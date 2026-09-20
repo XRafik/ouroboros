@@ -73,9 +73,11 @@ class DeliveryCandidate:
 # required tool call. Gates closable by a reconsidered answer arm normally.
 _SKILL_ACTION_HOLD_CONTROL = "skill_action_or_revision_required"
 _CHILD_ABSORPTION_HOLD_CONTROL = "child_absorption_or_revision_required"
+_AUTHORING_HANDOVER_HOLD_CONTROL = "authoring_handover_recovery_required"
 _DELIVERY_HOLD_CONTROLS = frozenset({
     _SKILL_ACTION_HOLD_CONTROL,
     _CHILD_ABSORPTION_HOLD_CONTROL,
+    _AUTHORING_HANDOVER_HOLD_CONTROL,
 })
 # Header of the host's own rendered control block; identifies the transcript's
 # control history the way ``acceptance_observation`` marks the observation rows.
@@ -1055,6 +1057,15 @@ def _compose_delivery_suffix(full_text: str, suffix: str) -> str:
     return text + note
 
 
+def _plan_review_only_awaited(llm_trace: Dict[str, Any]) -> bool:
+    """The projected gate decision's typed fact: the open plan wave was merely awaited.
+
+    The finalization notice and this fact read the SAME decision, so an only-awaited
+    wave keeps its loud notice and is a gap, never a degradation of the task."""
+    plan_gate = llm_trace.get("force_plan_decision")
+    return isinstance(plan_gate, dict) and plan_gate.get("review_only_awaited") is True
+
+
 def _no_tool_final_answer(
     content: Any,
     limit_ctx: _RoundLimitContext,
@@ -1112,6 +1123,8 @@ def _no_tool_final_answer(
     skill_finalization_was_injected = bool(
         getattr(tools._ctx, "_skill_finalization_injected", False)
     )
+    handover = getattr(tools._ctx, "_authoring_handover", None)
+    handover_was_prompted = bool(handover and handover.get("recovery_prompted"))
     if _loop()._maybe_inject_finalization_nudges(
         tools, limit_ctx.drive_root, limit_ctx.task_id, llm_trace, content, messages, emit_progress,
     ):
@@ -1125,6 +1138,11 @@ def _no_tool_final_answer(
         # allowed reconsidered answer; a typed keep cannot close it.
         if skill_finalization_injected_now:
             _hold_delivery_for_skill_action(tools, llm_trace)
+        elif handover and not handover_was_prompted and handover.get("recovery_prompted"):
+            _hold_delivery_for_skill_action(
+                tools, llm_trace,
+                control=_AUTHORING_HANDOVER_HOLD_CONTROL,
+            )
         else:
             _loop()._arm_delivery_control(tools, limit_ctx, llm_trace)
         return None
@@ -1171,7 +1189,7 @@ def _no_tool_final_answer(
             candidate.degraded = True
             candidate.degraded_reason = "host_child_status_suffix"
             _loop()._publish_delivery_candidate(tools, candidate, llm_trace)
-        elif plan_suffix:
+        elif plan_suffix and not _plan_review_only_awaited(llm_trace):
             candidate.degraded = True
             candidate.degraded_reason = "plan_review_advisory"
             _loop()._publish_delivery_candidate(tools, candidate, llm_trace)

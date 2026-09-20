@@ -236,8 +236,8 @@ and 23 (`delegated_transport`), both critical. The imperatives:
   Delivery is at-least-once: an exact task id with live or durable custody is
   an idempotent no-op, and semantic duplicate judgement is never the physical
   identity fence.
-- `subagent_id` selects one complete row from the canonical enabled
-  `OUROBOROS_SUBAGENTS` list; freeze the normalized row at schedule time and
+- `subagent_id` selects one complete `OUROBOROS_SUBAGENTS` row both
+  `enabled` axes admit; freeze the normalized row at schedule time and
   dispatch/restart from that snapshot, never from mutable Settings. No second
   model/lane/executor selector, no host-side ranking, no substitute actor
   after a typed refusal.
@@ -461,9 +461,9 @@ Settings, accounts and shared controls. Tests: `test_owner_settings_write_seam.p
   native inspection, and model/account edits never silently turn it into a packet.
 - One capability, one section: the task-actor story lives in Agents →
   Available subagents (`web/modules/subagents_settings.js`), editing one
-  canonical `OUROBOROS_SUBAGENTS` object (list-level Enabled, at most ten
-  stable rows, one prose field `recommended_use`; id and compatibility name
-  automatic and hidden). Never derive durable identity from the visual
+  canonical `OUROBOROS_SUBAGENTS` object (list-level and row Enabled, at most
+  ten stable rows, one prose field `recommended_use`; id and compatibility
+  name automatic and hidden). Never derive durable identity from the visual
   ordinal, and never render a second control over the same settings key
   (`OUROBOROS_MAX_WORKERS` stays in Advanced because it sizes the process
   pool). Share only neutral route/model/account/effort/status primitives with
@@ -617,14 +617,14 @@ and what enforces each.
   task emits one typed owner line (keyed by task and model, never per round, naming
   only the reporting route). A mismatch is disclosure, never a dispatch gate.
 - The engine's active-turn token is a transport fact: the CALLER owns the slot
-  (`llm_claudexor.ModelTurnState` on the loop context; a consciousness wake-up needs no
-  slot of its own), the engine boundary is its only writer. Fresh slot per logical
+  (`llm_claudexor.ModelTurnState` on the loop context, also used by consciousness);
+  only the engine boundary writes it. Fresh slot per logical
   turn, cleared when dispatch leaves this transport; never derived from message roles,
   prose or the last stored assistant envelope (BIBLE P5); never checkpointed (a cold
   restart starts empty); never forked by a reprepare, thread offload or kwargs copy;
-  updated only from a dispatched durable result of a request that carried the field (a
-  legacy-shaped exchange is silence, not proof a turn ended); never in usage, events,
-  progress or task cards. Opt-in is gated on the last SUCCESSFUL handshake's version —
+  a dispatched durable result updates it; released `invalid_continuation` repair clears
+  it with message envelopes. Other non-dispatched, unknown or legacy results preserve
+  it; never in usage, events, progress or task cards. Opt-in is gated on the last SUCCESSFUL handshake's version —
   not the next-spawn pin, not a liveness projection a failed probe can blank (WHY:
   ARCHITECTURE §6 "The live turn slot"; the `llm_claudexor.py` docstring).
 - Pass `model_role` and the captured account explicitly at every helper/reviewer seam
@@ -723,11 +723,11 @@ and what enforces each.
   calls". Enforce with `tests/test_review_prompt_caching.py`,
   `tests/test_transcript_prefix.py` (real Main loop, plain/multipart) and
   `tests/test_transcript_provider_shapes.py` (local/GigaChat); CHECKLISTS item 22.
-- Provider fallback is disabled only for a SEALED reasoning artifact
-  (`ouroboros/reasoning_artifacts.py::transcript_has_sealed_reasoning`) — only a sealed
-  artifact is bound to the endpoint that minted it; readable reasoning stays
-  failover-eligible for every family so one outage does not strand valid work
-  (`tests/test_llm_provider_routing.py`).
+- Only sealed reasoning artifacts bind fallback to their endpoint
+  (`reasoning_artifacts.transcript_has_sealed_reasoning`); readable reasoning
+  stays failover-eligible across families (`test_llm_provider_routing.py`).
+  Model handover preserves finalization checks; recovery and warnings:
+  ARCHITECTURE §6 (`test_authoring_handover_loop.py`).
 - Delegated agent sessions and the native review inspection episode get the full
   governance prompt; never truncate BIBLE/ARCHITECTURE/DEVELOPMENT/CHECKLISTS to fit
   argv or transport limits.
