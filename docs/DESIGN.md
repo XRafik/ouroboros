@@ -332,7 +332,9 @@ Model-authored replies use Ouroboros's assistant voice; host-composed commands,
 receipts and diagnostics use System voice. A **System row** is a chat message
 with `role="system"`, rendered with the existing yellow/amber system treatment,
 or its existing task-card placement. `role` alone selects voice; `system_type`
-names the kind, not the author. New host producers stamp both fields. Relays
+names the kind, not the author (two documented presentations of a System pointer row show
+model-authored bytes in Ouroboros's voice: the Project question mirror and the Project
+completion mirror). New host producers stamp both fields. Relays
 preserve them through live delivery, persistence and history. Model narration,
 proactive replies and questions remain model-authored even when typed.
 
@@ -518,10 +520,14 @@ answer keep both forms readable. Anatomy, top to bottom:
    `Replaced by a newer question` uses the disabled dot; an unreadable source
    reads `Status unavailable`, never an invented invitation. No answer-deadline
    countdown: task completion closes its mailbox, not the question's answerability.
-2. **Question** — the one primary thing, by position and ink: `--type-body`,
-   `--text-primary`, regular weight. Its emphasis is the asker's own — only
-   what the question marks (`**…**`) is semibold — so a question of several
-   lines keeps a title instead of reading as one bold block.
+2. **Question** — the one primary thing, by position and ink: readable
+   `--type-body` text in `--text-primary`, regular weight. Its emphasis is the
+   asker's own — authored headings and `**…**` are semibold — so a question of
+   several lines keeps a title instead of reading as one bold block. It may
+   contain paragraphs, lists, checklists, tables and code; those blocks keep
+   the shared rich-content gutter, rhythm and bounded code scrolling. The card
+   does not infer a title from the first line or rewrite authored Markdown to
+   make it fit.
 3. **Stake** — optional one-liner (`At stake: …`), `--type-meta`, `--text-meta`.
 4. **Options** — real owner actions: buttons with `--text-primary` labels,
    legible at rest; an optional per-option detail steps down to meta ink.
@@ -538,7 +544,8 @@ answer keep both forms readable. Anatomy, top to bottom:
    A settled card instead carries what the owner said as a second primary
    line (`Owner's answer: …`, `--type-body`, `--text-primary`) under the
    options — beside the highlighted option when one was chosen, and as the
-   whole answer when none was.
+   whole answer when none was. Its line breaks stay visible; the recorded
+   answer remains literal text.
 6. **Assumption or waiting** — the signature line (`Continuing meanwhile: …`
    for optional clarification, an explicit waiting statement for required input),
    `--type-meta`, `--text-meta`, separated by a hairline. While the card is
@@ -554,6 +561,8 @@ element in the card shares one keyboard ring (2px `--focus-accent-border`,
 the rest of the chat surface.
 
 **Project question mirror.** A Project question the owner has not answered appears in Main as the Project's own quiz card — the same `buildQuizCard` form with the question through the chat markdown pipeline, the options with their details and the `recommended` badge, the stake, the assumption or waiting line, the status and the own-answer field — inside the same assistant bubble. The one addition is a Project chip in the head beside the `Question` chip: a pill in the project chip's own language (the `--project` tints, the Project name in project ink with `↗`) that opens that exact question in its Project, with the card's shared keyboard ring. A long Project name yields first (the chip is capped and ellipsized, its title names the Project whole) so the status keeps its place; a phone column wraps the head. Every lifecycle state reads as it does in the Project: waiting, open, resumed and finished questions stay answerable, and a replaced question stays as a read-only record. An unreadable source keeps what Main already knew; with nothing known the copy says `Status unavailable`, takes no answer and keeps its chip, and a row that cannot carry the form yet shows `Open the original question for its text.` until it can. The first confirmed answer from any source — a press in Main, the Project form or another device, a history or census snapshot — shows the recorded result (the chosen option, `Owner's answer: …`, `You answered`) for five seconds and then removes only the Main copy, through the ordinary message retirement and without moving the reader's viewport; the Project keeps its card. The countdown starts once and later observations never restart it. When focus was inside the copy it stays there while the result shows, then moves to the next Main question, or to the composer for a keyboard owner, never summoning a touch keyboard. A copy that learns its form and its answer in one delivery shows that result for the same five seconds. An answered question never enters Main again: fresh history, a reconnect or a stale open snapshot cannot bring the copy back. Main remembers the lifecycle of a bounded number of questions; a question it no longer remembers mounts a safe unknown copy, whose answer controls appear only after a fresh canonical record confirms it unanswered. A failed, missing or wrong-project canonical read leaves a safe `Status unavailable` copy with its Project chip and no answer controls; the chip opens the original Project form, while a later owned refresh retries the Main copy, so an unavailable read never turns a stale open snapshot into an answerable form and never permanently suppresses a legitimate unanswered question. The mirror and the quiz header share the lifecycle wording above.
+
+**Project completion mirror.** A Project root that ended with Ouroboros's own final answer reaches Main as an ordinary Ouroboros message: that answer through the chat markdown pipeline, in the assistant voice, because the bytes are model-authored — the host stamps the answer on the completion row only for a model-authored final, so the browser never infers authorship. A long answer is folded to about seven lines; the fold is a visual clamp over the complete, selectable text, with a fade only when it really hides something, and never a cut. Under it sits one control: the Project chip in the project chip's own language, which names the Project and opens it. The durable row and its wire frame stay `role="system"`: like the Project question mirror, this is a browser presentation of model-authored bytes, not a change of the row's author. The message carries no status word, cause sentence, title or duration, so a host verdict on that answer (a warning, an unaccepted review) is not shown in Main: it stays loud on the task's card in the Project, one press away. Copy copies the answer. An ending with no model-authored answer (a provider failure, a stop, preserved output), a start row, and every row written before the answer rode the row keep the System row with its `Open Project` action. One durable row either way: its plain text is unchanged, so the Telegram mirror, Ouroboros's own context and one-ending-one-notification behave as before.
 
 Project-lifecycle and routing actions use the shared `createSystemMessageActions` composition. It owns token-based space above and below the controls, wrapping and clearance for the existing button focus ring; action buttons never sit in a clipped/nowrap text line. This is a row composition, not a new card framework or a global button-margin rule.
 
@@ -888,8 +897,9 @@ inside its own module or route-iframe page, override them, or design a completel
 independent interface. `.ouro-ui` supplies font and native dark-control context;
 the named classes opt controls into the recipes, with no page-wide reset.
 The kit reads the installed source at a new mount; retained frames keep the styling
-they loaded. It introduces no theme polling, forced remount or mandatory visual
-conformance. Author layout, validation, operations and loading feedback remain
+they loaded. A module may opt into the existing `OuroborosWidget.onTheme` signal
+and apply its own `data-theme` rules, but the kit introduces no theme polling,
+forced remount or mandatory visual conformance. Author layout, validation, operations and loading feedback remain
 author-owned; the small source recipes are in `docs/examples/author_ui_kit/`.
 
 ---
