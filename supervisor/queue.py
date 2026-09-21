@@ -209,8 +209,12 @@ def enqueue_task(
                 t["_admission_blocked"] = "duplicate_task_id"
                 return t
             try:
+                from ouroboros.routing_wait import is_own_admission_stub
                 from ouroboros.task_results import load_task_result
-                if load_task_result(DRIVE_ROOT, task_id, strict=True):
+                stored = load_task_result(DRIVE_ROOT, task_id, strict=True)
+                # The emitted promote stub (#1160) belongs to THIS admission token:
+                # its own enqueue reads around it, any other row still owns the id.
+                if stored and not is_own_admission_stub(stored, admission_token):
                     if ADMISSION_RESERVATIONS.get(task_id) == admission_token:
                         ADMISSION_RESERVATIONS.pop(task_id, None)
                     t["_admission_blocked"] = "duplicate_task_id"
@@ -522,7 +526,8 @@ def get_evolution_status_snapshot(*, budget_projection: Optional[Dict[str, Any]]
     owner_chat_id = int(st.get("owner_chat_id") or 0)
     consecutive_failures = int(st.get("evolution_consecutive_failures") or 0)
     try:
-        remaining: Optional[float] = round(float(budget_remaining(st, strict=True, projection=budget_projection)), 2)
+        # A status snapshot is a display read: without a supplied projection it rides the last validated snapshot.
+        remaining: Optional[float] = round(float(budget_remaining(st, strict=True, projection=budget_projection, allow_stale=True)), 2)
         accounting_available = True
     except Exception:
         remaining = None

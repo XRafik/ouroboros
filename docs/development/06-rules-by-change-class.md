@@ -158,11 +158,11 @@ Run roots are append-only outside `repo/` and live `data/`; the focused contract
   read-only git works everywhere, the network fence still applies, and acting
   `self_worktree` children keep the strict no-commit policy. `git
   init`/`commit`/`push` in an external project tree is legitimate task work.
-- In external workspace mode, light-mode self-repo dirty checks snapshot the
-  system repo, not the active workspace, and workspace patches are captured
-  against the preflight git base; project-room promotion provisions a
-  standalone repo through `ensure_project_workspace` and fails loudly on a
-  broken binding or unreadable registry.
+- In external workspace mode, light-mode dirty checks snapshot the system
+  repo, not the workspace; patches are captured against the preflight base;
+  project-room promotion provisions a repo (`ensure_project_workspace`),
+  records an explicit folder into an empty `working_dir`, and fails loudly on
+  a broken binding or unreadable registry.
 - `claude_code_edit` is a retired tool name with a one-way, permanent
   compatibility contract: a saved contract carrying
   `disabled_tools=["claude_code_edit"]` also withholds the successor
@@ -278,9 +278,9 @@ and 23 (`delegated_transport`), both critical. The imperatives:
   nothing beyond the canonical usage-ledger reader's bounded maintenance —
   that maintenance and its torn-quarantine residual: ARCHITECTURE §6
   "Delegated subagents (Claudexor transport + the nanny)"; owner-aware
-  `usage_attempts.lock` recovery: ARCHITECTURE §1 "Platform substrate"; its
-  45 s caller wait and 90 s stale grace (`ouroboros/usage_ledger.py`) are
-  unchanged. Every ledger state, absence included, goes through that reader.
+  `usage_attempts.lock` recovery: ARCHITECTURE §1 "Platform substrate"; money
+  waits 45 s on it with a 90 s stale grace (`ouroboros/usage_ledger.py`).
+  Every ledger state, absence included, goes through that reader.
 - `task_constraint` boolean parsing is strict (`"false"` is false); deadlines
   only narrow, delegation budgets only reduce, absent depth requests stay
   unknown rather than inferred from prose; preserve the persisted
@@ -678,7 +678,11 @@ and what enforces each.
   `docs/USAGE_COMPACTION.md`, `tests/test_usage_abandoned_ledger.py`).
 - Hold the usage-ledger cross-process lock only for budget check, validated append and
   fsync — never over network I/O; a caller that owns a finalization reserve passes it
-  explicitly so admission and the transport bound cannot disagree.
+  explicitly so admission and the transport bound cannot disagree. A display read on
+  the supervisor loop or a gateway thread never waits on it: it passes `allow_stale`
+  and rides the last validated snapshot. A reader that admits, reserves, settles or
+  refuses spend never does; a pre-check lets a snapshot admit and decides its refusal
+  on the exact read (ARCHITECTURE §10 invariant 28).
 - Keep root ceilings explicitly unreserved under the shared pool; persist the applied
   global limit and its source/revision on the physical attempt through every
   transition (a missing revision is unknown, never the settings-file hash). Pacing
