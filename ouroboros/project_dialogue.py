@@ -731,10 +731,10 @@ OUTCOME_PHASE_HEADLINE = {"working": "Working", "done": "Done", "warn": "Done wi
 # code stays typed on the row. web/modules/log_events.js carries the twin;
 # web/tests/fixtures/outcome_phase_parity.json pins both.
 TASK_CAUSE_PHRASES = {
-    # Acceptance-decision reasons. A clean accepted decision renders no clause,
-    # so clean_pass and clean_pass_obligations_closed carry no sentence; an
-    # accepted decision with a sentence here still states its cause.
+    # Acceptance-decision reasons. A clean accepted decision renders no clause (clean_pass and
+    # clean_pass_obligations_closed carry no sentence); an accepted decision with a sentence states its cause.
     "previous_revision_accepted": "The reviewers approved an earlier version of this answer; the current version was not re-reviewed.",
+    "admission_close_unconfirmed": "Reviewers approved this answer; the supervisor did not confirm that task admission was closed.",
     "author_stop": "Main stopped with unfinished work; no review approval was granted.",
     "review_outcome_received": "Main received the review outcome or recorded limitation.",
     "author_finish": "The answer was delivered on Main's own judgement; the reviewers had not signed it off.",
@@ -1393,8 +1393,8 @@ def enqueue_project_completion_summary(
         )
         if not snapshot["project_id"] or not snapshot["project_routable"]:
             # Owner decision 3A: a run whose project id was DERIVED from a
-            # workspace has no room, so Main stays silent instead of offering an
-            # "Open Project" that lands in an empty duplicate of itself. The same
+            # workspace has no room, so Main stays silent instead of offering a
+            # Project reference that lands in an empty duplicate of itself. The same
             # holds once a project is deleting or tombstoned.
             return False
         if not _run_lives_in_its_project(drive_root, tid, snapshot["project_id"], task, result):
