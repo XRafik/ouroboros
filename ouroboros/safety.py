@@ -44,6 +44,7 @@ TOOL_POLICY: Dict[str, str] = {
     "vcs_diff": POLICY_SKIP,
     "chat_history": POLICY_SKIP,
     "recent_tasks": POLICY_SKIP,
+    "live_roots": POLICY_SKIP,
     "knowledge_read": POLICY_SKIP,
     "knowledge_list": POLICY_SKIP,
     "journal_read": POLICY_SKIP,
@@ -88,6 +89,7 @@ TOOL_POLICY: Dict[str, str] = {
     "knowledge_write": POLICY_SKIP,
     "journal_write": POLICY_SKIP,
     "workpad_write": POLICY_SKIP,
+    "update_focus": POLICY_SKIP,
     # Bounded tree-scoped coordination. Tagged child-result dispositions are validated
     # and persisted only by join_ledger; neither branch has an external/repo effect.
     "tree_note": POLICY_SKIP,
@@ -106,6 +108,9 @@ TOOL_POLICY: Dict[str, str] = {
 
     # Control / messaging / internal side effects.
     "schedule_subagent": POLICY_SKIP,
+    # Owner-governed schedule inspection/mutation is narrow, reasoned and audited;
+    # it never edits task payloads or cancels an admitted task.
+    "manage_schedules": POLICY_SKIP,
     # One-shot deferred follow-up through the existing supervisor scheduler: the
     # future task re-enters normal admission/safety, so registration itself has
     # no reach beyond what the task already has (same reasoning as schedule_subagent).

@@ -102,7 +102,7 @@ EXPECTED_TOOLS = [
     "run_ci_tests",
     "preflight_review", "review_status",
     "compact_context", "set_tool_timeout", "request_restart",
-    "promote_to_stable", "schedule_subagent", "schedule_followup",
+    "promote_to_stable", "schedule_subagent", "schedule_followup", "manage_schedules",
     "configure_presence", "initiate_presence",
     "integrate_subagent_patch", "compare_subagent_patches",
     # C1: the explicit acceptance seam for a delegated run's captured patch —
@@ -132,7 +132,8 @@ EXPECTED_TOOLS = [
     "promote_chat_to_task", "route_to_project", "list_projects", "steer_task",
     "ensure_project_scope", "schedule_followup",
     "memory_map", "memory_update_registry",
-    "plan_task", "recent_tasks", "task_acceptance_review", "verify_and_record", "web_search",
+    "plan_task", "recent_tasks", "live_roots", "update_focus",
+    "task_acceptance_review", "verify_and_record", "web_search",
     "start_service", "service_status", "service_logs", "stop_service",
     "run_command", "run_script",
     "list_skills", "skill_review", "skill_exec", "toggle_skill", "skill_owner_action",

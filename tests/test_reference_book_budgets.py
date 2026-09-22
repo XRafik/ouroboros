@@ -17,8 +17,20 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 
 # UTF-8 bytes of each chapter source. Raise a value in the same diff that needs it, with a reason.
 CHAPTER_BYTE_BUDGETS: dict[str, int] = {
-    "docs/architecture/01-high-level-architecture.md": 161453,
-    "docs/architecture/02-startup-onboarding-flow.md": 15517,
+    # 161453 -> 162200: the module tree gains the `schedule_lifecycle.py` leaf beside
+    # queue_schedules.py and names Observe's argument-level narrowing on the
+    # consciousness_authority.py row; upstream had already filled the previous
+    # headroom with the handoff and sidebar-activity rows landing in the same window.
+    # 162200 -> 164200 (#1195 merge): four module-map rows for the new leaves
+    # startup_historical_audit.py, skill_peer_inventory.py/skill_conflicts.py, the
+    # extension_isolated_deps.py barrier and the widget_list.js request seam land
+    # beside the handoff/schedule rows the base added; none displaces older text.
+    # +400 (#1213): two new module rows (focus.py, room_consolidation.py) in the tree map.
+    "docs/architecture/01-high-level-architecture.md": 164800,
+    # 15517 -> 16200 (#1195): the session-custodied startup historical audit is a
+    # new node of the startup flow (readiness no longer waits for the historical
+    # seal diagnostic); the chapter had no older description of that pass to replace.
+    "docs/architecture/02-startup-onboarding-flow.md": 16200,
     # 97435 -> 99500: the notification owner is a new subsystem of this chapter
     # (its module, its client-level subscription, its room gate and its disclosed
     # limits), so the description is added rather than replacing another node's.
@@ -28,14 +40,61 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # 100300 -> 100900: the Project completion mirror adds a typed key and a
     # second rendering to "Main rows"; the stale sentence is replaced, and the
     # new mechanism (gate, ordinary-message path, decorator) has no older text to displace.
-    "docs/architecture/03-web-ui-pages-and-buttons.md": 100900,
+    # 100900 -> 101700: the ONE explanatory line states every fact (the assembler's clauses
+    # replace the single-cause sentence); the Telegram non-clean line has no older text.
+    # 101700 -> 104400: "Project handoff receipts" is a subsystem the chapter lacked
+    # (the typed receipt vocabulary at the outbox, the one-anchor precedence rule and
+    # its shadows, node-scoped reconcile, the phase/retry reading); the sentence it
+    # touched in "Main rows" is replaced, the rest has no older text to displace.
+    # 104400 -> 104900: the anchor rule gained its multi-card clause (cards are never
+    # shadows; a surviving card inherits folded receipts) after review found the gap.
+    # 104900 -> 105700: Activity gains the schedule LIFECYCLE surface the chapter
+    # lacked — the retained/consumed/suppressed vocabulary and its one disclosure,
+    # Restore's re-evaluation, the named-action endpoint, and what a lifecycle
+    # response is allowed to claim. The stale "read-only here" sentence it replaces
+    # is gone and the paragraph was compressed by 298 bytes first (no fact removed).
+    # 105700 -> 106400 (#1195 merge): the Widgets list-request deadline lifecycle
+    # (one AbortController over list+preferences, timeout error + Retry, last-good
+    # cards kept) is a new mechanism of the Widgets page with no older text to displace.
+    # 106400 -> 106600 (#1195 merge of 32d8dfc6): the base's settings_catalog.js
+    # paragraph (#1214, +319 bytes) landed in the same window; both additions stand,
+    # neither displaces the other's text.
+    "docs/architecture/03-web-ui-pages-and-buttons.md": 106600,
     "docs/architecture/04-server-api-endpoints.md": 26833,
-    "docs/architecture/05-supervisor-loop.md": 27137,
+    # 27137 -> 30400: the schedule table gains a documented write contract the
+    # chapter had no text for — one transaction owning the lock ORDER, the strict
+    # store read's three refusal cases, intent-then-outcome audit with its
+    # disclosed incomplete outcome, and the lifecycle actions' future-dispatch-only
+    # scope including the unknown in-flight answer. Both paragraphs were compressed
+    # by 286 bytes first; nothing older describes any of these rules.
+    # 30400 -> 30600: restore over an absent skill/manifest entry is a new typed
+    # refusal (`manifest_absent`, suppression kept) with no older text to
+    # displace; two neighbouring sentences were compressed by 168 bytes first.
+    # +300: the queue snapshot and the supervisor focus event carry the root's
+    # bounded authored focus (cross-focus awareness).
+    "docs/architecture/05-supervisor-loop.md": 30900,
     # 286850 -> 287600: "an answer that has not arrived is a gap" is a new invariant of
     # plan review and task acceptance (the slot census vocabulary, the `awaiting`
     # projection, the only-awaited task outcome); the in-flight sentence it grew from is
     # replaced, the rest has no older text to displace.
-    "docs/architecture/06-agent-core.md": 287600,
+    # 287600 -> 289400: scene A/C2/C3 sentences replace the progress-identity, advisory and
+    # split sentences; the plan-review class and the advisory-open cardinality have no older text.
+    # 289400 -> 290700 (2026-09-22): the custody row memo, the per-task recent-activity
+    # windows and the subagent child's own windows are new mechanisms described in the
+    # paragraphs they changed.
+    # 290700 -> 292800: Observe's positive path is a new seam of this chapter
+    # (the argument-narrowing predicate, which names it keeps and why, the
+    # own-child custody reuse, and the non-inherited mutating delegation budget);
+    # the Observe half of the AUTHORITY sentence is replaced, the rest is new.
+    # +2200: per-room memory consolidation (room_consolidation.py: draft +
+    # source-grounded correction, typed room sections through era, chunk-level
+    # transaction) and the cross-focus authored-focus contract are new
+    # subsystems of this chapter; the era paragraph they replaced was shorter.
+    # +400: the focus source is now RETAINED at authoring time (source_handle,
+    # FOCUS_SOURCE_UNRESOLVED) and a settled root's focus is dropped — new
+    # contract facts of the cross-focus paragraph, not a restatement; +250 for
+    # the digest-selected historical read and the reader admission rule.
+    "docs/architecture/06-agent-core.md": 295650,
     "docs/architecture/07-configuration.md": 36991,
     # 18947 -> 19287: CI failure collection now documents diagnostic desktop builds while release remains gated.
     "docs/architecture/08-git-branching-ci-and-build.md": 19287,
@@ -51,16 +110,25 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # 20650 -> 21100: one more rule the chapter lacked, the usage ledger's reader contract
     # ("money never reads a snapshot; a display never waits on money"). It REPLACES the
     # residual sentence of the off-thread invariant; the rule itself has no older text.
-    "docs/architecture/10-key-invariants.md": 21100,
+    # +200 (2026-09-22): invariant 10 names the process-local fingerprint memos
+    # and their fallback rule; the base sat 23 bytes under the previous budget.
+    "docs/architecture/10-key-invariants.md": 21300,
     "docs/architecture/11-frozen-contracts-v1.md": 24194,
-    "docs/architecture/12-host-service-companions-and-chat-ids.md": 11007,
-    "docs/architecture/13-external-skills-layer.md": 7764,
+    # +400 (#1213): Presence turns are named as actors without cross-focus catalogue or focus authority.
+    "docs/architecture/12-host-service-companions-and-chat-ids.md": 11400,
+    # 7764 -> 8600 (#1195): the fresh selected-subject + immutable peer projection
+    # execution check (`skill_peer_inventory.py`, `skill_conflicts.py`) replaces
+    # whole-inventory hashing; the chapter had no description of that seam to swap out.
+    "docs/architecture/13-external-skills-layer.md": 8600,
     "docs/development/01-role-and-authority.md": 2437,
     "docs/development/02-naming-and-boundaries.md": 36372,
     # 22873 -> 23100: one new invariant (notifications ring for live events
     # only). Its text was compressed to the load-bearing facts first; the
     # remainder is the cost of stating a rule that did not exist before.
-    "docs/development/03-module-size-and-complexity.md": 23100,
+    # +300 (2026-09-22): two new house precedents (custody row memo, bounded
+    # filtered tail reader) join the projection-over-replay list; the base sat
+    # 15 bytes under the previous budget.
+    "docs/development/03-module-size-and-complexity.md": 23400,
     "docs/development/04-core-governance-artifacts.md": 16431,
     "docs/development/05-review-and-commit-protocol.md": 12956,
     # 94197 -> 94520: the usage-ledger lock rule gains its reader contract (a display read
