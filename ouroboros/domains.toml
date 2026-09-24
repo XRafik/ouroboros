@@ -296,6 +296,7 @@ D20 = "Presence"
 "ouroboros/post_task_evolution.py" = "D15"
 "ouroboros/preflight_node.py" = "D06"
 "ouroboros/preflight_runner.py" = "D06"
+"ouroboros/test_environment.py" = "D06"
 "ouroboros/presence_admission.py" = "D20"
 "ouroboros/presence_authority.py" = "D20"
 "ouroboros/presence_bindings.py" = "D20"
@@ -419,6 +420,7 @@ D20 = "Presence"
 "ouroboros/task_results.py" = "D17"
 "ouroboros/task_result_schema.py" = "D17"
 "ouroboros/task_status.py" = "D17"
+"ouroboros/terminal_projection.py" = "D17"
 "ouroboros/task_tree_ledger.py" = "D07"
 "ouroboros/tool_access.py" = "D04"
 "ouroboros/tool_access_paths.py" = "D04"
@@ -905,6 +907,7 @@ lazy_only = [
   "D15->D10",
   "D15->D13",
   "D15->D17",
+  "D15->D20",
   "D16->D01",
   "D16->D03",
   "D16->D05",
@@ -918,6 +921,7 @@ lazy_only = [
   "D17->D09",
   "D17->D12",
   "D17->D13",
+  "D17->D20",
   "D18->D01",
   "D18->D07",
   "D18->D11",
