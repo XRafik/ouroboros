@@ -86,7 +86,17 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # bounded authored focus (cross-focus awareness).
     # 30900 -> 31150 (issue #1142): the crash counter's shutdown exemption names WHERE the stop
     # event is set (the uvicorn signal handler, then the lifespan teardown) and why both are needed.
-    "docs/architecture/05-supervisor-loop.md": 31150,
+    # 31150 -> 31300 (issue #1002): the budget-projection paragraph states what the persisted
+    # projection carries (totals only) and where per-root money lives; the chapter had no
+    # sentence about the shape of the persisted projection to replace.
+    # 31300 -> 31500 (issue #1230): the reconciliation sentence states the two-read rule of
+    # task reconciliation (decide on a status-only read, materialize only the healed row)
+    # and the cadence stamp at pass end; the older clause it extends is kept, not duplicated.
+    # 31500 -> 32400: the tick description names the bounded events batch and the one
+    # projection write per turn (the unbounded drain and per-event write they replace had
+    # no sentence of their own), and the projection paragraph states the writer's slim read,
+    # its retry interval and the crossing rule of the OpenRouter check.
+    "docs/architecture/05-supervisor-loop.md": 32400,
     # 286850 -> 287600: "an answer that has not arrived is a gap" is a new invariant of
     # plan review and task acceptance (the slot census vocabulary, the `awaiting`
     # projection, the only-awaited task outcome); the in-flight sentence it grew from is
@@ -143,8 +153,19 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # after the long-work continuity merge, 308678 after the Claudexor 3.14.0 pin, #1264);
     # the run-origin sentences replace the "request decides what the run was for" and the
     # owner-turn descriptions (+144 on the merged base) rather than appending to them.
-    "docs/architecture/06-agent-core.md": 308900,
-    "docs/architecture/07-configuration.md": 36991,
+    # 308900 -> 309800 (#1262): the one name-miss answer, every-mode discovery and the MCP
+    # lookup-before-safety facts are mechanisms no older text held; the "Not found"
+    # sentence they sit in was compressed rather than appended to (measured 309712).
+    # 309800 -> 310100 (TZ2 + #1262 merge, measured 309985): the Presence task-message
+    # own-binding boundary and forced declaration remain beside #1262's name-miss
+    # contract; both are independent rules in the same chapter, not duplicate prose.
+    "docs/architecture/06-agent-core.md": 310100,
+    # 36991 -> 37300: the facade paragraph names the three loop constants runtime_limits.py
+    # gained (events batch bound, budget-projection retry interval); no older text to displace.
+    # 37300 -> 38400 (PR #1207): the Z.ai (`zai::`) direct provider gets its own route
+    # paragraph (plan-selected endpoint, low/high/max projection, 1113 billing) plus two
+    # settings rows; the base sat 95 bytes under the previous budget, no older text to displace.
+    "docs/architecture/07-configuration.md": 38400,
     # 18947 -> 19287: CI failure collection now documents diagnostic desktop builds while release remains gated.
     # 19287 -> 20560 (#1215): three contracts the chapter had no older text for — the
     # ONE reusable browser lane and the two triggers that share it (the unfiltered
@@ -183,7 +204,18 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # conversation key, placeholder re-run and its lost-attempt facts, presence-local liveness,
     # previous-turn pointer and its replay repair, split in-flight budgets, silent orphaned work,
     # presence room label); the base sat 2 bytes under.
-    "docs/architecture/12-host-service-companions-and-chat-ids.md": 12500,
+    # 12500 -> 13400 (TZ2 own work): the Presence paragraph gains two contracts it had
+    # no text for — what a binding's own work is and which readers/controls reach it
+    # (replacing the conversation-exact cancel sentence), and the forced-final split
+    # between the internal record and the declared reply; the base sat 10 bytes under.
+    # 13400 -> 13700 (TZ2 descendant authority): one sentence the chapter lacked — a
+    # delegated descendant's inherited binding authority, apart from the speaker metadata.
+    # 13700 -> 13950 (TZ2 repair, measured 13918): that sentence now names what the
+    # descendant's promote/follow-up roots carry and the canonical-first steer precedence
+    # (replacing the live-row clause), and "host diagnostics" states its ordinary-final limit.
+    # 13950 -> 14100 (TZ2 review): a deferred tool-delivery finish note is
+    # carried separately from prior speech in the same previous-turn pointer.
+    "docs/architecture/12-host-service-companions-and-chat-ids.md": 14100,
     # 7764 -> 8600 (#1195): the fresh selected-subject + immutable peer projection
     # execution check (`skill_peer_inventory.py`, `skill_conflicts.py`) replaces
     # whole-inventory hashing; the chapter had no description of that seam to swap out.
@@ -209,7 +241,13 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # chapter had 5 bytes left. Sized to the text: 5 bytes of margin.
     # 94520 -> 94900: the delegated-lane bullet names the worktree ops lock rule
     # (issue #1241: no tree walk or per-file git process under the lock).
-    "docs/development/06-rules-by-change-class.md": 94900,
+    # 94900 -> 95000 (TZ2 own work): the Presence bullets replace the conversation-exact
+    # cancel clause with the own-binding rule and name the forced declaration.
+    # 95000 -> 95150 (TZ2 descendant authority): the own-binding bullet names how a delegated
+    # descendant is a Presence caller (inherited binding authority, never speaker metadata).
+    # 95150 -> 95200 (TZ2 repair, measured 95191): the promotion/follow-up clause names the
+    # one carrier it copies instead of "the Presence metadata".
+    "docs/development/06-rules-by-change-class.md": 95200,
     "docs/development/07-managed-update-rule.md": 4166,
     "docs/development/08-mutation-attribution-rule.md": 2899,
     "docs/development/09-process-custody-rule.md": 10028,
@@ -220,7 +258,9 @@ CHAPTER_BYTE_BUDGETS: dict[str, int] = {
     # system-message-actions bullet and adds what no older text held: the door, the
     # regenerate-and-read-the-neighbours duty and what enforces each half.
     "docs/development/11-design-system.md": 28300,
-    "docs/development/12-mcp-client-integration.md": 3313,
+    # 3313 -> 3520 (#1262): the missed-name rule (catalog-only answer, no guess, alias,
+    # cross-server hint or automatic call, before safety); no older text held it (measured 3506).
+    "docs/development/12-mcp-client-integration.md": 3520,
     "docs/development/13-gateway-boundary-pattern.md": 2228,
     # 14958 -> 16100: release proof now records diagnostic signing/attestation side effects, authority asymmetry, and fail-closed prerequisites.
     # 16100 -> 19350 (#1215): the safe-launch recipe an operator must copy exactly,
