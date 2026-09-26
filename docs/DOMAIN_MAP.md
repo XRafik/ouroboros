@@ -18,17 +18,17 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D08 | Supervisor: queue, workers, events & runtime control | 48 | 0 |
 | D09 | Cancellation, owner control & process custody | 13 | 0 |
 | D10 | Git, update & release machinery | 28 | 0 |
-| D11 | Gateway, server & Web UI | 56 | 0 |
+| D11 | Gateway, server & Web UI | 57 | 0 |
 | D12 | Settings & configuration | 15 | 0 |
 | D13 | Safety, guards & runtime mode | 9 | 0 |
 | D14 | Skills & extensions | 56 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 23 | 0 |
 | D16 | Observability, usage accounting & cost | 11 | 0 |
-| D17 | Projects, workspaces & task results | 23 | 0 |
+| D17 | Projects, workspaces & task results | 24 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 15 | 0 |
 | D19 | Frozen contracts (ABI) | 10 | 0 |
 | D20 | Presence | 10 | 0 |
-| **total** | | **575** | **0** |
+| **total** | | **577** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -65,7 +65,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 
 ## Hidden coupling (classified out of the strict graph)
 
-- lazy-only cross-domain pairs: **106**
+- lazy-only cross-domain pairs: **107**
   - D01->D08
   - D01->D10
   - D01->D11
@@ -74,6 +74,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D03->D06
   - D03->D07
   - D03->D08
+  - D03->D09
   - D03->D10
   - D03->D11
   - D03->D14
@@ -595,6 +596,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/gateway/settings.py`
 - `ouroboros/gateway/skill_publish.py`
 - `ouroboros/gateway/state.py`
+- `ouroboros/gateway/task_archive.py`
 - `ouroboros/gateway/task_decision.py`
 - `ouroboros/gateway/task_events.py`
 - `ouroboros/gateway/task_hurry.py`
@@ -761,6 +763,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/projects_registry.py`
 - `ouroboros/retention.py`
 - `ouroboros/routing_wait.py`
+- `ouroboros/task_custody.py`
 - `ouroboros/task_result_schema.py`
 - `ouroboros/task_results.py`
 - `ouroboros/task_status.py`

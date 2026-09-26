@@ -303,15 +303,22 @@ def test_supervisor_startup_restores_queue_before_worker_reset():
 
 
 def test_update_finalizer_waits_for_real_supervisor_outcome(monkeypatch):
+    """The waiter blocks on the init OUTCOME latch, never on readiness: a failed
+    init is an outcome that must not hang the boot, and it must not have to
+    fake readiness to unblock this waiter (the API would paint Online)."""
     import server
 
     calls = []
-    ready = SimpleNamespace(wait=lambda: calls.append("wait"))
-    monkeypatch.setattr(server, "_supervisor_ready", ready)
+    outcome = SimpleNamespace(wait=lambda: calls.append("wait"))
+    monkeypatch.setattr(server, "_supervisor_init_done", outcome)
+    monkeypatch.setattr(server, "_supervisor_ready", threading.Event())  # never set here
     monkeypatch.setattr(server, "_supervisor_error", None)
 
     assert server._wait_for_supervisor_update_finalize() is True
     assert calls == ["wait"]
+    monkeypatch.setattr(server, "_supervisor_error", "Supervisor init failed: boom")
+    assert server._wait_for_supervisor_update_finalize() is False
+    assert calls == ["wait", "wait"]
 
 
 def test_boot_update_check_notifies_the_live_ui():
@@ -698,7 +705,6 @@ def _supervisor_harness(monkeypatch, tmp_path, steps):
         monkeypatch.setattr(workers_mod, name, noop)
     monkeypatch.setattr(workers_mod, "get_event_q", lambda: queue_mod.Queue())
     monkeypatch.setattr("ouroboros.delegate_recovery.pre_adopt_planned_handoffs", noop)
-    monkeypatch.setattr("ouroboros.observability.prune_observability_blobs", lambda _root: {})
     monkeypatch.setattr("ouroboros.tools.services.prune_service_logs", lambda _root: {})
     monkeypatch.setattr("ouroboros.consciousness.BackgroundConsciousness", _Consciousness)
     return rec

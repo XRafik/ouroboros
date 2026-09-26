@@ -105,9 +105,9 @@ Run roots are append-only outside `repo/` and live `data/`; the focused contract
   rejected as soon as it exceeds the source's initial regular-file size rather
   than waiting for a growing file to reach EOF. HTTP admission and
   materialization run their whole blocking operation off the event loop
-  (`gateway._helpers.run_sync_to_completion`); cancellation waits for it before
-  releasing anything, and cancelling an HTTP waiter never cancels the admitted
-  task. Directory exports carry a complete relative member/size/SHA manifest
+  (`gateway._helpers.run_sync_to_completion`); every async ingress-lock
+  caller uses it for locked row → queue → echo. Cancellation settles before release; receive loops
+  stay responsive. Cancelling an HTTP waiter never cancels the admitted task. Directory exports carry a complete relative member/size/SHA manifest
   plus a streamed ZIP (outputs above 50 MiB included); a changed file or
   missing member is an explicit capture failure, while genesis LISTING is
   discovery and only capture/copy is strict.
@@ -209,14 +209,14 @@ successor-parity and artifact-transport rules are review-only.
   that reason).
 - Durable artifacts are NOT age-pruned: genesis projects
   (`OUROBOROS_SUBAGENT_PROJECTS_ROOT`) and forensic observability blobs (kept
-  compressed indefinitely by contract; startup runs a census, never a
-  deletion).
+  compressed indefinitely by contract; blobs are never deleted or
+  counted).
 - Review continuations are recovery state, not disposable GC: archive a record
   (collision-safe move, never delete) only when its owner task is settled, it
   stayed un-resumed past the seven-day threshold and no recorded obligation
   remains open; any uncertainty or move error leaves the live record intact.
 
-Enforcement: `tests/test_phase3c_observability_gc.py` (the unified knob and the cutoff math) and `tests/test_observability_retention.py` (the census and preserve-indefinitely contract); the review-continuation archive rule has no automated surface — review-only.
+Enforcement: `tests/test_phase3c_observability_gc.py` (the unified knob and the cutoff math) and `tests/test_observability_retention.py` (the preserve-indefinitely contract); the review-continuation archive rule has no automated surface — review-only.
 
 ### Live subagents
 
@@ -266,6 +266,12 @@ and 23 (`delegated_transport`), both critical. The imperatives:
   never mint task authority. Do not parse assignment prose to choose a profile
   or repeat competing native access instructions; preserve owner constraints
   in the complete work order.
+- A live message into a running run (`delegate_message`) is gated by the
+  engine's operation catalog and the route row's declared `liveInput`, never
+  by a harness name; outcomes mirror the engine's typed enum plus the host's
+  `not_found`; the host-minted `message_id` is the wire Idempotency-Key and is
+  reused ONLY after `delivery_unknown`. No retry loop, no stall detector, no
+  custody row (ARCHITECTURE §6 "Delegated subagents").
 - `subagents.route_health` is the ONE route reader for every consumer, and
   quota readers project one `ClaudexorGateway.quota_state()` envelope
   (`tests/test_available_subagents_runtime.py`): a fully-used ratio without a
@@ -309,7 +315,7 @@ and 23 (`delegated_transport`), both critical. The imperatives:
   stale-replica regression at BOTH seams
   (`tests/test_available_subagents_runtime_review_fixes.py`). Do not broaden
   generic data-tool behavior while fixing isolation (`forward_to_worker`
-  writes only to validated running tasks in the current task/root lineage).
+  writes only to validated running or queued tasks in the current lineage).
 - A custody row carries its owner's kind; every sweep, audit and counter over
   custody rows states which kinds it covers. A review-owned run
   (`RunCustody.review_owned`) belongs to its panel — never the task's open
@@ -337,7 +343,7 @@ and 23 (`delegated_transport`), both critical. The imperatives:
   rides the reminder round (`tests/test_v6570_swarm_honesty.py`). `wait_tasks`
   stays batch-compact;
   `control_task_results._wait_for_tasks` owns its projection, documented under
-  ARCHITECTURE's "Waiting on children"; full untruncated handoff belongs to `get_task_result` and `wait_task`, and the
+  ARCHITECTURE's "Waiting on children"; full untruncated handoff belongs to `get_task_result` and a settled `wait_task`, and the
   model result and the optional `terminal_host_notice` stay separate. No
   shared ledgers, automatic memory merges or new settings/endpoints unless the
   accepted plan calls for them. Push/live events are wakeups, not terminal
@@ -814,6 +820,8 @@ and what enforces each.
   an addressed task/owner message, a direct-child signal, control/recovery judgment or a
   model-requested one-shot checkpoint wakes it. No caller-visible `wait_sec`, repeating
   timers, progress wakes or host semantic stall detector.
+- Wake facts are measured over the interval the actor experienced (whole-call `sleep` stamped at
+  the one publication point, never a tick's `waited_sec`); the acked child cursor is task-scoped.
 - Wait/continue/stop is a structured fact — terminal status plus heartbeat freshness
   from `queue_snapshot.json` via `task_status.py` — never a keyword or regex over
   content (BIBLE P5). Fixed kill-timeouts (hard task/tool ceilings, watchdog) stay the
@@ -935,6 +943,25 @@ and what enforces each.
   unconditional `FINAL ANSWER:` or the task-level answer protocol. Host notices stay
   outside answer bytes/identity via terminal record/outbox/System on replay and
   single-body/headless transports; unchanged answers never revive superseded verdicts.
+- Plan review verdict: GREEN means a quorum answered and no blocking finding or
+  `need_evidence` without a disposition remains; notes never change it.
+  `plan_spec.closure_after_disposition` is the ONE closure table: under advisory a
+  reasoned reject closes a below-quorum blocking finding (per finding); blocking-mode
+  closure is unchanged; a closed REVIEW_REQUIRED is written as GREEN with a closure
+  note on every write path, and the four control validators keep accepting older
+  closed REVIEW_REQUIRED rows. An author-selected revised plan publishes the critic
+  wave's real pair labelled `historical_critic`, never an invented verdict. An envelope
+  `reviewer_effort` outranks a row's pinned effort for plan review only (an argument of
+  `plan_review_slots`, never a contextvar; a compound route slug keeps its encoded
+  effort); every wave records its effective per-seat efforts, the owner baseline captured
+  at dispatch and one typed `ordered_weaker`. On a same-spec cycle a seat that does not
+  answer keeps its still-open findings listed (`carried_absent_answer`), never counted as
+  parseable. The own-room conversation reaches every reviewer as numbered readable lines;
+  progress and host rows stay behind the exact snapshot; session reads of it are an
+  observed fact (`observed_sources`), never a gate. Tests: `tests/test_plan_spec.py`, `tests/test_plan_review_engine_quorum.py`,
+  `tests/test_awaited_review_not_degraded.py`, `tests/test_plan_author_disclosure.py`,
+  `tests/test_plan_review_epoch.py`, `tests/test_reviewer_slot_route_contract.py`,
+  `tests/test_plan_dialogue_snapshot.py`, `tests/test_review_session_reads.py`.
 - Keep delivered result, unresolved tool-call evidence and host acceptance separate.
   Error count alone does not degrade execution or establish objective acceptance;
   retain `execution.unresolved_tool_errors` and the cosmetic bucket, and expose the
@@ -982,12 +1009,12 @@ and what enforces each.
   generation. File/diff requests impose no commit-or-revert rule; self-modification
   keeps reviewed commits (BIBLE P0/P3).
 - Before cleanup, freeze `review_evidence.task_inputs` and `completion_observations`
-  for summary/reflection (ARCHITECTURE §6 "Post-task reflection"): run origin, whole
+  for reflection (ARCHITECTURE §6 "Post-task reflection"): run origin, whole
   owner Q/A, peer provenance and canonical split-root verification receipts. Zero exit is positive;
   absent is unknown; unrelated passes erase no failure. Send content, not pointers;
   recover the same snapshot. Count delivery via `OWNER_DELIVERY_TOOL_NAMES`, never
-  global skill state. Summary uses `chat_observed` custody and the task-scoped,
-  archive-aware trace reader.
+  global skill state. The free `host_task_facts` row makes no model call; the paid
+  reflection and its Pattern Register write use `chat_observed` custody.
 - Promoted tasks carry their host-minted root id and role on the queue payload.
   RUNNING writes preserve the actual `_task_started_ts` as `started_at` and an existing
   `queued_at`; terminal `ts` stays its own field; missing historical start facts stay
@@ -1070,7 +1097,8 @@ and what enforces each.
   arguments intact. A terminal critic vote cannot deny author reaction or choose its stop. Blocking may save corrections and stop; advancement needs fresh
   reviewer authority. Advisory may explicitly finish revisions after exposed feedback
   or disclosed unavailability without another panel. Keep critic/author hashes separate;
-  bind intent to delivery evidence; consume it on owner/evidence supersession.
+  bind a finish to delivery evidence (a stop needs no freshness); consume it on
+  owner/evidence supersession.
   Queueing is not exposure; predeclared finish cannot authorize unseen feedback;
   `author_action=stop` grants neither completion nor permission. No semantic counters or
   keyword gates (P5). ARCHITECTURE §6 owns material-only continue, invalid-vote abstention

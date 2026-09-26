@@ -639,8 +639,8 @@ def _objective_axis(review: Dict[str, Any]) -> Dict[str, Any]:
     local_failure = (decision.get("acceptance_incident") or {}).get("status") == "failed"
     if (not local_failure and _decision_reason == "author_finish" and author and author.get("enforcement") == "advisory"
             and author.get("action", "finish") == "finish"):
-        return {"status": OBJECTIVE_PASS, "source": "author_acceptance", "review_status": status,
-                "outcome_tier": OUTCOME_TIER_SOLVED, "reason": "author_finish"}
+        # The author's own finish, not a grade: the host derives no tier from it.
+        return {"status": OBJECTIVE_PASS, "source": "author_acceptance", "review_status": status, "reason": "author_finish"}
     if (
         str(decision.get("status") or "") == ACCEPTANCE_FINALIZED_UNACCEPTED
         and (_decision_reason in _ACCEPTANCE_BLOCKED_TERMINAL_REASONS
@@ -1357,7 +1357,7 @@ def artifact_bundle_from_result(result: Dict[str, Any]) -> Dict[str, Any]:
             "errors": (list(item.get("errors") or []) if isinstance(item.get("errors"), list) else [])
                       + ([str(item["copy_error"])] if item.get("copy_error") else []),
         }
-        records.append(record)
+        records.append(record | ({"relpath": str(item["relpath"])} if item.get("relpath") else {}))
     if old_status == ARTIFACT_STATUS_FAILED or any(item["status"] == ARTIFACT_STATUS_FAILED for item in records):
         status = ARTIFACT_STATUS_FAILED
     elif status != ARTIFACT_STATUS_FAILED and any(item["status"] == "missing" for item in records):

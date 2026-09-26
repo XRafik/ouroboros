@@ -113,18 +113,16 @@ class ChatOutbound(TypedDict):
     role: Literal["user", "assistant", "system"]
     content: str
     ts: str
+    ingress_accepted: NotRequired[bool]  # Canonical inbound row saved; not processing/start proof.
     markdown: NotRequired[bool]
     is_progress: NotRequired[bool]
     task_id: NotRequired[str]
     origin_message_ref: NotRequired[Dict[str, Any]]
     # X3: a repair receipt whose managed task id the router mints only at promotion (typed truth, no invented id).
     task_id_pending: NotRequired[bool]
-    # "finalizing" on a root's early final answer: the answer is delivered
-    # while post-task synthesis still runs, so the frame is NOT the task's
-    # terminal conclusion — task_done settles the card/turn.
+    # "finalizing": early answer during synthesis, NOT terminal; task_done settles the card/turn.
     task_phase: NotRequired[str]
-    # Direct/ephemeral finals and errors settle client activity without a snapshot:
-    # completed/failed/cancelled/rejected_duplicate, not an early answer.
+    # Direct/ephemeral completed/failed/cancelled/rejected_duplicate settles activity, not early answers.
     task_terminal_status: NotRequired[str]
     ephemeral_decision: NotRequired[bool]
     tool_calls: NotRequired[int]
@@ -153,9 +151,9 @@ class ChatOutbound(TypedDict):
     # A cancellation fault names the PHYSICAL task it could not settle when it differs from the logical task id.
     cancel_physical_task_id: NotRequired[str]
     toast_once: NotRequired[str]
-    # #628: the incident's valence for the one-shot toast (warn/ok/error),
-    # stamped by the producer that knows whether the boundary is a wait, a
-    # recovery or an exhaustion; absent = the browser keeps its alarm tone.
+    # #628: the one-shot toast's valence (warn/ok/error; the reaper's rail ``warning``
+    # is normalizeTone's existing ``warn`` alias, no new tone), stamped by the producer
+    # that knows wait/recovery/exhaustion; absent = the browser keeps its alarm tone.
     toast_tone: NotRequired[str]
     lifecycle: NotRequired[Dict[str, Any]]
     # C4 multi-chat dedupe: a duplicate lifecycle initiator's typed pointer to
@@ -1133,15 +1131,17 @@ class TaskDetailResponse(TypedDict, total=False):
     """``GET /api/tasks/{task_id}`` — the public task-result envelope (open shape;
     stored task-result keys pass through) plus additive typed projections."""
 
+    artifacts: List[Dict[str, Any]]  # Open result rows; a nested file carries additive ``relpath``.
+    # Per top-level result dir: {name, files, size, excluded, available} of its on-demand ``?archive=`` ZIP.
+    artifact_archives: Dict[str, Dict[str, Any]]
     cost_breakdown: TaskCostBreakdown
     model_waits: Dict[str, Any]
     # Cancel projection (additive-optional): ``"pending"`` while a durable cancel intent is open and the
     # supervisor teardown has not settled — the status itself honestly stays running/scheduled; absent on
     # settled results and on tasks nobody asked to cancel. The UI's interim "Cancelling…" reads this, never a status.
     cancel_state: str
-    # Rides beside ``cancel_state`` when the intent carries a reason (GR2-11):
-    # the WHY of the pending cancellation (owner text, "subtree cancellation of
-    # <root>", "evolution stopped", …). Absent when no reason was recorded.
+    # Beside ``cancel_state`` when the intent carries a reason (GR2-11): the WHY of the pending
+    # cancellation (owner text, "subtree cancellation of <root>", …); absent when none was recorded.
     cancel_reason: str
     # S3 (Q1, additive-optional): rides beside a pending ``cancel_state`` when
     # the open intent is the SOFT stop ("finalize_then_cancel") — the UI shows

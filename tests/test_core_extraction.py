@@ -127,9 +127,16 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # for a reader outside the room, names the source of the fork, and the question has no
     # quiz-specific length cap); schema shape, types, defaults and required keys are unchanged,
     # and the entry's literal moved beside its validator in core_artifacts (byte-identical
-    # serialization). Diffing the whole catalog base to head shows exactly those edits and nothing else.
+    # serialization). Rolled again for TZ-2 B1 (zero-option questions) and owner V13: the
+    # escalate description offers 0-6 alternatives (none for an open question answered in the
+    # human's own words), states that a shared wait ends on any incoming message and that a
+    # plain-text clarification ends the turn while a waited question keeps it alive; the
+    # `options` description says optional 0-6 and `options` leaves the required keys. Rolled
+    # again for TZ-1 V10: forward_to_worker also writes into a queued task's mailbox, so its
+    # description and `task_id` description say "running or queued" and when each reads it.
+    # Diffing the whole catalog base to head shows exactly those edits and nothing else.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "86cf723bf9aa0744b379a0e584034519bc178db1787f82dfd33ed6cddfa6f4d4"
+        "968eecad1c04b7f8a265d17bdb5dc42a8a5239373a0a5724ad8c8d5489d06ef3"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

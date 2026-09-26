@@ -27,7 +27,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import pathlib
+import stat
 from typing import Any, Dict, List
 
 from ouroboros.utils import sanitize_tool_result_for_log, truncate_review_artifact
@@ -597,6 +599,97 @@ def sealed_final_prompt_section(sealed_final: Dict[str, Any] | None) -> str:
         "Artifact store manifest (task_results/artifacts/<task_id>/):\n"
         f"{manifest_text}\nTask completion observations:\n{observations}\n\n"
     )
+
+
+def artifact_store_roots(canonical_root: Any, task_id: str, *, task: Any = None,
+                         child_root: Any = None) -> List[pathlib.Path]:
+    """The task's artifact store directories: the canonical one and, for a split root, the child drive's.
+
+    The child drive is the caller's when it knows it (the pipeline's ``env.drive_root``),
+    else the task row's (``child_drive_root`` / ``drive_root``, the supervisor's own
+    resolution of a running task's drive), else the durable result's; the same store
+    named twice is listed once. Fail-soft: an unreadable result adds no store.
+    """
+    from ouroboros.headless import ARTIFACTS_DIR
+
+    row = task if isinstance(task, dict) else {}
+    child = str(child_root or row.get("child_drive_root") or row.get("drive_root") or "").strip()
+    if not child and canonical_root:
+        try:
+            from ouroboros.task_results import load_task_result
+
+            stored = load_task_result(pathlib.Path(canonical_root), str(task_id)) or {}
+            child = str(stored.get("child_drive_root") or stored.get("headless_child_drive_root")
+                        or stored.get("drive_root") or "").strip()
+        except Exception:
+            log.debug("artifact store roots: durable child drive unreadable for %s", task_id, exc_info=True)
+    stores: List[pathlib.Path] = []
+    for root in (str(canonical_root or ""), child):
+        store = pathlib.Path(root) / ARTIFACTS_DIR / str(task_id)
+        if root and store.resolve(strict=False) not in [known.resolve(strict=False) for known in stores]:
+            stores.append(store)
+    return stores
+
+
+def rescued_files_fact(task_id: str, stores: List[pathlib.Path]) -> Dict[str, Any]:
+    """How many deliverable files the task's artifact stores hold (TZ-2 C2).
+
+    Each distinct store is read by the shared unmeasured listing
+    (``artifacts.collect_task_artifact_records(measure=False, strict=True)``), so a
+    store's metadata, receipt stream, staged inputs and source handles are never
+    counted, a registration whose file is gone is not a file, and an unregistered
+    output is. The listing reads only the registration; no deliverable is opened,
+    hashed, copied or registered, and the fact says so (``hash_computed``). ``state`` is
+    ``positive``, ``zero`` (every store was listed and holds none; a store never
+    created is one nothing was written to) or ``unknown`` (a store could not be
+    listed — ``count`` is then what the listed stores held, a floor, never a total).
+    The count is physical files per store: the same name in two stores is two
+    listed files, never assumed to be one copy. Never raises.
+    """
+    rows: List[Dict[str, Any]] = []
+    for store in stores:
+        try:
+            count, readable = _listed_file_count(task_id, pathlib.Path(store)), True
+        except Exception:
+            count, readable = 0, False
+        rows.append({"store": str(store), "count": count, "readable": readable})
+    total = sum(int(row["count"]) for row in rows)
+    unreadable = not rows or any(not row["readable"] for row in rows)
+    state = "unknown" if unreadable else ("positive" if total else "zero")
+    return {"count": total, "state": state, "hash_computed": False, "stores": rows}
+
+
+def _listed_file_count(task_id: str, store: pathlib.Path) -> int:
+    """Deliverables the shared listing finds in ``store``; raises when it cannot vouch for them.
+
+    The listing reads a missing store as empty through ``exists()``, which also says
+    False for some unreadable paths and follows a link: the store's own ``lstat``
+    decides first, so only a store that is not there counts as zero.
+    """
+    from ouroboros.artifacts import collect_task_artifact_records, task_artifact_dir_path
+
+    drive = store.parents[2]
+    if task_artifact_dir_path(drive, task_id) != store:
+        raise ValueError(f"{store} is not task {task_id}'s artifact store")
+    try:
+        mode = os.lstat(store).st_mode
+    except FileNotFoundError:
+        return 0
+    if not stat.S_ISDIR(mode):  # a file or a link where the store directory should be
+        raise NotADirectoryError(str(store))
+    return len(collect_task_artifact_records(drive, task_id, measure=False, strict=True))
+
+
+def rescued_files_sentence(fact: Dict[str, Any]) -> str:
+    """ONE owner sentence for the stop receipt: the count, its state, and that no hash was computed."""
+    state, count = str(fact.get("state") or "unknown"), int(fact.get("count") or 0)
+    noun = "store" if len(fact.get("stores") or []) <= 1 else "stores"
+    if state == "positive":
+        return f"Files rescued: {count} listed in the task's artifact {noun} (hashes not computed)."
+    if state == "zero":
+        return f"Files rescued: none — listing the task's artifact {noun} found no files (hashes not computed)."
+    seen = f"; {count} listed before the failure" if count else ""
+    return f"Files rescued: unknown — a task artifact store could not be listed{seen} (hashes not computed)."
 
 
 def model_execution_projection(usage: Dict[str, Any]) -> Dict[str, Any] | None:
