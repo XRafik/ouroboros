@@ -629,7 +629,7 @@ def test_file_verification_does_not_run_on_the_asgi_loop(tmp_path, monkeypatch, 
     import uvicorn
     from starlette.applications import Starlette
     from starlette.routing import Route
-    from ouroboros.gateway import tasks
+    from ouroboros.gateway import task_archive, tasks
     from ouroboros.task_results import write_task_result
 
     api_task_artifact = tasks.api_task_artifact
@@ -667,14 +667,24 @@ def test_file_verification_does_not_run_on_the_asgi_loop(tmp_path, monkeypatch, 
         async def request():
             async with httpx.AsyncClient(timeout=10) as client:
                 reply = await client.request(method, f'http://127.0.0.1:{sock.getsockname()[1]}/api/tasks/download/artifacts/{record["name"]}')
-                assert reply.status_code == 200, reply.text
-                assert reply.content == (source.read_bytes() if method == 'GET' else b'')
+                if task_archive.CONFINED:
+                    assert reply.status_code == 200, reply.text
+                    assert reply.content == (source.read_bytes() if method == 'GET' else b'')
+                else:
+                    assert reply.status_code == 503, reply.text
+                    if method == 'GET':
+                        assert reply.json()['reason_code'] == 'artifact_unavailable'
+                    else:
+                        assert reply.content == b''
         asyncio.run(request())
         assert bool(materialization_calls) is (not registered)
         assert all(identity != thread.ident for identity in materialization_calls)
-        if registered:
-            assert len(calls) == 1, "registered downloads verify once per request"
-        assert calls and all(identity != thread.ident for identity in calls), 'whole-file hashing ran synchronously on the ASGI event loop'
+        if task_archive.CONFINED:
+            if registered:
+                assert len(calls) == 1, "registered downloads verify once per request"
+            assert calls and all(identity != thread.ident for identity in calls), 'whole-file hashing ran synchronously on the ASGI event loop'
+        else:
+            assert calls == [], "unsupported platforms refuse before reading file bytes (#1297)"
     finally:
         server.should_exit = True
         thread.join(10)
@@ -732,6 +742,40 @@ def test_failed_child_capture_is_explicit_and_other_files_still_publish(tmp_path
         recovered = load_effective_task_result(parent, "capture")
         assert recovered["artifact_status"] == recovered["artifact_bundle"]["status"] == "ready"
         assert recovered["status"] == "completed" and recovered["accounted_upper_bound_usd"] == 3.5
+
+
+def test_unchanged_pending_ref_retry_rewrites_nothing_and_keeps_late_facts(tmp_path):
+    """#1305: retrying a still-unpromotable ref leaves bytes, mtime and updated_at alone; a
+    genuine late fact still lands, survives the next retry, and a restored source converges."""
+    from ouroboros.headless import prepare_task_drive, copy_child_task_result
+    from ouroboros.observability import retry_pending_child_ref_promotions
+    from ouroboros.task_results import task_result_path, write_task_result
+
+    parent = tmp_path / "canonical"
+    child = prepare_task_drive(parent, "stale", "empty")
+    source = child / "report.txt"
+    source.write_bytes(b"report")
+    record = artifacts.copy_file_to_task_artifacts(
+        SimpleNamespace(drive_root=child, task_id="stale"), source, immutable=True)
+    write_task_result(child, "stale", "failed", artifacts=[record], artifact_status="ready")
+    write_task_result(parent, "stale", "running", headless_child_drive_root=str(child))
+    Path(record["path"]).write_bytes(b"appended after the digest was captured")
+    assert copy_child_task_result(parent, {"id": "stale", "drive_root": str(child)})[
+        "child_ref_promotion"]["status"] == "incomplete"
+    row = task_result_path(parent, "stale")
+    before, stamp = row.read_bytes(), row.stat().st_mtime_ns
+    report = retry_pending_child_ref_promotions(parent)
+    assert report["retried"] == report["pending"] == ["stale"] and not report["errors"]
+    assert row.read_bytes() == before and row.stat().st_mtime_ns == stamp
+    write_task_result(parent, "stale", "failed", accounted_upper_bound_usd=4.25)
+    late = row.read_bytes()
+    assert retry_pending_child_ref_promotions(parent)["pending"] == ["stale"]
+    assert row.read_bytes() == late and json.loads(late)["accounted_upper_bound_usd"] == 4.25
+    Path(record["path"]).write_bytes(b"report")
+    assert retry_pending_child_ref_promotions(parent)["completed"] == ["stale"]
+    settled = json.loads(row.read_bytes())
+    assert settled["status"] == "failed" and settled["accounted_upper_bound_usd"] == 4.25
+    assert settled["child_ref_promotion"]["status"] == "complete"
 
 
 @pytest.mark.parametrize("copy_failure", [False, True])
