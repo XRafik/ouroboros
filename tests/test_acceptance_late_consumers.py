@@ -20,6 +20,16 @@ from tests.test_review_operation_lifetime import until
 
 @pytest.fixture
 def late(tmp_path, monkeypatch, fresh_sends):
+    # The model transport is synthetic; its budget quote must be offline too.
+    # Cold live catalogue I/O otherwise races the panel's 10s test wait. This
+    # synthetic tariff preserves real budget admission, reservation and settlement.
+    from ouroboros import pricing
+    for name in ("_cached_pricing", "_pricing_fetched_at", "_pricing_retry_after"):
+        monkeypatch.setattr(pricing, name, {})
+    monkeypatch.setattr(pricing, "_pricing_fetch_in_progress", set())
+    monkeypatch.setattr(pricing, "_fetch_live_rows", lambda provider, model="":
+                        {"openai/gpt-4.1-nano": (1.0, 1.0, 1.0, 1.0)}
+                        if provider == "openrouter" and not model else {})
     monkeypatch.setenv('OUROBOROS_TASK_REVIEW_MODE', 'auto')
     monkeypatch.setenv(REVIEWER_SLOTS_ENV, json.dumps({'triad': [
         {'slot_id': str(i), 'route': {'kind': 'api_chat', 'target_id': 'openai/gpt-4.1-nano'}} for i in range(3)],
@@ -203,13 +213,85 @@ def test_delayed_quorum_callback_keeps_one_final_historical_notice(
     for notice in [*notices, owed]:  # The real consumer also sees an outbox replay.
         chat._handle_send_message(notice, sender)
     assert len(sends) == 1 and sends[0][0] == 7, sends
-    assert 'pending' not in sends[0][1] and f'- 2: {last_verdict}' in sends[0][1], {
+    # The owner row says each outcome in words (DESIGN §4), one seat per roster slot in
+    # roster order, so the final notice reads slot 2's own verdict at seat 3.
+    words = {'PASS': 'passed it', 'FAIL': 'rejected it'}[last_verdict]
+    seats = [line.split(' — ')[0] for line in sends[0][1].split('\n')[1:]]
+    assert seats == [f'- openai/gpt-4.1-nano (requested) (seat {seat}): {outcome}'
+                     for seat, outcome in ((1, 'passed it'), (2, 'passed it'), (3, words))], {
         'notices': len(notices), 'sent': sends, 'retained': panel['late_settlement']['note']}
     assert len(notices) == 1, notices
     assert sends[0][1] == owed['text'] == panel['late_settlement']['note'] == source['late_settlement']['note']
     assert not pending_deliveries(f.root)
     again = _request(f, ctx, _source(ctx, text='Review this delivered historical answer again.'))
     assert again['reason'] == 'existing_paid_operation' and len(late.calls) == 3
+
+
+@pytest.mark.parametrize('order', ['drain_first', 'together'])
+def test_drain_and_last_slot_callback_settling_one_wave_queue_one_live_notice(late, tmp_path, monkeypatch, order):
+    """The drain's own settlement and the last slot's complete callback settle one wave.
+
+    ``drain_first``: the drain collects every slot and announces; the callback's
+    mailbox duty mark then lands and its settlement republishes. ``together``:
+    both reconcile the one pending run at once. The outbox owes one notice and
+    exactly one live copy is queued; no reviewer is bought again.
+    """
+    from ouroboros import acceptance_settlement as settlement
+    from ouroboros import review_dispatch, review_operation
+    from supervisor.terminal_delivery import pending_deliveries
+
+    f = delivered(tmp_path, monkeypatch)
+    ctx = _caller(f)
+    ctx.event_queue = queue.Queue()
+    drain = threading.current_thread()
+    complete, drain_entered, drain_done = threading.Event(), threading.Event(), threading.Event()
+    announce, settle = settlement.announce_acceptance_settlement, settlement.settle_acceptance_operation
+    collect, met, barrier = review_dispatch.collect_task_acceptance_run, [], threading.Barrier(2, timeout=10)
+
+    def last_slot_callback(usage_ctx, request, wave):
+        if all(wave['slots'].values()):
+            complete.set()
+            assert (drain_done if order == 'drain_first' else drain_entered).wait(10)
+        return announce(usage_ctx, request, wave)
+
+    def drain_settlement(usage_ctx, **kwargs):
+        if threading.current_thread() is not drain:
+            return settle(usage_ctx, **kwargs)
+        assert complete.wait(10)  # every slot is already in custody
+        drain_entered.set()
+        try:
+            return settle(usage_ctx, **kwargs)
+        finally:
+            drain_done.set()
+
+    def meeting_collect(run, **kwargs):
+        barrier.wait()
+        met.append(threading.current_thread().name)
+        return collect(run, **kwargs)
+
+    monkeypatch.setattr(settlement, 'announce_acceptance_settlement', last_slot_callback)
+    monkeypatch.setattr(settlement, 'settle_acceptance_operation', drain_settlement)
+    if order == 'together':
+        monkeypatch.setattr(review_dispatch, 'collect_task_acceptance_run', meeting_collect)
+    try:
+        result = _request(f, ctx, _source(ctx, text='Review this delivered historical answer.'))
+    finally:
+        for gate in (complete, drain_entered, drain_done):
+            gate.set()
+        until(lambda: not review_operation._LIVE)
+
+    assert result['status'] in {'announced', 'published'}, result
+    assert len(met) == (2 if order == 'together' else 0), met
+    notices = [row for row in list(ctx.event_queue.queue) if row.get('system_type') == 'acceptance_late_settlement']
+    owed, = pending_deliveries(f.root)
+    panel, = load_task_result(f.root, f.tid)['review_projection']['panels']
+    assert len(notices) == 1 and notices[0]['chat_id'] == 7, notices
+    assert notices[0]['delivery_id'] == owed['delivery_id'] and notices[0]['text'] == owed['text']
+    assert owed['text'] == panel['late_settlement']['note'] and len(late.calls) == 3, json.dumps([
+        {key: actor.get(key) for key in ('slot_id', 'transport_status', 'parse_status', 'operation_state', 'reason')}
+        for actor in panel['actors']])
+    if order == 'drain_first':  # the callback's duty mark was consumed, not left to re-announce
+        assert not settlement.late_publication_owed(f.tid, panel['late_settlement']['reviewed_subject']['retry_key'])
 
 
 def _late_effects(f):
@@ -318,7 +400,13 @@ def test_explicit_receipt_requires_id_routed_chat_and_exact_bytes(late, tmp_path
 
 @pytest.mark.parametrize('cap', ['unlimited', 'unknown', 'prior_hold', 'prior_spend', 'live_global'])
 def test_original_cap_and_live_money_fences_use_original_wallet(late, tmp_path, monkeypatch, cap):
+    import time
+    from ouroboros import pricing
     from ouroboros.usage_accounting import AttemptRequest, reserve_attempt
+    # The wave fence needs a priced reviewer seat: an unpriced one adds nothing and fits. Pin the
+    # catalog row; a live fetch that times out, or a test's leftover 30 s retry_after, leaves none.
+    monkeypatch.setitem(pricing._cached_pricing, 'openrouter', {'openai/gpt-4.1-nano': (0.1, 0.025, None, 0.4)})
+    monkeypatch.setitem(pricing._pricing_fetched_at, 'openrouter', time.time())
     f = delivered(tmp_path, monkeypatch, retry=True, cap='unlimited' if cap in {'unlimited', 'live_global'} else 'unknown' if cap == 'unknown' else 'finite')
     monkeypatch.setenv('OUROBOROS_PER_TASK_COST_USD', '0.00001')
     if cap == 'prior_hold':

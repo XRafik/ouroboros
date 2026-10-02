@@ -19,6 +19,7 @@ import {
 } from './subagents_settings.js';
 import { initHarnessAccounts } from './harness_accounts.js';
 import { openConfirmDialog } from './confirm_dialog.js';
+import { confirmAndSendRestart } from './chat_activity.js';
 import { PROVIDER_TEST_INPUTS, SECRET_KEYS, bindSecretInputs, bindSettingsTabs, renderSettingsPage } from './settings_ui.js';
 import { showToast } from './toast.js';
 import { escapeHtmlAttr as escapeHtml, formatDualVersion } from './utils.js';
@@ -438,21 +439,11 @@ export function providerTestResultIsCurrent({
 }
 
 // Decision 16=A (#285): the settings "Restart now" action reuses the existing
-// owner command contract — the same WS `/restart` the chat header sends. The
-// whole confirm-and-send flow lives here (node-tested, panic-flow precedent):
-// the click handler only injects real deps. queue:false keeps a disconnected
-// page from silently queueing a destructive command for a later reconnect.
-export async function confirmAndSendRestart({ openConfirmDialog: confirmDialog, ws: socket }) {
-    const confirmed = await confirmDialog({
-        title: 'Restart agent',
-        body: 'All running and queued tasks stop, then the agent process restarts.\nSaved settings apply after the restart.',
-        confirmLabel: 'Restart',
-        danger: true,
-    });
-    if (!confirmed) return 'cancelled';
-    const result = socket?.send?.({ type: 'command', cmd: '/restart' }, { queue: false });
-    return result?.status === 'sent' ? 'sent' : 'not_connected';
-}
+// owner command contract — the same WS `/restart` the chat header sends, through
+// the ONE shared confirmation both Restart buttons use (owner quiz 285597). The
+// whole confirm-and-send flow lives in chat_activity.js (node-tested, beside the
+// Panic flow); this page re-exports it and its click handler only injects deps.
+export { confirmAndSendRestart };
 
 export function initSettings({ state, setBeforePageLeave, ws } = {}) {
     const page = document.createElement('div');
@@ -686,7 +677,7 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
         // Owner-facing mutative-subagents control shows the EFFECTIVE state when it
         // is binary-representable: an explicit value, or unset in advanced/pro
         // (every acting surface on = "On"). Unset in LIGHT mode is surface-aware
-        // (external_workspace/genesis stay on, self_worktree off — see
+        // (external work, including isolated project copies, stays on; own-body copies off — see
         // config.get_allow_mutative_subagents), so neither Off nor On is truthful
         // there: it displays as "Auto". Picking Auto saves the empty value
         // (collectBody maps any non-on/off segment to ''), so the mode default
