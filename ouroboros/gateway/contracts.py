@@ -257,6 +257,9 @@ class ChatOutbound(TypedDict):
     handoff_id: NotRequired[str]  # immutable origin/destination receipt identity
     terminal_time: NotRequired[Dict[str, Any]]  # host-owned occurrence, separate from publication ts
     completion_answer: NotRequired[str]  # a Project root's model-authored final answer, mirrored into Main (DESIGN)
+    set_at: NotRequired[str]  # a `reminder` row's provenance, live frame only (its text carries the signature): when written
+    scheduled_for: NotRequired[str]  # the due point it was written for
+    delivered_at: NotRequired[str]  # when the host showed it (later than due after downtime)
     chat_id: NotRequired[int]  # present on some transport re-broadcast paths
     # Server-stamped when chat_id is a reserved Project thread: Main never
     # adopts it, even before the browser has learned the project.
@@ -902,11 +905,17 @@ class UiPreferencesResponse(TypedDict):
     ok: NotRequired[bool]
     widget_order: list[str]
     widget_start_mode: dict[str, Literal["auto", "manual", "retain"]]  # owner per-card launch-policy override
+    widget_size: dict[str, dict[str, int]]  # owner Widgets card width: {w: masonry columns the card spans, 12 = full width; h: 0}
     nested_subagents_expanded: bool
     sidebar_width: int  # px; 0 = CSS default (resizable side sections, v6.33.0)
     project_panel_width: int  # px; 0 = CSS default
     project_seen_revision: dict[str, int]  # monotonic paint ACK per active Project
     welcome: dict[str, str]  # install-wide empty-Main UI copy: mode default|hidden|custom and plain text
+
+
+class DesktopAutostartResponse(TypedDict):  # GET/POST /api/desktop/autostart (OS registration) and /api/desktop/background (unavailable|off|on)
+    state: Literal["unavailable", "off", "on", "other_copy", "disabled_by_os"]
+    reason: NotRequired[str]  # present only when unavailable
 
 
 class GitLogResponse(TypedDict):
@@ -1537,9 +1546,8 @@ __all__ = [
     "OnboardingPresetFailureResponse",
     "OnboardingPresetProjection",
     "SettingsPostCommitFailureResponse",
-    "SkillGrantResponse",
-    "SkillDeleteResponse",
-    "UiPreferencesResponse",
+    "SkillGrantResponse", "SkillDeleteResponse",
+    "UiPreferencesResponse", "DesktopAutostartResponse",
     "GitLogResponse",
     "EvolutionDataResponse",
     "ScheduledTasksResponse",

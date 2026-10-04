@@ -52,6 +52,8 @@ import { mountEmptyChatWelcome } from './welcome_preference.js';
 import {
     captureLiveCardPhaseState,
     desiredLiveCardPhase,
+    liveCardCountBits,
+    liveCardLabel,
     replayTerminalPhase,
     restoreLiveCardPhaseState,
     setLiveCardPhase,
@@ -126,6 +128,7 @@ import {
     partitionLocalEchoJournal,
     projectCollapsedActivity,
     positiveTaskTerminalFact,
+    unkeyedFrameEndsTurn,
     projectIdFromTask,
     rawTimestampEpoch,
     stampNodeTimestamp,
@@ -870,7 +873,7 @@ export function createChatInstance({
         // The control itself reports the in-flight conversion; Stop stays where
         // it was, because the task keeps running whatever the bind answers.
         const btn = record.turnProjectBtn;
-        if (btn) { btn.disabled = true; btn.textContent = 'Creating project…'; }
+        if (btn) { btn.disabled = true; btn.textContent = liveCardLabel.creatingProject(); }
         try {
             // One-click convert (owner P1): no name prompt, no extra LLM call.
             // The SERVER names the project (gateway/projects.py: explicit
@@ -889,7 +892,7 @@ export function createChatInstance({
         } catch (exc) {
             showToast(`Project conversion not confirmed: ${exc.message || exc}`, 'error');
             delete record.root.dataset.projectCreating;
-            if (btn) { btn.disabled = false; btn.textContent = 'Turn into project'; }
+            if (btn) { btn.disabled = false; btn.textContent = liveCardLabel.turnIntoProject(); }
         }
     }
 
@@ -920,7 +923,7 @@ export function createChatInstance({
         btn.type = 'button';
         btn.className = 'btn btn-xs btn-default';
         btn.dataset.turnIntoProject = '1';
-        btn.textContent = 'Turn into project';
+        btn.textContent = liveCardLabel.turnIntoProject();
         btn.addEventListener('click', (event) => {
             event.stopPropagation();
             turnTaskIntoProject(record);
@@ -1593,10 +1596,7 @@ export function createChatInstance({
 
     function updateLiveCardCount(record) {
         if (!record?.countEl) return;
-        const bits = [];
-        if (record.items.length >= 2) bits.push(`${record.items.length} notes`);
-        const children = directSubagentCount(record);
-        if (children) bits.push(`${children} ${children === 1 ? 'child' : 'children'}`);
+        const bits = liveCardCountBits(record.items.length, directSubagentCount(record));
         const hidden = bits.length === 0;
         const text = bits.join(' · ');
         if (record.countEl.hidden !== hidden) record.countEl.hidden = hidden;
@@ -3714,8 +3714,8 @@ export function createChatInstance({
                     if (finished?.clientMessageId) {
                         pendingSubmissions.delete(finished.clientMessageId);
                     }
-                } else if (msg.system_type !== 'terminal_incident') {
-                    // Unkeyed finals clear unscoped state; incidents are informational.
+                } else if (unkeyedFrameEndsTurn(msg)) {
+                    // Unkeyed finals clear unscoped state; incidents, notes and skill notices do not.
                     activeDirectActivities.clear();
                     pendingSubmissions.clear();
                 }

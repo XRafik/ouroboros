@@ -3,8 +3,6 @@
 BASELINE_SOURCE_SHA = "77d6827b7a72a632899bb6cc64a7e759aabcfaa6"
 
 GIANT_PATHS = (
-    "devtools/benchmarks/osworld/run_cu_bridge_agent.py",
-    "devtools/benchmarks/osworld/run_step_agent.py",
     "ouroboros/tools/git.py",
     "server.py",
     "skills/unix_computer_use/plugin.py",
@@ -103,6 +101,7 @@ BAND_PATHS = {
     "devtools/benchmarks/cybergym/cybergym_lifecycle.py": "Run/settle lifecycle layer of the executor split: one accounting seam.",
     "devtools/benchmarks/cybergym/cybergym_protocol.py": "Stateless protocol layer of the adapter split: constants, validators, provenance.",
     "devtools/benchmarks/cybergym/cybergym_reconcile.py": "CyberGym recovery joins existing checkpoint, result, claim and cleanup authority without repeating an agent; one recovery owner retains that crash-window contract.",
+    "devtools/benchmarks/osworld/run_cu_bridge_agent.py": "OSWorld launcher retains admission and finalization seams; gate, budget, prompts and tool-policy helpers live in bounded owner leaves.",
     "devtools/benchmarks/swe_bench_pro/e1v2/run_pro.py": None,
     "devtools/benchmarks/terminal_bench/harbor_installed_agent.py": None,
     "devtools/benchmarks/terminal_bench/run_tb.py": None,
@@ -159,6 +158,7 @@ BAND_PATHS = {
     "ouroboros/tools/control_scheduling.py": "The existing subagent scheduling transaction owns validation, source-policy inheritance, preparation, rollback and emission. The declared-source field is carried through those existing phases without a second scheduler; the module remains one admission owner.",
     "ouroboros/tools/control_task_results.py": "serial addressed turns: await_messages (the mailbox wait, its window bounds and catalog entry) lives beside wait_task/wait_tasks, whose transport-wait peek and cache-horizon note it shares; splitting the three waits would separate one reader from its consumers",
     "ouroboros/tools/core.py": "D05 ledger split (rows 311-349): read/list and owner-chat delivery spans moved to core_file_tools/core_artifacts; facade re-enters the band from above (2283 -> 1373) and shrinks further when the residual catalog split lands",
+    "ouroboros/tools/edit_ops.py": "Atomic edit validation, exact replacement and patch application share the same target resolution and mutation receipt.",
     "ouroboros/tools/plan_review.py": "Entered the band from 999 lines: the required-affected_paths form (owner 9=A) added the schema field and the PLAN_RESOURCE_FORM_REQUIRED refusal, which must name the task's open wave and the $0 disposition exit \u2014 it belongs beside the one preamble both the paid and dry-run paths share, not in the pure plan_spec companion that owns no task state.",
     "ouroboros/tools/registry_core.py": "ToolRegistry owns the registry class behind the protected facade; guard and dispatch implementations live in sibling leaves.",
     "ouroboros/tools/review.py": "D06 F2.3a re-entry by extraction: the multi-model fan-out moved to review_multi_model.py (1550->1269); the remaining single-owner review cycle machinery lands in the 1001-1500 band with headroom",
@@ -240,6 +240,7 @@ BAND_PATHS = {
     "web/modules/settings.js": "Settings retains draft, validation and save ownership; account discovery subscription and refresh state live together in the existing settings_catalog.js owner.",
     "web/modules/settings_ui.js": "The existing Settings markup owner includes the client-local Appearance panel alongside the other tab declarations; theme behavior remains in theme.js, without a new one-panel wrapper.",
     "web/modules/skills.js": "One installed-skill page controller owns independently settling primary/optional reads and current-generation menu, identity and badge updates; domain lifecycle, cards, hub truth and shared interactions remain separate owners.",
+    "web/modules/updates.js": "The existing Updates page owns installation progress and the cumulative update description, including its refresh and retained-text presentation; keeping that shared status lifecycle in one module avoids a parallel controller.",
     "web/tests/chat_instance_dom.test.js": "Entered the band from 1000 lines with the alias-free subagent cost pin (stage-2 fix wave): that regression reproduces only through the real createChatInstance card path, and this file owns the DOM harness that drives it; split when the next createChatInstance face lands.",
     "web/tests/harness_login_cards.test.js": "Login-card suite grew past 1000 lines with the name-the-account face cases (agy pickup, issue #232); split when the next face lands.",
     "web/tests/onboarding_agents_step.test.js": "Keeps the shared onboarding controller tests together across preview freshness, typed failure delivery, owner draft preservation and explicit reviewer recovery.",
@@ -257,5 +258,5 @@ BYTE_BASELINE_DEBT = {
 }
 
 BYTE_DEBT = {
-    "tests/test_devtools_benchmarks.py": 326550,
+    "tests/test_devtools_benchmarks.py": 326542,
 }

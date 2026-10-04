@@ -32,6 +32,7 @@
 import { TERMINAL_TASK_STATUSES } from './chat_activity.js';
 import { getLogTaskGroupId } from './log_events.js';
 import { shellBridgeApi } from './ui_helpers.js';
+import { tr } from './i18n.js';
 
 export const NOTIFY_PREFS_KEY = 'ouroboros.notifications';
 
@@ -58,6 +59,10 @@ export const NOTIFY_TITLES = Object.freeze({
     important: 'Message from Ouroboros',
     main_reply: 'Ouroboros replied',
 });
+
+// Titles are a four-word catalog outside the DOM: the install language reads them by code
+// (web/modules/i18n.js); the body is the authored frame text and stays as written.
+const notifyTitle = (category) => tr(`notify.title.${category}`, NOTIFY_TITLES[category]);
 
 const BODY_CHARS = 140;
 /* Bounded only for hygiene in a page that may live for days. A key evicted
@@ -116,6 +121,22 @@ function trimBody(value) {
     return `${body.slice(0, BODY_CHARS - 1)}…`;
 }
 
+/* A reminder (a note Ouroboros wrote earlier, shown now by the host) and a
+   granted skill's notice are System rows whose first line is the host's
+   signature; the banner names the author from `source` and shows only the words
+   after that line. Never the row's sentence in the title (§9: private by default). */
+export function noticeTitle(systemType, source) {
+    const author = text(source).trim();
+    if (systemType === 'skill_notice') return author ? `Notice from ${author}` : 'Notice from a skill';
+    return `Reminder from ${author || 'Ouroboros'}`;
+}
+
+function noticeBody(content) {
+    const raw = text(content);
+    const cut = raw.indexOf('\n');
+    return cut >= 0 ? raw.slice(cut + 1) : raw;
+}
+
 /**
  * Classify ONE live frame into a notification candidate, or null.
  *
@@ -165,7 +186,7 @@ export function classifyLiveFrame(frame, { kind = 'chat', isMain = false, isRoot
         return {
             category: waiting ? 'needs_answer' : 'important',
             key: `quiz:${taskId}:${quizId}`,
-            title: waiting ? NOTIFY_TITLES.needs_answer : 'Ouroboros asks a question',
+            title: waiting ? notifyTitle('needs_answer') : tr('notify.title.asks_question', 'Ouroboros asks a question'),
             body: trimBody(source.question || frame.question || frame.content),
             target: { chatId: frame.chat_id, taskId, quizId },
         };
@@ -190,7 +211,7 @@ export function classifyLiveFrame(frame, { kind = 'chat', isMain = false, isRoot
         return {
             category: 'task_done',
             key: `conclusion:${taskId}`,
-            title: NOTIFY_TITLES.task_done,
+            title: notifyTitle('task_done'),
             body: '',
             target: { chatId: frame.chat_id, taskId },
         };
@@ -213,8 +234,20 @@ export function classifyLiveFrame(frame, { kind = 'chat', isMain = false, isRoot
         return {
             category: 'important',
             key: `important:${rowKey}`,
-            title: NOTIFY_TITLES.important,
+            title: notifyTitle('important'),
             body: trimBody(frame.content),
+            target: { chatId: frame.chat_id, taskId },
+        };
+    }
+
+    // A message for the owner that nobody speaks NOW: no new category, the same
+    // `important` toggle (DESIGN §9).
+    if (systemType === 'reminder' || systemType === 'skill_notice') {
+        return {
+            category: 'important',
+            key: `important:${rowKey}`,
+            title: noticeTitle(systemType, frame.source),
+            body: trimBody(noticeBody(frame.content)),
             target: { chatId: frame.chat_id, taskId },
         };
     }
@@ -231,7 +264,7 @@ export function classifyLiveFrame(frame, { kind = 'chat', isMain = false, isRoot
         return {
             category: 'task_done',
             key: `conclusion:${taskId}`,
-            title: NOTIFY_TITLES.task_done,
+            title: notifyTitle('task_done'),
             body: trimBody(frame.content),
             target: { chatId: frame.chat_id, taskId },
         };
@@ -246,7 +279,7 @@ export function classifyLiveFrame(frame, { kind = 'chat', isMain = false, isRoot
             // of the same task share this key, so the owner is pulled back once
             // rather than twice for the same conclusion.
             key: taskId ? `conclusion:${taskId}` : `main_reply:${rowKey}`,
-            title: NOTIFY_TITLES.main_reply,
+            title: notifyTitle('main_reply'),
             body: trimBody(frame.content),
             target: { chatId: frame.chat_id, taskId },
         };
@@ -306,6 +339,7 @@ export function attentionStatusText({ enabled = true, nativeAttention = false, s
     if (!enabled) return 'Notifications are off; no attention is requested from this system.';
     if (status === 'window_only') return 'Desktop attention can raise this window, but its system sound is unavailable; the app tone is used when needed.';
     if (status === 'unsupported' || status === 'unavailable') return 'Desktop attention is unavailable in this launcher; browser or in-app delivery remains available.';
+    if (status === 'background') return 'Desktop attention is available; while Ouroboros runs in the background, alerts use a system banner or sound instead of opening this window.';
     if (status === 'native_sound' || nativeAttention) return 'Desktop attention is available; the launcher may raise this window and use the system sound.';
     if (bridge) return 'This desktop client exposes an attention bridge; its sound capability will be confirmed on the next alert.';
     if (supported) return 'Browser notifications are available; desktop attention depends on the client.';
@@ -391,36 +425,61 @@ export function createNotifier({
         }
     }
 
+    function showBanner(decision) {
+        try {
+            // The OS owns the banner's sound; `silent` honours the toggle
+            // so the owner never hears two sounds for one event.
+            const note = new notificationCtor(decision.title, {
+                body: decision.body || undefined,
+                tag: decision.key,
+                silent: !decision.sound,
+            });
+            note.onclick = () => {
+                try { focusWindow(); } catch { /* a blocked focus is not fatal */ }
+                try { activate?.(decision.target, decision); } catch { /* navigation is best-effort */ }
+                try { note.close?.(); } catch { /* already closed */ }
+            };
+            return true;
+        } catch {
+            return false; // the in-app path takes over
+        }
+    }
+
     function deliver(decision) {
         const banner = supported() && permission() === 'granted';
-        if (banner) {
-            try {
-                // The OS owns the banner's sound; `silent` honours the toggle
-                // so the owner never hears two sounds for one event.
-                const note = new notificationCtor(decision.title, {
-                    body: decision.body || undefined,
-                    tag: decision.key,
-                    silent: !decision.sound,
-                });
-                note.onclick = () => {
-                    try { focusWindow(); } catch { /* a blocked focus is not fatal */ }
-                    try { activate?.(decision.target, decision); } catch { /* navigation is best-effort */ }
-                    try { note.close?.(); } catch { /* already closed */ }
-                };
-                return 'banner';
-            } catch {
-                // Fall through to the in-app path below.
-            }
-        }
         const api = hostApi || shellBridgeApi(globalThis);
-        const nativeCue = typeof api?.request_attention === 'function';
-        if (nativeCue) {
+        if (banner && typeof api?.notify_owner === 'function') {
+            // A launcher that can hide its window on purpose answers first: hidden, its own native
+            // signal is the one that opens the window (focus() cannot undo a hide); visible, it does
+            // nothing (last argument) and the browser banner owns the sound, with no raise.
+            const answer = (result) => {
+                if (destroyed) return;
+                if (result?.status === 'background') inApp(decision, api, result);
+                else if (!showBanner(decision)) inApp(decision, api);
+            };
             try {
-                void Promise.resolve(api.request_attention(Boolean(decision.sound))).then((result) => {
+                void Promise.resolve(api.notify_owner(Boolean(decision.sound), decision.title, decision.body || '', false))
+                    .then(answer, () => answer(null));
+            } catch { answer(null); }
+            return 'host';
+        }
+        if (banner && showBanner(decision)) return 'banner';
+        return inApp(decision, api);
+    }
+
+    function inApp(decision, api, answered = null) {
+        if (answered || typeof api?.request_attention === 'function') {
+            try {
+                // A newer launcher takes the (privacy-filtered) text for its banner while its window is hidden on purpose.
+                const cue = answered || (typeof api.notify_owner === 'function'
+                    ? api.notify_owner(Boolean(decision.sound), decision.title, decision.body || '')
+                    : api.request_attention(Boolean(decision.sound)));
+                void Promise.resolve(cue).then((result) => {
                     if (destroyed) return;
                     nativeAttention = Boolean(result?.ok);
                     attentionStatus = String(result?.status || 'unavailable');
-                    if (decision.sound && result?.sound_played !== true) tone();
+                    // A native banner owns its sound (queued: not reported as played); no page tone after it.
+                    if (decision.sound && result?.sound_played !== true && result?.banner !== true) tone();
                     syncSettings();
                 }).catch(() => { if (!destroyed && decision.sound) tone(); });
             } catch { if (decision.sound) tone(); }
