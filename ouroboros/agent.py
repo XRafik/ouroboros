@@ -109,6 +109,7 @@ def _task_exception_terminal(env: Any, task: Dict[str, Any], exc: Exception, dri
     usage.update(execution_status="infra_failed", reason_code="task_exception",
                  terminal_origin=TERMINAL_ORIGIN_HOST_NOTICE)
     text = f"⚠️ Error during processing: {type(exc).__name__}: {exc}"
+    log.error("Task %s failed with an unexpected exception", task.get("id"), exc_info=exc)
     append_jsonl(drive_logs / "events.jsonl", {
         "ts": utc_now_iso(), "type": "task_error", "task_id": task.get("id"),
         "error": repr(exc), "traceback": truncate_for_log(traceback.format_exc(), 2000),
@@ -255,6 +256,8 @@ class OuroborosAgent:
         threads. A missing/None chat_id stays main-routed downstream.
         """
         payload: Dict[str, Any] = {"type": event_type, "ts": utc_now_iso(), **fields}
+        if event_type == "task_started":
+            self._activity_emitted_at = payload["activity_emitted_at"] = payload["ts"]
         if self._current_chat_id is not None and "chat_id" not in payload:
             payload["chat_id"] = self._current_chat_id
         emit_log_event(
@@ -521,7 +524,8 @@ class OuroborosAgent:
         dispatch = resolve_dispatch_axes(task)
         _record_executor_resolution(drive_logs, task, dispatch)
         sanitized_task = sanitize_task_for_event(task, drive_logs)
-        append_jsonl(drive_logs / "events.jsonl", {"ts": utc_now_iso(), "type": "task_received", "task": sanitized_task})
+        append_jsonl(drive_logs / "events.jsonl", {"ts": utc_now_iso(), "type": "task_received", "task": sanitized_task,
+                     "activity_emitted_at": getattr(self, "_activity_emitted_at", None)})
         self._persist_running_record(task)
         # Durable record first, live mirror second: the supervisor's RUNNING copy
         # (and therefore the queue snapshot) learns the same resolution the record
@@ -988,6 +992,7 @@ class OuroborosAgent:
                     raise
                 except Exception as e:
                     tb = traceback.format_exc()
+                    log.error("Deep self-review failed for task %s", task.get("id"), exc_info=e)
                     append_jsonl(drive_logs / "events.jsonl", {
                         "ts": utc_now_iso(), "type": "task_error",
                         "task_id": task.get("id"), "error": repr(e),
