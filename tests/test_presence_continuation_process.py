@@ -12,6 +12,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.parse import urlsplit
 
@@ -29,6 +30,21 @@ LATE_CHILD = "work-promoted-after-first-yield"
 MANUAL = "I checked the prior delivery. Continue the interrupted report as a new turn."
 pytestmark = [pytest.mark.serial, pytest.mark.skipif(
     os.name != "posix", reason="This fixture qualifies POSIX SIGKILL/process-group custody only")]
+
+
+@pytest.fixture
+def tmp_path(tmp_path):
+    """Keep private multiprocessing sockets short, independent of runner basetemp.
+
+    macOS limits AF_UNIX addresses to 104 bytes. The runner's nested pytest
+    root can consume that before multiprocessing appends its own socket name.
+    Retain this test's separate root and leave its address in pytest's tree,
+    just like the other isolated session trees; never discard failure evidence.
+    """
+    root = Path(tempfile.mkdtemp(prefix="ob-pres-", dir="/tmp"))
+    (tmp_path / "presence-root.txt").write_text(str(root), encoding="utf-8")
+    yield root
+    print(f"Presence fixture tree retained: {root}")
 
 
 def eventually(read, *, seconds=45):
@@ -168,6 +184,40 @@ def test_host_close_rejects_a_live_descendant_after_the_parent_exits(tmp_path):
             return False
 
         eventually(gone, seconds=10)
+
+
+@pytest.mark.parametrize("method", ["spawn", "forkserver"])
+def test_fixture_joins_owned_multiprocessing_support_before_exit(tmp_path, method):
+    """Force the bus to exist; test cleanup independently of late-notice timing."""
+    script = r'''
+import json, os, sys
+from pathlib import Path
+os.environ["OUROBOROS_WORKER_START_METHOD"] = sys.argv[2]
+from supervisor import queue
+from supervisor.workers import get_event_q
+from multiprocessing import forkserver, resource_tracker
+from tests.presence_lifecycle_host import shutdown_fixture_processes
+root = Path(sys.argv[1])
+try:
+    bus = get_event_q()
+    bus.put({"fixture": True})
+    assert bus.get(timeout=5) == {"fixture": True}
+    shutdown_fixture_processes(root, 1)
+    assert forkserver._forkserver._forkserver_pid is None
+    record = json.loads((root / "process-cleanup-1.json").read_text())
+    assert record["event_bus_children"] and record["resource_tracker_pid"], record
+    assert record["remaining_children"] == [] and record["resource_tracker_joined"], record
+    assert record["forkserver_joined"], record
+    assert bool(record["forkserver_pid"]) == (sys.argv[2] == "forkserver"), record
+finally:
+    # A failing old fixture still must not leave its support processes behind.
+    forkserver._forkserver._stop()
+    resource_tracker._resource_tracker._stop()
+'''
+    result = subprocess.run([sys.executable, "-c", script, str(tmp_path), method],
+                            cwd=ROOT, env=isolated_environment(tmp_path, ROOT),
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("mode", ["blocking", "advisory"])
@@ -394,7 +444,7 @@ def test_second_park_exposes_late_child_without_changing_initial_replay(tmp_path
         # Releasing the pending reviewer after Stop emits a late notice through
         # the real manager-backed event bus. Both support processes must be
         # joined by the fixture, before the parent's group assertion runs.
-        assert cleanup["event_bus_children"] and cleanup["resource_tracker_pid"]
+        assert cleanup["event_bus_children"] and cleanup["resource_tracker_pid"], cleanup
 
 
 @pytest.mark.parametrize("mode", ["blocking", "advisory"])

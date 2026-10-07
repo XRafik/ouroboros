@@ -101,6 +101,7 @@ D20 = "Presence"
 "ouroboros/anthropic_native_custody.py" = "D02"
 "ouroboros/argv_budget.py" = "D13"
 "ouroboros/artifacts.py" = "D05"
+"ouroboros/chat_uploads.py" = "D05"
 "ouroboros/repo_diff_capture.py" = "D05"
 "ouroboros/betterleaks_runtime.py" = "D14"
 "ouroboros/browser_policy.py" = "D05"
@@ -121,6 +122,7 @@ D20 = "Presence"
 "ouroboros/colab_bootstrap.py" = "D12"
 "ouroboros/commit_admission.py" = "D06"
 "ouroboros/config.py" = "D12"
+"ouroboros/confined_files.py" = "D18"
 "ouroboros/model_slots.py" = "D12"
 "ouroboros/review_model_routes.py" = "D12"
 "ouroboros/runtime_limits.py" = "D12"
@@ -213,6 +215,7 @@ D20 = "Presence"
 "ouroboros/fallback_cooldown.py" = "D02"
 "ouroboros/gateway/__init__.py" = "D11"
 "ouroboros/gateway/_helpers.py" = "D11"
+"ouroboros/gateway/attachment_contracts.py" = "D11"
 "ouroboros/gateway/claudexor_accounts.py" = "D11"
 "ouroboros/gateway/claudexor_quota.py" = "D11"
 "ouroboros/gateway/contracts.py" = "D11"
@@ -474,6 +477,9 @@ D20 = "Presence"
 "ouroboros/subagent_work_order.py" = "D07"
 "ouroboros/subagent_worktrees.py" = "D07"
 "ouroboros/workspace_copies.py" = "D07"
+"ouroboros/body_candidate.py" = "D07"  # own-body authoring candidate: one more kind of task-owned isolated copy
+"ouroboros/body_adoption.py" = "D10"  # restart-bound adoption of one exact candidate commit (authorize/arm/finalize)
+"ouroboros/body_switch.py" = "D10"  # the captured stdlib helper that moves an armed adoption into the checkout
 "ouroboros/delegate_directory.py" = "D07"
 "ouroboros/subagents.py" = "D07"
 "ouroboros/subagent_route_health.py" = "D07"
@@ -663,6 +669,7 @@ D20 = "Presence"
 "supervisor/git_ops_updates.py" = "D10"
 "supervisor/log_addressing.py" = "D08"
 "supervisor/message_bus.py" = "D08"
+"supervisor/message_ingress.py" = "D08"
 "supervisor/owner_stop.py" = "D09"
 "supervisor/queue.py" = "D08"
 "supervisor/queue_snapshot.py" = "D08"
@@ -971,6 +978,7 @@ lazy_only = [
   "D09->D15",
   "D09->D17",
   "D10->D01",
+  "D10->D07",
   "D10->D09",
   "D10->D11",
   "D10->D14",

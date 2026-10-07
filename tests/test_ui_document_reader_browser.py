@@ -118,10 +118,18 @@ def _reader(page):
 
 def _open(page, name, *, ready=".document-reader-markdown, .document-reader-source, .document-reader-status:not(.is-loading)",
           feed="#chat-messages"):
-    page.locator(f"{feed} .chat-file-card").filter(has_text=name).click()
+    card = page.locator(f"{feed} .chat-file-card").filter(has_text=name)
+    # Playwright may scroll again to avoid fixed chrome before dispatching
+    # the click. Measure the actual opening gesture, before the reader handler.
+    card.evaluate("""(node, feed) => node.addEventListener('click', () => {
+        node.__readerOpeningScroll = document.querySelector(feed).scrollTop;
+    }, {capture: true, once: true})""", feed)
+    card.click()
     page.locator("dialog.document-reader[open]").wait_for(state="visible")
     page.locator(f"dialog.document-reader[open] :is({ready})").first.wait_for(state="attached")
-    return _reader(page)
+    state = _reader(page)
+    state["opening_scroll"] = card.evaluate("node => node.__readerOpeningScroll")
+    return state
 
 
 def _close_with_escape(page):
@@ -131,21 +139,15 @@ def _close_with_escape(page):
 
 def _feed_scroll(page, feed="#chat-messages"):
     """The conversation's scroll offset once layout has settled (two equal reads)."""
-    read = "feed => document.querySelector(feed).scrollTop"
+    read = "feed => { const node = document.querySelector(feed); return [node.scrollTop, node.scrollHeight]; }"
     value = page.evaluate(read, feed)
     for _ in range(20):
         page.wait_for_timeout(150)
         latest = page.evaluate(read, feed)
         if latest == value:
-            return value
+            return value[0]
         value = latest
-    return value
-
-
-def _place(page, name, feed="#chat-messages"):
-    """The settled feed offset with the card in view, as a click leaves it (a click scrolls it in)."""
-    page.locator(f"{feed} .chat-file-card").filter(has_text=name).scroll_into_view_if_needed()
-    return _feed_scroll(page, feed)
+    return value[0]
 
 
 def _check_brief(state, title="brief.md"):
@@ -212,8 +214,13 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
                         for name in FILES}
             assert readable == {name: ("•••" if name == "page.html" else "Read") for name in FILES}
 
-            # Live: the inline delivered bytes, with no request to any address of the file.
-            before = _place(page, "brief.md")
+            # A delivered frame precedes the model's final answer. Wait for that
+            # answer before measuring a fixed scroll offset: while following the
+            # live edge, its arrival legitimately moves the underlying feed.
+            page.locator("#chat-messages .chat-bubble.assistant").filter(
+                has_text="The files are delivered.").wait_for(timeout=60_000)
+            page.locator('#chat-messages .chat-live-card [data-phase="done"]').wait_for()
+            # Still live: inline delivered bytes, no history reload or file request.
             requests.clear()
             state = _open(page, "brief.md", ready=".document-reader-markdown")
             _check_brief(state)
@@ -238,7 +245,7 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
             page.locator('[data-reader-view="formatted"]').click()
             _close_with_escape(page)
             assert page.evaluate("() => document.activeElement?.closest('.chat-file-card')?.textContent.includes('brief.md')")
-            assert abs(_feed_scroll(page) - before) <= 1, "closing returns to the same place in the conversation"
+            assert abs(_feed_scroll(page) - state["opening_scroll"]) <= 1, "closing returns to the same place in the conversation"
 
             state = _open(page, "notes.txt", ready=".document-reader-source")
             assert state["source"] == NOTES and not state["views"] and state["meta"].startswith("TXT · ")
@@ -333,7 +340,6 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
             # Phone: a full sheet in light appearance; Close returns to the same place.
             page.set_viewport_size(NARROW)
             page.emulate_media(color_scheme="light")
-            before = _place(page, "brief.md")
             state = _open(page, "brief.md", ready=".document-reader-markdown")
             assert [round(value) for value in state["rect"]] == [0, 0, NARROW["width"], NARROW["height"]], state["rect"]
             assert any(state["tables"]) and state["bodyOverflowX"] <= 1, "only the table scrolls sideways"
@@ -345,7 +351,7 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
             page.screenshot(path=str(evidence / "chromium-narrow-light-brief.png"))
             page.locator('dialog.document-reader [data-reader-action="close"]').click()
             page.locator("dialog.document-reader").wait_for(state="detached")
-            assert abs(_feed_scroll(page) - before) <= 1
+            assert abs(_feed_scroll(page) - state["opening_scroll"]) <= 1
         finally:
             chromium.close()
 
@@ -356,7 +362,6 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
             page.on("request", lambda request: requests.append((request.url, request.headers.get("range"))))
             page.goto(url, wait_until="domcontentloaded")
             page.locator(".chat-file-card").filter(has_text="brief.md").wait_for(state="visible", timeout=30_000)
-            before = _place(page, "brief.md")
             state = _open(page, "brief.md", ready=".document-reader-markdown")
             _check_brief(state)
             assert state["active"]
@@ -364,7 +369,7 @@ def test_delivered_documents_open_in_the_reader_live_and_after_reload(direct_ser
             page.screenshot(path=str(evidence / "webkit-wide-light-brief.png"))
             _close_with_escape(page)
             assert page.evaluate("() => document.activeElement?.closest('.chat-file-card')?.textContent.includes('brief.md')")
-            assert abs(_feed_scroll(page) - before) <= 1
+            assert abs(_feed_scroll(page) - state["opening_scroll"]) <= 1
             state = _open(page, "big.md", ready=".document-reader-markdown")
             assert "Showing the first 1.0 MB of 1.5 MB" in state["notice"] and "UTF-8" not in state["notice"]
             _close_with_escape(page)
@@ -478,8 +483,11 @@ def test_project_room_reader_survives_reload_and_closes_with_its_room(direct_ser
             assert page.locator("#chat-messages .chat-file-card").count() == 0, "the room's files stay in the room"
             artifact = {name: url + frame["download_url"] for name, frame in frames.items()}
 
+            # Like Main, measure the settled turn, not its file-before-final interval.
+            page.locator(f"{feed} .chat-bubble.assistant").filter(
+                has_text="The files are delivered.").wait_for(timeout=60_000)
+            page.locator(f'{feed} .chat-live-card [data-phase="done"]').wait_for()
             # Live, in the room: the inline delivered bytes.
-            before = _place(page, "room-brief.md", feed)
             requests.clear()
             state = _open(page, "room-brief.md", ready=".document-reader-markdown", feed=feed)
             _check_brief(state, "room-brief.md")
@@ -489,7 +497,7 @@ def test_project_room_reader_survives_reload_and_closes_with_its_room(direct_ser
             page.screenshot(path=str(evidence / "chromium-wide-dark-project-brief.png"))
             _close_with_escape(page)
             assert page.evaluate(f"() => document.activeElement?.closest('{feed} .chat-file-card')?.textContent.includes('room-brief.md')")
-            assert abs(_feed_scroll(page, feed) - before) <= 1, "closing returns to the same place in the room"
+            assert abs(_feed_scroll(page, feed) - state["opening_scroll"]) <= 1, "closing returns to the same place in the room"
 
             # Reload: the room rebuilds from history and reads the immutable artifact route.
             page.reload(wait_until="domcontentloaded")
@@ -542,14 +550,13 @@ def test_project_room_reader_survives_reload_and_closes_with_its_room(direct_ser
             page.goto(url, wait_until="domcontentloaded")
             feed = _enter_room(page, room)
             page.locator(f"{feed} .chat-file-card").filter(has_text="room-brief.md").wait_for(state="visible", timeout=30_000)
-            before = _place(page, "room-brief.md", feed)
             state = _open(page, "room-brief.md", ready=".document-reader-markdown", feed=feed)
             _check_brief(state, "room-brief.md")
             assert [round(value) for value in state["rect"]] == [0, 0, NARROW["width"], NARROW["height"]], state["rect"]
             page.screenshot(path=str(evidence / "webkit-narrow-light-project-brief.png"))
             _close_with_escape(page)
             assert page.evaluate(f"() => document.activeElement?.closest('{feed} .chat-file-card')?.textContent.includes('room-brief.md')")
-            assert abs(_feed_scroll(page, feed) - before) <= 1
+            assert abs(_feed_scroll(page, feed) - state["opening_scroll"]) <= 1
 
             held = []
             page.route("**/artifacts/**", lambda route: held.append(route))
@@ -781,6 +788,14 @@ TRANSLATED = {"language": "ru", "english": False, "revision": 1, "entries": {
 NO_ASYNC_CLIPBOARD = """() => {
     Object.defineProperty(Navigator.prototype, 'clipboard', {configurable: true, get: () => undefined});
     window.__copied = [];
+    // Capture after the pointer's default focus action, but before the Copy
+    // handler moves focus into its temporary textarea. Engine names do not
+    // determine whether a clicked button takes focus on this platform.
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest?.('dialog.document-reader .md-code-copy')) return;
+        window.__copyFocus = document.activeElement;
+        window.__copyScroll = document.querySelector('dialog.document-reader .document-reader-body').scrollTop;
+    }, true);
     document.addEventListener('copy', () => {
         const node = document.activeElement;
         window.__copied.push({
@@ -817,6 +832,8 @@ COPY_STATE = """() => {
         active: document.activeElement === dialog.querySelector('.md-code-copy') ? 'copy'
             : document.activeElement === dialog.querySelector('.document-reader-body') ? 'region'
             : document.activeElement?.tagName || '',
+        focus_restored: Boolean(window.__copyFocus) && document.activeElement === window.__copyFocus,
+        scroll_before_copy: window.__copyScroll,
         scroll: dialog.querySelector('.document-reader-body').scrollTop,
         textareas: dialog.querySelectorAll('textarea').length,
         highlighted: code.classList.contains('hljs'),
@@ -891,17 +908,28 @@ def test_reader_in_a_translated_ui_and_copy_without_async_clipboard(direct_serve
                 # Exactly what the block holds, selected inside the dialog.
                 assert after["code_text"].strip() == "print('copy me')", after
                 assert after["copied"] == {"text": after["code_text"], "tag": "TEXTAREA", "in_dialog": True}, after
-                # Focus is back where the click left it: Chromium focuses a clicked button, WebKit does not.
-                assert after["active"] == ("copy" if engine == "chromium" else "region"), after
-                assert after["textareas"] == 0 and after["scroll"] == before["scroll"], after
+                # Restore the actual pre-handler focus and viewport, not an
+                # engine-name guess or the position before click auto-scrolling.
+                assert after["focus_restored"], after
+                assert after["textareas"] == 0 and after["scroll"] == after["scroll_before_copy"], after
                 _close_with_escape(page)
 
                 state = _open(page, "huge-code.md", ready=".document-reader-markdown")
                 big = page.evaluate(COPY_STATE)
                 assert not big["highlighted"] and len(big["code_text"]) > 32768, len(big["code_text"])
-                page.locator("dialog.document-reader .md-code-copy").click()
+                # Keyboard activation from a scrolled document exercises both
+                # actual focus restoration and a nonzero viewport position.
+                page.evaluate("""() => {
+                    const dialog = document.querySelector('dialog.document-reader');
+                    dialog.querySelector('.document-reader-body').scrollTop = 100;
+                    dialog.querySelector('.md-code-copy').focus({preventScroll: true});
+                }""")
+                page.keyboard.press("Enter")
                 page.wait_for_function("() => document.querySelector('dialog.document-reader .md-code-copy').textContent === 'Скопировано'")
-                copied = page.evaluate(COPY_STATE)["copied"]
+                after = page.evaluate(COPY_STATE)
+                assert after["focus_restored"] and after["textareas"] == 0, after
+                assert after["scroll"] == after["scroll_before_copy"] > 0, after
+                copied = after["copied"]
                 assert copied["in_dialog"] and copied["text"] == big["code_text"], len(copied["text"])
                 assert copied["text"].strip() == HUGE_CODE[len("```text\n"):-len("```\n")].strip()
                 _close_with_escape(page)
