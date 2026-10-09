@@ -235,6 +235,9 @@ def _memory_health_lines(env: Any) -> List[str]:
 def build_health_invariants(env: Any, task_id: str = "", active_root: str = "") -> str:
     """Render the health-invariant WARNING block for one reader's context.
 
+    Called once when a task's context is built (a task-start snapshot, not
+    refreshed per round).
+
     ``task_id`` names the READING task so delegated-run obligations can shape
     their instruction clause by ownership: the obligations stay globally
     visible (owner doctrine — a preserved-and-invisible result is how work
@@ -252,6 +255,14 @@ def build_health_invariants(env: Any, task_id: str = "", active_root: str = "") 
     byte-for-byte.
     """
     checks: List[str] = []
+
+    try:
+        from ouroboros.claudexor_exit_facts import health_line
+        engine_exit = health_line(env.drive_path("logs/supervisor.jsonl").parent.parent)
+        if engine_exit:
+            checks.append(engine_exit)
+    except Exception:
+        log.debug("Engine exit observation unavailable", exc_info=True)
 
     try:
         from ouroboros.tools.release_sync import (

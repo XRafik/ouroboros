@@ -1295,7 +1295,12 @@ def test_review_wave_admission_fail_open_paths(tmp_path):
     assert review_wave_admission(tmp_path, root_task_id="ghost", models=["m"], prompt_chars=10)["fits"]
 
 
-def test_review_wave_admission_blocks_known_overrun(tmp_path, monkeypatch):
+def test_review_wave_admission_decides_on_known_spend_not_the_wave_estimate(tmp_path, monkeypatch):
+    """#1487: the wave is admitted while KNOWN spend is below the limit, exactly what
+    each seat's reservation checks; an estimate above the remainder is disclosed,
+    never an earlier refusal. Known spend at the limit refuses."""
+    import dataclasses
+
     from ouroboros import pricing as pricing_mod
     from ouroboros import usage_accounting as ua
 
@@ -1322,11 +1327,18 @@ def test_review_wave_admission_blocks_known_overrun(tmp_path, monkeypatch):
     admission = ua.review_wave_admission(
         tmp_path, root_task_id="root1",
         models=["anthropic/claude-fable-5"] * 3,
-        prompt_chars=4_000_000,  # ~1M tokens per slot — cannot fit $1 remaining
+        prompt_chars=4_000_000,  # ~1M tokens per slot — far above the $1 remaining
     )
-    assert admission["estimated_wave_usd"] is not None
-    assert admission["remaining_usd"] == pytest.approx(1.0)
-    assert not admission["fits"]
+    assert admission["estimated_wave_usd"] > admission["remaining_usd"] == pytest.approx(1.0)
+    assert admission["known_usd"] == pytest.approx(4.0)
+    assert admission["fits"]  # disclosed, not refused: the seats' own fences bind per send
+
+    reservation = ua.reserve_attempt(dataclasses.replace(request, reservation_usd=1.0))
+    ua.mark_dispatched(reservation)
+    ua.settle_attempt(reservation, {}, cost_usd=1.0, cost_final=True)
+    at_limit = ua.review_wave_admission(
+        tmp_path, root_task_id="root1", models=["anthropic/claude-fable-5"], prompt_chars=10)
+    assert at_limit["remaining_usd"] == 0.0 and not at_limit["fits"]
 
 
 # ---------------------------------------------------------------------------
@@ -1481,16 +1493,19 @@ def test_supervisor_handles_review_wave_budget_event(monkeypatch):
     assert captured.get("surface") == "skill_review"
 
 
-def test_scope_review_usage_flows_through_substrate_once():
-    """Behavioral pin for the v6.69.0 dedup: one scope call → exactly one
+def test_review_seat_usage_flows_through_substrate_once():
+    """Behavioral pin for the v6.69.0 dedup: one seat call → exactly one
     llm_usage event, emitted by the review substrate per-slot path (the former
-    job-level re-emit in run_scope_review is gone)."""
-    from ouroboros.tools.scope_review import _call_scope_llm
+    job-level re-emit of the scope role is gone with the role)."""
+    import asyncio
+
+    from ouroboros.review_execution import ReviewRouteKind
+    from ouroboros.tools.review_multi_model import _query_model
 
     events = []
 
     class _Ctx:
-        task_id = "scope-task"
+        task_id = "seat-task"
         event_queue = None
         pending_events = events
         drive_root = "/tmp"
@@ -1510,15 +1525,15 @@ def test_scope_review_usage_flows_through_substrate_once():
 
     rs.ReviewCoordinator.__init__ = _patched
     try:
-        raw, usage, err = _call_scope_llm(
-            "", scope_model="anthropic/claude-fable-5", ctx=_Ctx(),
-            session_task="review the staged change", session_root="/tmp")
+        _model, payload, err = asyncio.run(_query_model(
+            _StubLLM(), "anthropic/claude-fable-5", [{"role": "user", "content": "review"}],
+            asyncio.Semaphore(1), ctx=_Ctx(), slot_id="slot_1", route=ReviewRouteKind.API_CHAT))
     finally:
         rs.ReviewCoordinator.__init__ = original
-    assert err == "" and raw
+    assert err is None and payload["choices"][0]["message"]["content"]
     usage_events = [e for e in events if e.get("type") == "llm_usage"]
     assert len(usage_events) == 1
-    assert usage_events[0]["source"] == "review_substrate:scope_review"
+    assert usage_events[0]["source"] == "review_substrate:multi_model_review"
     assert usage_events[0]["ledger_attempt_ids"] == ["a1"]
 
 

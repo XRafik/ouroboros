@@ -9,9 +9,17 @@ the question quits. A quit request (the indicator's Quit, Cmd+Q, sign-out, shutd
 and Panic never reach the question and are never cancelled. An alert never raises a
 window hidden on purpose. Linux and other hosts have no indicator: closing quits.
 
+Second launch: a manual one shows the running window (``activate_running_instance`` -> ``Background.listen``),
+an automatic one only logs. Windows signals a named auto-reset kernel event derived from the PID-lock
+path; elsewhere the loser sends SIGURG to the PID in the lock file (an older launcher without a handler
+ignores it). A lock loser never truncates the lock file. The listener starts right after the lock is
+taken; a request that arrives before pywebview has shown the window is kept until then and cancels a
+quiet start.
+
 ``DesktopApi`` is the page's alert half of the window bridge (``launcher.MainApi`` inherits it): the
 attention cue, the shell's own facts, and the system notifications of ``desktop_notifications``,
-whose click opens the window and hands the page its token.
+whose click opens the window and hands the page its token; it also carries the painted palette to
+the window's native caption (``launcher_appearance``).
 """
 from __future__ import annotations
 
@@ -27,6 +35,7 @@ import urllib.request
 from ouroboros.config import read_version
 from ouroboros.desktop_autostart import BACKGROUND_ENV, keep_running_choice, set_keep_running
 from ouroboros.desktop_notifications import UNAVAILABLE, capability, native_notifier, platform_name, refused
+from ouroboros.launcher_appearance import NativeAppearance
 from ouroboros.platform_layer import request_native_attention, signal_pid
 
 log = logging.getLogger("launcher.background")
@@ -288,6 +297,7 @@ class Background:
         self.window = None
         self.native_ready = False
         self.indicator = cls(self) if cls is not None else None
+        self.appearance = NativeAppearance()  # the window's caption tint follows its page (Windows)
         global _notifier
         self.notifications = _notifier = native_notifier(self.open_notification)
         self._asking = threading.Lock()
@@ -332,6 +342,7 @@ class Background:
 
     def attach(self, window):
         self.window = window
+        self.appearance.attach(window)  # every window, indicator or not: its own before_show and close
         window.events.closing += self.closing
         window.events.shown += self._window_shown  # set for a hidden window too (pywebview 5.4)
         if self.indicator is not None:
@@ -494,6 +505,10 @@ class DesktopApi:
         return self._background.attention(bool(sound), str(title or ""), str(body or ""), bool(cue_when_visible))
 
     notify_owner = request_attention  # newer pages send the alert text; older launchers lack this name
+
+    def set_native_appearance(self, theme: str = "", page: float | None = None, sequence: int | None = None) -> dict:
+        """The page's painted palette for this window's native caption; the newest request wins."""
+        return self._background.appearance.request(theme, page, sequence)
 
     def shell_info(self) -> dict:
         """What this desktop app is: its own version (not the core's), its storage and its notifications."""

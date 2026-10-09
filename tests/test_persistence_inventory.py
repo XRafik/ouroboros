@@ -582,9 +582,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
     # project id, then appends its history beside that shelf.  Keep these
     # canonical dynamic siblings visible to the inventory audit even though
     # the AST resolver cannot expand the address object's validated prefix.
+    # rebuild_knowledge_index writes shelf / INDEX_FILE for either shelf;
+    # context's shared reader no longer spells the project index path itself.
     if (root / "ouroboros" / "knowledge.py").exists():
         paths.update({
             "projects/*/knowledge/*.md",
+            "projects/*/knowledge/index-full.md",
             "projects/*/knowledge_history.jsonl",
         })
     return frozenset(paths)
@@ -692,7 +695,19 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # 345 -> 347 (2026-10-07): the isolated review checkout of a frozen review subject,
 # ``state/review_checkouts/<token>`` and its ``repo`` worktree
 # (``ouroboros/tools/review_subject.py`` ``isolated_checkout``; one section-4 row).
-EXPECTED_SCAN_PATHS = 347
+# 347 -> 346 (2026-10-08): the scope-delivery migration disclosure
+# ``state/scope_delivery_migration.json`` is gone with the scope role — the one
+# brief has two parts and no separate scope wave to migrate (its PERSISTENCE.md row
+# was removed with the writer).
+# 346 -> 348 (review pool, PR-3): the review-lane -> review-pool migration receipt
+# ``state/review_migrations/<ts>-slots-to-pool.json`` and its directory
+# (``ouroboros/review_pool_receipts.py`` ``persist_receipts``, written by the process that
+# saves the migrated document — FIX6b moved it there from the supervisor boot; one section-2 row).
+# 348 -> 349 (#1610): first/latest usable author inputs retained by
+# ``context_input_selection._historical_anchor`` in
+# ``task_results/artifacts/*/source_handles/context_checkpoints/historical-author-input-*.json``
+# (one section-7 row; evidence, not current task authority).
+EXPECTED_SCAN_PATHS = 349
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

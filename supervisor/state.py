@@ -964,6 +964,11 @@ def update_budget_from_usage(usage: Dict[str, Any]) -> bool:
     The persisted projection carries totals only; the per-root map is never written.
     The ledger read is the writer's slim snapshot (``usage_writer_snapshot``): only what this
     function persists is rendered; the loop's llm_usage path writes once per turn, direct callers on call.
+
+    Writes are ordered by the ledger's ``(compaction_epoch, seq)`` marker, compared under STATE_LOCK:
+    a lower epoch, or a same-epoch lower seq, is stale and skipped; an equal or higher marker writes.
+    The projection stays untouched, returning False, on a quarantined ledger (``integrity_degraded``),
+    an unparseable fresh or saved marker, a lock timeout, or an unavailable ``state.json``.
     """
     def _to_float(v: Any, default: float = 0.0) -> float:
         try:
@@ -1305,7 +1310,9 @@ def status_text(workers_dict: Dict[int, Any], pending_list: list,
             if TOTAL_BUDGET_LIMIT > 0
             else ledger_breakdown
         )
-        spent = float(ledger_projection.get("accounted_usd") or 0.0)
+        spent = float(ledger_projection.get("settled_usd") or 0.0)  # known: what the limit decides on
+        open_holds = float(ledger_projection.get("reserved_usd") or 0.0) + float(
+            ledger_projection.get("unresolved_upper_bound_usd") or 0.0)
         pct = (spent / TOTAL_BUDGET_LIMIT * 100.0) if TOTAL_BUDGET_LIMIT > 0 else 0.0
         budget_remaining_usd = (
             float(ledger_projection.get("remaining_known_usd") or 0.0)
@@ -1319,7 +1326,7 @@ def status_text(workers_dict: Dict[int, Any], pending_list: list,
     except Exception:
         log.exception("Budget ledger unavailable while building status")
         accounting_available = False
-        spent = pct = budget_remaining_usd = None
+        spent = pct = budget_remaining_usd = open_holds = None
         spent_calls = prompt_tokens = completion_tokens = cached_tokens = None
     lines.append(f"budget_total: ${TOTAL_BUDGET_LIMIT:.0f}")
     if not accounting_available:
@@ -1336,6 +1343,9 @@ def status_text(workers_dict: Dict[int, Any], pending_list: list,
             lines.append(f"spent_usd: ${spent:.2f} ({pct:.1f}% of budget)")
         else:
             lines.append(f"spent_usd: ${spent:.2f}")
+        if open_holds > 0:
+            lines.append(f"open_holds_usd: ${open_holds:.2f} (reservations and unresolved upper bounds; "
+                         "not counted as spending)")
         lines.append(f"spent_calls: {spent_calls}")
         lines.append(
             f"prompt_tokens: {prompt_tokens}, completion_tokens: {completion_tokens}, "

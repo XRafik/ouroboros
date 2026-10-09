@@ -481,7 +481,8 @@ class OwnedClaudexorDaemon:
         return endpoint
 
     def status_dict(self) -> Dict[str, Any]:
-        """UI status projection. Read-only: never spawns."""
+        """UI status projection; observes capacity without starting the daemon."""
+        from ouroboros.claudexor_exit_facts import engine_status_facts
         endpoint, state, detail = self._classify_liveness()
         if detail:
             self._last_error = detail
@@ -505,6 +506,7 @@ class OwnedClaudexorDaemon:
             # Typed foreign-home disclosure ('' = ours): a marker naming another
             # data plane means we display, and manage, NOTHING here.
             "ownership_problem": ownership_problem or None,
+            **engine_status_facts(endpoint if state == "running" and not ownership_problem else None, self._engine_version, self._engine_build_sha),
         }
 
     # -- lifecycle ----------------------------------------------------------
@@ -593,8 +595,8 @@ class OwnedClaudexorDaemon:
     def clear_start_failure_latch(self, *, cleared_by: str) -> bool:
         """Release the spawn latch; True when one was set (a durable row names who released it).
 
-        Callers: the periodic sweep and the owner's Refresh (the two retriers),
-        and a successful attach. Restart/Panic clear it by constructing a new manager.
+        The sweep, owner Refresh and successful attach call this; Restart/Panic build a new manager.
+        Another caller may spawn between release and retry; the retry joins that child.
         """
         with self._lock:
             record, self._last_start_failure = self._last_start_failure, None

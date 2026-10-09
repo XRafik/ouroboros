@@ -1,4 +1,7 @@
-"""Queue-based bridge between UI/skill transports and the supervisor."""
+"""Queue-based bridge between UI/skill transports and the supervisor.
+
+Chat, media, typing and log frames never carry A2A synthetic chats to the browser; ``project_thread`` is stamped from Project registry membership (not a numeric range), so external transport ids stay unstamped.
+"""
 
 from __future__ import annotations
 
@@ -1129,10 +1132,7 @@ class LocalChatBridge:
     def push_log(self, event: dict):
         """Stream append_jsonl events to UI."""
         if self._broadcast_fn and not is_a2a_chat_id(event.get("chat_id")):
-            # Task-scoped events arrive already addressed
-            # (supervisor/log_addressing.py); an unaddressable event keeps the
-            # legacy chat-0 default, which Main still admits. A2A synthetic
-            # chats are machine traffic and never enter the human stream.
+            # Task-scoped events arrive addressed (supervisor/log_addressing.py); an unaddressable one keeps the chat-0 default (Main admits it).
             frame = {"type": "log", "data": event, "chat_id": int(event.get("chat_id") or 0)}
             stamp_project_thread(DATA_DIR, frame)
             self._broadcast_fn(frame)
@@ -1263,7 +1263,7 @@ def budget_line(force: bool = False) -> str:
                 if total > 0
                 else usage_writer_snapshot(DATA_DIR, allow_stale=True)
             )
-            display_state["spent_usd"] = float(accounting.get("accounted_usd") or 0.0)
+            display_state["spent_usd"] = float(accounting.get("settled_usd") or 0.0)  # known; holds in the detail
             display_state["usage_accounting"] = accounting
             display_state["_budget_accounting_available"] = True
         except Exception:
@@ -1361,7 +1361,7 @@ def log_chat(
         if "narration" in meta:
             record["narration"] = bool(meta["narration"])
         if record_type in ("project_started", "project_handoff", "project_completion_summary"):
-            for key in ("project_id", "project_name", "target_label", "status", "completion_answer", "handoff_id", "terminal_time"):
+            for key in ("project_id", "project_name", "task_name", "target_label", "status", "completion_answer", "handoff_id", "terminal_time"):
                 if key in meta:
                     record[key] = meta[key]
         if "task_terminal_status" in meta:

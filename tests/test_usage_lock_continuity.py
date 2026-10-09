@@ -86,6 +86,77 @@ def rows(root):
     return ledger_rows(root)
 
 
+@pytest.mark.parametrize("cancel", [False, True])
+def test_async_first_generation_real_writer_contention_keeps_loop_and_custody(root, monkeypatch, cancel):
+    from ouroboros.llm_stream import consume_stream_async
+    from ouroboros.openrouter_cost import binding_for_target
+    from tests.test_openrouter_transport_evidence import Wire, frame, target
+
+    acquired, release, entered, expired = (threading.Event() for _ in range(4))
+    original, bindings, threads = ua.bind_provider_generation, [], []
+
+    def observe(generation, **kwargs):
+        bindings.append(generation)
+        entered.set()
+        return original(generation, **kwargs)
+
+    def hold():
+        with ua._locked(root):
+            acquired.set()
+            if not release.wait(3):
+                expired.set()  # Bounded failure if the event loop cannot release us.
+
+    monkeypatch.setattr(ua, "bind_provider_generation", observe)
+
+    async def send():
+        holder = threading.Thread(target=hold)
+        threads.append(holder)
+        holder.start()
+        assert acquired.wait(2)
+        wire = Wire([frame(usage={"cost": 0.25}, finish="stop"), b"data: [DONE]\n\n"],
+                    header="gen-fixture")
+        return await consume_stream_async(wire)
+
+    async def exercise():
+        req = ua.AttemptRequest(model="vendor/fixture", provider="openrouter", reservation_usd=2,
+                                drive_root=root, provider_receipt_binding=binding_for_target(target()))
+        task = asyncio.create_task(ua.execute_physical_attempt_async(req, send))
+        try:
+            for _ in range(200):
+                if entered.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert entered.is_set() and not expired.is_set()
+            if cancel:
+                task.cancel()
+            # This coroutine must progress while the real store writer remains held.
+            await asyncio.sleep(0.03)
+            assert not task.done() and not expired.is_set()
+            release.set()
+            if cancel:
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+            else:
+                assert (await task).model_dump()["choices"][0]["message"]["content"] == "answer"
+        finally:
+            release.set()
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    try:
+        asyncio.run(exercise())
+    finally:
+        release.set()
+        for holder in threads:
+            holder.join(3)
+            assert not holder.is_alive()
+    assert bindings == ["gen-fixture"]
+    row = rows(root)[0]
+    assert row["provider_receipt_binding"]["generation_id"] == "gen-fixture"
+    assert row["state"] == ("unresolved" if cancel else "settled")
+
+
 @contextlib.contextmanager
 def held_name_lock(root, timeout=5):
     """The name-protocol helper itself (the store's ``name`` tier lock)."""
@@ -190,12 +261,20 @@ def test_fence_closing_interrupts_dispatch_wait_before_lock_is_available(root, s
         assert error.value.physical_attempt_capture.state == "reserved"
 
 
+def _known_spend(root, usd):
+    """A settled, finally priced attempt: the KNOWN spend every limit decides on (#1487)."""
+    held = ua.reserve_attempt(request(root, provider="openai", reservation_usd=usd))
+    ua.mark_dispatched(held)
+    ua.settle_attempt(held, {}, cost_usd=usd, cost_final=True)
+
+
 def test_cap_is_resolved_again_after_pre_reservation_wait(root, short_acquisitions, monkeypatch):
     cap = [10]
     monkeypatch.setattr(ua, "_global_limit", lambda req: cap[0])
+    _known_spend(root, 1.0)
     with owner(root), held_lock(root) as release:
         def reduce():
-            cap[0] = .5
+            cap[0] = .5  # the owner lowers the wallet below the known $1 while the send waits
             release.set()
         timer = threading.Timer(.12, reduce)
         timer.start()
@@ -204,16 +283,17 @@ def test_cap_is_resolved_again_after_pre_reservation_wait(root, short_acquisitio
                 ua.execute_physical_attempt(request(root), lambda: pytest.fail("sent"))
         finally:
             timer.join(2)
-    assert rows(root) == []
+    assert [row["state"] for row in rows(root)] == ["settled"]
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
 def test_cap_reduction_after_reservation_refuses_send_and_returns_claim(root, monkeypatch, asynchronous):
     cap = [10]
     monkeypatch.setattr(ua, "_global_limit", lambda req: cap[0])
+    _known_spend(root, 1.0)
     def before(held):
         assert rows(root)[-1]["state"] == "reserved"
-        cap[0] = .5
+        cap[0] = .5  # lowered below the known $1 between reservation and send
     def send():
         pytest.fail("provider called after cap reduction")
     async def async_send():
@@ -227,8 +307,8 @@ def test_cap_reduction_after_reservation_refuses_send_and_returns_claim(root, mo
         assert error.value.limit_scope == "global"
         assert error.value.physical_attempt_capture.state == "released"
         assert ua._PHYSICAL_LIMIT.get().used == 0
-    assert [row["state"] for row in rows(root)] == ["released"]
-    assert ua.usage_projection(root)["accounted_usd"] == 0
+    assert [row["state"] for row in rows(root)] == ["settled", "released"]
+    assert ua.usage_projection(root)["accounted_usd"] == 1.0  # the known $1 only; the claim returned
 
 
 def test_interactive_window_expiry_is_typed_and_never_quota_wait(root, short_acquisitions, monkeypatch):

@@ -496,8 +496,7 @@ def test_assisted_apply_reports_started_only_for_an_admitted_resolver(pool, monk
         return (0, base, "") if cmd[:3] == ["git", "rev-parse", "--verify"] else (0, "", "")
 
     txs, rollbacks = [], []
-    monkeypatch.setattr(reviewer_slot_config, "commit_triad_rows", lambda: [])
-    monkeypatch.setattr(reviewer_slot_config, "commit_scope_rows", lambda: [])
+    monkeypatch.setattr(reviewer_slot_config, "review_pool_slots", lambda **_kw: [])
     monkeypatch.setattr(git_ops, "BRANCH_DEV", "ouroboros")
     monkeypatch.setattr(git_ops, "git_capture", capture)
     monkeypatch.setattr(git_ops, "_create_rescue_snapshot", lambda *_a, **_k: None)
@@ -763,6 +762,7 @@ def test_consciousness_host_producer_reads_its_allowance_off_the_queue_lock(host
     notices = []
     monkeypatch.setattr(queue, "send_with_budget", lambda _chat, text, **_k: notices.append(text))
     window = {"status": STATUS_AVAILABLE if status == "available" else "exhausted", "limit_usd": 5.0,
+              "settled_usd": 0.0 if status == "available" else 5.0,
               "accounted_usd": 0.0 if status == "available" else 5.0, "remaining_usd": 5.0,
               "resets_at": "", "unknown_unmetered": 0}
     tid, free, reads = _consciousness_review(monkeypatch, window)

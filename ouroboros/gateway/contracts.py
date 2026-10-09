@@ -235,6 +235,7 @@ class ChatOutbound(TypedDict):
     target_label: NotRequired[str]
     project_id: NotRequired[str]
     project_name: NotRequired[str]
+    task_name: NotRequired[str]
     handoff_id: NotRequired[str]  # immutable origin/destination receipt identity
     terminal_time: NotRequired[Dict[str, Any]]  # host-owned occurrence, separate from publication ts
     completion_answer: NotRequired[str]  # a Project root's model-authored final answer, mirrored into Main (DESIGN)
@@ -551,7 +552,8 @@ class UpdateApplyErrorResponse(TypedDict):
     merge_plan: NotRequired[UpdateMergePlan]
     smoke: NotRequired[Dict[str, Any]]
     # Stash-first prologue disclosures (additive): how the owner's stashed work
-    # was unwound on an aborted update, and the wave-floor admission numbers.
+    # was unwound on an aborted update. The wave numbers rode the retired
+    # wave-floor refusal (#1487 removed it); the optional keys stay in the shape.
     stash_note: NotRequired[str]
     estimated_wave_usd: NotRequired[Optional[float]]
     remaining_usd: NotRequired[Optional[float]]
@@ -706,6 +708,12 @@ class ActiveChatActivity(ActiveDirectTurn):
     awaits explicit Resume. Direct paused turns keep their ID/kind. Unreadable
     live waits or Pause authority report unknown (incomplete census); unresolved owner-question detail reports
     required_question_unavailable. Managed rows have empty client_message_id."""
+    status: NotRequired[str]
+    outcome_axes: NotRequired[Dict[str, Any]]
+    reason_code: NotRequired[str]
+    root_phase_checkpoint: NotRequired[Dict[str, Any]]
+    timeout_retry_from: NotRequired[str]
+    original_task_id: NotRequired[str]
     owner_wait: NotRequired[Dict[str, Any]]  # quiz-bound wait facts, independent of a Project pointer
     required_question: NotRequired[Dict[str, Any]]
     required_question_unavailable: NotRequired[bool]
