@@ -408,6 +408,11 @@ class _PathResolver:
     def _locals(self, scope: ast.AST, consts: dict[str, str],
                 nodes: list[ast.AST]) -> dict[str, str]:
         local: dict[str, str] = {}
+        if self.current.name == "image_preparation.py" and getattr(scope, "name", "") == "retain_original":
+            # Both callers (context.build_user_content and tools.vision's loader)
+            # pass their data owner's uploads/views. Bind only this parameter,
+            # never a generic directory name in other writers.
+            local["directory"] = "uploads/views"
         created_dirs = {node.func.value.id for node in nodes
                         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                         and node.func.attr == "mkdir" and isinstance(node.func.value, ast.Name)}
@@ -707,7 +712,10 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # ``context_input_selection._historical_anchor`` in
 # ``task_results/artifacts/*/source_handles/context_checkpoints/historical-author-input-*.json``
 # (one section-7 row; evidence, not current task authority).
-EXPECTED_SCAN_PATHS = 349
+# 349 -> 351 (#1563 saved work): the rolling per-attempt working checkpoint,
+# ``task_results/artifacts/<task>/source_handles/working`` and its ``*.json`` file
+# (``ouroboros/working_checkpoint.py``; one row beside the source-handle rows).
+EXPECTED_SCAN_PATHS = 351
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
@@ -869,6 +877,7 @@ def _covers(scan_path: str, pattern: str, scan_prefix_ok: bool = True) -> bool:
 
 def test_scan_is_populated_and_pinned():
     paths = scan_data_paths()
+    assert "uploads/views/*_*" in paths, "the shared original-retention writer must remain scanned"
     missing_sentinels = sorted(SENTINELS - paths)
     assert not missing_sentinels, (
         f"scanner regressed — sentinel paths vanished: {missing_sentinels}"
