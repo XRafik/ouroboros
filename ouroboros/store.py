@@ -19,7 +19,9 @@ import errno
 import json
 import os
 import pathlib
+import shutil
 import sqlite3
+import stat
 import threading
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
@@ -116,11 +118,217 @@ def file_identity(path: pathlib.Path) -> Optional[tuple]:
     return info.st_ino, info.st_dev
 
 
+class _Inode:
+    """One file's open uses in this process: SQLite connections from ``connect`` and raw readers,
+    with the unbuffered handles the readers opened (``files[0]`` serves every read)."""
+
+    __slots__ = ("conns", "readers", "files")
+
+    def __init__(self) -> None:
+        self.conns, self.readers, self.files = 0, 0, []
+
+
+_INODES: Dict[Tuple[int, int], _Inode] = {}
+# Reentrant: a reader generator finalized by the cyclic GC returns its borrow on whatever thread
+# triggered the collection, possibly inside this thread's own guarded section.
+_INODE_GUARD = threading.RLock()
+
+
+def _settle(key: Tuple[int, int], entry: _Inode) -> None:
+    """Close the readers' descriptors once nothing in this process uses the inode (guard held):
+    with no connection open, no lock of this process on the file can be released by a close."""
+    if entry.conns or entry.readers:
+        return
+    for handle in entry.files:
+        with contextlib.suppress(OSError):
+            handle.close()
+    _INODES.pop(key, None)
+
+
+def _borrow(path: Any) -> Tuple[Tuple[int, int], int]:
+    """A read descriptor of PATH's file (POSIX): on POSIX closing ANY descriptor of a file releases
+    every advisory lock this process holds on it, an open transaction's on another thread included,
+    and another process then writes the same pages (sqlite.org howtocorrupt §2.2). So a raw read
+    shares one descriptor per inode, and ``_return`` closes it only when no store connection of this
+    process has the file open (SQLite's unix VFS defers its own closes the same way)."""
+    key = _identity_key(os.stat(path))
+    with _INODE_GUARD:
+        entry = _INODES.get(key)
+        if entry is not None and entry.files:
+            entry.readers += 1
+            return key, entry.files[0].fileno()
+    handle = pathlib.Path(path).open("rb", buffering=0)  # outside the guard: a slow open stalls only this caller
+    key = _identity_key(os.fstat(handle.fileno()))  # the path may name a newer file than the stat did
+    with _INODE_GUARD:
+        entry = _INODES.setdefault(key, _Inode())
+        entry.files.append(handle)  # never closed early: a second handle waits for the settle too
+        entry.readers += 1
+        return key, entry.files[0].fileno()
+
+
+def _return(key: Tuple[int, int]) -> None:
+    with _INODE_GUARD:
+        entry = _INODES.get(key)
+        if entry is not None:
+            entry.readers -= 1
+            _settle(key, entry)
+
+
+def _identity_key(info: os.stat_result) -> Tuple[int, int]:
+    return info.st_dev, info.st_ino
+
+
+class _StoreConnection(sqlite3.Connection):
+    """A ``connect`` connection, counted on its file's inode until it closes (see ``_borrow``)."""
+
+    _store_key: Optional[Tuple[int, int]] = None
+
+    def close(self) -> None:
+        super().close()  # a close that raises leaves the connection counted: its lock may still be held
+        key, self._store_key = self._store_key, None
+        if key is not None:
+            with _INODE_GUARD:
+                entry = _INODES.get(key)
+                if entry is not None:
+                    entry.conns -= 1
+                    _settle(key, entry)
+
+
+def _read_header(path: pathlib.Path) -> bytes:
+    """The first 100 bytes, read through the inode registry (``_borrow``); Windows locks belong
+    to their handle, and a held handle there would block the export rename."""
+    if os.name == "nt":
+        with open(path, "rb") as handle:
+            return handle.read(100)
+    key, fd = _borrow(path)
+    try:
+        return os.pread(fd, 100, 0)
+    finally:
+        _return(key)
+
+
+def held_descriptor(path: Any) -> Optional[int]:
+    """The descriptor this process's open uses of PATH's file share right now, else ``None``."""
+    if os.name == "nt":
+        return None
+    try:
+        key = _identity_key(os.stat(path))
+    except OSError:
+        return None
+    with _INODE_GUARD:
+        entry = _INODES.get(key)
+        return entry.files[0].fileno() if entry is not None and entry.files else None
+
+
+def is_sqlite_file(path: Any) -> bool:
+    """Whether PATH holds a SQLite database (its header magic), read without closing a descriptor
+    a store connection may depend on."""
+    try:
+        if not stat.S_ISREG(os.stat(path).st_mode):
+            return False  # never open a FIFO or a device to look
+        return _read_header(pathlib.Path(path)).startswith(b"SQLite format 3\x00")
+    except OSError:
+        return False
+
+
+class _BorrowedReader:
+    """A binary reader over a borrowed descriptor (``_borrow``); closing returns the borrow."""
+
+    def __init__(self, path: Any) -> None:
+        self._key, self._fd = _borrow(path)
+        self._offset, self._open = 0, True
+
+    def __enter__(self) -> "_BorrowedReader":
+        return self
+
+    def __exit__(self, *_exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._open:
+            self._open = False
+            _return(self._key)
+
+    def _check(self) -> None:
+        if not self._open:  # the descriptor may be closed or reused by another file by now
+            raise ValueError("I/O operation on closed file")
+
+    def fileno(self) -> int:
+        self._check()
+        return self._fd
+
+    def tell(self) -> int:
+        self._check()
+        return self._offset
+
+    def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
+        self._check()
+        if whence not in (os.SEEK_SET, os.SEEK_CUR, os.SEEK_END):
+            raise ValueError(f"invalid whence ({whence})")
+        base = os.fstat(self._fd).st_size if whence == os.SEEK_END else (0 if whence == os.SEEK_SET else self._offset)
+        if base + offset < 0:
+            raise ValueError("negative seek position")
+        self._offset = base + offset
+        return self._offset
+
+    def read(self, size: Optional[int] = -1) -> bytes:
+        """Up to ``size`` bytes (all that remain when negative); short ``pread``s are continued."""
+        self._check()
+        wanted, parts = (-1 if size is None else size), []
+        while wanted:
+            data = os.pread(self._fd, wanted if wanted > 0 else 1 << 20, self._offset)
+            if not data:
+                break
+            parts.append(data)
+            self._offset += len(data)
+            wanted = wanted - len(data) if wanted > 0 else wanted
+        return b"".join(parts)
+
+
+def open_for_read(path: Any) -> Any:
+    """``open(path, "rb")`` for any reader in a process that may hold a store: on POSIX the read
+    borrows the inode's shared descriptor, whose close waits until no store connection of this
+    process has the file open; Windows opens and closes as usual."""
+    return pathlib.Path(path).open("rb") if os.name == "nt" else _BorrowedReader(path)
+
+
+def iter_file_bytes(path: Any, *, limit: Optional[int] = None, chunk: int = 1 << 20) -> Iterator[bytes]:
+    """A file's bytes (the first ``limit``, or all), read through ``open_for_read``."""
+    with open_for_read(path) as handle:
+        while limit is None or limit > 0:
+            data = handle.read(chunk if limit is None else min(chunk, limit))
+            if not data:
+                return
+            if limit is not None:
+                limit -= len(data)
+            yield data
+
+
+def read_file_bytes(path: Any, *, limit: Optional[int] = None) -> bytes:
+    return b"".join(iter_file_bytes(path, limit=limit))
+
+
+def copy_file_bytes(source: Any, destination: Any) -> Any:
+    """``shutil.copy2`` that reads a SQLite file through ``open_for_read`` (a ``copytree``
+    ``copy_function``); the copy is a byte copy, not a consistent snapshot of a live store."""
+    if os.name == "nt" or not is_sqlite_file(source):
+        return shutil.copy2(source, destination)
+    target = pathlib.Path(destination)
+    if target.is_dir():
+        target = target / pathlib.Path(source).name
+    if target.exists() and os.path.samefile(source, target):
+        raise shutil.SameFileError(f"{source!r} and {str(target)!r} are the same file")
+    with open(target, "wb") as handle:
+        for data in iter_file_bytes(source):
+            handle.write(data)
+    shutil.copystat(source, target)
+    return str(target)
+
+
 def header_tier(path: pathlib.Path, application_ids: Dict[str, int]) -> Optional[str]:
     """The lock tier the file's SQLite header names; ``None`` for a missing or foreign file."""
     try:
-        with open(path, "rb") as handle:
-            header = handle.read(100)
+        header = _read_header(path)
     except FileNotFoundError:
         return None
     if len(header) < 100 or not header.startswith(b"SQLite format 3\x00"):
@@ -137,8 +345,17 @@ def connect(path: pathlib.Path, tier: str, *, create: bool = False, wait_sec: fl
     if tier == TIER_NAME:
         query += "&vfs=" + ("win32-none" if os.name == "nt" else "unix-none")
     conn = sqlite3.connect(f"{path.absolute().as_uri()}?{query}", uri=True, isolation_level=None,
-                           timeout=max(0.0, wait_sec) if tier == TIER_ENFORCED else 0.0)
+                           timeout=max(0.0, wait_sec) if tier == TIER_ENFORCED else 0.0, factory=_StoreConnection)
     conn.row_factory = sqlite3.Row
+    if os.name != "nt":  # counted before any statement can take a lock (see ``_borrow``)
+        try:
+            key = _identity_key(os.stat(path))
+        except OSError:
+            conn.close()
+            raise
+        with _INODE_GUARD:
+            _INODES.setdefault(key, _Inode()).conns += 1
+            conn._store_key = key
     return conn
 
 
@@ -382,7 +599,8 @@ def _absent(root: pathlib.Path, *, write: bool, service: bool) -> bool:
 
 
 @contextlib.contextmanager
-def open_store(root: Any, *, write: bool, wait_sec: float = STORE_WAIT_SEC, service: bool = False) -> Iterator["Txn"]:
+def open_store(root: Any, *, write: bool, wait_sec: float = STORE_WAIT_SEC, service: bool = False,
+               barrier: bool = False) -> Iterator["Txn"]:
     """One transaction on the published store: ``StoreMigrating`` while the lifespan imports or
     for a read of a never-imported root that holds facts (a read never imports; a root without
     facts, or one that does not exist, reads empty and creates nothing), a first-touch import
@@ -394,7 +612,9 @@ def open_store(root: Any, *, write: bool, wait_sec: float = STORE_WAIT_SEC, serv
     The one write gate: a public write (``write`` without ``service``) refuses ``StoreMigrating``
     while ROOT is in the import window and ``StoreRetired`` inside the transaction when the phase
     is not PUBLISHED. ``service`` is the importer's, the exporter's and the seam's mode (also the
-    import owner thread's, ``service_thread``): their transactions pass both checks."""
+    import owner thread's, ``service_thread``): their transactions pass both checks. A ``barrier``
+    holds the write lock and the gate without writing (the evidence packer's phase gate) and ends
+    in ROLLBACK, so its release never waits for readers to drain as a COMMIT would."""
     root = pathlib.Path(root)
     service = service or bool(getattr(_SERVICE, "active", False))
     if write and not service and _in_window(root):
@@ -420,11 +640,14 @@ def open_store(root: Any, *, write: bool, wait_sec: float = STORE_WAIT_SEC, serv
             raise _typed(exc) from exc
         stack.callback(conn.close)
         try:
-            with transaction(conn, write=write, commit_wait_sec=wait_sec if tier == TIER_ENFORCED else None):
+            with transaction(conn, write=write, commit_wait_sec=wait_sec if tier == TIER_ENFORCED else None,
+                             finish=(lambda: conn.execute("ROLLBACK")) if barrier else None):
                 txn = Txn(conn, root)
                 if write and not service and (phase := txn.phase()) != PUBLISHED:
                     raise StoreRetired(f"current store phase is {phase}: the files are the authority")
                 yield txn
+                if barrier and conn.total_changes:
+                    raise StoreError("a barrier transaction wrote rows; its ROLLBACK would discard them")
                 if write and conn.total_changes:
                     txn.set_meta("commit_seq", txn.revision() + 1)
         except sqlite3.Error as exc:
