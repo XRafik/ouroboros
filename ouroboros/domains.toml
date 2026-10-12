@@ -281,6 +281,8 @@ D20 = "Presence"
 "ouroboros/gateway/ws.py" = "D11"
 "ouroboros/gateways/__init__.py" = "D07"
 "ouroboros/gateways/claudexor.py" = "D07"
+"ouroboros/gateways/claudexor_images.py" = "D07"
+"ouroboros/gateways/image_api.py" = "D02"
 "ouroboros/gateways/claudexor_maintenance.py" = "D07"
 "ouroboros/harness_maintenance.py" = "D07"
 "ouroboros/gateways/claudexor_run_events.py" = "D07"
@@ -296,6 +298,7 @@ D20 = "Presence"
 "ouroboros/launcher_bootstrap.py" = "D18"
 "ouroboros/launcher_onboarding.py" = "D12"
 "ouroboros/launcher_server_reaper.py" = "D18"
+"ouroboros/runtime_venv.py" = "D18"
 "ouroboros/llm.py" = "D02"
 "ouroboros/llm_anthropic.py" = "D02"
 "ouroboros/llm_attempt.py" = "D02"
@@ -377,6 +380,7 @@ D20 = "Presence"
 "ouroboros/packaged_cli.py" = "D18"
 "ouroboros/packaged_cli_install.py" = "D18"
 "ouroboros/platform_layer.py" = "D18"
+"ouroboros/platform_win32_abi.py" = "D18"
 "ouroboros/post_task_checkpoint.py" = "D01"
 "ouroboros/post_task_synthesis.py" = "D01"
 "ouroboros/post_task_evolution.py" = "D15"
@@ -656,6 +660,7 @@ D20 = "Presence"
 "ouroboros/tools/task_tree.py" = "D07"
 "ouroboros/tools/tool_discovery.py" = "D04"
 "ouroboros/tools/verify.py" = "D05"
+"ouroboros/tools/imagegen.py" = "D05"
 "ouroboros/tools/vision.py" = "D05"
 "ouroboros/tools/vision_process.py" = "D05"
 "ouroboros/tools/write_shape.py" = "D13"
@@ -682,6 +687,7 @@ D20 = "Presence"
 "ouroboros/image_preparation.py" = "D02"
 "ouroboros/workspace_admission.py" = "D17"
 "ouroboros/workspace_executor.py" = "D17"
+"ouroboros/docker_process_observer.py" = "D17"
 "ouroboros/workspace_patch_rules.py" = "D17"
 "ouroboros/workspace_preflight.py" = "D17"
 "ouroboros/world_profiler.py" = "D15"
@@ -1003,6 +1009,7 @@ lazy_only = [
   "D04->D01",
   "D04->D06",
   "D04->D07",
+  "D04->D09",
   "D04->D10",
   "D04->D12",
   "D04->D14",
@@ -1014,6 +1021,7 @@ lazy_only = [
   "D05->D07",
   "D05->D08",
   "D05->D14",
+  "D05->D20",
   "D06->D03",
   "D06->D05",
   "D06->D08",
