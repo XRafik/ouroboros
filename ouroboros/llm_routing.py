@@ -347,7 +347,8 @@ class _ProviderRoutingMixin:
             return {
                 "provider": provider, "source": source, "resolved_model": native_model,
                 "usage_model": usage_model, "api_key": "", "default_headers": {},
-                # A locality fact only; real daemon discovery never uses this URL.
+                # The daemon's address as route identity only; discovery never uses it, and each
+                # attempt states the model's real (remote) locality (llm_claudexor._accounted_request).
                 "base_url": "http://127.0.0.1", "supports_openrouter_extensions": False,
                 "supports_generation_cost": False,
             }
@@ -493,6 +494,9 @@ class _ProviderRoutingMixin:
             "supports_openrouter_extensions": True,
             "supports_generation_cost": True,
         }
+
+    # Non-chat provider facets share the same route, credential and header owner.
+    resolve_remote_target = _resolve_remote_target
 
     def _get_client(self):
         target = self._resolve_remote_target("openrouter::")

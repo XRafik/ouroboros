@@ -47,6 +47,7 @@ from ouroboros.tools.tool_result import (
     ToolResult,
 )
 from ouroboros.usage_accounting import UsageAccountingError
+from ouroboros.model_wait import ModelWaitInterrupted
 from ouroboros.utils import (
     append_jsonl,
     emit_cognitive_operation_event,
@@ -293,32 +294,34 @@ def _get_tool_timeout(
 _DEADLINE_CLAMPED_TOOLS = frozenset({
     "web_search", "browse_page", "browser_action", "youtube_transcript",
     "wait_task", "wait_tasks", "await_messages", "plan_task", "task_acceptance_review",
-    "analyze_screenshot", "vlm_query",
+    "analyze_screenshot", "vlm_query", "generate_image", "list_image_models", "recover_image",
 })
 
 
 def _deadline_clamped_timeout(tools: ToolRegistry, tool_name: str, base_timeout: int) -> int:
     """min(tool timeout, remaining − finalization reserve) for network/long tools.
 
-    Without ``deadline_at`` (remaining reads 0.0) the behavior is byte-identical.
-    An already-elapsed deadline is also left unclamped — the loop's forced
-    finalization owns that path. The clamp never floors PAST the reserve: inside
-    or near the finalization window the tool gets a near-immediate (1s) timeout —
-    a fast, cleanly-messaged failure — rather than a grace-period-eating floor
-    (review round 1: a 30s floor let one web call consume the reserve the clamp
-    exists to protect)."""
+    ``remaining`` is the nearer explicit bound: ``deadline_at`` or the execution
+    window (#939). With neither the behavior is byte-identical. An already-elapsed
+    bound is also left unclamped — the loop's forced finalization owns that path.
+    The clamp never floors PAST the reserve: inside or near the finalization window
+    the tool gets a near-immediate (1s) timeout — a fast, cleanly-messaged failure —
+    rather than a grace-period-eating floor (review round 1: a 30s floor let one web
+    call consume the reserve the clamp exists to protect)."""
     if tool_name not in _DEADLINE_CLAMPED_TOOLS:
         return base_timeout
     try:
         remaining = deadline_remaining_sec(getattr(tools, "_ctx", None))
+        from ouroboros.model_wait import explicit_execution_window_remaining
+        execution_left = explicit_execution_window_remaining(getattr(tools, "_ctx", None))  # #939
+        if execution_left is not None:
+            remaining = min(remaining, execution_left) if remaining > 0 else execution_left
     except Exception:
         return base_timeout
     if remaining <= 0:
         return base_timeout
-    # v6.55.0: the plain finalization GRACE emit-window (task_pacing SSOT) — the
-    # tool must return before the deadline leaves no time to emit a final answer.
-    # NOT the pct reserve (an acceptance-review gate concept): clamping a tool out
-    # of the last pct-of-total would strand long tasks with idle time.
+    # v6.55.0: the plain finalization GRACE emit-window (task_pacing SSOT), NOT the pct
+    # reserve (a review gate): clamping out the last pct-of-total strands long tasks idle.
     try:
         from ouroboros.task_pacing import effective_finalization_reserve_sec
 
@@ -463,6 +466,8 @@ def _typed_result_metadata(
         # One typed projection supplies both the legacy bucket and the published result facts.
         meta.update(tool_result_status=tool_result.status, tool_result_code=tool_result.code,
                     tool_result_meta=dict(tool_result.meta))
+        if tool_result.meta.get("artifact_registered") is True:
+            meta["artifact_registered"] = True
     # Legacy non-process deliverable fallback reads the FULL result before trace
     # truncation. Process producers must supply the typed fact below.
     if (
@@ -495,8 +500,6 @@ def _typed_result_metadata(
         signal_name = tool_result.meta.get("signal")
         if isinstance(signal_name, str) and signal_name:
             meta["signal"] = signal_name
-        if tool_result.meta.get("artifact_registered") is True:
-            meta["artifact_registered"] = True
     if (
         meta["status"] == "ok"
         and isinstance(tool_result, ToolResult)
@@ -660,7 +663,7 @@ def _execute_single_tool(
         with staged_read_delivery_scope():
             tool_result = host_refusal if host_refusal is not None else tools.execute_result(fn_name, args)
         result = tool_result.text
-    except UsageAccountingError:
+    except (UsageAccountingError, ModelWaitInterrupted):
         raise
     except Exception as e:
         tool_ok = False
@@ -1242,7 +1245,7 @@ def handle_tool_calls(
                 idx = future_to_index[future]
                 try:
                     results[idx] = future.result()
-                except UsageAccountingError:
+                except (UsageAccountingError, ModelWaitInterrupted):
                     raise
                 except Exception as exc:
                     tc = tool_calls[idx]

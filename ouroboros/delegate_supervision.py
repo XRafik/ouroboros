@@ -117,8 +117,12 @@ def _save_state(ctx: Any, state: dict[str, Any]) -> None:
 
 
 def _emit(ctx: Any, kind: str, payload: dict[str, Any]) -> bool:
+    metadata = getattr(ctx, "task_metadata", None)
+    metadata = metadata if isinstance(metadata, dict) else {}
+    # #1578: the lineage this context already knows; an unknown id stays absent.
+    lineage = {key: str(metadata.get(key) or getattr(ctx, key, "") or "") for key in ("root_task_id", "parent_task_id")}
     return custody.emit(custody.custody_root(ctx), kind, {
-        "task_id": str(getattr(ctx, "task_id", "") or ""), **payload,
+        "task_id": str(getattr(ctx, "task_id", "") or ""), **{k: v for k, v in lineage.items() if v}, **payload,
     })
 
 
@@ -732,6 +736,24 @@ def _pending_payload(ctx: Any, state: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _record_terminal_acknowledged(ctx: Any, state: dict[str, Any], pending: dict[str, Any],
+                                  wake_id: str, attempt: str) -> None:
+    """The custody-native half of an accepted TERMINAL wake (#1573).
+
+    Called only after the supervision acknowledgement landed, i.e. after the exact
+    wake (or its verified source envelope) was appended to this attempt's
+    transcript, and only for the run's own terminal payload. It proves that append in
+    ``attempt`` — not a physical send, a read or permanent transcript retention. A
+    row that fails to land only lets the own-run notice repeat (the safe direction).
+    """
+    payload = pending.get("payload") if isinstance(pending.get("payload"), dict) else {}
+    run_id = str(state.get("run_id") or "")
+    if run_id and str(payload.get("status") or "") == "terminal" and str(payload.get("run_id") or "") == run_id:
+        _emit(ctx, custody.TERMINAL_ACKNOWLEDGED, {
+            "run_id": run_id, "wake_id": wake_id, "attempt_key": attempt,
+        })
+
+
 def acknowledge_pending_wake(ctx: Any, delivered: Any = None) -> bool:
     """Ack only after the exact wake or its verified source handle was delivered."""
 
@@ -804,6 +826,7 @@ def acknowledge_pending_wake(ctx: Any, delivered: Any = None) -> bool:
         ),
     }):
         return False
+    _record_terminal_acknowledged(ctx, state, pending, expected, attempt)
     interaction_ids = frozenset(
         str(item) for item in (pending.get("interaction_ids") or []) if str(item)
     )

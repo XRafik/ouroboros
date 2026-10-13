@@ -318,12 +318,15 @@ def load_owner_wait(ctx: Any, handoff: dict | None = None) -> dict:
     return state
 
 
-def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False) -> bool:
-    """Current wait and acknowledged restart authorize a locator; strict preserves read failures."""
+def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False, expiring: bool = False) -> bool:
+    """Current wait and acknowledged restart authorize a locator; strict preserves read failures.
+
+    ``expiring`` settles an explicit deadline; all other checks and reads still bind.
+    """
     import time
 
     from ouroboros.cancel_intents import has_active_intent
-    from ouroboros.config import get_task_abs_ceiling_sec
+    from ouroboros.config import resolve_task_execution_timeout_sec
     from ouroboros.deadline_utils import parse_deadline_ts, utc_now
     from ouroboros.delegate_recovery import (
         _ack_direct_exec_successor,
@@ -358,11 +361,11 @@ def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False) -
     if has_active_intent(root, task_id, strict=True):
         return False
     deadline = parse_deadline_ts(task.get("deadline_at") or (task.get("task_contract") or {}).get("deadline_at"))
-    if deadline is not None and deadline <= utc_now():
+    if deadline is not None and deadline <= utc_now() and not expiring:
         return False
     started = float(handoff.get("started_at") or wait.get("started_at") or 0)
     now = time.time()
-    ceiling = get_task_abs_ceiling_sec()  # None = no lifetime bound to have outlived
+    ceiling = resolve_task_execution_timeout_sec(task)  # None = no execution bound to have outlived
     # ONE shared clock (``model_wait.execution_elapsed_seconds``): wall time minus
     # the quota union minus the budget-paused carrier. A task that was paused and
     # then parked in an owner wait must not have that paused time charged to its
@@ -373,7 +376,7 @@ def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False) -
     if paused_carrier is None:
         paused_carrier = handoff.get("budget_paused_sec") or 0.0
     executed = execution_elapsed_seconds(
-        {"started_at": started,
+        {"task": task, "started_at": started,
          "model_wait_quota_clock": wait.get("model_wait_quota_clock") or {},
          "budget_paused_sec": paused_carrier}, now)
     if started and ceiling is not None and executed >= ceiling:
