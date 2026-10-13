@@ -680,8 +680,9 @@ def _exact_continuation_row(limit_ctx: Any, ctx: Any, *, pause_id: str, rail: st
     sleep = getattr(ctx, "_model_sleep", None) if reason == REASON_SLEEP else None
     if isinstance(sleep, dict):
         # What the supervisor's sleep-wake policy reads: the selected sources and
-        # the mailbox ids this loop had already seen (never a second latch).
-        settlement = {"sleep": dict(sleep), "sleep_seen": sorted(set(limit_ctx.owner_msg_seen or ()))}
+        # the mailbox and beacon ids this loop had already seen.
+        settlement = {"sleep": dict(sleep), "sleep_seen": sorted(set(limit_ctx.owner_msg_seen or ())),
+                      "sleep_attention_cursors": state["wait_attention_cursors"]}
     return {
         "pause_id": pause_id, "state": STATE_PAUSING, "reason": reason,
         **settlement,

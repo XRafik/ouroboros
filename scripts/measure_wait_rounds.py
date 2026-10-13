@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure explicit JSONL by task/round; never discover owner logs.
 
-Certification needs per-round tool_call_count (llm_round_finished or usage) and
+Certification needs per-round tool_call_count (durable llm_round, llm_round_finished or usage) and
 matching distinct tool_call_id rows, including explicit zero-tool evidence.
 Missing/conflicting inventories stay unknown; micro-scenarios are not workloads.
 """
@@ -40,7 +40,7 @@ def measure(rows: list[dict]) -> dict:
             continue
         if usage_row and row.get("category") is None:
             gaps.append({"row": i, "reason": "task_usage_category_missing"})
-        inventory_row = usage_row or row.get("type") == "llm_round_finished"
+        inventory_row = usage_row or row.get("type") in {"llm_round", "llm_round_finished"}
         if not name and not inventory_row:
             continue
         if task is None or round_id is None:

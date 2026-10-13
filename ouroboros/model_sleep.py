@@ -12,9 +12,9 @@ until the transcript delivered it.
 
 Readiness is read from the CANONICAL records every time — the mailbox file,
 the task results, the custody rows, the live service registry (execution facts
-of the start that was selected) — never from a cursor or a sender-side
-latch, so an event that lands between the first check and the park is seen by
-the first check after it: the sequence is check → install the wait → recheck.
+of the start that was selected). The actor's saved beacon cursor suppresses
+only already consumed rows; a new event between the first check and the park
+is seen by the first check after it: check → install the wait → recheck.
 A terminal counts once as the stable fact that the task settled, never as a
 later enrichment of its result. A readiness recorded while the task cannot
 run (no capacity, a lease, money, an owner Pause or a Restart hold) stays
@@ -403,6 +403,43 @@ def end(ctx: Any) -> float:
     return slept
 
 
+def _adopt_inline_wake_beacons(ctx: Any, chosen: Dict[str, Any], handoff: str) -> None:
+    """Advance the restored wait cursor only for beacon rows in the actual notice.
+
+    A bounded handoff may carry only a complete-source pointer. Those rows
+    remain eligible for the next poll.
+    """
+    from ouroboros.task_tree_ledger import tree_ledger_row_id
+    from ouroboros.tools.task_tree import tree_root_id
+
+    disclosed = json.loads(handoff).get("wake_beacons") or {}
+    original = (chosen.get("wake_beacons") or {}).get("beacons") or []
+    allowed = {tree_ledger_row_id(row) for row in original if isinstance(row, dict)}
+    rows = disclosed.get("beacons") if isinstance(disclosed, dict) else None
+    if not isinstance(rows, list) or not rows:
+        return
+    cursors = getattr(ctx, "_wait_attention_cursors", None)
+    if not isinstance(cursors, dict):
+        cursors = {}
+        ctx._wait_attention_cursors = cursors
+    root = tree_root_id(ctx)
+    selected = set(chosen.get("tasks") or ())
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        task_id, ts = str(row.get("task_id") or ""), str(row.get("ts") or "")
+        row_id = tree_ledger_row_id(row)
+        if task_id not in selected or row_id not in allowed:
+            continue
+        cursor = cursors.setdefault(f"{root}:{task_id}", {"after_ts": "", "seen_ids": set()})
+        cursor_ts = str(cursor.get("after_ts") or "")
+        if ts < cursor_ts:
+            continue
+        if ts > cursor_ts:
+            cursor["after_ts"], cursor["seen_ids"] = ts, set()
+        cursor["seen_ids"].add(row_id)
+
+
 def wake_notice(chosen: Dict[str, Any], outcome: str, slept: float, ctx: Any = None) -> Dict[str, Any]:
     """Host facts for the woken model: what woke it — a fact, never a verdict."""
     what = {
@@ -454,5 +491,8 @@ def wake_notice(chosen: Dict[str, Any], outcome: str, slept: float, ctx: Any = N
             payload["cache_horizon_note"] = note
         # Bound the handoff including beacons; the ordinary notice itself is
         # small, and the authoritative full-mail drain remains independent.
-        notice["content"] += "\n" + bounded_wait_response(ctx, payload, limit=15_000-len(notice["content"])-1)
+        handoff = bounded_wait_response(ctx, payload, limit=15_000-len(notice["content"])-1)
+        notice["content"] += "\n" + handoff
+        if chosen.get("mode") == MODE_COLD and chosen.get("wake_beacons"):
+            _adopt_inline_wake_beacons(ctx, chosen, handoff)
     return notice
