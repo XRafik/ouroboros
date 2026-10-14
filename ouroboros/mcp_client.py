@@ -417,19 +417,15 @@ def normalize_server_config(
         if errors is not None:
             errors.append(f"MCP_CONFIG_ERROR: {message}")
         log.warning("Invalid MCP server config: %s", message)
-
     if not isinstance(raw, dict):
         return invalid("server must be an object")
     raw = {key: value for key, value in raw.items() if key not in MCP_RESPONSE_ONLY_FIELDS}
-
     server_slug = raw_server_id(raw)
     if not server_slug:
         return invalid("server id or name is required")
-
     transport = str(raw.get("transport") or "streamable_http").strip().lower()
     if transport not in SUPPORTED_TRANSPORTS:
         return invalid("unsupported transport; use streamable_http, sse, or stdio")
-
     try:
         known = {"id", "slug", "name", "label", "enabled", "transport", "url", "command",
                  "args", "auth_header", "auth_token", "allowed_tools", "cwd", "env", "env_from_settings",
@@ -467,16 +463,13 @@ def normalize_server_config(
         headers = validate_headers(raw.get("headers"), legacy_header=auth_header, legacy_token=auth_token)
     except ValueError as exc:
         return invalid(str(exc))
-
     name = str(raw.get("name") or raw.get("label") or server_slug).strip() or server_slug
     enabled_raw = raw.get("enabled", False)
     if isinstance(enabled_raw, bool):
         enabled = enabled_raw
     else:
         enabled = str(enabled_raw or "").strip().lower() in {"1", "true", "yes", "on"}
-
     allowed_tools = _coerce_str_list(raw.get("allowed_tools"))
-
     return MCPServerConfig(
         id=server_slug,
         name=name,
@@ -639,7 +632,6 @@ def _redacted_sdk_logs(cfg: MCPServerConfig, logger_name: str):
     the filters leave with the connection.
     """
     sdk_logs = (logging.getLogger(logger_name), logging.getLogger())
-
     def project_log(record: logging.LogRecord) -> bool:
         if _SDK_DIAGNOSTIC_CONFIG.get() is cfg:
             message = record.getMessage()
@@ -648,7 +640,6 @@ def _redacted_sdk_logs(cfg: MCPServerConfig, logger_name: str):
                 record.exc_info = record.exc_text = None
             record.msg, record.args = _redact_error_text(message, cfg), ()
         return True
-
     token = _SDK_DIAGNOSTIC_CONFIG.set(cfg)
     for sdk_log in sdk_logs:
         sdk_log.addFilter(project_log)
@@ -684,7 +675,6 @@ class MCPRedirectRefused(RuntimeError):
 def _origin(url: Any) -> tuple:
     """``(scheme, host, port)`` with the scheme's default port made explicit."""
     import httpx
-
     parsed = url if isinstance(url, httpx.URL) else httpx.URL(str(url))
     return parsed.scheme, parsed.host, parsed.port or {"http": 80, "https": 443}.get(parsed.scheme, 0)
 
@@ -729,7 +719,6 @@ class _CredentialOriginGuard:
                 # SSE message POST would otherwise wait for its tool timeout.
                 await client.aclose()
                 raise self.refusal
-
             client.event_hooks["request"].append(stay_on_origin)
         return client
 
@@ -786,7 +775,6 @@ async def _list_tools_async(cfg: MCPServerConfig, *, timeout_sec: int) -> List[D
             "MCP client SDK not installed. Add `mcp>=1.10` to the runtime."
         )
     from ouroboros.owner_pause import submit_async_preparation
-
     async def _do_with_session() -> List[Dict[str, Any]]:
         async with _transport_factory(cfg) as transport_ctx:
             # Both transports yield read/write streams.
@@ -830,7 +818,6 @@ async def _list_tools_async(cfg: MCPServerConfig, *, timeout_sec: int) -> List[D
                             "nextCursor still present; catalog is PARTIAL",
                         )
                 return tools_raw
-
     # A task's discovery passes that task's launch admission before each
     # transport entry (a stdio server starts there); Settings probes name none.
     return await asyncio.wait_for(
@@ -846,9 +833,11 @@ async def _call_tool_async(
         raise RuntimeError(
             "MCP client SDK not installed. Add `mcp>=1.10` to the runtime."
         )
-    from ouroboros.owner_pause import submit_async_operation, submit_async_preparation
-
+    from ouroboros.owner_pause import submit_async_operation, submit_async_preparation, OwnerPauseRefused, _TOOL_OPERATION
+    from ouroboros.model_wait import ModelWaitInterrupted
+    from ouroboros.usage_accounting import UsageAccountingError
     async def _do() -> ToolResult:
+        refusal = None
         async with _transport_factory(cfg) as transport_ctx:
             streams = transport_ctx
             if isinstance(streams, tuple):
@@ -857,9 +846,20 @@ async def _call_tool_async(
                 read, write = streams.read, streams.write  # pragma: no cover
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await submit_async_operation(None, session.call_tool, tool_name, arguments)
-                return _tool_result_from_call_result(result)
-
+                try:
+                    pending = submit_async_operation(None, session.call_tool, tool_name, arguments)
+                except (OwnerPauseRefused, ModelWaitInterrupted, UsageAccountingError) as exc:
+                    refusal = exc  # Unsent; first join both contexts normally.
+                else:
+                    result = await pending
+        if refusal is not None:
+            # Failed/unfinished cleanup never reaches this positive phase fact.
+            active = _TOOL_OPERATION.get()
+            if active:
+                active[2]["settled"] = True
+            refusal.mcp_unsent_joined = True
+            raise refusal
+        return _tool_result_from_call_result(result)
     # Launch admission precedes transport entry: a stdio server starts there.
     return await asyncio.wait_for(submit_async_preparation(_do), timeout=timeout_sec)
 
@@ -940,18 +940,14 @@ def _run_async(coro_factory: Callable[[], Awaitable[Any]], *, join_timeout: Opti
         asyncio.get_running_loop()
     except RuntimeError:
         return asyncio.run(coro_factory())
-
     # Existing loop: run the coroutine in a sub-thread.
     holder: Dict[str, Any] = {}
-
     def _runner() -> None:
         try:
             holder["value"] = asyncio.run(coro_factory())
         except BaseException as exc:
             holder["error"] = exc
-
     import contextvars
-
     context = contextvars.copy_context()
     thread = threading.Thread(target=lambda: context.run(_runner), name="mcp-sync-runner", daemon=True)
     thread.start()
@@ -1038,7 +1034,6 @@ class MCPManager:
             self._servers = new_servers
         # Closing a held browser bridge waits for its process scan: never under this lock.
         from ouroboros.mcp_task_sessions import revoke_changed
-
         revoke_changed(new_configs if bool(settings.get("MCP_ENABLED")) else [])
         return True
 
@@ -1116,7 +1111,6 @@ class MCPManager:
 
     def tool_name_collisions(self) -> List[Dict[str, str]]:
         """Return provider-name collisions omitted by first-wins normalization."""
-
         with self._lock:
             if not self._enabled:
                 return []
@@ -1206,9 +1200,7 @@ class MCPManager:
             if not cfg.enabled:
                 return {"ok": False, "error": f"MCP server {server_id!r} is disabled."}
             timeout = self._tool_timeout_sec
-
         from ouroboros.owner_pause import OwnerPauseRefused
-
         attempted_at = datetime.now(timezone.utc).isoformat()
         token = _DISCOVERY_AUTHORITY.set(authority)
         borrowed: List[Any] = []  # The bridge session this listing reads, by object.
@@ -1450,7 +1442,8 @@ class MCPManager:
             return resolution.refusal(prefixed_name)
         from ouroboros.mcp_task_sessions import CALL_FAILURES, failure_result
         from ouroboros.mcp_task_sessions import call as scoped_call
-
+        from ouroboros.tool_custody import external_handoff
+        confirmed = external_handoff("mcp_transport")
         advice = note = ""
         try:
             if cfg.browser_bridge:
@@ -1475,6 +1468,11 @@ class MCPManager:
             )
             return ToolResult(status="timeout", code="MCP_TIMEOUT", text=text)
         except BaseException as exc:  # noqa: BLE001 - any failure is reported
+            from ouroboros.owner_pause import OwnerPauseRefused, _TOOL_OPERATION
+            active = _TOOL_OPERATION.get()
+            if getattr(exc, "mcp_unsent_joined", False) or (
+                    isinstance(exc, OwnerPauseRefused) and active and active[2].get("not_started")):
+                confirmed()  # no call, with either no transport entry or joined cleanup
             if cfg.browser_bridge and _is_task_control(exc):
                 raise  # Stop and Pause reach the loop as they do from any Safety check.
             body = f"⚠️ MCP_TOOL_ERROR: {type(exc).__name__}: {_redact_error_text(exc, cfg)}"
@@ -1485,6 +1483,7 @@ class MCPManager:
         from ouroboros.owner_pause import record_mcp_call_returned
 
         record_mcp_call_returned(prefixed_name)
+        confirmed()
         text = _redact_error_text(result.text, cfg)
         if not (cfg.browser_bridge and result.meta.get("host_verdict")):
             text = _model_facing_result(cfg, tool.raw_name, text)
