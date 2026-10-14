@@ -1,8 +1,11 @@
-"""Task-owned stdio sessions for a Playwright MCP browser server.
+"""Task-owned stdio sessions for explicit Playwright or Ouroboros Chrome MCP.
 
 An owner opts a stdio server in with ``browser_bridge: true``. Only a bound task
 attempt opens it, every call of that attempt reuses the one connection, and
 Settings never launches it.
+
+The Playwright branch below retains its pinned upstream tab/guard behavior.
+The Chrome branch uses ``mcp_chrome_protocol`` and the same lifetime and custody.
 
 The page an action targets is read from the upstream server itself, not from an
 adapter tool. The pinned ``@playwright/mcp@0.0.82`` (playwright-core
@@ -66,9 +69,12 @@ import pathlib
 import tempfile
 import threading
 import types
+import uuid
 from typing import Any
 
 from ouroboros import browser_policy
+from ouroboros.mcp_chrome_protocol import _policy_inputs
+from ouroboros.mcp_chrome_protocol import binding_reason as _chrome_binding_reason
 from ouroboros.process_containment import (
     CONTAINMENT_ENV_PREFIX,
     MARKER_MEMBER,
@@ -222,6 +228,62 @@ def _data_root(ctx: Any) -> pathlib.Path:
     return canonical_data_root(ctx)
 
 
+def _source_bytes_from_call_result(result: Any) -> bytes:
+    """Keep the complete SDK response as received, before its text projection."""
+    from ouroboros.mcp_client import _serialize_content_part
+
+    dump = getattr(result, "model_dump", None)
+    payload = None
+    if callable(dump):
+        try:
+            payload = dump(mode="json", by_alias=True)
+        except (TypeError, ValueError):
+            payload = None
+    if not isinstance(payload, dict):
+        payload = {
+            "isError": bool(getattr(result, "isError", False) or getattr(result, "is_error", False)),
+            "content": [_serialize_content_part(part) for part in (getattr(result, "content", None) or [])],
+        }
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            payload["structuredContent"] = structured
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _retain_returned_response(session: "TaskBrowserSession", raw: Any) -> tuple[dict[str, Any] | None, str]:
+    """Record the complete returned MCP value before looking at post-dispatch state."""
+    from ouroboros.artifacts import store_actor_source_bytes
+
+    try:
+        source = store_actor_source_bytes(
+            session.data_root, session.key[0], category="tool_results",
+            source_id=f"mcp-browser-{uuid.uuid4().hex}",
+            data=_source_bytes_from_call_result(raw), extension="json")
+        return source, ""
+    except Exception as exc:
+        log.warning("Could not retain returned MCP browser response", exc_info=True)
+        return None, type(exc).__name__
+
+
+def _post_dispatch_error(name: str, reason: str, source: dict[str, Any] | None,
+                         retention_gap: str) -> ToolResult:
+    """Withhold an untrusted post-state response while exposing its original source."""
+    if source is not None:
+        pointer = (f"Returned response retained: read_file(root='artifact_store', "
+                   f"path='{source['path']}'); size={source['size']} bytes; sha256={source['sha256']}.")
+        meta = {"host_verdict": True, "mcp_response_source": source}
+    else:
+        pointer = f"Returned response retention failed ({retention_gap or 'unknown'}); source unavailable."
+        meta = {"host_verdict": True, "mcp_response_retention_gap": retention_gap or "unknown"}
+    return ToolResult(
+        status="error", code="MCP_ERROR", meta=meta,
+        text=(f"⚠️ MCP_TOOL_ERROR: BROWSER_POLICY_POST_DISPATCH — {name} was dispatched, "
+              f"but the later browser state is unavailable or blocked ({reason}); "
+              f"the result is withheld. {pointer} Reconcile before any retry."))
+
+
+
+
 def _scope(data_root: Any, task_id: str = "") -> str:
     """Marker scope of this installation's bridges, or of one task's."""
     def tag(text: str) -> str:
@@ -257,13 +319,6 @@ def _page_state(result: Any) -> dict[str, Any]:
     if not url:
         raise RuntimeError("BROWSER_STATE_UNKNOWN: the current tab reports no url")
     return {"url": url, "tab_index": index, "open_tabs": len(lines)}
-
-
-def _policy_inputs(ctx: Any) -> tuple[bool, str]:
-    from ouroboros.config import get_runtime_mode
-    from ouroboros.tools.core import is_restricted_subagent_profile
-
-    return is_restricted_subagent_profile(ctx), get_runtime_mode()
 
 
 def _block_reason(ctx: Any, url: str) -> str:
@@ -333,10 +388,13 @@ class TaskBrowserSession:
         from ouroboros.platform_layer import IS_WINDOWS
 
         if IS_WINDOWS:
-            raise RuntimeError("MCP browser bridge requires process custody not yet available on Windows")
+            raise RuntimeError("MCP browser bridge uses a Unix callback socket; Windows transport is not validated")
         task, self.attempt = _owner(ctx)
         self.cfg = cfg
         self.ctx = ctx  # The request guard's policy context; each call refreshes it.
+        from ouroboros.mcp_chrome_protocol import resolve_binding
+        self._chrome_launch_cfg, self._chrome_skill_hash = (
+            resolve_binding(cfg, ctx) if cfg.browser_protocol == "ouroboros_chrome" else (cfg, ""))
         self.key = (task, cfg.id)
         self.data_root = _data_root(ctx)
         self.container = ProcessContainer(_scope(self.data_root, task))
@@ -356,6 +414,17 @@ class TaskBrowserSession:
         self.scratch: tempfile.TemporaryDirectory | None = None
         self.guard_dir = _private_socket_dir()
         self.guard_armed = False
+        self._chrome_state: dict[str, Any] | None = None
+        self._chrome_invocation: tuple[str, str, dict[str, Any]] | None = None
+        self._chrome_last_step = 0
+        self._chrome_sequence_index = 0
+        self._chrome_requests: set[str] = set()
+        self._chrome_documents: dict[str, str] = {}
+        self._chrome_navigation_pending = False
+        self._chrome_guard_lock = asyncio.Lock()
+        self._chrome_lease_generation_floor = -1
+        self.chrome_disconnect_ack = "not_sent"
+        self._binding_revoked = False
         self._blocked: collections.deque = collections.deque(maxlen=20)
         self._blocked_omitted = 0
 
@@ -434,7 +503,15 @@ class TaskBrowserSession:
                 facts, reason = {}, f"BROWSER_POLICY_UNAVAILABLE: unreadable request facts ({type(exc).__name__})"
             else:
                 reason = ""
-            if facts.get("armed") is True and not self.revoked:
+            if self.cfg.browser_protocol == "ouroboros_chrome":
+                # Only callbacks serialize with one another. The outer call
+                # waits on the MCP result while this path answers independently.
+                async with self._chrome_guard_lock:
+                    reason = reason or await self._chrome_guard_reason(facts)
+                if reason:
+                    self._record_block(reason, facts)
+                answer = {"block": reason}
+            elif facts.get("armed") is True and not self.revoked:
                 self.guard_armed = True
                 answer: dict[str, Any] = {"armed": True}
             else:
@@ -446,12 +523,7 @@ class TaskBrowserSession:
                 if self.revoked:
                     reason = "BROWSER_SESSION_REVOKED: the task's browser session is closing"
                 if reason:
-                    from ouroboros.utils import truncate_within_limit
-
-                    if len(self._blocked) == self._blocked.maxlen:
-                        self._blocked_omitted += 1
-                    self._blocked.append(truncate_within_limit(
-                        f"{reason} — {facts.get('method') or '?'} {facts.get('url') or '?'}", 400))
+                    self._record_block(reason, facts)
                 answer = {"block": reason}
             writer.write(json.dumps(answer).encode("utf-8") + b"\n")
             await writer.drain()
@@ -460,27 +532,60 @@ class TaskBrowserSession:
         finally:
             writer.close()
 
+    from ouroboros.mcp_chrome_protocol import guard_callback as _chrome_guard_reason
+
+    def _mark_binding_revoked(self) -> None:
+        with _lock:
+            self._binding_revoked = True
+            self.revoked = True
+        self._closing.set()  # Called only on the session event loop.
+
+    def _record_block(self, reason: str, facts: dict[str, Any]) -> None:
+        from ouroboros.utils import truncate_within_limit
+
+        if len(self._blocked) == self._blocked.maxlen:
+            self._blocked_omitted += 1
+        self._blocked.append(truncate_within_limit(
+            f"{reason} — {facts.get('method') or facts.get('operation') or '?'} "
+            f"{facts.get('url') or '?'}", 400))
+
     async def _serve(self) -> None:
         from mcp.types import Implementation
+
         from ouroboros.mcp_client import ClientSession, _transport_factory
         from ouroboros.version import get_version
 
         if not self.cfg.cwd:
             self.scratch = tempfile.TemporaryDirectory(prefix="ouroboros-mcp-browser-")
         guard = pathlib.Path(self.guard_dir.name)
-        (guard / "guard.cjs").write_text(_GUARD_JS, encoding="utf-8")
+        chrome = self.cfg.browser_protocol == "ouroboros_chrome"
+        if not chrome:
+            (guard / "guard.cjs").write_text(_GUARD_JS, encoding="utf-8")
         server = await asyncio.start_unix_server(
             self._answer_guard, path=str(guard / "g.sock"), limit=_GUARD_FACTS_LIMIT)
         # The SDK starts the server in its own session; the marker is inherited
         # from birth and survives that and a descendant's later setsid. The
         # host's guard replaces any init page the entry's own env names. The
         # marker is the session's own string: a scan cannot consume it.
+        bridge_env = {self.token: "1", _GUARD_ENV: str(guard / "g.sock")}
+        if chrome:
+            bridge_env.update({"OUROBOROS_BROWSER_PROTOCOL": "ouroboros_chrome",
+                               "OUROBOROS_BROWSER_OWNER_TASK_ID": self.key[0],
+                               "OUROBOROS_BROWSER_OWNER_ATTEMPT": self.attempt})
+        else:
+            bridge_env["PLAYWRIGHT_MCP_INIT_PAGE"] = str(guard / "guard.cjs")
+        launch_cfg = self._chrome_launch_cfg if chrome else self.cfg
+        entry_env = dict(launch_cfg.env)
+        if chrome:
+            entry_env.pop("PLAYWRIGHT_MCP_INIT_PAGE", None)
         cfg = dataclasses.replace(
-            self.cfg,
-            cwd=self.cfg.cwd or (self.scratch.name if self.scratch is not None else ""),
-            env={**self.cfg.env, self.token: "1",
-                 "PLAYWRIGHT_MCP_INIT_PAGE": str(guard / "guard.cjs"), _GUARD_ENV: str(guard / "g.sock")},
+            launch_cfg,
+            cwd=launch_cfg.cwd or (self.scratch.name if self.scratch is not None else ""),
+            env={**entry_env, **bridge_env},
         )
+        if chrome and (reason := await asyncio.to_thread(_chrome_binding_reason, self.cfg, self.ctx, self._chrome_skill_hash)):
+            server.close()
+            raise RuntimeError(reason)
         with _lock:  # Revocation and this launch decision are one step.
             if self.revoked:
                 server.close()
@@ -498,6 +603,8 @@ class TaskBrowserSession:
             )
             async with ClientSession(streams[0], streams[1], **client_kwargs) as session:
                 await session.initialize()
+                if chrome and (reason := await asyncio.to_thread(_chrome_binding_reason, self.cfg, self.ctx, self._chrome_skill_hash)):
+                    raise RuntimeError(reason)
                 tools, cursor = [], None
                 for _page in range(50):
                     listed = await (session.list_tools(cursor=cursor) if cursor else session.list_tools())
@@ -506,13 +613,23 @@ class TaskBrowserSession:
                     cursor = getattr(listed, "nextCursor", None)
                     if not cursor:
                         break
-                if cursor or _STATE_TOOL not in {tool["name"] for tool in tools}:
-                    raise RuntimeError(f"MCP browser server does not list its {_STATE_TOOL} tool")
+                state_tool = "browser_state" if chrome else _STATE_TOOL
+                if cursor or state_tool not in {tool["name"] for tool in tools}:
+                    raise RuntimeError(f"MCP browser server does not list its {state_tool} tool")
+                if chrome:
+                    from ouroboros.mcp_chrome_protocol import TOOLS
+
+                    tools = [tool for tool in tools if tool["name"] in TOOLS]
+                    if reason := await asyncio.to_thread(_chrome_binding_reason, self.cfg, self.ctx, self._chrome_skill_hash):
+                        raise RuntimeError(reason)
                 if self.revoked:
                     raise RuntimeError("MCP browser task session was revoked while starting")
                 self._session, self._read_stream = session, streams[0]
                 self.ready.set_result(tools)
                 while not self._closing.is_set():
+                    # Readiness drift is checked at discovery, dispatch and each
+                    # primitive/network callback; an idle connection grants no
+                    # effect. Keep this EOF/Stop wait free of payload/peer scans.
                     # The SDK reader exits on stdio EOF without waking our close event.
                     if streams[0].statistics().open_send_streams == 0:
                         raise RuntimeError("MCP browser transport closed")
@@ -520,14 +637,25 @@ class TaskBrowserSession:
                         await asyncio.wait_for(self._closing.wait(), timeout=0.2)
                     except asyncio.TimeoutError:
                         pass
+                if chrome and self._binding_revoked:
+                    try:
+                        answer = await asyncio.wait_for(session.call_tool(
+                            "browser_disconnect", {},
+                            meta={"ouroboros_invocation_id": uuid.uuid4().hex}), timeout=0.5)
+                        self.chrome_disconnect_ack = "acknowledged" if not getattr(answer, "isError", True) else "rejected"
+                    except Exception:
+                        self.chrome_disconnect_ack = "unknown"
 
-    def _request(self, name: str, args: dict, timeout: int, *, dispatch: bool = False) -> Any:
+    def _request(self, name: str, args: dict, timeout: int, *, dispatch: bool = False,
+                 invocation_id: str = "") -> Any:
         loop, session = self._loop, self._session
         if self.revoked or loop is None or session is None or loop.is_closed():
             raise RuntimeError("MCP browser task session is revoked or closed")
 
         def submit() -> concurrent.futures.Future:
-            call = session.call_tool(name, args)
+            call = session.call_tool(
+                name, args, **({"meta": {"ouroboros_invocation_id": invocation_id}}
+                             if invocation_id else {}))
             try:
                 return asyncio.run_coroutine_threadsafe(call, loop)
             except RuntimeError:
@@ -587,19 +715,26 @@ class TaskBrowserSession:
                     f"The task session was closed: {outcome}")
         return BrowserBridgeBroken(text, submitted=submitted, closure=outcome)
 
-    def _observe(self, timeout: int) -> dict[str, Any]:
+    def _observe(self, timeout: int, *, allow_closed: bool = False) -> dict[str, Any]:
+        if self.cfg.browser_protocol == "ouroboros_chrome":
+            from ouroboros.mcp_chrome_protocol import observe_state
+
+            return observe_state(self, self._request("browser_state", {}, timeout), allow_closed=allow_closed)
         return _page_state(self._request(_STATE_TOOL, dict(_STATE_ARGS), timeout))
 
-    def _observe_before(self, timeout: int) -> dict[str, Any]:
+    def _observe_before(self, timeout: int, *, allow_closed: bool = False) -> dict[str, Any]:
         try:
-            return self._observe(timeout)
+            return self._observe(timeout, allow_closed=allow_closed)
         except RuntimeError as exc:  # Unknown state refuses; nothing was dispatched.
             raise BrowserBridgeRefusal(f"{exc}; the action was not dispatched") from exc
 
     def call(self, prefixed: str, name: str, args: dict, ctx: Any, timeout: int) -> tuple[ToolResult, str, str]:
         """The result, any Safety advice and the guard's refusals; a pre-dispatch refusal raises."""
-        from ouroboros.mcp_client import _tool_result_from_call_result
+        from ouroboros.mcp_client import _is_task_control, _tool_result_from_call_result
         from ouroboros.safety import check_safety
+
+        if self.cfg.browser_protocol == "ouroboros_chrome":
+            return self._call_chrome(prefixed, name, args, ctx, timeout)
 
         with self._call_lock:  # Observation, assessment and action share one turn.
             if self.revoked or _owner(ctx) != (self.key[0], self.attempt):
@@ -624,26 +759,31 @@ class TaskBrowserSession:
                     "BROWSER_STATE_CHANGED: the current tab or its url changed during the assessment; "
                     "the action was not dispatched"
                 )
+            _authority(ctx, name, args, state)  # Task authority may narrow during Safety.
             self._blocked.clear()  # Earlier refusals were background requests between calls.
             self._blocked_omitted = 0
-            result = _tool_result_from_call_result(self._request(name, args, timeout, dispatch=True))
+            raw = self._request(name, args, timeout, dispatch=True)
+            source, retention_gap = _retain_returned_response(self, raw)
             blocked = [self._blocked.popleft() for _ in range(len(self._blocked))]
             try:
+                result = _tool_result_from_call_result(raw)
                 after = self._observe(timeout)
                 reason = _block_reason(ctx, after["url"])
-            except RuntimeError as exc:
-                reason = str(exc)
+            except Exception as exc:
+                if _is_task_control(exc):
+                    raise
+                # Only post-response processing is caught; the action is never retried.
+                reason = f"{type(exc).__name__}: {exc}"
             if reason:
-                withheld = (f"⚠️ MCP_TOOL_ERROR: BROWSER_POLICY_POST_DISPATCH — {name} was dispatched and its "
-                            f"effect stands, but the page afterwards is not confirmed inside browser policy "
-                            f"({reason}). Its result is withheld; read the current state before any retry.")
-                result = ToolResult(status="error", code="MCP_ERROR", text=withheld, meta={"host_verdict": True})
+                result = _post_dispatch_error(name, reason, source, retention_gap)
             note = ("⚠️ BROWSER_REQUEST_BLOCKED: the host request guard aborted these requests during the call; "
                     "the page saw a network failure for each:\n" + "\n".join(f"- {line}" for line in blocked)
                     ) if blocked else ""
             if self._blocked_omitted:
                 note += f"\nEarlier blocked-request diagnostics omitted: {self._blocked_omitted}."
             return result, advice, note
+
+    from ouroboros.mcp_chrome_protocol import call_chrome as _call_chrome
 
     def is_current(self) -> bool:
         """Still its attempt's cached, unrevoked session: a listing it served may publish."""
@@ -660,6 +800,20 @@ class TaskBrowserSession:
             self.revoked = True
         loop = self._loop
         if loop is not None:
+            # Chrome's control tool is serviced outside its script queue. Send
+            # revocation on the already-owned connection while a prior action
+            # may be waiting on the guard; never acquire the outer call lock.
+            if (self.cfg.browser_protocol == "ouroboros_chrome" and self._session is not None
+                    and not loop.is_closed()):
+                try:
+                    revoke = asyncio.run_coroutine_threadsafe(
+                        self._session.call_tool(
+                            "browser_disconnect", {},
+                            meta={"ouroboros_invocation_id": uuid.uuid4().hex}), loop)
+                    answer = revoke.result(timeout=0.5)
+                    self.chrome_disconnect_ack = "acknowledged" if not getattr(answer, "isError", True) else "rejected"
+                except (Exception, concurrent.futures.TimeoutError):
+                    self.chrome_disconnect_ack = "unknown"
             try:
                 loop.call_soon_threadsafe(self._closing.set)
             except RuntimeError:
@@ -689,6 +843,8 @@ def _foreign_live_members(data_root: pathlib.Path, task_id: str) -> str:
 def discover(cfg: Any, ctx: Any, timeout: int, *, session_out: list | None = None) -> list[dict]:
     """The attempt's tools from its one session; ``session_out`` receives that exact session."""
     task, attempt = _owner(ctx)
+    if cfg.browser_protocol == "ouroboros_chrome" and (reason := _chrome_binding_reason(cfg, ctx)):
+        raise RuntimeError(reason)
     with _lock:
         if (task, attempt) in _ended_attempts:
             raise RuntimeError("MCP browser task attempt has ended")
@@ -745,7 +901,10 @@ def _close(session: TaskBrowserSession) -> dict:
         with _lock:
             if _sessions.get(session.key) is session:
                 _sessions.pop(session.key, None)
-    return {"server": session.cfg.id, "closure": outcome}
+    result = {"server": session.cfg.id, "closure": outcome}
+    if session.cfg.browser_protocol == "ouroboros_chrome":
+        result["browser_disconnect_ack"] = session.chrome_disconnect_ack
+    return result
 
 
 def stop_task(ctx: Any, *, end_attempt: bool = True) -> list[dict]:

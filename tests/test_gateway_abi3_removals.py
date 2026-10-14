@@ -194,6 +194,7 @@ class TestAliasProducerFanOutSweep:
         ("ouroboros/usage_accounting.py", "cost_usd", "_terminalize_failed_attempt"): ("ledger settlement transitions; shared rejection branch and received-price/usage settlement despite call failure", 3),
         ("ouroboros/usage_accounting.py", "cost_usd", "_account_response"): ("ledger settlement call shared by sync and async received responses", 1),
         ("ouroboros/usage_journal.py", "cost_usd", "legacy_candidates"): ("legacy usage telemetry import rows (the store's one-time migration)", 2),
+        ("ouroboros/tools/imagegen.py", "cost_usd", "_recover_image"): ("original physical-attempt ledger settlement; public image receipts use actual_cost_usd/estimated_cost_usd", 1),
         ("ouroboros/tools/search.py", "cost_usd", "_web_search_openai"): ("ledger settlement call (web search attempt)", 1),
         # usage/observability event streams (events.jsonl, live log frames;
         # /api/logs replay converts to the honest name at the boundary)
@@ -216,7 +217,7 @@ class TestAliasProducerFanOutSweep:
         ("ouroboros/evolution_checkpoints.py", "cost_usd", "build_solve_capability_digest"): ("evolution capability digest", 1),
         ("ouroboros/evolution_checkpoints.py", "cost_usd", "append_evolution_checkpoint"): ("evolution checkpoint records", 1),
         # custody settlement events
-        ("ouroboros/delegate_custody.py", "cost_usd", "settle_run"): ("custody SETTLED event row", 1),
+        ("ouroboros/delegate_collection.py", "cost_usd", "record_terminal_money"): ("custody SETTLED event row", 1),
         # reflection records
         ("ouroboros/reflection.py", "cost_usd", "generate_reflection"): ("task reflection record", 1),
     }

@@ -640,6 +640,13 @@ def recover_aborted_update(drive_root: Any, running: Dict[str, Any], pending: Li
             "detail": "Saved work from the aborted update awaits original admission verification."})
         pending.append(task)
         running.pop(task_id, None)
+        # #1183: this captured process is proven dead; its own active fence must not
+        # cancel or refuse the successor that continues its work.
+        from supervisor.queue_transitions import release_ended_attempt_fences_locked
+        release_ended_attempt_fences_locked(queue.ACCEPTANCE_FENCES, task_id,
+                                            task_attempt=batch["rows"][task_id]["attempt"],
+                                            pid=getattr(batch["rows"][task_id]["proc"], "pid", None),
+                                            paused_roots=queue.BUDGET_ROOT_FENCES)
     if queue.persist_queue_snapshot(reason="update_abort_handoff") is not True:
         return False
     _update_returns = {}
@@ -744,8 +751,8 @@ def fresh_return_transaction(drive_root: Any) -> Dict[str, Any]:
         dr._ack_direct_exec_successor(drive_root)
         active = _json.loads(dr._active_restart_transaction_path(drive_root).read_text(encoding="utf-8"))
         row = dr._read_restart_transaction(drive_root, str(active.get("transaction_id") or ""))
-        if row.get("ack_source") == "direct_spawn_successor" and (
-            not dr.direct_spawn_successor_matches(row)
+        if row.get("ack_source") in {"direct_spawn_successor", dr.WINDOWS_PARENT_ACK} and (
+            not dr.spawned_successor_is_current(row)
             or any(active.get(key) != row.get(key) for key in ("transaction_id", "supervisor_pid", "prepared_at"))
         ):
             return {}
@@ -816,6 +823,11 @@ def recover_saved_running(rows: Iterable[Dict[str, Any]], drive_root: Any, *,
             source_cause = "restart" if auto and cause != "update_aborted" else cause
             if not _recovery_source(root, task, attempt, source_cause):
                 continue
+            from ouroboros.model_wait import fold_running_clock, stamp_execution_handoff
+            from supervisor.events_budget import fold_consumed_resume
+            fold_consumed_resume(row, root)  # a consumption whose notification died with the process
+            fold_running_clock(task, row)  # confirmed waits newer than the saved source (#939)
+            stamp_execution_handoff(task, row)
         except Exception:
             log.warning("Saved work of %s unreadable at restore; ordinary interrupted path", task_id, exc_info=True)
             continue

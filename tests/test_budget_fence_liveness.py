@@ -81,6 +81,19 @@ def test_a_publication_in_flight_is_waited_out(tmp_path, monkeypatch, alive_gene
     assert _reserve(tmp_path, CHILD).attempt_id and waits
 
 
+def test_a_publication_slower_than_the_former_window_is_waited_out(tmp_path, monkeypatch):
+    _publish(tmp_path, alive_generation=None)  # issue #1754: 20 reads failed sends on a loaded host
+    waits = []
+
+    def slow_publisher(_sec):
+        waits.append(_sec)
+        if len(waits) == 25:
+            _write(tmp_path, "queue.alive", {"generation": "g1", "ts": OLD_TS, "heartbeats": {}})
+
+    monkeypatch.setattr(queue_observation, "_sleep", slow_publisher)
+    assert _reserve(tmp_path, CHILD).attempt_id and len(waits) == 25
+
+
 @pytest.mark.parametrize("damage", ["malformed", "non_object", "missing", "no_generation", "unreadable"])
 def test_an_unreadable_dispatch_document_refuses_typed(tmp_path, monkeypatch, caplog, damage):
     _publish(tmp_path)
@@ -116,13 +129,14 @@ def test_publication_waits_only_outside_the_money_lock(tmp_path, monkeypatch, op
 
     _publish(tmp_path)
     reservation = _reserve(tmp_path, CHILD) if operation == "dispatch" else None
-    stamp, held, waits = tmp_path / "state/queue.alive", [], []
+    stamp, held, waits, replaced = tmp_path / "state/queue.alive", [], [], []
     original = ua._locked
 
     @contextlib.contextmanager
     def locked(*args, **kwargs):
         with original(*args, **kwargs) as view:
-            if publication == "under_lock":
+            if publication == "under_lock" and not replaced:
+                replaced.append(True)
                 stamp.unlink()
             held.append(True)
             try:
@@ -143,16 +157,13 @@ def test_publication_waits_only_outside_the_money_lock(tmp_path, monkeypatch, op
     try:
         def act():
             return _reserve(tmp_path, CHILD) if operation == "reserve" else ua.mark_dispatched(reservation)
-        if publication == "under_lock":
-            with pytest.raises(ua.UsageAccountingError, match="root budget fence authority unavailable"):
-                act()
-        elif operation == "reserve":
+        if operation == "reserve":
             assert act().attempt_id
         else:
             act()
     finally:
         _usage_wait._CANCEL.reset(token)
-    assert len(waits) == int(publication == "before_lock")
+    assert len(waits) == int(publication != "stable")
     if reservation:
         with ua.usage_store.read(tmp_path) as view:
-            assert view.attempt(reservation.attempt_id)["state"] == ("reserved" if publication == "under_lock" else "dispatched")
+            assert view.attempt(reservation.attempt_id)["state"] == "dispatched"

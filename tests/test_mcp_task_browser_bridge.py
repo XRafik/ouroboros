@@ -363,7 +363,7 @@ def test_windows_bridge_refuses_before_process_or_socket_creation(tmp_path, monk
     monkeypatch.setattr(mcp_task_sessions, "ProcessContainer", forbidden)
     monkeypatch.setattr(mcp_task_sessions, "_private_socket_dir", forbidden)
     cfg = mcp_client.normalize_server_config(_entry(tmp_path / "must-not-run.py"))
-    with pytest.raises(RuntimeError, match="not yet available on Windows"):
+    with pytest.raises(RuntimeError, match="Unix callback socket; Windows transport is not validated"):
         mcp_task_sessions.discover(cfg, _ctx(tmp_path), 15)
 
 

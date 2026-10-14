@@ -16,7 +16,9 @@ export const CHECKPOINT_LABELS = {
     nanny_finalization_nudge: 'Finalization nudge',
     budget_scope_paused: 'Budget scope paused',
     services_stopped: 'Background services stopped',
+    mcp_browser_bridges_stopped: 'Browser bridge closed',
     services_kept: 'Background services kept',
+    service_finalization_error: 'Background service cleanup unconfirmed',
     forced_candidate_drift: 'Forced candidate drifted',
 };
 

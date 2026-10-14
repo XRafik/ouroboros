@@ -114,6 +114,7 @@ def test_gc_owes_unreferenced_physical_calls_including_old_and_cancelled_rows(tm
 
 def test_public_exact_review_reader_works_while_history_is_deferred(tmp_path):
     from pathlib import Path
+
     from ouroboros.artifacts import store_actor_source_bytes, task_artifact_dir_path
     from ouroboros.task_finalization import review_source_reader
     from ouroboros.tools.registry import ToolContext, ToolRegistry
@@ -255,4 +256,7 @@ def test_shared_drive_is_kept_while_a_successor_is_live_or_unknown(tmp_path, gua
     assert not report["pruned"] and child.exists(), report
     reason = {"live": "task_live", "liveness_unknown": "liveness_unknown"}.get(guard, "drive_occupant_unknown")
     assert {"task_id": "shared-owner", "reason": reason} in report["custody_pending"], report
-    assert (child / "task_results" / f"{successor}.json").is_file()
+    retained = load_task_result(child, successor, strict=True)
+    assert retained["status"] == "completed" and retained["result"] == "successor answer"
+    if guard == "unknown_occupant":
+        assert (child / "task_results" / "not a task id!.json").read_text(encoding="utf-8") == "{}"

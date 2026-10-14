@@ -136,6 +136,7 @@ BAND_PATHS = {
     "ouroboros/memory_view.py": "Selected accounts and records told through them share the existing story and room capture; account-block rendering is already isolated in memory_view_account.",
     "ouroboros/model_wait.py": "The existing task wait owner coordinates confirmed resource waits, owner controls and warm/cold sleep through shared clocks and custody; keeping their wake and interruption rules together preserves one authority path.",
     "ouroboros/observability.py": "Owns forensic call and blob storage, exact-version readers and result-reference custody; graph traversal is independently owned by source_retention.",
+    "ouroboros/owner_pause.py": "The existing launch-admission owner keeps ordinary tool and delegated-start claims under the same Pause boundary, with positive pre-effect contention retried outside its holds and no replay of handed work.",
     "ouroboros/preflight_runner.py": None,
     "ouroboros/presence_runner.py": "Presence turn admission, durable retry identity and transport custody remain one owner; separating them now would duplicate the gate and receipt seam.",
     "ouroboros/project_dialogue.py": "Shrank INTO the band from 1587 lines: the dead authored_root_summary writer was removed with the old dialogue memory writer; no new content.",
@@ -163,6 +164,7 @@ BAND_PATHS = {
     "ouroboros/tools/browser.py": None,
     "ouroboros/tools/chronicle.py": "Account and selection writers and exact revision reads extend the existing chronicle tool surface and its actor provenance rules.",
     "ouroboros/tools/commit_gate.py": "Grew INTO the band by the review-wave fix binding the actor reference (delivery class) into the commit review contract fingerprint \u2014 same-module contract identity, splitting it would separate the fingerprint from its gate.",
+    "ouroboros/tools/control_delegation.py": "Keeps delegation rights and durable child-count semantics in their existing owner; explicit contention propagation preserves the same unsent scheduler operation and parent limits.",
     "ouroboros/tools/control_routing.py": "One owner for promote, route, and steer receipts; this change shares objective provenance instead of duplicating per-route logic.",
     "ouroboros/tools/control_scheduling.py": "The existing subagent scheduling transaction owns validation, source-policy inheritance, preparation, rollback and emission. The declared-source field is carried through those existing phases without a second scheduler; the module remains one admission owner.",
     "ouroboros/tools/control_task_results.py": "serial addressed turns: await_messages (the mailbox wait, its window bounds and catalog entry) lives beside wait_task/wait_tasks, whose transport-wait peek and cache-horizon note it shares; splitting the three waits would separate one reader from its consumers",
@@ -188,6 +190,7 @@ BAND_PATHS = {
     "skills/telegram/plugin.py": None,
     "skills/telegram/scripts/companion.py": None,
     "skills/telegram/scripts/sidecar.py": None,
+    "supervisor/events_budget.py": "Entered the band from 1000 lines (#1716): the owner's held-row selection completes a member's consumed Resume on its own fence only after every refusal it checks, then names the owner-Pause latch that member now passes; both stay at the one place a held row is released, beside the authority snapshot they compare.",
     "supervisor/events_task_done.py": "Entered the band from exactly 1000 lines with the #1154 terminal-projection continuation and the #1087 shared warning fold: the terminal dispatch now hands both halves of a root's owed projection to one settlement owner and reads child warnings from the shared normalized projection instead of a second execution-axis copy. Shrink-only from here.",
     "supervisor/queue_snapshot.py": "Entered the band from exactly 1000 lines with the owner-latch restore rule: a parked owner marker's latch is read from its queue root's durable owner fence (released raises none, closed raises the current fence, unknown authority keeps the marker's latch) beside the root-row rebuild that already reads that fence, so one restore owner decides every parked-root latch. Shrink-only from here.",
     "supervisor/queue_transitions.py": "F2.2 cancel/custody organ: the owner-stop campaign closure (_close_campaign_after_owner_stop, reference row 970) moved in from the hot events monolith to live beside stop_evolution_tasks - one honesty rule, one owner; 1016 lines, shrink-only from here",
@@ -220,6 +223,7 @@ BAND_PATHS = {
     "tests/test_llm_provider_routing.py": "Entered the band from 1000 lines: the issue #468 shape-first reasoning classifier added its single-form/roster/mixed-artifact unit table, the gap-merge cases against the owner provider policy, and the pin-telemetry guards beside the dispatch and reroute tests they constrain.",
     "tests/test_loop_transport_wait.py": "Contract suite for the transport-wait episode: classification, custody, round-level wait, terminals, and the final-review regression pins live together as one coherent surface.",
     "tests/test_managed_review_subject.py": "Lane L-review contract suite: the managed resolution-delta subject (gate/advisory surfaces, M0 fallback), Q25-A admission, Q28-A yield outcomes and enforcement-honest advisory texts grew past 1000 across the adversarial fix round; one subject, one suite.",
+    "tests/test_mcp_client.py": "MCP client compatibility and canonical transport consumers remain together to exercise shared discovery and call semantics.",
     "tests/test_native_tool_round_executor.py": "One suite per executor contract: the native tool-round episode's bounds, floors, custody facts and delivery shapes are one behaviour pinned together; split at the next natural seam (custody vs bounds), not by size.",
     "tests/test_nested_rights_depth.py": "Nested-rights depth suite shrank into the band when the semantic duplicate-gate stubs left (#884); one contract, one file; shrink next touch.",
     "tests/test_observability_outcomes_v2.py": None,
@@ -282,5 +286,5 @@ BYTE_BASELINE_DEBT = {
 }
 
 BYTE_DEBT = {
-    "tests/test_devtools_benchmarks.py": 326526,
+    "tests/test_devtools_benchmarks.py": 326504,
 }

@@ -31,7 +31,7 @@ CLAUDEXOR_ADMISSION_POLL_SEC = 0.15
 OPENROUTER_DEFAULTS = {
     "main": "google/gemini-3.8-flash",
     "heavy": "",
-    "light": "openai/gpt-5.6-luna",
+    "light": "openai/gpt-6-luna",
     "vision": "",
     "consciousness": "",
     "fallback": "openai/gpt-5.6-luna",
@@ -45,12 +45,12 @@ OPENROUTER_DEFAULTS = {
 OPENROUTER_REVIEW_DEFAULTS = {
     "triad": (
         "google/gemini-3.8-flash",
-        "openai/gpt-5.6-terra",
-        "anthropic/claude-opus-5",
+        "openai/gpt-6.1-sol",
+        "anthropic/claude-opus-5.5",
     ),
+    # Scope and advisory are the retired lanes' values as they shipped, read only by the
+    # retired-key tolerance; the factory pool is the triad (``factory_review_rows``).
     "scope": ("openai/gpt-5.6-terra",),
-    # Routed catalog id (the retired Claude-SDK spelling migrated same-model);
-    # without provider credentials the advisory gate records an audited bypass.
     "advisory": "anthropic/claude-sonnet-5",
 }
 
@@ -231,10 +231,6 @@ SETTINGS_DEFAULTS = {**UPDATE_SETTINGS_DEFAULTS,
     "OUROBOROS_ONBOARDING_COMPLETED_AT": "",
     # Pre-commit review enforcement: advisory | blocking
     "OUROBOROS_REVIEW_ENFORCEMENT": "advisory",
-    # Native tool-round reviewer episode transcript CEILING (chars); the effective
-    # bound is derived from the reviewer window (review_native_episode.py); a
-    # surface's declared mandatory reading may lift it up to the window. No round cap.
-    "OUROBOROS_REVIEW_NATIVE_MAX_TRANSCRIPT_CHARS": "900000",
     # Auto-grant reviewed-skill requests by default; grants stay bound to the
     # reviewed content hash and editing a skill still invalidates them.
     "OUROBOROS_AUTO_GRANT_REVIEWED_SKILLS": "true",
@@ -386,7 +382,10 @@ RETIRED_SETTING_KEYS: tuple[str, ...] = (
     # window deletes it rather than carrying the ghost another minor.
     "OUROBOROS_SOFT_TIMEOUT_SEC",
     "OUROBOROS_HARD_TIMEOUT_SEC",
-    "OUROBOROS_REVIEW_NATIVE_MAX_ROUNDS",  # a ceiling on rounds; bounds are transcript/deadline/ledger
+    "OUROBOROS_REVIEW_NATIVE_MAX_ROUNDS",  # execution retains deadline and ledger limits
+    # Serialized characters are diagnostic, never a native-review admission limit.
+    # Retire every stored value without inferring whether it was owner-selected.
+    "OUROBOROS_REVIEW_NATIVE_MAX_TRANSCRIPT_CHARS",
     "OUROBOROS_BG_MAX_ROUNDS",  # a wake is an ordinary Main turn: the per-task cost cap (+ any OUROBOROS_MAX_ROUNDS) bounds it
     # The effort range: evolution tasks and consciousness wakes start at its top (EFFORT_RANGE_RETIRED_SETTING_KEYS).
     "OUROBOROS_EFFORT_EVOLUTION", "OUROBOROS_EFFORT_CONSCIOUSNESS",

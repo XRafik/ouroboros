@@ -7,11 +7,13 @@ patch, ``closed`` after). A pending start is the owner-held ``custody_open`` row
 ``custody_refused`` so the id's fate stays answerable. The task-scoped facts the evidence
 reader needs without a run (the nudge stamp, a blocked attempt, patch verdicts) are the
 ``custody_marks`` row of the task. Closing a run also owes an addressed terminal-result
-refresh; its receipt travels in ``delegated_runs`` until that refresh lands.
+refresh; its receipt travels in ``delegated_runs`` until that refresh lands. A retained output
+that lands after its run settled owes that receipt again (#1573): the receipt publishes it.
 
 ``publish`` is ONE ``BEGIN IMMEDIATE``: the reduced rows and the event's outbox row commit
 together; the chain append follows, and the outbox row is deleted only once the append
-confirmed. ``fold`` is the importer's single pass over the retained chain.
+confirmed; a re-owed receipt is then refreshed outside any transaction. ``fold`` is the
+importer's single pass over the retained chain.
 """
 from __future__ import annotations
 
@@ -47,8 +49,19 @@ def _decode(raw):
     return entry
 
 
+def collection_pending(entry) -> bool:
+    """Applicable technical duties on an observed terminal, independent of money or disposition alone."""
+    if entry is None:
+        return False
+    capture = bool(entry.execution_root or entry.resource_ref.get("workspace_kind") == "directory")
+    return bool(entry.terminal_source and (not entry.ledger_recorded or not entry.settled
+        or not entry.output_source or not entry.output_complete
+        or entry.output_terminal_sha != entry.terminal_source.get("sha256")
+        or (capture and not entry.patch_captured and not entry.patch_disposed and not entry.superseded_by)))
+
+
 def _held(entry) -> bool:
-    return (not entry.settled or entry.project_owned
+    return (not entry.settled or entry.project_owned or collection_pending(entry)
             or ((entry.snapshot_id or (entry.resource_ref.get("workspace_kind") == "directory"
                                       and entry.resource_ref.get("strategy") == "copy"))
                 and not entry.patch_disposed))
@@ -62,7 +75,8 @@ def _decode_all(rows: Dict[str, Dict[str, Any]]):
 def runs(root, where: str = "", params: tuple = ()):
     """Custody selected by typed columns (all runs when unfiltered)."""
     with store.open_store(root, write=False) as txn:
-        return _decode_all(txn.custody_rows(where, params))
+        raw = txn.custody_raw_rows(where, params)
+    return _decode_all({rid: json_loads(text) for rid, text in raw.items()})
 
 
 def run(root, run_id: str):
@@ -136,7 +150,8 @@ def task_snapshot(root, task_id: str):
 
     mine = str(task_id or "")
     with store.open_store(root, write=False) as txn:
-        runs_by_id, requests = txn.custody_rows("task_id=?", (mine,)), _pending_rows(txn)
+        raw, requests = txn.custody_raw_rows("task_id=?", (mine,)), _pending_rows(txn)
+    runs_by_id = {rid: json_loads(text) for rid, text in raw.items()}
     requests = [row for row in requests if str(row.get("task_id") or "") == mine]
     return {"runs": _decode_all(runs_by_id), "pending": pending_invocations(root, rows=requests)}
 
@@ -185,9 +200,10 @@ def snapshot(root, closed: bool = True):
 
 
 
-def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Dict[str, Dict[str, Any]]) -> None:
+def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Dict[str, Dict[str, Any]]) -> str:
     """Apply ONE event to the rows it touches (``state`` holds the decoded runs the caller
-    loaded; a PROJECT_RETIRED needs its project's siblings, a STARTED its invocation row)."""
+    loaded; a PROJECT_RETIRED needs its project's siblings, a STARTED its invocation row).
+    Returns the owner whose closing receipt a late retained output re-owed ("" otherwise)."""
     from ouroboros import delegate_custody as c
 
     kind, rid, iid = str(event.get("type") or ""), str(event.get("run_id") or ""), str(event.get("invocation_id") or "")
@@ -205,18 +221,26 @@ def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Di
             state[rid].request_event = dict(request["request"])
             group = request["request"].get("billing_group")
             state[rid].billing_group = dict(group) if isinstance(group, dict) else {}
+    # A retained output (its canonical ``source``) staged after the run settled: only the closing
+    # receipt publishes it, and an earlier refresh may already have acknowledged that receipt.
+    late = rid if kind == c.OUTPUT_SPILLED and event.get("staged") and isinstance(event.get("source"), dict) else ""
+    owed = ""
     for run_id, entry in state.items():
         facts = vars(entry)
-        if facts != before.get(run_id):
+        changed = facts != before.get(run_id)
+        if changed:
             txn.put_custody(run_id, facts, state=HELD if _held(entry) else CLOSED)
-            if entry.settled and entry.task_id:
-                # The closing receipt and the custody row commit together; a later fact on a
-                # settled run (its patch disposition, its output ack) refreshes the receipt.
-                debt = txn.get_row("delegated_runs", entry.task_id)
-                if debt is not None or (run_id == rid and kind in (c.SETTLED, c.CLOSED_ABSENT)):
-                    debt = dict(debt or {})
-                    receipts = {**debt.get("closed_runs", {}), run_id: facts}
-                    txn.put_row("delegated_runs", entry.task_id, {**debt, "task_id": entry.task_id, "closed_runs": receipts})
+        if entry.settled and entry.task_id and (changed or run_id == late):
+            # The closing receipt and the custody row commit together; a later fact on a
+            # settled run (its patch disposition, its output ack) refreshes the receipt, and a
+            # late retained output owes it again (an identical re-wait included).
+            debt = txn.get_row("delegated_runs", entry.task_id)
+            if debt is not None or (run_id == rid and kind in (c.SETTLED, c.CLOSED_ABSENT)) or run_id == late:
+                debt = dict(debt or {})
+                receipts = {**debt.get("closed_runs", {}), run_id: facts}
+                txn.put_row("delegated_runs", entry.task_id, {**debt, "task_id": entry.task_id, "closed_runs": receipts})
+            if run_id == late:
+                owed = entry.task_id
     if iid and (kind == c.STARTED or (kind == c.START_FAILED and event.get("definite") is True)):
         request = txn.get_row("custody_open", f"invocation:{iid}")
         txn.delete_row("custody_open", f"invocation:{iid}")
@@ -226,6 +250,7 @@ def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Di
         mark = marks_by_task.setdefault(tid, txn.get_row("custody_marks", tid) or {"task_id": tid})
         _mark(mark, event)
         txn.put_row("custody_marks", tid, mark)
+    return owed
 
 
 def _mark(mark: Dict[str, Any], event: Dict[str, Any]) -> None:
@@ -269,19 +294,39 @@ def _loaded(txn, event: Dict[str, Any]) -> Dict[str, Any]:
     return state
 
 
-def publish(root, event: Dict[str, Any]) -> bool:
+def publish(root, event: Dict[str, Any], *, propagate_contention: bool = False) -> bool:
     """Returns whether custody + outbox COMMITTED; append failure does not undo custody.
     A failed append keeps the outbox for the next flush, so the chain never leads the store.
     Transaction/append ordering: module docstring."""
     try:
         with store.open_store(root, write=True) as txn:
-            _reduce(txn, event, _loaded(txn, event), {})
+            owed = _reduce(txn, event, _loaded(txn, event), {})
             txn.outbox_put(event)
     except store.StoreError as exc:
+        if (propagate_contention and isinstance(exc, store.StoreBusy) and exc.reason == "contention"
+                and getattr(exc, "rollback_confirmed", None) is not False):
+            exc.custody_not_committed = True  # Only this pre-COMMIT boundary grants retry.
+            raise
         log.warning("Custody %s not recorded under %s (%s)", event.get("type"), root, type(exc).__name__)
         return False
     flush_outbox(root)
+    if owed:
+        _refresh_owed_receipt(root, owed)
     return True
+
+
+def _refresh_owed_receipt(root, task_id: str) -> None:
+    """The addressed refresh of a receipt a late output re-owed, after COMMIT and outside any
+    transaction: a terminal owner publishes the output now; a running owner keeps the receipt
+    until its terminal write. A failure leaves the committed receipt owed for the sweep and the
+    boot backfill, and never turns the committed custody fact into a failed emit."""
+    from ouroboros.delegate_terminal import refresh_terminal_reconciliation
+
+    try:
+        refresh_terminal_reconciliation(root, task_id, trigger="output_spilled")
+    except Exception:
+        log.warning("Custody post-commit bookkeeping failed for %s; its closing receipt stays owed",
+                    task_id, exc_info=True)
 
 
 CHAIN_BOUNDARY = "custody_chain_offset"  # meta: the chain's length after this store's last own row

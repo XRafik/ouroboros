@@ -274,6 +274,8 @@ def _child_env(
     env["OUROBOROS_SETTINGS_PATH"] = str(pathlib.Path(drive_root) / "settings.json")
     env["OUROBOROS_DATA_DIR"] = str(drive_root)
     env["OUROBOROS_REPO_DIR"] = str(repo_dir)
+    if os.environ.get("OUROBOROS_PORT_FILE"):  # the hosting server's relocated endpoint, for its runtime info
+        env["OUROBOROS_PORT_FILE"] = os.environ["OUROBOROS_PORT_FILE"]
     env["OUROBOROS_EXTENSION_PROCESS_CHILD"] = "1"
     for key in _RUNTIME_MODE_ENV_KEYS:
         if os.environ.get(key):
@@ -449,8 +451,8 @@ def _child_process(
         cap_bytes=_INPUT_CAP,
         overflow_error="extension child protocol input exceeded safety cap",
     )
-    env = dict(env)
-    env["OUROBOROS_EXTENSION_IMPORT_ROOT_BASE"] = str(import_root_base)
+    from ouroboros.process_custody import lifeline_parent_env
+    env = {**env, "OUROBOROS_EXTENSION_IMPORT_ROOT_BASE": str(import_root_base), **lifeline_parent_env()}
     cmd = [_child_python(), "-m", "ouroboros.extension_process_runner", str(input_path)]
     kwargs: Dict[str, Any] = {
         "cwd": str(repo_dir),

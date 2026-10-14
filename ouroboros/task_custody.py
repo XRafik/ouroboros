@@ -75,10 +75,11 @@ import shutil
 import uuid
 from typing import Any, Callable, ContextManager, Dict, Iterator, List, Optional, Tuple
 
+from ouroboros.owner_mailbox import _MAILBOX_DIR as _OWNER_MAILBOX_DIR
+from ouroboros.owner_mailbox import _mailbox_path
+from ouroboros.store import StoreError
 from ouroboros.task_results import load_task_result, validate_task_id, write_task_result
 from ouroboros.utils import utc_now_iso
-from ouroboros.owner_mailbox import _mailbox_path, _MAILBOX_DIR as _OWNER_MAILBOX_DIR
-from ouroboros.store import StoreError
 
 log = logging.getLogger(__name__)
 
@@ -151,6 +152,11 @@ def custody_anchor(drive_root: Any, task_id: str) -> pathlib.Path:
     drive), so every writer of one mailbox takes the same lock.
     """
     validate_task_id(task_id)
+    return canonical_owner_root(drive_root)
+
+
+def canonical_owner_root(drive_root: Any) -> pathlib.Path:
+    """``custody_anchor``'s layout rule alone, for writers without a task id."""
     root = pathlib.Path(drive_root).resolve(strict=False)
     if root.name == "data" and len(root.parents) > 3 and root.parents[1].name == "headless_tasks" \
             and root.parents[2].name == "state":
@@ -663,7 +669,11 @@ def _occupants(drive: pathlib.Path, task_id: str) -> List[str]:
         ids.update(task_ids(drive))
     except StoreError as exc:
         raise _Retained("drive_occupant_unknown") from exc
-    for directory, suffix in ((drive / _ARTIFACTS_DIR, ""), (drive / _MAILBOX_DIR, ".jsonl")):
+    # Legacy result files can remain beside CURRENT after import or an older
+    # body writes them. Their occupants participate in both settlement censuses;
+    # an unrepresented/invalid name is not permission to discard that drive.
+    for directory, suffix in ((drive / "task_results", ".json"),
+                              (drive / _ARTIFACTS_DIR, ""), (drive / _MAILBOX_DIR, ".jsonl")):
         if not directory.is_dir():
             continue
         for entry in directory.iterdir():
@@ -918,8 +928,11 @@ def _carry_row_inputs(canonical: pathlib.Path, source: pathlib.Path, task_id: st
     closure). Each member verifies against the captured identity; a canonical file with other
     bytes is never replaced and fails the store. Returns the canonical, resolvable projection;
     a closure neither store supplies whole raises."""
-    from ouroboros.artifacts import (attachment_manifest_projection, materialize_inherited_attachment_manifest,
-                                     resolve_attachment_manifest)
+    from ouroboros.artifacts import (
+        attachment_manifest_projection,
+        materialize_inherited_attachment_manifest,
+        resolve_attachment_manifest,
+    )
 
     failure: Optional[Exception] = None
     for owner in (canonical, source):

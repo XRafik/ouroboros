@@ -9,11 +9,13 @@ export function createChatReadingPosition({ visible, alive, ready, feed, anchors
     // Every room opens following its newest message (owner decision 2026-10-05).
     let intent = null;
     // dragging: 'held'/'released' feed scrollbar, or 'owed' to a downward gesture's animation.
-    let approximate = false, dragging = '', claimed = null, scrolls = 0;
+    let approximate = false, dragging = '', claimed = null, scrolls = 0, arriving = null;
     const state = {
         top: 0,
         stick: true,
         get generation() { return generation; },
+        // The unread opening still owed (`claim(true)`): its claim's generation, else null.
+        get arriving() { return arriving === generation ? arriving : null; },
         get pending() { return Boolean(intent); },
         get target() { return intent; },
         get approximate() { return approximate; },
@@ -80,9 +82,10 @@ export function createChatReadingPosition({ visible, alive, ready, feed, anchors
         },
         /** An explicit navigation (↓) that awaits history before it moves: the
          * reader's own later gesture supersedes it, even one a bounded box absorbs. */
-        claim() {
+        claim(arrive = false) {
             state.cancel();
             const token = claimed = generation;
+            arriving = arrive ? token : null;
             return () => token === generation;
         },
         bindGestures(navigate) {
@@ -142,9 +145,10 @@ export function createChatReadingPosition({ visible, alive, ready, feed, anchors
                 const follow = state.stick, absorb = () => { state.stick = follow && direction > 0 && state.nearBottom(); };
                 if (nested) {
                     // Box scrolling also ends an earlier feed gesture's queued frame and
-                    // the scrolls it still owes, though not a scrollbar drag still held.
+                    // the scrolls it still owes, though not a scrollbar drag still held,
+                    // and an unread opening still owed after its claim reached the present.
                     gestures++; if (dragging !== 'held') dragging = '';
-                    if (intent || approximate || claimed === generation) state.cancel();
+                    if (intent || approximate || claimed === generation || arriving === generation) state.cancel();
                     absorb();
                     return;
                 }
@@ -196,6 +200,21 @@ export function createChatReadingPosition({ visible, alive, ready, feed, anchors
             dragging = '';
             if (!intent) intent = { scrollTop: state.top, stick: state.stick, historyAnchor: anchors.serialize() };
             state.position();
+        },
+        /** An unread room opened (`claim(true)`) lands once on its newest message, `measure()`
+         * px from the bottom, unless the reader moved first; `token` is that opening's
+         * own claim, so a superseded one spends nothing. Nothing to move (on screen
+         * there, unknown, never reached) leaves the claim's own navigation in charge. */
+        land(measure, token) {
+            if (arriving !== generation || token !== generation) return;
+            arriving = null;
+            if (!visible()) return;
+            feed.scrollTop = feed.scrollHeight;
+            const offset = measure();
+            if (!offset) return;
+            state.cancel();
+            feed.scrollTop += offset;
+            state.top = feed.scrollTop; state.stick = false; state.remember(true); updateButton();
         },
         followAfterLayout() {
             const token = generation;

@@ -13,8 +13,11 @@ Authority split:
 
 Shared values and control recipes live in `web/ui.css`, loaded before page
 styles by both the SPA and the served onboarding document. Page styles own
-composition, not another copy of the shared palette. This file names roles;
-it does not copy an inventory.
+composition, not a second shared palette. This file names roles, not an inventory.
+
+**Visual intent:** airy, not faint: hierarchy, rhythm and light material, not
+paler or smaller text. Colour identifies at reading contrast; fill conveys
+importance. Identity marks stay subordinate; pressable looks belong to destinations.
 
 The shell offers **Settings → Appearance → Light / Dark / System**. New clients
 start on System; explicit Light or Dark remains pinned. The shared semantic
@@ -244,49 +247,49 @@ Enter as a line break.
 
 ### Composer owner controls
 
-Two controls in the composer's pill row write a global owner setting rather than
-a fact about the next message: the Nano/Low/Max context mode and the **effort
-range**. Both save at once through their owner endpoint, show the server's refusal
-as a toast and read the one saved value back from `/api/state`, so Main and every
-Project composer show the same thing; the composer is the only place the range is
-shown or edited (Settings has no effort section).
+Two controls in the composer's pill row write a global owner setting rather than a
+fact about the next message: the context mode and the **effort range**. Both save at
+once through their owner endpoint, show the server's refusal as a toast and read the
+one saved value back from `/api/state`, so Main and every Project composer agree;
+Settings has no effort section.
 
-The effort range is a round button (the pills' height) wearing a ring glyph — a
-300° arc whose band is the minimum..maximum and whose dot is the recommended
-level. It opens **inline**, never as a dropdown, into the seven-level strip (None ·
-Low · Medium · High · X-High · Max · Ultra) with two brackets and the recommended
-pill, and nothing else: no title word, no reset. A segment is its word plus
-`--effort-seg-pad` on each side; the pill covers its whole segment with the word
-centred, and the band, the pill and the brackets share one vertical inset, so their
-edges meet. Every handle pushes the ones it meets: a bracket carries the
-recommended level along, the pill carries a bracket past which it moves, a pushed
-bracket stays where it was pushed, and the brackets never cross. A tap inside the
-range sets the recommended level, a tap outside moves the nearer bracket; a drag
-keeps the grab offset and shows whole levels throughout. A stored tier outside the
-seven (`minimal`) shows at the nearest owner tier and is rewritten only when its own
-handle moves.
+Each is a **capsule** of the pills' height — ring, name, value: `Context Max`,
+`Effort X-High`. Closed, Effort names only the recommended level; its ring (a 300°
+arc: band minimum..maximum, dot recommended) and the button's name carry the range.
+Context's ring is three arcs, the chosen one lit: one of three modes, never a fill
+level or capacity. A capsule opens **inline**, never as a dropdown, one at a time;
+its value yields to the strip. Context's is Nano · Low · Max under a glass thumb; a
+choice posts at once and the strip waits for the answer (lowering only while idle,
+outside Cyber Pro). Effort's: seven levels, two brackets, the recommended pill. A
+segment is its word plus `--capsule-seg-pad` a side; the pill covers its segment;
+band, pill and brackets share one vertical inset. Every handle pushes the ones it
+meets, a pushed bracket stays, the brackets never cross. A tap inside the range sets
+the recommended level, outside it the nearer bracket; a drag keeps the grab offset
+on whole levels. A stored `minimal` shows at Low until its handle moves.
 
-**The open strip stays on the composer's line.** It sits beside the pills when it
-fits there (the padding may tighten to `--space-1`); otherwise Swarm and
-Nano/Low/Max step aside while it is open, and it appears and leaves at once with
-them (the padding may tighten to 3 px, the pill's corners tightening with it so it
-still covers its word); only when
-even that does not fit does the strip scroll inside itself, fading on the side that
-hides levels, while the round button stays put. The fit is measured from the row,
-so a Project pane, a phone and a translation need no breakpoint.
+**A mark keeps from a rounded end the clearance it keeps from the straight edges.**
+A pill (the thumb, the recommended pill) is concentric with the capsule, so the band
+inset suffices; a square bracket at the last level would graze the curve, so
+Effort's end gutter also clears it. The gutter is measured into the fit and outlasts
+scrolling and dragging.
 
-**Hover is an accelerator; the press always works.** With a hovering fine pointer
-the strip opens about 160 ms after the pointer arrives and closes a second after it
-leaves a 32 px zone around the control, unless a press pinned it; the same press
-unpins. Touch and keyboard use the press alone: Enter or Space opens and focuses the
-recommended handle, arrows and PageUp/PageDown step a handle, Home and End take it
-to the ends, Esc closes and returns focus to the button, an outside press closes.
-The three handles are sliders whose value text names the level; closed, they leave
-the tab order and the button's name states the range. A change saves when the
-gesture ends, saves run one after another with the last winning, and Send waits
-for a pending save so the next root starts at the level the owner just chose; a
-refused save keeps the draft, says why and returns the control to the saved value —
-unsaved values are never shown as saved.
+**The open strip stays on the composer's line**: beside the others when it fits
+(padding down to `--space-1`), else alone while they step aside (down to 3 px, the
+pill's corners tightening; the name and divider yield first), last scrolling inside
+itself, faded where levels hide. A closed line too narrow drops the names, then
+ellipsizes the longest values, never rings. All is measured, so no breakpoint.
+
+**Hover is an accelerator; the press always works.** With a hovering fine pointer a
+capsule opens ~160 ms after arrival (not while the other is open) and closes a
+second after it leaves a 32 px zone unless a press pinned it; the press unpins.
+Touch and keyboard use the press: Enter or Space opens onto the recommended handle
+or the chosen mode; arrows step a handle (PageUp/PageDown too) or choose the next
+mode, Home/End reach the ends; Esc closes and returns focus to the head; an outside
+press closes. Handles are sliders naming their level; closed, they leave the tab
+order. An effort change saves when the gesture ends, saves run in order (last wins),
+and Send waits for a pending one so the next root starts at that level; a refused
+save keeps the draft, says why and returns to the saved value — unsaved values are
+never shown as saved.
 
 ### `.muted`
 
@@ -334,7 +337,7 @@ derived from whatever generic opacity happens to sit on the element.
 The connected Chat header says `Starting…` until a complete server-ready
 observation confirms the supervisor can assign work; a live socket alone means
 only that the UI transport is open. `Online` is reserved for a ready, idle
-runtime, while known queued or active work retains its own factual label. A
+runtime, while known queued, active or finalizing work keeps its own factual label. A
 durably accepted incoming message likewise proves acceptance, not that its
 task has begun or that a model has read it.
 
@@ -554,28 +557,26 @@ revision; this counter is not a guarantee of delivery durability.
   them. Where a row is shown decides, never its kind: an incident shown alone as
   a System message counts, one shown in a card does not. A placed row is card
   content even where the page has not loaded its card and shows it alone.
-- **Read:** only once the newest message is painted in the visible room with
-  the reader at it — on screen, clear of the header and composer, normally at
-  the bottom of the conversation with nothing newer to load. Being at the bottom
-  is not enough when later card rows or the owner's own messages pushed it above
-  the fold. Opening a room, or new messages arriving, while the reader is
-  elsewhere leaves the dot; scrolling to the newest message, `Scroll to latest
-  message`, or showing the page or window again clears it. Collapsed cards need
-  not be expanded. A question opened from its Main mirror is shown first; landing on it
-  is not reading the newer messages below it. The newest message is the one that
-  arrived last: a late answer keeps the time it was written and takes that place
-  in the conversation, so it is read only once it is itself on screen, clear of
-  the header and composer — above the loaded messages, after `Load more history` shows
-  it — and never while the room cannot tell which message arrived last, as
-  while the newest line of the conversation is still being written. A
-  damaged persisted row can leave this unknown until the history is repaired or
-  a newer standalone message arrives; while the unread room is open, existing
-  state refreshes recheck the source. A message that later card rows and the
-  owner's own messages pushed past the newest page is read the same way. A room
-  holding no standalone message is read at the bottom once the history reader
-  reaches its clean start, through the bounded search or `Load more history`.
-  An old child's final whose lineage is available only on another history page
-  can also keep the dot after the readable conversation has been shown.
+- **Read:** only after a covering history read paints the newest-arrived message
+  on screen in the visible room, clear of header and composer. Being at the
+  bottom is insufficient when later cards or owner messages buried it. Opening
+  an unread room therefore lands on that standalone message wherever it lies:
+  until a loaded page holds it, the opening reads older pages (the page limit
+  bounds what stays loaded, not this reach); a read room opens at the bottom.
+  One opening intent, ended by a gesture (in a bounded box too), a question,
+  leaving room or window or a failed page (bottom and Retry), never a jump
+  on later reads or new arrivals. A question opened from its Main mirror has
+  priority; showing it does not read newer messages elsewhere. Collapsed cards
+  need not open. The newest message is the one that arrived last: a late answer
+  keeps its written time and chronological place. While reading elsewhere the dot
+  remains until that message is shown by scrolling, `Scroll to latest message`,
+  or returning to the page/window; opening alone never clears it. Unknown newest
+  arrivals (an unfinished line, a damaged row) acknowledge nothing and are never
+  searched for; state refreshes recheck an open unread room until history is
+  repaired or newer standalone content arrives. A room with no standalone
+  message is read at the bottom only once its clean start is reached: by bounded
+  search, the opening or `Load more history`. An old child's final whose
+  lineage appears only on another page can keep the dot once the room is shown.
 - **Several clients** share one read cursor that only moves forward: a room read
   on one client stops showing the dot on the others at their next state
   refresh, and nothing read is shown unread again.
@@ -591,26 +592,28 @@ therefore about intents.
 - A **reference** points at an entity that exists in the product and goes there
   when pressed. A Project is referred to by the Project reference — the Projects
   glyph, the Project's name, `↗` — and by nothing else, wherever content points
-  at it: a bound task card's footer, a converted card, a System lifecycle row,
-  the owner's routed message, a mirrored answer, a mirrored question's head.
-  `web/modules/project_reference.js` builds it and alone raises
+  at it. `project_reference.js` builds it and alone raises
   `ouro:open-project`; a caller chooses a layout (`inline`, `bar`, `footer`),
   never a label or a class. It names the Project wherever its row carries the
-  name; a Project that was never named, and the owner's routed message (whose
-  caption names the destination), read `Project`, never an id. The handoff's separate phase chip states observed activity; the reference
-  itself makes no running claim. Its accessible name
-  says in words what the glyph and the arrow say in pixels (`Open project <name>`),
-  and nothing depends on hover.
+  name, even beside same-named work; a Project never named, and the owner's
+  routed message (whose caption names the destination), read `Project`, never an
+  id. It claims no activity (an entry's status chip does). Its accessible name
+  says in words what the glyph and the arrow say in pixels (`Open project
+  <name>`), and nothing depends on hover.
+- **Its form follows the surface's job.** It is a Project work entry's
+  destination row and a bound task card's wide footer (the body stays the
+  task's); under a mirrored answer, the owner's routed message or a System
+  lifecycle row, a reading-size capsule in the shared `createSystemMessageActions`
+  row (token spacing, wrapping, focus-ring clearance, never a clipped line: a
+  composition, not a card framework or global button-margin rule); in a question
+  head, a meta capsule. Long names: two lines in entry/footer, ellipsis in
+  capsules, no smaller type; accessible names stay whole.
 - A **command** is a button: it changes or confirms something, or goes to a
   place that is not such a reference (`Load older messages`, `Open widgets`).
   Tabs, toggles, menus and the navigation list keep their own roles; a status
   chip states a fact and is not a destination.
-- An intent that will be drawn in a second place gets its door first.
-  `docs/inventories/UI_CONTROL_TEXT_INVENTORY.md` lists the fixed text of the
-  hand-written buttons sorted by text (a label passed to a factory is that
-  factory's business), and the `ouro:*` events with the modules that raise
-  them, so a diff that adds a button shows its siblings in the same hunk. Read
-  them: "it reuses a shared primitive" does not show that two controls agree.
+- An intent that will be drawn in a second place gets its door first (siblings:
+  `docs/inventories/UI_CONTROL_TEXT_INVENTORY.md`).
 
 ### Chat authorship and System rows
 
@@ -634,6 +637,10 @@ reminder, a skill notice). It is one short typed mark in owner words, never a
 paragraph or text written for a model. `tests/test_host_message_voice.py` keeps
 every host type stamped as a literal at its send site in one of these classes, with
 its counted producer sites.
+
+Rollback transition receipts (`rollback_notice`) and refused or abandoned storage
+switches (`storage_switch_notice`) report the runtime's current or pending version
+state. They are runtime-state facts, not model speech or task completion.
 
 Language follows the same line. The install's interface language
 (`OUROBOROS_UI_LANGUAGE`, Settings → Appearance → Language) translates chrome and
@@ -819,11 +826,19 @@ preference when it opens and on every reconnect; there is no file watcher.
   The root keeps primary title ink at weight 500, children secondary ink at
   400. Nested frames preserve real ancestry; their opaque secondary surface
   avoids accumulating translucent white tints at greater depth.
-- **An executor label states its evidence.** A progress actor is labelled
-  `last update`, with requested model or `model unconfirmed`; it is not proof
-  of current computation. Settled observed models are separate historical
-  facts, not a claim that their union is the current actor. Missing identity
-  stays unconfirmed; marks and configured routes never manufacture execution.
+- **An executor label names the helper and states only exceptions.** The
+  ordinary case is the bare name — an assigned route beside the card's own
+  `Working` chip, or every settled run ok; it names the selected helper and is
+  not proof of current computation. A progress actor adds `last update`; a
+  refused pin, no run, runs not settled, failed or unverified runs, unreadable
+  evidence and an undisclosed outcome split qualify it. One priority phrase
+  stays visible; the detail names the other exceptions. Terminal records without
+  run evidence remain explicitly unknown; no promise of a later receipt replaces
+  it. Counts, the model and its source (requested, observed or `model unconfirmed`), spend
+  and access form one detail sentence that the expanded card prints as text,
+  never only a title. Settled observed models are separate historical facts,
+  not a claim that their union is the current actor. Missing identity stays
+  unconfirmed; marks and configured routes never manufacture execution.
 
 A completion notice distinguishes the task's recorded end from the time the
 notification was added. Both dates are absolute local dates outside the answer's
@@ -933,8 +948,8 @@ reconciliation.
 
 A Project keeps its conversation and real nested task cards. One compact pointer
 leads to an unfinished represented root, or the latest represented root when all
-are finished. It occupies one line: it names the card (its coined name, else its
-title) and ellipsizes rather than restating a status headline in full, so the status bar
+are finished. It occupies one line: `Working`, or for ended work still wrapping up its
+outcome beside `Finalizing…`, then the card's coined name (else its title), ellipsized, so the status bar
 never grows into the reading area; the complete text stays on the card itself,
 one click away, not in a mouse-only tooltip. The pointer and status pill share the
 bar; the common history note wraps below them when needed, readable on touch
@@ -1121,22 +1136,24 @@ the rest of the chat surface.
 **Project question mirror.** A Project question the owner has not answered appears in Main as the Project's own quiz card — the same `buildQuizCard` form with the question through the chat markdown pipeline, the options with their details and the `recommended` badge, the stake, the assumption or waiting line, the status and the own-answer field — inside the same assistant bubble. The one addition is the Project reference ("References and actions") in the head beside the `Question` chip: its inline pill (the `--project` tints, the Project name in project ink with `↗`) opens that exact question in its Project, with the card's shared keyboard ring. A long Project name yields first (the chip is capped and ellipsized, its title names the Project whole) so the status keeps its place; a phone column wraps the head. Every lifecycle state reads as it does in the Project: waiting, open, resumed and finished questions stay answerable, and a replaced question stays as a read-only record. An unreadable source keeps what Main already knew; with nothing known the copy says `Status unavailable`, takes no answer and keeps its chip, and a row that cannot carry the form yet shows `Open the original question for its text.` until it can. The first confirmed answer from any source — a press in Main, the Project form or another device, a history or census snapshot — shows the recorded result (the chosen option, `Owner's answer: …`, `You answered`) for five seconds and then removes only the Main copy, through the ordinary message retirement and without moving the reader's viewport; the Project keeps its card. The countdown starts once and later observations never restart it. When focus was inside the copy it stays there while the result shows, then moves to the next Main question, or to the composer for a keyboard owner, never summoning a touch keyboard. A copy that learns its form and its answer in one delivery shows that result for the same five seconds. An answered question never enters Main again: fresh history, a reconnect or a stale open snapshot cannot bring the copy back. Main remembers the lifecycle of a bounded number of questions; a question it no longer remembers mounts a safe unknown copy, whose answer controls appear only after a fresh canonical record confirms it unanswered. A failed, missing or wrong-project canonical read leaves a safe `Status unavailable` copy with its Project chip and no answer controls; the chip opens the original Project form, while a later owned refresh retries the Main copy, so an unavailable read never turns a stale open snapshot into an answerable form and never permanently suppresses a legitimate unanswered question. The mirror and the quiz header share the lifecycle wording above.
 
 **Project work entries.** Creation, transfer and manual conversion share one compact
-Project-colour card, live and on replay: width, border, insets, type and footer.
-The work title leads; status sits beside it in a wide card and above it in a narrow
-one. The sole Project reference uses its available row, ellipsizing only when needed.
-The footer holds the recorded event time and Copy (work title and full Project name).
-A converted card gains its transfer time from the matching receipt, never the current
-clock or an unrelated task; missing time stays absent. Finished conversions keep
-Project colour. There is no System heading or created/transferred caption.
+Project-colour card, live and on replay. The selectable work title leads at weight
+500, status beside it (above when narrow). Below, the sole Project reference fills
+a row beside the event time and Copy (work title and full Project name), above them
+when narrow. Only here does free area press the reference; text stays reading (a
+double click selects a word), controls keep their press, and a drag, a selection
+that press made, a repeat or a modifier never navigates. The entry adds no role, tab
+stop or name.
+A converted card gains its transfer time from the matching receipt, never the clock
+or an unrelated task; missing time stays absent. Finished or not, it keeps
+Project colour, with no System heading or created/transferred caption.
 Structured `task_name` names the work; older history uses its retained task result.
 Creation and transfer keep their event identities and publication eligibility; each
 card follows its work, never the Project's latest unrelated task. Binding proves no
-activity. Task cards, entries and Project indicators share per-task status facts:
-confirmed working/thinking/finalizing can move; queued, paused/pausing, waiting and
-unknown stay still. Motion survives reload and respects reduced motion. A known
+activity. Task cards, entries and Project indicators share per-task status facts and
+motion ("Sidebar activity dots"; pausing stays still too), across reload. A known
 outcome leads beside quiet finalization; an answered/resumed question is not a wait.
 Manual conversion opens its room; agent handoffs do not steal focus. Converted cards
-stay visible, including several from one owner message. Their durable receipt folds
+stay visible, several from one owner message included; their durable receipt folds
 under the visible anchor and returns when it leaves the feed. Matching Started and
 routing references fold only while that anchor is mounted; records and non-browser
 plain text remain. An undurable Main receipt keeps a dashed border and a plain warning;
@@ -1144,8 +1161,6 @@ the binding holds. Genuine initiator work and failures remain visible; folding n
 lends another task's outcome. The later final answer stays a separate message.
 
 **Project completion mirror.** A Project root that ended with Ouroboros's own final answer reaches Main as an ordinary Ouroboros message: that answer through the chat markdown pipeline, in the assistant voice, because the bytes are model-authored — the host stamps the answer on the completion row only for a model-authored final, so the browser never infers authorship. A long answer is folded to about seven lines; the fold is a visual clamp over the complete, selectable text, with a fade only when it really hides something, and never a cut. Under it sits one control, the Project reference ("References and actions"). The durable row and its wire frame stay `role="system"`: like the Project question mirror, this is a browser presentation of model-authored bytes, not a change of the row's author. The message carries no status word, cause sentence, title or duration, so a host verdict on that answer (a warning, an unaccepted review) is not shown in Main: it stays loud on the task's card in the Project, one press away. Copy copies the answer. An ending with no model-authored answer (a provider failure, a stop, preserved output), and every completion row written before the answer rode the row keep the System row, which ends with that same reference: the voice of a row never chooses how the UI points at its Project. One durable row either way: its plain text is unchanged, so the Telegram mirror, Ouroboros's own context and one-ending-one-notification behave as before.
-
-The row under a Project lifecycle row or a routed message is the shared `createSystemMessageActions` composition around the Project reference. It owns token-based space above and below the controls, wrapping and clearance for the focus ring; a control never sits in a clipped/nowrap text line. This is a row composition, not a new card framework or a global button-margin rule.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved task-acceptance PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 

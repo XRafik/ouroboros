@@ -27,19 +27,19 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from ouroboros.secret_masking import (
-    looks_masked_secret as looks_masked_secret,
-)
+from ouroboros.config import get_runtime_mode
+from ouroboros.mcp_headers import mask_headers, validate_headers
+from ouroboros.platform_layer import IS_WINDOWS
+from ouroboros.runtime_mode_policy import mode_has_unrestricted_agency
 from ouroboros.secret_masking import (
     MCP_RESPONSE_ONLY_FIELDS,
     mask_prefixed_secret,
     redact_known_values,
 )
-from ouroboros.mcp_headers import mask_headers, validate_headers
+from ouroboros.secret_masking import (
+    looks_masked_secret as looks_masked_secret,
+)
 from ouroboros.tools.tool_result import ToolResult, _compose_execute_result_result, _replace_tool_result
-from ouroboros.platform_layer import IS_WINDOWS
-from ouroboros.config import get_runtime_mode
-from ouroboros.runtime_mode_policy import mode_has_unrestricted_agency
 from ouroboros.workspace_executor import resolve_process_env, validate_process_env
 
 log = logging.getLogger(__name__)
@@ -108,6 +108,8 @@ class MCPServerConfig:
     secret_values: tuple[str, ...] = field(default=(), repr=False)
     configuration_warnings: tuple[str, ...] = ()
     browser_bridge: bool = False
+    browser_protocol: str = "playwright"
+    browser_skill_binding: tuple[str, str] | None = None
     headers: Dict[str, str] = field(default_factory=dict, repr=False)
 
     def has_auth(self) -> bool:
@@ -431,7 +433,7 @@ def normalize_server_config(
     try:
         known = {"id", "slug", "name", "label", "enabled", "transport", "url", "command",
                  "args", "auth_header", "auth_token", "allowed_tools", "cwd", "env", "env_from_settings",
-                 "browser_bridge", "headers"}
+                 "browser_bridge", "browser_protocol", "browser_skill_binding", "headers"}
         unknown = set(raw) - known
         warnings = ("Fields retained but not applied: " + ", ".join(sorted(map(str, unknown))),) if unknown else ()
         cwd = raw.get("cwd", "")
@@ -444,15 +446,12 @@ def normalize_server_config(
             raise ValueError("fields unsupported by this transport: " + ", ".join(key for key in unused if raw.get(key)))
         if transport == "stdio" and raw.get("auth_header", "Authorization") not in (None, "", "Authorization"):
             raise ValueError("auth_header is unsupported for stdio")
-        browser_bridge = raw.get("browser_bridge", False)
-        if not isinstance(browser_bridge, bool) or (browser_bridge and transport != "stdio"):
-            raise ValueError("browser_bridge must be a boolean and requires stdio")
+        from ouroboros.mcp_chrome_protocol import normalize_browser_entry
+        browser_bridge, browser_protocol, browser_skill_binding = normalize_browser_entry(raw, transport)
         if transport == "stdio":
-            url = ""
             command = _validate_stdio_command(raw.get("command"))
             args = _validate_stdio_args(raw.get("args"))
-            auth_header = "Authorization"
-            auth_token = ""
+            url, auth_header, auth_token = "", "Authorization", ""
         else:
             url = _validate_url(raw.get("url") or "")
             parsed_url = urllib.parse.urlparse(url)
@@ -495,6 +494,8 @@ def normalize_server_config(
         secret_values=secret_values,
         configuration_warnings=warnings,
         browser_bridge=browser_bridge,
+        browser_protocol=browser_protocol,
+        browser_skill_binding=browser_skill_binding,
         headers=headers,
     )
 
@@ -910,7 +911,7 @@ def _tool_result_from_call_result(result: Any) -> ToolResult:
 def _serialize_content_part(item: Any) -> Dict[str, Any]:
     """Best-effort conversion of an MCP content part into a JSON-safe dict."""
     out: Dict[str, Any] = {}
-    for attr in ("type", "uri", "mimeType", "data", "annotations"):
+    for attr in ("type", "text", "uri", "mimeType", "data", "annotations"):
         value = getattr(item, attr, None)
         if value is not None and not callable(value):
             out[attr] = value
@@ -1447,7 +1448,8 @@ class MCPManager:
             timeout = self._tool_timeout_sec
         if resolution.status != "callable":
             return resolution.refusal(prefixed_name)
-        from ouroboros.mcp_task_sessions import CALL_FAILURES, call as scoped_call, failure_result
+        from ouroboros.mcp_task_sessions import CALL_FAILURES, failure_result
+        from ouroboros.mcp_task_sessions import call as scoped_call
 
         advice = note = ""
         try:
@@ -1477,12 +1479,8 @@ class MCPManager:
                 raise  # Stop and Pause reach the loop as they do from any Safety check.
             body = f"⚠️ MCP_TOOL_ERROR: {type(exc).__name__}: {_redact_error_text(exc, cfg)}"
             text = _model_facing_result(cfg, tool.raw_name, body)
-            return ToolResult(
-                status="error",
-                code="MCP_ERROR",
-                text=text,
-                meta={"dynamic_provider": True},
-            )
+            return ToolResult(status="error", code="MCP_ERROR", text=text,
+                              meta={"dynamic_provider": True})
         # Joined normal return (either SDK error bit): this invocation's call is over.
         from ouroboros.owner_pause import record_mcp_call_returned
 
@@ -1495,6 +1493,8 @@ class MCPManager:
             code=result.code,
             text=text,
             meta={**dict(result.meta), "dynamic_provider": True},
+            producer_text=result.producer_text,
+            host_annotations=result.host_annotations,
         )
         if not advice and not note:
             return final

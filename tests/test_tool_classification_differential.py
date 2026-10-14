@@ -31,9 +31,9 @@ from ouroboros._outcome_tool_errors import (
 from ouroboros.loop_tool_execution import _typed_execution_failure, _typed_result_metadata
 from ouroboros.tools.tool_result import TOOL_CODE_SPECS, LegacyTextResultAdapter
 from tests.tool_classification_corpus import (
-    Case,
-    GOLDEN_SOURCE_SHA,
     _MARKER_RE,
+    GOLDEN_SOURCE_SHA,
+    Case,
     build_corpus,
     harvested_identifiers,
     harvested_native_codes,
@@ -86,6 +86,7 @@ APPROVED_DELTAS: Mapping[str, Delta] = MappingProxyType({
     "MCP_DISABLED": Delta(False, "ok", True, "unavailable", "A.3", "an MCP provider that is off is unavailable, not a success"),
     "MCP_TOOL_DISALLOWED": Delta(False, "ok", True, "blocked", "A.3", "an MCP tool refused by policy is a denial, not a success"),
     "MCP_TOOL_ERROR": Delta(True, "error", True, "mcp_error", "A.17", "the MCP error gets its own bucket, homed to the blocking partition"),
+    "native:MCP_ERROR:MCP_TOOL_ERROR": Delta(True, "error", True, "mcp_error", "A.17", "the native alias has the same retired plain input and the MCP error bucket"),
     # Owner decision on #1262 (item 3): a name the current MCP catalog does not list
     # is the caller's unknown tool, not a provider outage; a known disabled server
     # or an unlisted catalog keeps `unavailable` (MCP_DISABLED, MCP_CATALOG_UNAVAILABLE).
@@ -384,6 +385,15 @@ CURRENT_PRODUCER_CONTRACTS = {
     # tools/vision.py `_no_image_route`: no configured model could take the image at all,
     # told apart from VLM_NO_VISION_MODEL (every candidate confirmed unable); same VLM family answer.
     "VLM_NO_MODEL": (True, "vlm_error"),
+    # imagegen.py adds its typed markers after the retired golden source.
+    # Same contract shape as the VLM family: rate limit is a soft window
+    # (text lane unaffected), unknown outcome and provider failure are errors.
+    "IMAGE_RATE_LIMITED": (True, "unavailable"),
+    "IMAGE_OUTCOME_UNKNOWN": (True, "error"),
+    "IMAGE_NOT_DISPATCHED": (True, "unavailable"),
+    "IMAGE_PROVIDER_REJECTED": (True, "error"),
+    "IMAGE_RESULT_INCOMPLETE": (True, "error"),
+    "PATH_BLOCKED": (True, "blocked"),
     # The actual skill-metadata target refusal publishes its specific native
     # code; standalone historical-style text retains the generic blocked code.
     "SKILL_PAYLOAD_BLOCKED": (True, "blocked"),
@@ -443,6 +453,11 @@ CURRENT_PRODUCER_CONTRACTS = {
     "PREFLIGHT_UNAVAILABLE": (True, "unavailable"),
     # Peer admission adds current producers; the historical fixture stays intact.
     "TASK_CANCEL_STATE_UNAVAILABLE": (True, "unavailable"),
+    # #939: the new marker alone is a legacy warning. The actual scheduling
+    # refusal publishes TOOL_ERROR with reason=task_lifetime_exhausted; pin both
+    # answers without inventing a retired-golden entry or changing the producer.
+    "TASK_LIFETIME_EXHAUSTED": (False, "ok"),
+    "native:TOOL_ERROR:TASK_LIFETIME_EXHAUSTED": (True, "error"),
     # #1262: an enabled MCP server with no current listing makes a name's existence
     # unknown — the provider's unavailability, never the caller's unknown tool.
     "MCP_CATALOG_UNAVAILABLE": (True, "unavailable"),
@@ -481,6 +496,34 @@ def test_current_producer_contracts_have_explicit_live_answers(subject, detail):
     assert _live_answer(case) == CURRENT_PRODUCER_CONTRACTS[subject]
 
 
+def test_spent_execution_budget_publishes_the_actual_scheduling_refusal(tmp_path, monkeypatch):
+    from queue import Queue
+
+    from ouroboros.tools import control_scheduling
+    from ouroboros.tools.registry import ToolContext
+    from tests.test_control_native_results import _published
+
+    ctx = ToolContext(repo_dir=tmp_path, drive_root=tmp_path, task_id="bounded-parent")
+    ctx.event_queue = Queue()
+    monkeypatch.setattr(control_scheduling, "_inherited_execution_allowance", lambda _ctx: 0)
+    monkeypatch.setattr(control_scheduling, "select_subagent_snapshot",
+                        lambda *a, **kw: pytest.fail("spent allowance must refuse before child selection"))
+    result = _published(ctx, "schedule_subagent", lambda: control_scheduling._schedule_task(
+        ctx, subagent_id="unused", objective="Inspect", expected_output="Findings"),
+        owner_delta="the exhausted execution allowance is a typed refusal")
+    assert result.text == (
+        "⚠️ TASK_LIFETIME_EXHAUSTED (schedule_subagent): this task's execution budget is spent; "
+        "no child was scheduled. Finalize with what you have.")
+    assert (result.status, result.code, dict(result.meta)) == (
+        "error", "TOOL_ERROR", {"reason": "task_lifetime_exhausted"})
+    is_error = _typed_execution_failure(True, result)
+    assert (is_error, _typed_result_metadata("schedule_subagent", result.text, is_error, result)["status"]) == (
+        CURRENT_PRODUCER_CONTRACTS["native:TOOL_ERROR:TASK_LIFETIME_EXHAUSTED"])
+    from ouroboros import store
+
+    assert ctx.event_queue.empty() and not store.store_path(tmp_path).exists()  # no child row was written
+
+
 @pytest.mark.parametrize("tool", ["write_file", "edit_text", "apply_patch", "edit_batch"])
 def test_output_capture_warning_preserves_the_successful_write(tool):
     """workspace_file_outputs.capture_known_workspace_outputs runs post-write.
@@ -508,6 +551,7 @@ def test_syntax_warning_suffix_keeps_the_applied_edit_successful(tool):
 def test_single_classifier_matches_the_retired_pair_except_approved_deltas() -> None:
     golden = _golden()
     corpus = build_corpus()
+    by_key = {case.key: case for case in corpus}
     assert len(corpus) >= 600, "the corpus collapsed; a harvest regression would hide every delta"
 
     unexpected: list[tuple[str, dict, tuple[bool, str]]] = []
@@ -519,8 +563,16 @@ def test_single_classifier_matches_the_retired_pair_except_approved_deltas() -> 
             contract = CURRENT_PRODUCER_CONTRACTS.get(case.subject, CURRENT_PRODUCER_CONTRACTS[identifier])
             assert _live_answer(case) == contract, case.key
             continue
-        assert case.key in golden, f"no golden answer for {case.key}: regenerate before trusting this run"
-        old = golden[case.key]
+        if case.key not in golden and case.subject in APPROVED_DELTAS and case.key.startswith("native:"):
+            # Native codes are absent from the retired text pair. Reuse only its
+            # recorded, byte-identical plain input; never invent a golden row.
+            plain = by_key[f"ident:{case.key.split(':', 2)[2]}:plain"]
+            assert (case.tool, case.text) == (plain.tool, plain.text)
+            assert plain.key in golden
+            old = golden[plain.key]
+        else:
+            assert case.key in golden, f"no golden answer for {case.key}: regenerate before trusting this run"
+            old = golden[case.key]
         live = _live_answer(case)
         if live == (old["is_error"], old["status"]):
             continue
@@ -555,6 +607,11 @@ def test_native_golden_answers_have_identical_retired_text_inputs() -> None:
         assert (native.tool, native.text) == (plain.tool, plain.text)
         if key in golden:
             assert golden[key] == golden[plain.key]
+        elif native.subject in APPROVED_DELTAS:
+            assert plain.key in golden
+            delta = APPROVED_DELTAS[native.subject]
+            assert golden[plain.key] == {"is_error": delta.old_is_error, "status": delta.old_status}
+            assert _live_answer(native) == (delta.new_is_error, delta.new_status)
         else:
             identifier = native.subject.split(":", 2)[-1]
             assert identifier in CURRENT_PRODUCER_CONTRACTS

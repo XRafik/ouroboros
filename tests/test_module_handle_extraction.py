@@ -100,7 +100,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
     })),
     "supervisor/queue_timeouts.py": ("supervisor/queue.py", "_queue", frozenset({
         "DRIVE_ROOT", "FINALIZATION_GRACE_SEC", "HEARTBEAT_STALE_SEC", "PENDING",
-        "QUEUE_MAX_RETRIES", "RUNNING", "_enforce_task_timeouts_locked",
+        "QUEUE_MAX_RETRIES", "RUNNING", "_enforce_task_timeouts_locked", "_expire_pending_deadlines_locked",
         "_ensure_reaper_started", "_has_live_descendant", "_has_pending_descendant",
         "_is_descendant_of", "_queue_lock", "_reap_queue",
         "_request_finalization_grace", "_subtree_progressing", "_task_deadline_ts",
@@ -253,7 +253,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
     "ouroboros/delegate_custody_reconcile.py": ("ouroboros/delegate_custody.py", "_custody", frozenset({
         "RECONCILED", "RunCustody", "START_FAILED", "TERMINAL_STATES", "_reconcile_one",
         "cancel_and_verify", "close_absent_run", "daemon_says_absent", "emit",
-        "is_terminal", "open_runs", "output_disposition", "pending_invocations",
+        "is_terminal", "output_disposition", "pending_invocations",
         "record_containment_fault", "record_settled_unread", "record_started",
         "retire_settled_registrations", "review_owned_source",
         "settle_run", "summary_of",
@@ -277,7 +277,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
     # call time goes through `_delegate()` (the reference cut this leaf with
     # plain preamble imports and declared only _emit).
     "ouroboros/tools/delegate_terminal_evidence.py": ("ouroboros/tools/delegate.py", "_delegate", frozenset({
-        "_Breach", "_PAYLOAD_ENVELOPE_HEADROOM", "_capture_terminal_patch", "_emit", "_home_isolation_breach",
+        "_Breach", "_PAYLOAD_ENVELOPE_HEADROOM", "_emit", "_home_isolation_breach",
         "_preview_payload", "_resolve_full_primary_output", "_stage_full_output",
         "_widened_access", "add_terminal_source_verification", "custody",
         "home_nested_under_operator_home", "tool_result_limit",
@@ -336,7 +336,8 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         'DeliveryCandidate', 'TERMINAL_ORIGIN_MODEL_FINAL', '_LoopExitContext',
         '_append_or_merge_user_message', '_arm_delivery_control', '_begin_task_acceptance_fence',
         '_child_disposition_state', '_compute_subagent_handoff', '_current_delivery_candidate',
-        '_delivery_evidence_state', '_delivery_replace_required', '_drain_incoming_messages',
+        '_delivery_evidence_state', '_delivery_replace_required', '_disclose_service_finalization',
+        '_drain_incoming_messages',
         '_end_task_acceptance_fence', '_enforce_swarm_actions', '_extract_plain_text_from_content',
         '_finalize_forced_services', '_finalize_task_services', '_force_plan_disclosure',
         '_forced_fallback_result', '_forced_orphan_note', '_handle_text_response',
@@ -353,7 +354,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         'DeliveryCandidate', '_LoopExitContext', '_append_or_merge_user_message',
         '_call_forced_model_once', '_child_disposition_state', '_claimed_child_dispositions',
         '_context_reclaim_materializations', '_current_delivery_candidate', '_degrade_retained_delivery_candidate', '_delivery_evidence_state',
-        '_delivery_replace_required', '_direct_child_results', '_drain_forced_owner_directives',
+        '_delivery_replace_required', '_direct_child_results', '_disclose_service_finalization', '_drain_forced_owner_directives',
         '_drain_incoming_messages', '_emit_checkpoint_event', '_finalize_forced_services',
         '_finalize_task_services', '_force_plan_decision', '_force_plan_disclosure',
         '_force_plan_reminder', '_forced_delegation_note', '_forced_fallback_result',

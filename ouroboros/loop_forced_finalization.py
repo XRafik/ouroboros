@@ -32,7 +32,7 @@ from ouroboros.outcomes import ACCEPTANCE_FINALIZED_UNACCEPTED, REASON_DELIVERY_
 from ouroboros.task_finalization import TERMINAL_ORIGIN_HOST_NOTICE, TERMINAL_ORIGIN_HOST_SALVAGE, TERMINAL_ORIGIN_MODEL_FINAL, set_terminal_host_notice
 from ouroboros.tools.registry import ToolRegistry
 from ouroboros.usage_accounting import BudgetExceeded, PhysicalAttemptPreconditionFailed
-from ouroboros.utils import sanitize_tool_result_for_log, truncate_review_artifact
+from ouroboros.utils import sanitize_tool_result_for_log
 
 
 from typing import TYPE_CHECKING
@@ -687,30 +687,55 @@ def _finalize_forced_services(
         llm_trace=llm_trace,
     ))
     _loop()._delivery_evidence_state(tools, ctx, llm_trace)
+    _loop()._disclose_service_finalization(ctx, llm_trace)
+
+
+def _service_finalization_projection(
+    llm_trace: Dict[str, Any], *, drive_root: Any = None, task_id: str = "",
+) -> List[Dict[str, Any]]:
+    """Complete redacted task-local service facts, shared by author and panel.
+
+    Per-field summaries remain marked, but no whole service row may disappear.
+    A complete log becomes this task's readable text source (``source_ref``) and
+    replaces its tail. Existing context/packet delivery owns fitting.
+    """
+    projection = _loop()._service_finalization_evidence(llm_trace)
+    if not projection:
+        return []
+    from ouroboros.observability import redact_projection
+    from ouroboros.tools.services import retained_log_display
+
+    shown = [{**row, "services": [retained_log_display(service, drive_root=drive_root, task_id=task_id)
+                                  for service in row["services"]]} for row in projection]
+    return redact_projection(shown).value
+
+
+def _service_finalization_text(llm_trace: Dict[str, Any], *, drive_root: Any = None, task_id: str = "") -> str:
+    shown = _service_finalization_projection(llm_trace, drive_root=drive_root, task_id=task_id)
+    return json.dumps(shown, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str) if shown else ""
+
+
+def _disclose_service_finalization(ctx: _RoundLimitContext, llm_trace: Dict[str, Any]) -> None:
+    """Show the author that projection once per change, on forced and ordinary rails.
+
+    cleanup_pending/stop_error facts become readable; disclosure only, no veto.
+    """
+    # Identity belongs to the full stable projection, not its display: two
+    # changes hidden by a compact tail can have identical visible bytes.
     projection = _loop()._service_finalization_evidence(llm_trace)
     if not projection:
         return
-    payload = json.dumps(
-        projection,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
+    payload = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
     fingerprint = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     if ctx.forced_service_evidence_fingerprint == fingerprint:
         return
-    from ouroboros.observability import redact_projection
-
     ctx.forced_service_evidence_fingerprint = fingerprint
-    safe_payload = truncate_review_artifact(
-        str(redact_projection(payload).value),
-        limit=8000,
-    )
+    safe_payload = _service_finalization_text(
+        llm_trace, drive_root=getattr(ctx, "drive_root", None), task_id=str(getattr(ctx, "task_id", "") or ""))
     _loop()._append_or_merge_user_message(
         ctx.messages,
         "[SERVICE_FINALIZATION_EVIDENCE]\n"
-        "Task services were finalized before forced synthesis. Incorporate this "
+        "Task services were finalized before completion. Incorporate this "
         f"evidence and disclose any failure honestly:\n{safe_payload}",
     )
 
@@ -986,8 +1011,11 @@ def _forced_fallback_result(
     retained_control: str = "",
     candidate_reason: str = "",
     provider_terminal: bool = False,
+    host_words: Optional[bool] = None,
 ) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
-    """Compose fallback."""
+    """Compose fallback. ``host_words`` is the caller's fact about ``fallback_text`` on the
+    provider-death rail: the host's own notice (``host_notice``) or retained model bytes
+    (``host_salvage``); ``None`` keeps the rail's previous provenance."""
     tool_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
     plan_suffix = (
         _loop()._force_plan_disclosure(tool_ctx, llm_trace, forced_reason=reason_code)
@@ -1058,7 +1086,7 @@ def _forced_fallback_result(
             if candidate_reason:
                 candidate.degraded_reason = candidate_reason
                 _loop()._publish_delivery_candidate(ctx.tools, candidate, llm_trace)
-            if provider_terminal:
+            if provider_terminal or host_words is not None:  # stale retained text is model bytes
                 ctx.accumulated_usage["terminal_origin"] = TERMINAL_ORIGIN_HOST_SALVAGE
             ctx.accumulated_usage["_best_effort_extracted"] = True
             _loop()._record_forced_finalization(
@@ -1076,8 +1104,9 @@ def _forced_fallback_result(
     )
     if fallback_is_retained_model_text:
         ctx.accumulated_usage["_best_effort_extracted"] = True
-    if provider_terminal:
-        ctx.accumulated_usage["terminal_origin"] = TERMINAL_ORIGIN_HOST_SALVAGE
+    if provider_terminal or host_words is not None:
+        ctx.accumulated_usage["terminal_origin"] = (
+            TERMINAL_ORIGIN_HOST_NOTICE if host_words else TERMINAL_ORIGIN_HOST_SALVAGE)
     _loop()._record_forced_finalization(
         ctx,
         llm_trace,
@@ -1203,6 +1232,7 @@ def _forced_final_answer(
     reason_code: str,
     single_semantic_turn: bool = False,
     provider_terminal: bool = False,
+    fallback_host_words: Optional[bool] = None,
     _prompt_prepared: bool = False,
     _initial_messages: Any = None,
     _admitted_request: Any = None,
@@ -1218,7 +1248,7 @@ def _forced_final_answer(
         ctx.accumulated_usage.update(execution_status="failed", reason_code=reason_code)
         return _loop()._forced_fallback_result(
             ctx, llm_trace, fallback_text, reason_code,
-            source=f"{reason_code}_window_elapsed",
+            source=f"{reason_code}_window_elapsed", host_words=fallback_host_words,
         )
     tools_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
     _loop()._append_or_merge_user_message(ctx.messages, prompt)
@@ -1250,7 +1280,7 @@ def _forced_final_answer(
             ctx.accumulated_usage.update(execution_status="failed", reason_code=reason_code)
             return _loop()._forced_fallback_result(
                 ctx, llm_trace, fallback_text, reason_code, source="budget_wrapup_unaffordable",
-                provider_terminal=provider_terminal)
+                provider_terminal=provider_terminal, host_words=fallback_host_words)
         except Exception:
             log.warning("Failed to get final response after %s", reason_code, exc_info=True)
             extracted = ""
@@ -1264,7 +1294,7 @@ def _forced_final_answer(
                 ctx, llm_trace,
                 "⚠️ Provider outcome unknown; directive retained. Resume the task without a blind resend.",
                 reason_code,
-                source="provider_outcome_unknown_no_resend",
+                source="provider_outcome_unknown_no_resend", host_words=True,
             )
         if single_semantic_turn or attempt == 1:
             return _loop()._forced_fallback_result(
@@ -1273,7 +1303,7 @@ def _forced_final_answer(
                 "⚠️ Another directive arrived. Resume the task for a current answer.",
                 reason_code,
                 source="late_owner_directive_requires_resume",
-                provider_terminal=provider_terminal,
+                provider_terminal=provider_terminal, host_words=True,
             )
         _loop()._finalize_forced_services(ctx, llm_trace)
         _loop()._append_or_merge_user_message(
@@ -1305,7 +1335,7 @@ def _forced_final_answer(
         return _loop()._forced_fallback_result(
             ctx, llm_trace, extracted or fallback_text, reason_code,
             source="forced_model_incomplete", candidate_reason=control_degraded,
-            provider_terminal=provider_terminal,
+            provider_terminal=provider_terminal, host_words=None if extracted else fallback_host_words,
         )
     if extracted:
         ctx.accumulated_usage["_best_effort_extracted"] = True
@@ -1346,5 +1376,5 @@ def _forced_final_answer(
         llm_trace,
         fallback_text,
         reason_code,
-        provider_terminal=provider_terminal,
+        provider_terminal=provider_terminal, host_words=fallback_host_words,
     )

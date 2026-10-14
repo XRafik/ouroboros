@@ -5,6 +5,7 @@ import { PAGE_ICONS } from './page_icons.js';
 import { showToast } from './toast.js';
 import { tx } from './i18n.js';
 import { hostRowDisplayText } from './host_notice_text.js';
+import { childRowPlacement, replayConcludesTask } from './chat_row_placement.js';
 import { decorateProjectRow, syncSavedProjectContext } from './project_answer.js';
 import { createProjectHandoffs, receiptNotice } from './project_handoff.js';
 import { bindComposerFileTargets, cleanupUploadedAttachments, createChatMedia, showTaskIncidentToast } from './chat_media.js';
@@ -16,7 +17,7 @@ import { clientSurfaceField } from './client_surface.js';
 import { syncSettledItems } from './settled_card.js';
 import { createChatReadingPosition } from './chat_reading_position.js';
 import { createChatHistoryPager, historyCoverage, historyIslandAtEdge } from './chat_history.js';
-import { createProjectReadReceipt, isAtNewestMessage } from './project_read_state.js';
+import { createProjectReadReceipt, isAtNewestMessage, newestMessageOffset } from './project_read_state.js';
 import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, historyStamps, stampHistoryNode, compareHistoryPosition } from './chat_history_replay.js';
 import { apiClient, apiFetch, fetchTaskDetail, fetchTaskDetailStrict, isStoreMigrating } from './api_client.js';
 import { syncHistoryRetentionItem } from './history_retention.js';
@@ -270,8 +271,8 @@ export function createChatInstance({
                 <div class="chat-toolbar-row">
                     <div class="chat-composer-pills" id="chat-composer-pills">
                         <button class="chat-swarm" id="chat-swarm" type="button" data-armed="false" title="Swarm: route your next message into a new managed task, run a deep plan review with plan_task, then delegate when parallel work helps. Auto-disarms after sending.">Swarm</button>
-                        <div class="chat-context-mode" id="chat-context-mode" data-context-mode="max" role="group" aria-label="Context size mode" title="Context mode (owner setting). Nano is the compact owner window, Low fits ~250K / local models, Max is full. Saves immediately; lowering requires Ouroboros to be idle."><button class="chat-seg" type="button" data-mode="nano">Nano</button><button class="chat-seg" type="button" data-mode="low">Low</button><button class="chat-seg" type="button" data-mode="max">Max</button></div>
                     </div>
+                    <div class="chat-context-mode" id="chat-context-mode" data-context-mode="max"></div>
                 </div>
                 <div class="chat-text-row">
                     <button class="chat-attach-btn" id="chat-attach" type="button" title="Attach file">
@@ -561,10 +562,6 @@ export function createChatInstance({
         if (moreSummary) {
             const anyActive = !!data?.evolution_enabled || !!data?.bg_consciousness_enabled;
             moreSummary.classList.toggle('has-active', anyActive);
-        }
-        const ctxBtn = byId('context-mode');
-        if (ctxBtn && typeof data?.context_mode === 'string') {
-            ctxBtn.dataset.contextMode = ['nano', 'low', 'max'].includes(data.context_mode) ? data.context_mode : 'max';
         }
         ownerControls?.syncState(data);
         const budget = headerBudgetPresentation(data);
@@ -1591,10 +1588,13 @@ export function createChatInstance({
     }
 
     // Returning to the Chat page reopens the room at its newest message; a window
-    // shown again keeps the same reading intent (data readiness positions it).
+    // shown again keeps the same reading intent (data readiness positions it);
+    // hidden, it ends an unread opening still owed.
     const handlePageShown = (event) => {
         if (event?.detail?.page === 'chat') void showLatest();
-        else if (event?.type === 'visibilitychange' && !document.hidden) reading.request();
+        else if (event?.type !== 'visibilitychange') return;
+        else if (document.hidden) reading.land(() => 0, reading.arriving);
+        else reading.request();
     };
     window.addEventListener('ouro:page-shown', handlePageShown);
     document.addEventListener('visibilitychange', handlePageShown);
@@ -2045,7 +2045,7 @@ export function createChatInstance({
     }
 
     // A known child's own (non-lifecycle) progress updates the linked child card.
-    function routeSubagentProgressToCard(childId, msg) {
+    function routeSubagentProgressToCard(childId, msg, ownLine = false) {  // ownLine: the child's own words
         const info = subagentChildParents.get(childId);
         if (!info) return false;
         const { parentId, role } = info;
@@ -2054,7 +2054,7 @@ export function createChatInstance({
         const rawTs = msg?.ts || new Date().toISOString();
         reanchorTaskCard(getLiveCardRecord(parentId), rawTs);
         const record = getSubagentCardRecord(childId, parentId, role);
-        const preserveTerminal = Boolean(record?.finished && subagentTerminalChildren.has(childId));
+        const preserveTerminal = Boolean(record?.finished && (ownLine || subagentTerminalChildren.has(childId)));
         const summary = summarizeSubagentCardFrame(msg, childId, {
             content,
             text: content,
@@ -2065,7 +2065,8 @@ export function createChatInstance({
             status: preserveTerminal ? '' : (msg?.status || ''),
         }, rawTs);
         if (!summary) return false;
-        if (!summary.activity) summary.dedupeKey = `subagent-progress:${childId}`;
+        // Same frame adopts one speech occurrence; progress replaces a line.
+        if (!summary.activity) summary.dedupeKey = ownLine ? `subagent-line:${childId}:${rawTs}:${content}` : `subagent-progress:${childId}`;
         if (preserveTerminal && !_historyReplayActive) {
             summary.phase = String(record.phaseEl?.dataset?.phase || 'done');
             summary.terminal = true;
@@ -2562,17 +2563,10 @@ export function createChatInstance({
                         else appendMediaBubble(msg);
                         continue;
                     }
-                    // Replay conclusion: a typed terminal fact OR a plain
-                    // untyped final (replay has no later task_done frame, so
-                    // the bare final is the task's last word; marked rows —
-                    // system_type/msg_type — still never conclude).
-                    const plainUntypedFinal = !msg.system_type && !msg.msg_type && msg.task_phase !== 'unfinished';
-                    if (
-                        taskId
-                        && (msg.role === 'assistant' || msg.role === 'system')
-                        && (positiveTaskTerminalFact(msg) || plainUntypedFinal)
-                        && !isNonTerminalMediaHistoryRow(msg)
-                    ) {
+                    if (subagentChildParents.has(taskId) && childRowPlacement(msg) === 'line') {
+                        insertCardIfNeeded(taskId); routeSubagentProgressToCard(taskId, msg, true); continue;
+                    }
+                    if (taskId && replayConcludesTask(msg)) {
                         if (subagentChildParents.has(taskId)) {
                             insertCardIfNeeded(taskId);
                             routeSubagentFinalMessageToCard(taskId, msg);
@@ -2825,6 +2819,8 @@ export function createChatInstance({
 
     // A new revision needs a read begun after it: one in flight is awaited, never
     // joined; the sticky hydration answers a covered one (project_read_state.js).
+    const newestFacts = { delivered: id => retainedHistoryIds().has(id), nodes: id => historyNodes(id),
+        viewport: messagesDiv, header: pageHeader, composer: inputArea };
     const readReceipt = createProjectReadReceipt({
         read: async (fresh) => {
             if (!fresh && initialHydrationPromise) await initialHydrationPromise;
@@ -2838,10 +2834,19 @@ export function createChatInstance({
         isShown: () => !destroyed && !page.hidden,
         // A place still being restored is not where the reader is.
         isReadingLatest: latest => !destroyed && !reading.pending && isInstanceVisible() && isAtNewestMessage(latest, {
-            delivered: id => retainedHistoryIds().has(id), nodes: historyNodes, viewport: messagesDiv, header: pageHeader, composer: inputArea,
-            atBottom: () => isNearBottom() && !historyPager.getState().canNewer,
+            ...newestFacts, atBottom: () => isNearBottom() && !historyPager.getState().canNewer,
         }),
-        onReadingLatest,
+        onReadingLatest, arriving: () => reading.arriving, delivered: newestFacts.delivered,
+        older: async current => {
+            await historyPager.whenIdle();
+            if (!current()) return {};
+            const direction = readReceipt.continuation(pagerRecent);
+            // A failed present keeps the existing horizon repair.
+            if (direction === 'latest' || (direction && !historyPager.getState().error)) return historyPager[direction]();
+            return loadHistoryAtEdge('older', current);
+        },
+        present: current => historyPager.whenIdle().then(() => current() && historyPager.getState().canNewer && historyPager.latest()),
+        land: (latest, token) => reading.land(() => newestMessageOffset(latest, newestFacts), token),
     });
 
     (async () => {
@@ -3025,10 +3030,6 @@ export function createChatInstance({
         }
     });
     // Dynamic CSS reserve keeps the absolute composer from covering messages.
-    function scrollToBottom() {
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        updateScrollButton();
-    }
 
     // Scroll events observe position; only positive navigation changes follow intent.
     messagesDiv?.addEventListener('scroll', () => { reading.scroll(); settleHistoryViewport(); readReceipt.note(); }, { passive: true });
@@ -3057,9 +3058,9 @@ export function createChatInstance({
         scrollBottomBtn.classList.toggle('visible', isInstanceVisible() && (!isNearBottom() || (!reading.stick && historyWindow?.gaps)));
     }
     // The one way to the present: ↓, and returning to the room (owner decision
-    // 2026-10-05: a room is always reopened at its newest message).
-    async function showLatest() {
-        const current = reading.claim();
+    // 2026-10-05: a room is always reopened at its newest message), unread at what arrived last.
+    async function showLatest({ arrive = false } = {}) {
+        const current = reading.claim(arrive === true);
         if (historySyncPromise) await historySyncPromise;
         await historyPager.whenIdle();
         if (destroyed || !current()) return;
@@ -3231,6 +3232,7 @@ export function createChatInstance({
 
     const pageHistoryIds = new Map();
     let recentCoverage = null;
+    let pagerRecent = {};
     let recentHasOrigins = false;
     let recentHistoryIds = new Set();
     let recentRequest = 0, recentApplied = 0;
@@ -3328,6 +3330,7 @@ export function createChatInstance({
             const oldRecentIds = recentHistoryIds;
             const admitted = descriptor.direction === 'latest' && acceptRecentWindow(descriptor, messages);
             const archived = descriptor.direction !== 'recent' && descriptor.direction !== 'latest';
+            if (!archived) pagerRecent = descriptor;
             applyHistoryMessages(messages, { archived });
             // The present re-anchors the chain: rows no page or window owns any more
             // (windows kept while the reader was in older history) go with it.
@@ -3368,22 +3371,19 @@ export function createChatInstance({
         if (snapshot.error) return historyPager.retry();
         return loadHistoryAtEdge('older');
     }
-    // `Load more history` only ever reads older messages; the present is the one ↓
-    // (owner decisions 2026-09-14, 2026-10-05). A page counts the room's own rows,
-    // so only the server's per-request read ceiling can land one empty: keep
-    // reading until rows land or the room's history ends. When the newest read has
-    // moved past the pager's chain (the room grew while open), the chain is first
-    // re-anchored at that read, so the same press goes on into the missing rows;
-    // a reader in older history with older rows left goes on above them instead.
-    async function loadHistoryAtEdge(direction) {
+    // `Load more history` reads older messages; ↓ returns to the present (owner
+    // decisions 2026-09-14, 2026-10-05). Empty pages cross the server read ceiling:
+    // read on until rows land or the chat ends. A grown room re-anchors unless the
+    // reader is still walking its older chain. Openings guard each request with `current`.
+    async function loadHistoryAtEdge(direction, current = () => true) {
         const { canNewer, canOlder } = historyPager.getState();
-        if (direction === 'older' && historyWindow?.horizonGap && !canNewer && !(canOlder && readingHistory())) {
+        if (direction === 'older' && current() && historyWindow?.horizonGap && !canNewer && !(canOlder && readingHistory())) {
             const rebased = await historyPager.latest();
             if (destroyed || rebased.status !== 'applied') return rebased;
         }
         let result;
         do {
-            result = await historyPager[direction]();
+            result = current() ? await historyPager[direction]() : {};
         } while (!destroyed && result.status === 'applied' && result.messageCount === 0
             && historyPager.getState()[direction === 'older' ? 'canOlder' : 'canNewer']);
         return result;
@@ -3696,9 +3696,9 @@ export function createChatInstance({
                 return settled(Boolean(changed));
             }
             // A placed host row is never a child's answer; with no card it stays a System row.
-            if (explicitTaskId && !msg.card_row && subagentChildParents.has(explicitTaskId)) {
-                return settled(Boolean(routeSubagentFinalMessageToCard(explicitTaskId, msg)));
-            }
+            const placed = explicitTaskId && !msg.card_row && subagentChildParents.has(explicitTaskId) && childRowPlacement(msg);
+            if (placed === 'line') return settled(Boolean(routeSubagentProgressToCard(explicitTaskId, msg, true)), false);
+            if (placed) return settled(Boolean(routeSubagentFinalMessageToCard(explicitTaskId, msg)));
             let changed = false;
             if (finalizing) changed = markLiveCardFinalizing(explicitTaskId, msg) || changed;
             else if (explicitTaskId && typedTerminal) {

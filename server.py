@@ -10,13 +10,15 @@ import sys
 import threading
 import time
 import uuid
-from ouroboros.utils import read_json_dict, utc_now_iso
+# The executing checkout is the implicit repository before any import resolves REPO_DIR; an explicit one wins.
+os.environ.setdefault("OUROBOROS_REPO_DIR", os.path.dirname(os.path.abspath(__file__)))
+from ouroboros.utils import read_json_dict, utc_now_iso  # noqa: E402
 from typing import Any, Dict, Optional
 
 from starlette.applications import Starlette
 from starlette.routing import Route, Mount
 import uvicorn
-from ouroboros.server_control import (PanicIngress, execute_panic_stop as _execute_panic_stop_impl,
+from ouroboros.server_control import (PanicIngress, execute_panic_stop as _execute_panic_stop_impl, exit_after_restart,
                                       restart_current_process as _restart_current_process_impl)
 from ouroboros.owned_shutdown import (begin_owned_stop, finish_unconfirmed_stops, start_inherited_import,
                                        stop_owned_work)
@@ -25,10 +27,12 @@ from ouroboros.server_auth import (
     get_network_auth_startup_warning,
     validate_network_auth_configuration,
 )
-from ouroboros.server_entrypoint import bound_service_socket, find_free_port, parse_server_args, write_port_file
+from ouroboros.server_entrypoint import (ServerAdmissionRefused, admit_data_root, bound_service_socket,
+                                         find_free_port, parse_server_args, reserved_service_ports, write_port_file)
 from ouroboros.launcher_bootstrap import automatic_launch_allowed
 from ouroboros import body_adoption, store_switch
 from ouroboros.server_web import NoCacheStaticFiles, make_index_page, resolve_web_dir
+from ouroboros.config import resolve_port_file
 from ouroboros.process_logging import configure_process_logging
 from ouroboros.task_finalization import host_operation_reply_kwargs
 from ouroboros import usage_store  # the boot import of the retired journal (run_startup_phase below)
@@ -80,6 +84,7 @@ from ouroboros.server_liveness import (  # noqa: F401
     drain_worker_events, flush_budget_projection,
 )
 from ouroboros.server_maintenance import (  # noqa: F401
+    bind_body_lifespan,
     _LAST_CANCEL_INTENT_SWEEP,
     _migrate_startup_cancel_latches,
     _startup_worker_pids,
@@ -98,6 +103,8 @@ from ouroboros.server_maintenance import (  # noqa: F401
     _startup_worktree_prune,
 )
 from ouroboros.ui_translation import start_background as _start_ui_translation
+from supervisor.workspace_preparation import start_generation as _start_preparation_generation
+from supervisor.event_observation import pending_idle_observations
 from ouroboros.server_restart import (  # noqa: F401
     _live_running_task_ids, _managed_update_pending_kwargs,
     _perform_owner_restart, _safe_restart_serialized,
@@ -105,11 +112,11 @@ from ouroboros.server_restart import (  # noqa: F401
     _stop_owned_daemon_for_new_pin, _stop_owned_work,
 )
 
-REPO_DIR = pathlib.Path(os.environ.get("OUROBOROS_REPO_DIR", pathlib.Path(__file__).parent))
+REPO_DIR = pathlib.Path(os.environ["OUROBOROS_REPO_DIR"])
 capture_server_source_baseline(REPO_DIR)
 DEFAULT_HOST = os.environ.get("OUROBOROS_SERVER_HOST", "127.0.0.1")
 DEFAULT_PORT = int(os.environ.get("OUROBOROS_SERVER_PORT", "8765"))
-PORT_FILE = DATA_DIR / "state" / "server_port"
+PORT_FILE = resolve_port_file(DATA_DIR, hosting_data_dir=DATA_DIR)
 
 sys.path.insert(0, str(REPO_DIR))
 if not os.environ.get("OUROBOROS_AGENT_PYTHON"):
@@ -699,6 +706,7 @@ def _run_supervisor(settings: dict) -> None:
         prior_worker_pids = _startup_worker_pids(DATA_DIR)
         interrupted_running: list = []
         restored_pending = restore_pending_from_snapshot(terminalized=interrupted_running)
+        _start_preparation_generation(stop=lambda stop=_watchdog_stop: any(e.is_set() for e in (stop, _supervisor_stop, _restart_requested, _exit_signalled)))
         kill_workers(preserve_pending=True)
         spawn_workers(max_workers)
         from ouroboros.server_process import record_applied_restart_settings
@@ -853,7 +861,7 @@ def _run_supervisor(settings: dict) -> None:
             flush_budget_projection(_event_ctx)
 
             _loop_liveness[1], _loop_liveness[0] = loop_phase_facts(_loop_liveness, "maintenance"), time.monotonic()
-            enforce_task_timeouts()
+            enforce_task_timeouts(pending_events=pending_idle_observations(get_event_q()))
             try:
                 from supervisor.queue import check_scheduled_tasks
                 check_scheduled_tasks()
@@ -1167,7 +1175,6 @@ def _execute_panic_stop(consciousness, kill_workers_fn) -> None:
         data_dir=DATA_DIR,
         panic_exit_code=PANIC_EXIT_CODE,
         log=log,
-        bound_port=_actual_bound_port(),
     )
 
 def _startup_owner_command(command: str, *, send_kwargs=None, source="web", user_id=0, chat_id=0, reply=None):
@@ -1267,6 +1274,15 @@ from contextlib import ExitStack, asynccontextmanager, suppress
 @asynccontextmanager
 async def lifespan(app):
     global _event_loop
+    lifespan_drive_root = pathlib.Path(getattr(getattr(app, "state", None), "drive_root", DATA_DIR))
+    default_real_data_dir = pathlib.Path.home() / "Ouroboros" / "data"
+    pytest_default_real_data_dir = (
+        (bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules)
+        and lifespan_drive_root == default_real_data_dir
+        and not os.environ.get("OUROBOROS_DATA_DIR")
+    )
+    if not pytest_default_real_data_dir:  # an imported ASGI app is admitted here; main() already was
+        admit_data_root(lifespan_drive_root)
     _event_loop = asyncio.get_running_loop()
     _set_ws_event_loop(_event_loop)
     ws_heartbeat_task = asyncio.create_task(
@@ -1288,17 +1304,6 @@ async def lifespan(app):
     from ouroboros.config import initialize_runtime_mode_baseline
     initialize_runtime_mode_baseline()
     has_local = needs_local_model_autostart(settings)
-    lifespan_drive_root = pathlib.Path(
-        app.state.drive_root
-        if hasattr(app, "state") and hasattr(app.state, "drive_root")
-        else DATA_DIR
-    )
-    default_real_data_dir = pathlib.Path.home() / "Ouroboros" / "data"
-    pytest_default_real_data_dir = (
-        (bool(os.environ.get("PYTEST_CURRENT_TEST")) or "pytest" in sys.modules)
-        and lifespan_drive_root == default_real_data_dir
-        and not os.environ.get("OUROBOROS_DATA_DIR")
-    )
 
     if not pytest_default_real_data_dir:  # before admission and any extension/replacement process (§9)
         finish_unconfirmed_stops(lifespan_drive_root)
@@ -1334,6 +1339,8 @@ async def lifespan(app):
 
     if not _exit_signalled.is_set():
         _supervisor_stop.clear()  # a fresh lifespan owns a fresh generation (symmetric with the teardown set)
+    body_stop = threading.Event()  # lifespan ownership survives a cognitive supervisor revival
+    start_body = (lambda: None) if pytest_default_real_data_dir else bind_body_lifespan(lifespan_drive_root, body_stop)
     # A provider-ready boot starts the supervisor after the extension reload below.
     startup_provider_ready = has_startup_ready_provider(settings)
     if not startup_provider_ready:  # readiness follows the store's publication (store_switch.when_ready below)
@@ -1416,17 +1423,14 @@ async def lifespan(app):
     # RUNNING results and resolve an indeterminate post-task synthesis phase.
     # The periodic zombie sweep intentionally does not perform this recovery.
     if not startup_provider_ready:  # after the store's publication: the recovery writes, then readiness (P1)
-        store_switch.when_ready(lifespan_drive_root, lambda: _run_startup_task_recovery(
+        store_switch.when_ready(lifespan_drive_root, start_body, lambda: not body_stop.is_set() and _run_startup_task_recovery(
             lifespan_drive_root, REPO_DIR, skip_live_data=pytest_default_real_data_dir,
             prior_worker_pids=None if pytest_default_real_data_dir else _startup_worker_pids(lifespan_drive_root),
-        ), _supervisor_ready.set)
+        ), lambda: not body_stop.is_set() and _supervisor_ready.set())
 
     # Reload enabled+reviewed extensions across restarts.
     try:
-        from ouroboros.config import (
-            get_skills_repo_path,
-            load_settings as _load_settings,
-        )
+        from ouroboros.config import get_skills_repo_path, load_settings as _load_settings
         from ouroboros.extension_loader import reload_all as _reload_extensions, set_ws_broadcaster as _set_extension_ws_broadcaster
         _set_extension_ws_broadcaster(broadcast_ws_sync)
         repo_path = get_skills_repo_path()
@@ -1439,7 +1443,7 @@ async def lifespan(app):
     if not pytest_default_real_data_dir: _start_ui_translation(lifespan_drive_root, _supervisor_stop)  # after the skills registered their tables; fail-soft, no model call; no batch starts once teardown began  # noqa: E701
     # Only now: the first tick may consume an overdue note; a bus subscriber attached later never sees it.
     if startup_provider_ready:
-        _start_supervisor_if_needed(settings)
+        store_switch.when_ready(lifespan_drive_root, start_body, lambda: not body_stop.is_set() and _start_supervisor_if_needed(settings))
 
     try:
         from ouroboros.mcp_client import (
@@ -1473,6 +1477,9 @@ async def lifespan(app):
         yield
     finally:
         _supervisor_stop.set()  # first: the loop must know a teardown owns what follows
+        body_stop.set()
+        from ouroboros.delegate_collection import stop_body_runtime
+        stop_body_runtime(lifespan_drive_root, wait=False)
         begin_owned_stop(lifespan_drive_root)  # the grace starts here; pending stops are recorded before any wait
         log.info("Server shutting down...")
         # Let the loop leave its current tick BEFORE workers are killed and the
@@ -1581,14 +1588,6 @@ app.app.state.default_port = DEFAULT_PORT  # type: ignore[attr-defined]
 app.app.state.start_supervisor_if_needed = _start_supervisor_if_needed  # type: ignore[attr-defined]
 
 
-_ACTUAL_BOUND_PORT: Optional[int] = None
-
-
-def _actual_bound_port() -> int:
-    """Port the server actually bound (set in main(); DEFAULT_PORT before that)."""
-    return _ACTUAL_BOUND_PORT if _ACTUAL_BOUND_PORT else DEFAULT_PORT
-
-
 def _restart_cleanup_kwargs() -> dict:
     """Keep owner Restart from re-opening daemon custody after its stop; every
     application stop keeps saved work and accepted queue for the next boot (#1563)."""
@@ -1597,8 +1596,9 @@ def _restart_cleanup_kwargs() -> dict:
     return {"retain_saved_work": True}
 
 
-def _emergency_process_cleanup(*, port_sweep: bool = True) -> dict:
-    """Kill child processes, workers, companions, and runtime port holders; the kill census."""
+def _emergency_process_cleanup() -> dict:
+    """Kill child processes, workers and companions; the kill census. The main and
+    Host Service listeners close with this process: no port is swept."""
     from ouroboros.evidence_packer import packer
     packer.stop()
     begin_owned_stop(DATA_DIR)  # the grace starts here; pending stops are recorded before any wait
@@ -1626,7 +1626,7 @@ def _emergency_process_cleanup(*, port_sweep: bool = True) -> dict:
                          exc_info=True)
     owned_stop = stop_owned_work(DATA_DIR)  # the same one stop: joined until it completes or its deadline
     import multiprocessing
-    from ouroboros.platform_layer import force_kill_pid, kill_process_on_port
+    from ouroboros.platform_layer import force_kill_pid
     for child in multiprocessing.active_children():
         try:
             force_kill_pid(child.pid)
@@ -1639,30 +1639,35 @@ def _emergency_process_cleanup(*, port_sweep: bool = True) -> dict:
     if _restart_requested.is_set():  # only the restart that carried an adoption can arm it; never a wait
         body_adoption.arm(DATA_DIR, worker_exits=worker_exits, live_children=multiprocessing.active_children() + packer.live_children(),
                           owned_stop=owned_stop, owner_restart=_owner_restart_requested.is_set())
-    if port_sweep:
-        # Sweep the ACTUALLY bound port (find_free_port may have moved off
-        # DEFAULT_PORT); the old hardcoded 8765/8766 pair could kill an
-        # unrelated process on a custom-port install.
-        kill_process_on_port(_actual_bound_port())
     try:
         from ouroboros.extension_companion import panic_kill_all
-        from ouroboros.gateway.host_service import host_service_port
         panic_kill_all()
-        if port_sweep:
-            kill_process_on_port(host_service_port())
     except Exception:
         pass
     return {"worker_exits": worker_exits, "live_children": multiprocessing.active_children() + packer.live_children(), "owned_stop": owned_stop}
 
 def main() -> int:
-    # The server process is the single writer of logs/server.log; a test run on the
-    # real default data root keeps the stream handler only.
+    from ouroboros.delegate_recovery import observe_restart_parent
+    # A Windows direct successor first waits for its parent, which holds the data root until it exits;
+    # admission then follows that exit, and a Panic exit ends the successor before any write.
+    if observe_restart_parent().get("exit_code") == PANIC_EXIT_CODE:
+        configure_process_logging(drive_logs=None)
+        log.critical("The previous server generation exited by Panic; its restart successor stops")
+        return PANIC_EXIT_CODE
+    # Admission before any write: one server per actual data root (server_entrypoint).
+    if not _pytest_default_real_data_dir:
+        try:
+            admit_data_root(DATA_DIR)
+        except ServerAdmissionRefused as refusal:
+            configure_process_logging(drive_logs=None)
+            log.error("Server not started: %s", refusal)
+            return 2
+    # Sole server.log writer; tests on the real default data root retain only the stream handler.
     configure_process_logging(drive_logs=None if _pytest_default_real_data_dir else DATA_DIR / "logs")
     if not automatic_launch_allowed(os.environ.get("OUROBOROS_LAUNCH_INTENT", "owner"), DATA_DIR, log):
         return 0
-    # A benchmark-owned child may receive an integrity pin from its parent.
-    # Verify the exact bytes before even resolving the saved bind host; a
-    # malformed/replaced snapshot must not be converted into product defaults.
+    # Verify a benchmark parent's exact integrity pin before resolving the saved bind host;
+    # a malformed/replaced snapshot must never become product defaults.
     try:
         verify_settings_integrity()
     except SettingsIntegrityError:
@@ -1687,11 +1692,15 @@ def main() -> int:
     if auth_error:
         log.error(auth_error)
         return 2
-    actual_port = find_free_port(args.host, args.port)
+    server = _SignalStopServer(None)  # the config follows the port choice; the stop watcher must not
+    server.watch_launcher_stop()  # wait for it: a launcher quit or exit from here on ends this start
+    actual_port = find_free_port(args.host, args.port, reserved=reserved_service_ports())
     if actual_port != args.port:
         log.info("Port %d busy on %s, using %d instead", args.port, args.host, actual_port)
-    global _ACTUAL_BOUND_PORT
-    config = uvicorn.Config(
+    if _exit_signalled.is_set():
+        log.info("Stop requested before the server started serving; exiting.")
+        return 0
+    server.config = uvicorn.Config(
         app,
         host=args.host,
         port=actual_port,
@@ -1702,8 +1711,6 @@ def main() -> int:
         # Leave time for terminal custody inside the launcher stop budget (#1142).
         timeout_graceful_shutdown=SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_SEC,
     )
-    server = _SignalStopServer(config)
-    server.watch_launcher_stop()
     _uvicorn_exited = threading.Event()
 
     def _check_restart():
@@ -1731,7 +1738,7 @@ def main() -> int:
                         force_exit_timeout_sec)
         try:
             # Our listeners close on exit/exec; port sweeps add no ownership proof.
-            store_switch.switch_at_restart(DATA_DIR, REPO_DIR, _emergency_process_cleanup(port_sweep=False))  # the seam: after every reader is dead, before the exit
+            store_switch.switch_at_restart(DATA_DIR, REPO_DIR, _emergency_process_cleanup())  # the seam: after every reader is dead, before the exit
             if not _LAUNCHER_MANAGED:
                 if _planned_delegate_restart_transaction_id:
                     from ouroboros.delegate_recovery import PLANNED_RESTART_TRANSACTION_ENV
@@ -1740,8 +1747,8 @@ def main() -> int:
                 _restart_current_process(args.host, actual_port)
         except Exception:
             log.exception("Restart failed; cleanup or transfer is unconfirmed, custody retained")
-            return os._exit(1)  # A watcher exception must not silently return success or leave main hung.
-        os._exit(RESTART_EXIT_CODE)
+            return exit_after_restart(1)  # Panic retains termination even when cleanup/transfer failed.
+        exit_after_restart(RESTART_EXIT_CODE)
 
     restart_thread = threading.Thread(target=_check_restart, daemon=True)
     restart_thread.start()
@@ -1749,7 +1756,7 @@ def main() -> int:
     try:
         with bound_service_socket(DATA_DIR, "main", args.host, actual_port,
                                   server_host_source=host_source) as listener:
-            actual_port = _ACTUAL_BOUND_PORT = listener.getsockname()[1]
+            actual_port = listener.getsockname()[1]
             write_port_file(PORT_FILE, actual_port)
             log.info("Starting Ouroboros server on %s:%d", args.host, actual_port)
             server.run(sockets=[listener])

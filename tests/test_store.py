@@ -7,6 +7,7 @@ import errno
 import os
 import pathlib
 import re
+import shutil
 import sqlite3
 
 import pytest
@@ -600,3 +601,210 @@ def test_mutator_inputs_are_prepared_before_begin_and_reprepared_outside_when_th
     retained = plan_author_history._read(tmp_path, "t1", final["author_history_head"])
     assert retained["author_disposition"]["rationale"] == "first stance"
     assert all(name in {"_read", "_persist"} for name in probes)
+
+
+def _read_store_file_in_this_process(kind, root, path):
+    import contextlib
+
+    from ouroboros.artifacts import stream_artifact_file
+    from ouroboros.gateway import files
+    from ouroboros.tools import core_file_tools
+
+    if kind == "header":
+        state, tier = store.probe(root)
+        assert state == "present" and tier is not None
+    elif kind == "preview":
+        assert files._read_prefix(path, 4096).startswith(b"SQLite format 3")
+    elif kind == "agent_read":
+        with contextlib.suppress(UnicodeDecodeError):  # a database is not text; the read itself happened
+            core_file_tools._read_source_text(path, None)
+    elif kind == "copy":
+        files._copy_path(path, root / "copied.sqlite")
+        assert (root / "copied.sqlite").stat().st_size == path.stat().st_size
+    elif kind == "stream":
+        assert len(b"".join(store.iter_file_bytes(path))) == path.stat().st_size
+    elif kind == "artifact":
+        assert stream_artifact_file(path)["size"] == path.stat().st_size
+
+
+@pytest.mark.serial
+@pytest.mark.parametrize("kind", ["header", "preview", "agent_read", "copy", "stream", "artifact"])
+def test_reading_a_store_file_keeps_the_write_lock_another_thread_holds(tmp_path, kind):
+    """Closing any descriptor of the store file releases every POSIX lock this process holds on
+    it (sqlite.org howtocorrupt 2.2). ``probe`` read the header on every ``open_store``, and the
+    Files panel, the read tools and artifact capture read whole files: each close freed an open
+    transaction's lock and a second process could write the same pages."""
+    import subprocess
+    import sys
+    import threading
+
+    from ouroboros import store_import
+
+    store_import.ensure_current_store(tmp_path)
+    task_store.patch_document(tmp_path, "t1", lambda _current: {"task_id": "t1", "status": "running"})
+    path = store.store_path(tmp_path)
+    attempt = ("import sqlite3, sys\n"
+               "conn = sqlite3.connect(sys.argv[1], isolation_level=None, timeout=0)\n"
+               "try:\n    conn.execute('BEGIN IMMEDIATE')\n"
+               "except sqlite3.OperationalError as exc:\n"
+               "    print('blocked' if 'locked' in str(exc) else 'error: ' + str(exc))\n"
+               "else:\n    print('acquired')\n    conn.execute('ROLLBACK')\n")
+
+    def other_process() -> str:
+        return subprocess.run([sys.executable, "-c", attempt, str(path)], capture_output=True,
+                              text=True, timeout=60, check=True).stdout.strip()
+
+    failures: list = []
+
+    def read() -> None:
+        try:
+            _read_store_file_in_this_process(kind, tmp_path, path)
+        except BaseException as exc:  # the assertion below names it
+            failures.append(exc)
+
+    with store.open_store(tmp_path, write=True):
+        assert other_process() == "blocked"
+        reader = threading.Thread(target=read)
+        reader.start()
+        reader.join(timeout=60)
+        assert not reader.is_alive() and failures == []
+        assert other_process() == "blocked"
+    assert other_process() == "acquired"
+
+
+def test_copying_a_held_store_file_onto_itself_raises_and_keeps_its_bytes(tmp_path):
+    """The borrowed-descriptor copy keeps ``shutil.copy2``'s same-file refusal: opening the target
+    for writing first would truncate the very file it reads."""
+    from ouroboros import store_import
+
+    store_import.ensure_current_store(tmp_path)
+    path = store.store_path(tmp_path)
+    assert store.is_sqlite_file(path)  # the borrowed branch (Windows copies with copy2)
+    size = path.stat().st_size
+    for destination in (path, path.parent):
+        with pytest.raises(shutil.SameFileError):
+            store.copy_file_bytes(path, destination)
+        assert path.stat().st_size == size
+    assert pathlib.Path(store.copy_file_bytes(path, tmp_path / "copy.sqlite")).stat().st_size == size
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows reads store files through ordinary handles")
+def test_a_kept_reader_reads_like_a_file_and_continues_short_reads(tmp_path, monkeypatch):
+    from ouroboros import store_import
+
+    store_import.ensure_current_store(tmp_path)
+    path = store.store_path(tmp_path)
+    data = path.read_bytes()
+    with store.open_for_read(path) as reader:
+        assert reader.read() == data and reader.tell() == len(data)
+        assert reader.seek(-10, os.SEEK_END) == len(data) - 10 and reader.read() == data[-10:]
+        with pytest.raises(ValueError):
+            reader.seek(-1)
+        reader.seek(5)
+        monkeypatch.setattr(store.os, "pread", lambda fd, n, at, _pread=os.pread: _pread(fd, min(n, 3), at))
+        assert reader.read(10) == data[5:15] and reader.tell() == 15
+    assert store.held_descriptor(path) is None  # no connection open: returning the borrow closed it
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps no shared descriptors")
+def test_store_descriptors_live_only_as_long_as_their_connections(tmp_path):
+    """One descriptor per touched store file for the process lifetime ran a live server to 2,682
+    open descriptors in four hours (issue #1759); the registry closes it with the last use."""
+    from ouroboros import store_import
+
+    roots = [tmp_path / f"drive{n}" for n in range(40)]
+    for root in roots:
+        store_import.ensure_current_store(root)
+    before = len(os.listdir("/dev/fd"))
+    for root in roots:
+        with store.open_store(root, write=True):
+            assert store.read_file_bytes(store.store_path(root), limit=16) == b"SQLite format 3\x00"
+            assert store.held_descriptor(store.store_path(root)) is not None  # shared while in use
+        with store.open_store(root, write=False):
+            pass
+    assert len(os.listdir("/dev/fd")) <= before  # nothing kept once the transactions ended
+    assert not getattr(store, "_INODES", None)
+
+
+@pytest.mark.serial
+@pytest.mark.skipif(os.name == "nt", reason="POSIX record locks")
+def test_a_reader_opened_before_a_transaction_keeps_its_lock_when_it_closes(tmp_path):
+    """A borrow taken while nothing held the file must not be closed under a transaction that
+    began meanwhile: the close would release that transaction's write lock."""
+    import subprocess
+    import sys
+
+    from ouroboros import store_import
+
+    store_import.ensure_current_store(tmp_path)
+    path = store.store_path(tmp_path)
+    attempt = ("import sqlite3, sys\n"
+               "conn = sqlite3.connect(sys.argv[1], isolation_level=None, timeout=0)\n"
+               "try:\n    conn.execute('BEGIN IMMEDIATE')\n"
+               "except sqlite3.OperationalError as exc:\n"
+               "    print('blocked' if 'locked' in str(exc) else 'error: ' + str(exc))\n"
+               "else:\n    print('acquired')\n    conn.execute('ROLLBACK')\n")
+
+    def other_process() -> str:
+        return subprocess.run([sys.executable, "-c", attempt, str(path)], capture_output=True,
+                              text=True, timeout=60, check=True).stdout.strip()
+
+    reader = store.open_for_read(path)  # idle file: a fresh descriptor
+    with store.open_store(tmp_path, write=True):
+        assert other_process() == "blocked"
+        assert reader.read(16) == b"SQLite format 3\x00"
+        reader.close()  # returning the borrow while the transaction holds the lock
+        assert other_process() == "blocked"
+        assert store.held_descriptor(path) is not None  # its close waits for the connection
+    assert other_process() == "acquired" and store.held_descriptor(path) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows keeps no shared descriptors")
+def test_the_registry_survives_a_failed_close_a_finalizer_and_a_closed_reader(tmp_path):
+    import threading
+
+    from ouroboros import store_import
+
+    store_import.ensure_current_store(tmp_path)
+    path = store.store_path(tmp_path)
+    conn = store.connect(path, store.TIER_ENFORCED)
+    key = (os.stat(path).st_dev, os.stat(path).st_ino)
+    failures = []
+    closer = threading.Thread(target=lambda: failures.append(_closing_raises(conn)))
+    closer.start()
+    closer.join(10)
+    assert failures == [True] and store._INODES[key].conns == 1  # a refused close keeps it counted
+    conn.close()
+    assert key not in store._INODES
+
+    reader = store.open_for_read(path)
+    done = []
+
+    def finalizer_inside_the_guard():  # a GC finalizer returning a borrow on the guard's own thread
+        with store._INODE_GUARD:
+            reader.close()
+        done.append(True)
+
+    worker = threading.Thread(target=finalizer_inside_the_guard, daemon=True)
+    worker.start()
+    worker.join(10)
+    assert done == [True] and key not in store._INODES
+    with pytest.raises(ValueError):
+        reader.read(1)  # never through a descriptor that may now name another file
+
+
+def _closing_raises(conn) -> bool:
+    try:
+        conn.close()  # another thread: sqlite3 refuses it
+    except Exception:
+        return True
+    return False
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs FIFOs")
+def test_a_fifo_is_never_opened_to_test_for_sqlite(tmp_path):
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    assert store.is_sqlite_file(fifo) is False  # returns at once: opening a FIFO would block
+    with pytest.raises(shutil.SpecialFileError):
+        store.copy_file_bytes(fifo, tmp_path / "copy")
