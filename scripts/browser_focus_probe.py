@@ -5,8 +5,8 @@ Serve only (safe to prepare without Chrome):
 
 Later, with the owner present and a genuinely cyber_pro Ouroboros process:
   python scripts/browser_focus_probe.py --source-root "$PWD" \
-      --data-root /Users/kazzand/Ouroboros/data \
-      --live-data-root /Users/kazzand/Ouroboros/data \
+      --data-root $HOME/Ouroboros/data \
+      --live-data-root $HOME/Ouroboros/data \
       --task-id CURRENT_RUNNING_TASK_ID --task-attempt CURRENT_ATTEMPT \
       --cli /absolute/path/to/@playwright/mcp/cli.js --extension --owner-ready
 
