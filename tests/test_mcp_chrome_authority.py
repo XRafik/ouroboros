@@ -15,6 +15,8 @@ from ouroboros.contracts.task_contract import attach_task_contract
 from ouroboros.tools.registry import ToolContext, ToolRegistry
 from tests.test_mcp_chrome_session import _session, _state
 
+pytestmark = pytest.mark.serial
+
 
 def _context(root, actor):
     metadata = wake_task_metadata(actor, "heartbeat") if actor in {"observe", "act", "full"} else {}
@@ -49,6 +51,8 @@ def consumer(tmp_path, monkeypatch):
     monkeypatch.setattr("ouroboros.owner_pause.tool_handoff", handoff)
     session = _session()
     session.data_root = tmp_path
+    from ouroboros.task_results import STATUS_RUNNING, write_task_result
+    write_task_result(tmp_path, "task-one", STATUS_RUNNING)
     session._observe_before = lambda *_a, **_k: session._chrome_state
     session._observe = session._observe_before
     sent = []
@@ -76,6 +80,7 @@ def consumer(tmp_path, monkeypatch):
     mcp_client.reconfigure_from_settings({"MCP_ENABLED": True, "MCP_SERVERS": [{
         "id": "browser", "enabled": True, "transport": "stdio", "command": "node",
         "browser_bridge": True, "browser_protocol": "ouroboros_chrome"}]})
+    monkeypatch.setitem(mcp_task_sessions._sessions, session.key, session)
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
     yield registry, session, sent, tmp_path
     mcp_task_sessions._sessions.pop(session.key, None)

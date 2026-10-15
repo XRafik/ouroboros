@@ -12,6 +12,8 @@ from ouroboros.task_results import STATUS_RUNNING, write_task_result
 from tests.test_mcp_chrome_authority import ACTORS, UNRESTRICTED, _ask, _context
 from tests.test_mcp_chrome_session import _session, _state
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture
 def idle(tmp_path, monkeypatch):

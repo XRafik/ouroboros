@@ -115,8 +115,10 @@ network callback is `{kind:"request",invocation_id,step_id,request_id,url,method
 The state is the complete current state object; `step_id` is a strictly
 increasing positive integer within the invocation. The host answers one JSON
 line `{"block":""}` only after matching owner, invocation, step, executor,
-lease and current browser policy; any nonempty `block`, missing or late answer
-denies. Request body presence and completeness are required before the existing
+lease and current policy. Active and idle callbacks share final binding and
+task/actor admission after policy assessment; drift denies without advancing
+steps or lease state. Any nonempty `block`, missing or late answer denies.
+Request body presence and completeness are required before the existing
 `browser_request_block_reason` judges its actual URL and method. A navigation
 step, trusted click, Enter or submit may cause a same-tab main-document request.
 Its request callback additionally carries resource_type:"Document",

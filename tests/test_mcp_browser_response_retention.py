@@ -383,14 +383,20 @@ def test_manager_preserves_existing_producer_text_on_normal_route(tmp_path, monk
     assert result.host_annotations == ("⚠️ host note",)
 
 
-def test_same_document_url_refresh_checks_observation_and_live_callback(monkeypatch):
+def test_same_document_url_refresh_checks_observation_and_live_callback(tmp_path, monkeypatch):
+    from ouroboros.task_results import STATUS_RUNNING, write_task_result
+    from tests.test_mcp_chrome_authority import _context
+
     monkeypatch.setattr(mcp_chrome_protocol, "binding_reason", lambda *_a: "")
     monkeypatch.setattr(mcp_chrome_protocol, "target_reason",
                         lambda _ctx, url: "BROWSER_URL_BLOCKED" if "forbidden" in url else "")
     session = object.__new__(mcp_task_sessions.TaskBrowserSession)
     session.cfg = SimpleNamespace(browser_protocol="ouroboros_chrome")
-    session.ctx = SimpleNamespace()
+    session.ctx, session.data_root = _context(tmp_path, "owner"), tmp_path
+    session.ctx.task_id = "response-task"
     session.key, session.attempt, session.revoked = ("response-task", "browser"), "1", False
+    write_task_result(tmp_path, "response-task", STATUS_RUNNING)
+    monkeypatch.setitem(mcp_task_sessions._sessions, session.key, session)
     session._chrome_state = _state()
     session._chrome_invocation = ("live", "browser_action", {"operation": "snapshot", "args": {}})
     session._chrome_last_step = 0

@@ -441,6 +441,21 @@ def background_read_reason(self: Any, facts: Any, state: Any, ctx: Any) -> str:
     return ""
 
 
+async def callback_authority_reason(self: Any, ctx: Any, authority: tuple[bool, str]) -> str:
+    """The final admission shared by active and idle callbacks after policy awaits."""
+    reason = await asyncio.to_thread(binding_reason, self.cfg, ctx, getattr(self, "_chrome_skill_hash", ""))
+    if reason:
+        self._mark_binding_revoked()
+        return reason
+    # Binding resolution yields; controls and actor caps must still hold after it.
+    reason = await asyncio.to_thread(lease_authority_reason, self, ctx)
+    if reason:
+        return reason
+    if self.revoked or self.ctx is not ctx or _policy_inputs(ctx) != authority:
+        return "BROWSER_POLICY_UNAVAILABLE: callback actor authority changed during assessment"
+    return ""
+
+
 async def guard_callback(self, facts: dict[str, Any]) -> str:
     """Settle against a captured invocation or the same idle read lease, never a later call."""
     invocation = self._chrome_invocation
@@ -454,17 +469,11 @@ async def guard_callback(self, facts: dict[str, Any]) -> str:
     # if its state itself is well formed. Check this before reading state.
     if self._chrome_invocation is not invocation:
         return "BROWSER_POLICY_UNAVAILABLE: callback invocation closed during readiness check"
+    authority = _policy_inputs(ctx)
     if invocation is None:
-        authority = _policy_inputs(ctx)
         reason = await asyncio.to_thread(background_read_reason, self, facts, previous, ctx)
         if not reason:
-            reason = await asyncio.to_thread(binding_reason, self.cfg, ctx, getattr(self, "_chrome_skill_hash", ""))
-            if reason:
-                self._mark_binding_revoked()
-        if not reason:
-            # Binding resolution yields: Pause, cancel, sleep or network authority
-            # may have changed while it ran. Recheck after that final binding wait.
-            reason = await asyncio.to_thread(lease_authority_reason, self, ctx)
+            reason = await callback_authority_reason(self, ctx, authority)
         if self.revoked:
             return reason or "BROWSER_SESSION_REVOKED: task browser session is closing"
         if reason:
@@ -513,8 +522,10 @@ async def guard_callback(self, facts: dict[str, Any]) -> str:
         reason = await asyncio.to_thread(
             guard_reason, self.ctx, facts, candidate, invocation, self.revoked,
             getattr(self, "_chrome_sequence_index", 0))
+    if not reason:
+        reason = await callback_authority_reason(self, ctx, authority)
     if self.revoked:
-        return "BROWSER_SESSION_REVOKED: task browser session is closing"
+        return reason or "BROWSER_SESSION_REVOKED: task browser session is closing"
     if self._chrome_invocation is not invocation or self._chrome_state is not previous:
         return "BROWSER_POLICY_UNAVAILABLE: callback authority closed during assessment"
     if stale := invocation_reason(facts, invocation, self._chrome_last_step):

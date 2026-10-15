@@ -269,8 +269,8 @@ def test_a_pending_legacy_row_heals_on_one_retry_and_leaves_the_ledger(tmp_path)
     assert observability.retry_pending_child_ref_promotions(parent, generation=object())["scanned"] == 0
 
 
-def test_a_complete_legacy_row_is_readable_in_memory_and_never_rewritten(tmp_path):
-    """No pending ledger row will retry it: the read projection restores, nothing writes."""
+def test_a_complete_pre_retention_row_is_projected_without_rewriting_either_source(tmp_path):
+    """CURRENT reads restore older address carriers; an adjacent retained file is inert."""
     from ouroboros.agent_startup_checks import task_result_authority_projection
     from ouroboros.store import open_store
     from ouroboros.task_results import load_plan_review_state, task_result_path

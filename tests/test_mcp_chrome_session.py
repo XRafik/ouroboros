@@ -13,12 +13,27 @@ from ouroboros import mcp_chrome_protocol as chrome
 from ouroboros import mcp_task_sessions
 from ouroboros.tools.tool_result import ToolResult
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture(autouse=True)
-def cyber_consumer(monkeypatch):
+def cyber_consumer(monkeypatch, tmp_path):
     # These primitive fixtures represent the qualified unrestricted caller.
     # Ordinary/readonly refusal is exercised separately in protocol unit tests.
     monkeypatch.setattr("ouroboros.config.get_runtime_mode", lambda: "cyber_pro")
+    from ouroboros.task_results import STATUS_RUNNING, write_task_result
+    from tests.test_mcp_chrome_authority import _context
+
+    factory = _session
+
+    def admitted_session():
+        session = factory()
+        session.ctx, session.data_root = _context(tmp_path, "owner"), tmp_path
+        write_task_result(tmp_path, "task-one", STATUS_RUNNING)
+        monkeypatch.setitem(mcp_task_sessions._sessions, session.key, session)
+        return session
+
+    monkeypatch.setattr(sys.modules[__name__], "_session", admitted_session)
 
 
 def test_installed_skill_binding_checks_current_payload_readiness_and_executor(monkeypatch, tmp_path):

@@ -238,7 +238,7 @@ def test_shared_drive_successor_is_retried_by_task_id_and_its_custody_survives_p
     assert observability.read_blob_ref(parent, stored["full_payload_ref"]) == {"answer": "exact successor"}
 
 
-@pytest.mark.parametrize("guard", ["live", "liveness_unknown", "unknown_occupant"])
+@pytest.mark.parametrize("guard", ["live", "liveness_unknown", "unknown_occupant", "unknown_legacy_occupant"])
 def test_shared_drive_is_kept_while_a_successor_is_live_or_unknown(tmp_path, guard):
     """A settled, fully promoted successor still keeps the owner's drive while it is live, its
     liveness is unknown, or the drive holds an occupant that is not a task id."""
@@ -250,6 +250,9 @@ def test_shared_drive_is_kept_while_a_successor_is_live_or_unknown(tmp_path, gua
         # JSON result files are inert after import; an unowned artifact directory
         # is still an occupant that the current custody census must retain.
         (child / "task_results" / "artifacts" / "not a task id!").mkdir(parents=True)
+    elif guard == "unknown_legacy_occupant":
+        # A file-only occupant participates in custody, but not CURRENT reads.
+        (child / "task_results" / "not a task id!.json").write_text("{}", encoding="utf-8")
     probe = {"live": lambda task: True if task == successor else False,
              "liveness_unknown": lambda task: None if task == successor else False}.get(guard, lambda _task: False)
 
@@ -262,3 +265,5 @@ def test_shared_drive_is_kept_while_a_successor_is_live_or_unknown(tmp_path, gua
     assert retained["status"] == "completed" and retained["result"] == "successor answer"
     if guard == "unknown_occupant":
         assert (child / "task_results" / "artifacts" / "not a task id!").is_dir()
+    elif guard == "unknown_legacy_occupant":
+        assert (child / "task_results" / "not a task id!.json").read_text(encoding="utf-8") == "{}"
