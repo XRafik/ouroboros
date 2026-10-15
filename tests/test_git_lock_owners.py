@@ -44,17 +44,22 @@ def _git(repo, *args, input=None):
     return proc.stdout.strip()
 
 
-def _repo(tmp_path):
+def _init_repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "ouroboros")
-    _git(repo, "config", "user.name", "Fixture")
-    _git(repo, "config", "user.email", "fixture@example.invalid")
-    _git(repo, "config", "commit.gpgsign", "false")
+    # Real merge/cherry-pick commands need identity too, not only fixture commits.
+    for key, value in {"user.name": "Fixture", "user.email": "fixture@example.invalid",
+                       "commit.gpgsign": "false"}.items():
+        _git(repo, "config", "--local", key, value)
+    return repo
+
+
+def _repo(tmp_path):
+    repo = _init_repo(tmp_path)
     (repo / "seed.txt").write_text("committed seed\n", encoding="utf-8")
     _git(repo, "add", "seed.txt")
-    _git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-         "-c", "commit.gpgsign=false", "commit", "-qm", "seed")
+    _git(repo, "commit", "-qm", "seed")
     return repo
 
 
@@ -360,8 +365,7 @@ def _commit(repo, message, files=(), delete=()):
     for rel in delete:
         (repo / rel).unlink()
     _git(repo, "add", "-A")
-    _git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-         "-c", "commit.gpgsign=false", "commit", "-qm", message)
+    _git(repo, "commit", "-qm", message)
     return _git(repo, "rev-parse", "HEAD")
 
 
@@ -374,9 +378,7 @@ def replace_scene(tmp_path, monkeypatch):
     from ouroboros.gateway import control
     from supervisor import update_merge
 
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q", "-b", "ouroboros")
+    repo = _init_repo(tmp_path)
     root = _commit(repo, "root", {"BIBLE.md": "constitution\n", "ouroboros/store.py": "# store\n",
                                   "ouroboros/usage_store.py": "# usage\n", "seed.txt": "seed\n"})
     base = _commit(repo, "owner work", {"local.txt": "owner commit\n"})
@@ -761,7 +763,6 @@ def test_owner_work_beside_a_held_lock_is_refused_before_anything_moves(replace_
 
     error = body["error"].partition("could not preserve local changes before the update: ")
     # Git's own words, or the fallback when Git said nothing (Apple Git 2.39 refuses this push silently).
-    # Git versions differ in how much of stash's index-lock failure they print.
     assert status == 409 and error[1] and (
         "index.lock" in error[2] or error[2] in {"git stash push failed", "error: could not write index"}
     ), body
@@ -1055,9 +1056,7 @@ def restore_door(tmp_path, monkeypatch):
     from ouroboros.tools import services
     from supervisor import restart_retention, workers
 
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    _git(repo, "init", "-q", "-b", "ouroboros")
+    repo = _init_repo(tmp_path)
     storeless = _commit(repo, "before the store", {"BIBLE.md": "constitution\n", "seed.txt": "storeless\n",
                                                    "ouroboros/usage_store.py": "# usage\n"})
     old = _commit(repo, "the store arrives", {"ouroboros/store.py": "# store\n", "seed.txt": "old\n"})
