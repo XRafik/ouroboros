@@ -8,8 +8,10 @@ from types import SimpleNamespace
 import pytest
 
 from ouroboros import mcp_task_sessions, owner_pause
-from tests.test_mcp_chrome_idle import idle
+from tests.test_mcp_chrome_idle import idle as _idle
 from tests.test_mcp_chrome_session import _state
+
+idle = _idle  # Register the shared pytest fixture without an unused import.
 
 
 @pytest.fixture

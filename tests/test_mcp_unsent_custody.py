@@ -9,8 +9,11 @@ from ouroboros import mcp_client, owner_pause, store
 from tests.test_batch4_producer_custody import _registry
 from tests.test_invocation_ownership import claims, owner, run
 from tests.test_mcp_client import _settings
-from tests.test_mcp_task_browser_bridge import manager, policy, safety  # noqa: F401 - bridge fixtures
+from tests.test_mcp_task_browser_bridge import manager as _manager
+from tests.test_mcp_task_browser_bridge import policy, safety  # noqa: F401 - bridge fixtures
 from tests.test_mcp_task_browser_bridge import posix_bridge
+
+manager = _manager  # Register the shared pytest fixture without an unused import.
 
 pytestmark = pytest.mark.serial
 
@@ -113,7 +116,7 @@ def test_real_manager_keeps_only_unresolved_mcp_duty(tmp_path, monkeypatch, boun
 
 @pytest.mark.parametrize("bound", [False, True])
 @pytest.mark.parametrize("outcome", ["refused", "safety", "returned", "sdk_error", "timeout",
-                                    "broken", "broken_unsent", "unknown", "independent_duty"])
+                                    "broken", "broken_unsent", "unknown", "independent_duty", "pre_read_timeout"])
 def test_registered_bridge_discharges_only_its_positive_unsent_receipt(tmp_path, monkeypatch, bound, outcome):
     from ouroboros import mcp_chrome_protocol, mcp_task_sessions, tool_custody
     from ouroboros.model_sleep import cold_blockers
@@ -137,12 +140,13 @@ def test_registered_bridge_discharges_only_its_positive_unsent_receipt(tmp_path,
     session._chrome_state["owner"]["task_id"] = ctx.task_id
     session._chrome_invocation = None
     session._read_stream = None
-    session._observe_before = session._observe = lambda *_a, **_k: session._chrome_state
+    if outcome != "pre_read_timeout":
+        session._observe_before = session._observe = lambda *_a, **_k: session._chrome_state
     monkeypatch.setitem(mcp_task_sessions._sessions, session.key, session)
     monkeypatch.setattr(mcp_chrome_protocol, "target_reason", lambda *_a: "")
     monkeypatch.setattr("ouroboros.safety.check_safety",
                         lambda *_a, **_k: (outcome != "safety", "host safety refusal" if outcome == "safety" else ""))
-    returned, dispatched, independent, pending_before = [], [], [], []
+    returned, dispatched, independent, pending_before, state_reads = [], [], [], [], []
     record_returned = owner_pause.record_mcp_call_returned
 
     def returned_call(name):
@@ -163,7 +167,10 @@ def test_registered_bridge_discharges_only_its_positive_unsent_receipt(tmp_path,
     # evidence for either the action token or an independent external duty.
     session.stop = lambda: "unconfirmed: fixture retains session custody"
 
-    def request(*_args, **_kwargs):
+    def request(name, *_args, **_kwargs):
+        if outcome == "pre_read_timeout" and name == "browser_state":
+            state_reads.append(name)
+            raise mcp_task_sessions.BrowserBridgeTimeout("pre-action state read timed out")
         with owner_pause.operation_start():
             dispatched.append(True)
         if outcome == "timeout":
@@ -184,10 +191,12 @@ def test_registered_bridge_discharges_only_its_positive_unsent_receipt(tmp_path,
     else:
         result = registry.execute_result(prefixed, args)
     assert pending_before and all(set(row.values()) == {"mcp_transport"} for row in pending_before)
-    refused = outcome in {"refused", "safety", "independent_duty"}
+    refused = outcome in {"refused", "safety", "independent_duty", "pre_read_timeout"}
     answered = outcome in {"returned", "sdk_error"}
     assert len(dispatched) == (0 if refused else 1)
     assert returned == ([prefixed] if answered else [])
+    if outcome == "pre_read_timeout":
+        assert state_reads == ["browser_state"] and "not dispatched" in result.text
     assert result.status == ("blocked" if refused else "timeout" if outcome == "timeout"
                              else "ok" if outcome == "returned" else "error"), result
     if outcome == "timeout":

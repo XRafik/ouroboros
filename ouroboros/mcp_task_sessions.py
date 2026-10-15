@@ -725,7 +725,7 @@ class TaskBrowserSession:
     def _observe_before(self, timeout: int, *, allow_closed: bool = False) -> dict[str, Any]:
         try:
             return self._observe(timeout, allow_closed=allow_closed)
-        except RuntimeError as exc:  # Unknown state refuses; nothing was dispatched.
+        except (RuntimeError, BrowserBridgeTimeout) as exc:  # The action itself was never submitted.
             raise BrowserBridgeRefusal(f"{exc}; the action was not dispatched") from exc
 
     def call(self, prefixed: str, name: str, args: dict, ctx: Any, timeout: int) -> tuple[ToolResult, str, str]:

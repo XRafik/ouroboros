@@ -1,9 +1,10 @@
 """Client-only MCP integration for external HTTP/SSE/stdio tool servers.
 
 Configured servers are hot-reloaded from settings, listed tools are exposed
-through ToolRegistry as provider-safe ``mcp_<server>__<tool>`` names, and each
-call opens a fresh session. Secrets, server descriptions/results, and obvious
-metadata SSRF targets are handled defensively because MCP servers are external.
+through ToolRegistry as provider-safe ``mcp_<server>__<tool>`` names. Ordinary
+calls open fresh sessions; browser bridges retain one task-owned connection.
+Secrets, server descriptions/results, and obvious metadata SSRF targets are
+handled defensively because MCP servers are external.
 
 For ``stdio``, ``command`` is an executable and ``args`` is passed as an exact
 list without a shell. Optional cwd, literal and settings-backed environment selections
@@ -759,8 +760,13 @@ def _transport_factory(cfg: MCPServerConfig):
         # environment and its context-managed process shutdown sequence.
         # The SDK merges a plain dict onto its defaults. Windows env names are
         # case-insensitive: canonical names prevent a second Path/PATH entry.
-        env = {key.upper() if IS_WINDOWS else key: value for key, value in cfg.env.items()}
-        selected = {"env": env} if cfg.env else {}
+        from ouroboros.process_scope import installation_scope_entries
+
+        # The installation scope marker rides every stdio server (a long-lived shared
+        # helper belongs to the installation, never to the task that first touched it).
+        env = {**installation_scope_entries(),
+               **{key.upper() if IS_WINDOWS else key: value for key, value in cfg.env.items()}}
+        selected = {"env": env} if env else {}
         if cfg.cwd:
             selected["cwd"] = cfg.cwd
         params = StdioServerParameters(command=cfg.command, args=list(cfg.args), **selected)
@@ -1100,9 +1106,7 @@ class MCPManager:
                    for item in self._configuration_errors if item["enabled"]]
             for runtime in self._servers.values():
                 cfg = runtime.config
-                if not cfg.enabled:
-                    continue
-                if not runtime.tools:
+                if cfg.enabled and not runtime.tools:
                     out.append({"id": cfg.id, "last_error": _redact_error_text(runtime.last_error or "", cfg)})
             return out
 
@@ -1120,16 +1124,14 @@ class MCPManager:
                 for tool in runtime.tools:
                     if allowed and tool.raw_name not in allowed:
                         continue
-                    results.append(
-                        {
-                            "name": tool.prefixed_name,
-                            "description": _model_facing_description(tool),
-                            "schema": tool.schema,
-                            "server_id": tool.server_id,
-                            "raw_name": tool.raw_name,
-                            "raw_description": _redact_error_text(tool.description, cfg),
-                        }
-                    )
+                    results.append({
+                        "name": tool.prefixed_name,
+                        "description": _model_facing_description(tool),
+                        "schema": tool.schema,
+                        "server_id": tool.server_id,
+                        "raw_name": tool.raw_name,
+                        "raw_description": _redact_error_text(tool.description, cfg),
+                    })
             return results
 
     def tool_name_collisions(self) -> List[Dict[str, str]]:
@@ -1177,17 +1179,10 @@ class MCPManager:
                         "env_from_settings": dict(cfg.env_from_settings),
                         "configuration_warnings": list(cfg.configuration_warnings),
                         "tool_count": len(runtime.tools),
-                        "tools": [
-                            {
-                                "name": tool.raw_name,
-                                "prefixed_name": tool.prefixed_name,
-                                "description": _redact_error_text(tool.description, cfg),
-                            }
-                            for tool in runtime.tools
-                        ],
-                        "tool_name_collisions": [
-                            dict(item) for item in runtime.tool_name_collisions
-                        ],
+                        "tools": [{"name": tool.raw_name, "prefixed_name": tool.prefixed_name,
+                                   "description": _redact_error_text(tool.description, cfg)}
+                                  for tool in runtime.tools],
+                        "tool_name_collisions": [dict(item) for item in runtime.tool_name_collisions],
                         "last_error": runtime.last_error,
                         "last_refreshed": runtime.last_refreshed,
                         "last_attempted": runtime.last_attempted,
@@ -1215,10 +1210,7 @@ class MCPManager:
                 for error in self._configuration_errors:
                     if error["id"] == server_id:
                         return {"ok": False, "code": error["code"], "error": error["last_error"]}
-                return {
-                    "ok": False,
-                    "error": f"unknown server id: {server_id!r}",
-                }
+                return {"ok": False, "error": f"unknown server id: {server_id!r}"}
             cfg = runtime.config
             if not cfg.enabled:
                 return {"ok": False, "error": f"MCP server {server_id!r} is disabled."}
@@ -1253,33 +1245,27 @@ class MCPManager:
         finally:
             _DISCOVERY_AUTHORITY.reset(token)
 
-        pagination_truncated = any(
-            isinstance(item, dict) and item.get("_pagination_truncated")
-            for item in tools_raw
-        )
+        pagination_truncated = any(isinstance(item, dict) and item.get("_pagination_truncated") for item in tools_raw)
         tools_raw = [
             item for item in tools_raw
             if not (isinstance(item, dict) and item.get("_pagination_truncated"))
         ]
-        normalized = [
-            MCPTool(
+        # Normalize and deduplicate in one pass, preserving first-descriptor order.
+        seen: Dict[str, MCPTool] = {}
+        collisions: List[Dict[str, str]] = []
+        for item in tools_raw:
+            if not str(item.get("name") or "").strip():
+                continue
+            tool = MCPTool(
                 server_id=cfg.id,
                 raw_name=str(item.get("name") or "").strip(),
                 prefixed_name=make_tool_name(cfg.id, item.get("name") or ""),
                 description=_redact_error_text(str(item.get("description") or ""), cfg)[:1024],
                 schema=_normalize_input_schema(item.get("input_schema"), cfg),
             )
-            for item in tools_raw
-            if str(item.get("name") or "").strip()
-        ]
-        normalized = [tool for tool in normalized if tool.prefixed_name]
-        # Drop duplicates caused by slug collisions. A residual collision (the
-        # 12-hex tail makes it astronomically rare) DROPS a tool — a capability
-        # omission that must be disclosed, not silently swallowed (#447 P1).
-        seen: Dict[str, MCPTool] = {}
-        deduped: List[MCPTool] = []
-        collisions: List[Dict[str, str]] = []
-        for tool in normalized:
+            if not tool.prefixed_name:
+                continue
+            # A residual slug collision DROPS a tool; disclose the omission (#447 P1).
             if tool.prefixed_name in seen:
                 kept = seen[tool.prefixed_name]
                 collisions.append({
@@ -1289,7 +1275,7 @@ class MCPManager:
                 })
                 continue
             seen[tool.prefixed_name] = tool
-            deduped.append(tool)
+        deduped = list(seen.values())
         omission_notes: List[str] = []
         if collisions:
             log.error(
@@ -1337,14 +1323,8 @@ class MCPManager:
             "tool_count": len(deduped),
             "configuration_warnings": list(cfg.configuration_warnings),
             "tool_name_collisions": [dict(item) for item in collisions],
-            "tools": [
-                {
-                    "name": tool.raw_name,
-                    "prefixed_name": tool.prefixed_name,
-                    "description": tool.description,
-                }
-                for tool in deduped
-            ],
+            "tools": [{"name": tool.raw_name, "prefixed_name": tool.prefixed_name,
+                       "description": tool.description} for tool in deduped],
         }
 
     def refresh_all(self, *, authority: Any = None, unlisted_only: bool = False) -> Dict[str, Any]:
@@ -1385,11 +1365,8 @@ class MCPManager:
         errors: List[str] = []
         cfg = normalize_server_config(raw_config, settings=settings, errors=errors)
         if cfg is None:
-            return {
-                "ok": False,
-                "code": "MCP_CONFIG_ERROR",
-                "error": "Invalid MCP server config: " + "; ".join(errors),
-            }
+            return {"ok": False, "code": "MCP_CONFIG_ERROR",
+                    "error": "Invalid MCP server config: " + "; ".join(errors)}
         timeout = self._tool_timeout_sec
         if cfg.browser_bridge:
             return {"ok": False, "code": "MCP_TASK_OWNER_REQUIRED",
@@ -1398,9 +1375,7 @@ class MCPManager:
             tools_raw = _run_async(lambda: self._async_list_tools(cfg, timeout), join_timeout=timeout + 3)
         except BaseException as exc:  # noqa: BLE001
             return {"ok": False, "error": f"{type(exc).__name__}: {_redact_error_text(exc, cfg)}"}
-        truncated = any(
-            isinstance(t, dict) and t.get("_pagination_truncated") for t in tools_raw
-        )
+        truncated = any(isinstance(t, dict) and t.get("_pagination_truncated") for t in tools_raw)
         tools_raw = [
             t for t in tools_raw
             if not (isinstance(t, dict) and t.get("_pagination_truncated"))
@@ -1411,13 +1386,9 @@ class MCPManager:
             "tool_count": len(tools_raw),
             "configuration_warnings": list(cfg.configuration_warnings),
             **({"pagination_truncated": True} if truncated else {}),
-            "tools": [
-                {
-                    "name": str(t.get("name") or ""),
-                    "description": _redact_error_text(str(t.get("description") or ""), cfg)[:512],
-                }
-                for t in tools_raw
-            ],
+            "tools": [{"name": str(t.get("name") or ""),
+                       "description": _redact_error_text(str(t.get("description") or ""), cfg)[:512]}
+                      for t in tools_raw],
         }
 
     def _resolve_locked(self, prefixed_name: str) -> tuple[MCPNameResolution, Any, Any]:
@@ -1514,12 +1485,8 @@ class MCPManager:
                                             meta_updates={"mcp_call_not_sent": True})
             body = f"⚠️ MCP_TOOL_ERROR: {type(exc).__name__}: {_redact_error_text(exc, cfg)}"
             text = _model_facing_result(cfg, tool.raw_name, body)
-            return ToolResult(
-                status="error",
-                code="MCP_ERROR",
-                text=text,
-                meta={"dynamic_provider": True, "mcp_call_not_sent": bool(unsent)},
-            )
+            return ToolResult(status="error", code="MCP_ERROR", text=text,
+                              meta={"dynamic_provider": True, "mcp_call_not_sent": bool(unsent)})
         # Joined normal return (either SDK error bit): this invocation's call is over.
         from ouroboros.owner_pause import record_mcp_call_returned
 

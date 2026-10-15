@@ -271,8 +271,9 @@ def test_a_pending_legacy_row_heals_on_one_retry_and_leaves_the_ledger(tmp_path)
 def test_a_complete_legacy_row_is_readable_in_memory_and_never_rewritten(tmp_path):
     """No pending ledger row will retry it: the read projection restores, nothing writes."""
     from ouroboros.agent_startup_checks import task_result_authority_projection
+    from ouroboros.store import open_store
     from ouroboros.task_results import load_plan_review_state, task_result_path
-    from ouroboros.task_store import read_document, signature
+    from ouroboros.task_store import signature
     from ouroboros.tools.plan_review_artifacts import PlanReviewSourceUnavailable
 
     task_id = "legacy-complete"
@@ -281,11 +282,11 @@ def test_a_complete_legacy_row_is_readable_in_memory_and_never_rewritten(tmp_pat
     write_task_result(tmp_path, task_id, "completed", result="done", plan_review_state=damaged,
                       child_ref_promotion=_promotion("complete", facts, []))
     path = task_result_path(tmp_path, task_id)
-    row_before = read_document(tmp_path, task_id)
-    signature_before = signature(tmp_path, task_id)
+    with open_store(tmp_path, write=False) as txn:
+        row_text, revision = txn.body_text(task_id), signature(tmp_path, task_id, txn=txn)
     # A real retained file from the older writer, not an assumed CURRENT output.
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(row_before, ensure_ascii=False), encoding="utf-8")
+    path.write_text(row_text, encoding="utf-8")
     raw = path.read_bytes()
 
     authority = task_result_authority_projection(load_task_result(tmp_path, task_id), drive_root=tmp_path)
@@ -293,8 +294,9 @@ def test_a_complete_legacy_row_is_readable_in_memory_and_never_rewritten(tmp_pat
     assert "plan_review_source_gap" not in authority
     assert authority["plan_review_state"]["waves"][-1]["spec"] == spec
     assert path.read_bytes() == raw
-    assert read_document(tmp_path, task_id) == row_before
-    assert signature(tmp_path, task_id) == signature_before
+    with open_store(tmp_path, write=False) as txn:
+        assert txn.body_text(task_id) == row_text
+        assert signature(tmp_path, task_id, txn=txn) == revision
     with pytest.raises(PlanReviewSourceUnavailable):
         load_plan_review_state(tmp_path, task_id)  # deciders stay strict
 

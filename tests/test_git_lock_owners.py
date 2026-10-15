@@ -48,6 +48,9 @@ def _repo(tmp_path):
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "ouroboros")
+    _git(repo, "config", "user.name", "Fixture")
+    _git(repo, "config", "user.email", "fixture@example.invalid")
+    _git(repo, "config", "commit.gpgsign", "false")
     (repo / "seed.txt").write_text("committed seed\n", encoding="utf-8")
     _git(repo, "add", "seed.txt")
     _git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
@@ -758,7 +761,10 @@ def test_owner_work_beside_a_held_lock_is_refused_before_anything_moves(replace_
 
     error = body["error"].partition("could not preserve local changes before the update: ")
     # Git's own words, or the fallback when Git said nothing (Apple Git 2.39 refuses this push silently).
-    assert status == 409 and error[1] and ("index.lock" in error[2] or error[2] == "git stash push failed"), body
+    # Git versions differ in how much of stash's index-lock failure they print.
+    assert status == 409 and error[1] and (
+        "index.lock" in error[2] or error[2] in {"git stash push failed", "error: could not write index"}
+    ), body
     assert update_merge.read_update_tx_strict()[0] == "absent" and scene.events["respawned"] == 1
     assert workers.repo_writer_admission_closed() == "" and scene.events["fenced"] == []
     assert (scene.repo / "seed.txt").read_text(encoding="utf-8") == "owner edit in progress\n"
