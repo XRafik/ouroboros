@@ -101,6 +101,7 @@ def test_prefixed_registry_mutation_authority(consumer, actor, name, args):
     assert "mcp_browser__browser_action" in {item["function"]["name"] for item in registry.schemas()}
     if name == "browser_connect":
         session._chrome_state.update(connected=False, lease=None)
+        session._chrome_lease_generation_floor = -1  # a cold executor has never held a lease
     result = registry.execute_result("mcp_browser__" + name, args)
     assert result.status == ("ok" if actor in UNRESTRICTED else "blocked"), result.text
     assert bool(sent) == (actor in UNRESTRICTED)

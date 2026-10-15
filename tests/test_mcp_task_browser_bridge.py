@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ouroboros import mcp_client, mcp_task_sessions
+from ouroboros import cancel_intents, mcp_client, mcp_task_sessions
 from ouroboros.process_containment import CONTAINMENT_ENV_PREFIX, pid_is_zombie, pids_with_env_marker
 from tests._cancel_intents_shared import _LiveProc, _reap_spawned_live_procs  # noqa: F401
 from tests._cancel_intents_shared import qenv as _qenv
@@ -739,6 +739,7 @@ def test_running_task_cancel_closes_bridge_after_worker_death(qenv, monkeypatch,
     qenv.q.RUNNING[ctx.task_id] = {"task": {"id": ctx.task_id, "chat_id": 0}, "worker_id": 0}
     monkeypatch.setattr(qenv.q, "_emit_cancel_task_done", lambda *_a, **_kw: None)
     try:
+        cancel_intents.request_cancel(qenv.drive, ctx.task_id, reason="owner stop", source="owner", requested_by="owner")
         assert qenv.tl.cancel_task_custody(ctx.task_id) == qenv.tl.CANCEL_CANCELLED
         assert not proc.is_alive()
         assert not _live(marker)
@@ -754,6 +755,7 @@ def test_unconfirmed_bridge_scan_never_undoes_a_confirmed_cancel(qenv, monkeypat
     qenv.workers.WORKERS[0] = SimpleNamespace(wid=0, proc=proc, busy_task_id=task_id, reaping=False)
     qenv.q.RUNNING[task_id] = {"task": {"id": task_id, "chat_id": 0}, "worker_id": 0}
     monkeypatch.setattr(qenv.q, "_emit_cancel_task_done", lambda *_a, **_kw: None)
+    cancel_intents.request_cancel(qenv.drive, task_id, reason="owner stop", source="owner", requested_by="owner")
     assert qenv.tl.cancel_task_custody(task_id) == qenv.tl.CANCEL_CANCELLED
     assert not proc.is_alive()
 

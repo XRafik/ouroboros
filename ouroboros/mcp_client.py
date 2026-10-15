@@ -836,7 +836,11 @@ async def _call_tool_async(
     from ouroboros.owner_pause import submit_async_operation, submit_async_preparation, OwnerPauseRefused, _TOOL_OPERATION
     from ouroboros.model_wait import ModelWaitInterrupted
     from ouroboros.usage_accounting import UsageAccountingError
+    from ouroboros.store import StoreError
+    unsent_joined = False
+
     async def _do() -> ToolResult:
+        nonlocal unsent_joined
         refusal = None
         async with _transport_factory(cfg) as transport_ctx:
             streams = transport_ctx
@@ -845,15 +849,22 @@ async def _call_tool_async(
             else:
                 read, write = streams.read, streams.write  # pragma: no cover
             async with ClientSession(read, write) as session:
-                await session.initialize()
                 try:
-                    pending = submit_async_operation(None, session.call_tool, tool_name, arguments)
-                except (OwnerPauseRefused, ModelWaitInterrupted, UsageAccountingError) as exc:
-                    refusal = exc  # Unsent; first join both contexts normally.
+                    await session.initialize()
+                except BaseException as exc:
+                    # Includes timeout cancellation before tools/call. Keep the
+                    # original exception, but join both contexts before proof.
+                    refusal = exc
                 else:
-                    result = await pending
+                    try:
+                        pending = submit_async_operation(None, session.call_tool, tool_name, arguments)
+                    except (OwnerPauseRefused, ModelWaitInterrupted, UsageAccountingError, StoreError) as exc:
+                        refusal = exc
+                    else:
+                        result = await pending  # any error here may follow a send
         if refusal is not None:
             # Failed/unfinished cleanup never reaches this positive phase fact.
+            unsent_joined = True
             active = _TOOL_OPERATION.get()
             if active:
                 active[2]["settled"] = True
@@ -861,7 +872,19 @@ async def _call_tool_async(
             raise refusal
         return _tool_result_from_call_result(result)
     # Launch admission precedes transport entry: a stdio server starts there.
-    return await asyncio.wait_for(submit_async_preparation(_do), timeout=timeout_sec)
+    try:
+        pending = submit_async_preparation(_do)
+    except (OwnerPauseRefused, ModelWaitInterrupted, UsageAccountingError, StoreError) as exc:
+        exc.mcp_unsent_joined = True  # no transport task was handed off
+        raise
+    try:
+        return await asyncio.wait_for(pending, timeout=timeout_sec)
+    except BaseException as exc:
+        if unsent_joined:
+            # wait_for replaces CancelledError with TimeoutError; carry proof,
+            # not exception-class inference, over that conversion.
+            exc.mcp_unsent_joined = True
+        raise
 
 
 def _stringify_call_result(result: Any) -> str:
@@ -1440,7 +1463,7 @@ class MCPManager:
             timeout = self._tool_timeout_sec
         if resolution.status != "callable":
             return resolution.refusal(prefixed_name)
-        from ouroboros.mcp_task_sessions import CALL_FAILURES, failure_result
+        from ouroboros.mcp_task_sessions import BrowserBridgeRefusal, CALL_FAILURES, failure_result
         from ouroboros.mcp_task_sessions import call as scoped_call
         from ouroboros.tool_custody import external_handoff
         confirmed = external_handoff("mcp_transport")
@@ -1456,29 +1479,47 @@ class MCPManager:
             if not isinstance(result, ToolResult):
                 raise TypeError("MCP transport returned a non-ToolResult outcome")
         except CALL_FAILURES as exc:  # Before asyncio.TimeoutError, which is TimeoutError on 3.11+.
-            # Refused before dispatch, timed out or broken: no final response arrived,
-            # so the call is not recorded as returned.
+            # A host pre-dispatch refusal discharges only this call's token.
+            # Broken/timeout outcomes and independent session custody stay held;
+            # none of these failures is a returned MCP call.
+            if isinstance(exc, BrowserBridgeRefusal):
+                confirmed()
             return failure_result(exc, lambda value: _redact_error_text(value, cfg))
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
+            unsent = getattr(exc, "mcp_unsent_joined", False) is True
+            if unsent:
+                confirmed()
             text = (
                 f"⚠️ MCP_TOOL_TIMEOUT: server {cfg.id!r} did not respond in {timeout}s. "
-                "The remote outcome is unknown: side effects may already have happened, "
-                "and remote cancellation is not confirmed. Use the server-specific status/read "
-                "tool, if available, to reconcile the operation before retrying."
+                + ("The tool call was not submitted; its session and transport have closed."
+                   if unsent else "The remote outcome is unknown: side effects may already have happened, "
+                   "and remote cancellation is not confirmed. Use the server-specific status/read "
+                   "tool, if available, to reconcile the operation before retrying.")
             )
-            return ToolResult(status="timeout", code="MCP_TIMEOUT", text=text)
+            return ToolResult(status="timeout", code="MCP_TIMEOUT", text=text,
+                              meta={"mcp_call_not_sent": unsent})
         except BaseException as exc:  # noqa: BLE001 - any failure is reported
             from ouroboros.owner_pause import OwnerPauseRefused, _TOOL_OPERATION
+            from ouroboros.store import StoreError
             active = _TOOL_OPERATION.get()
-            if getattr(exc, "mcp_unsent_joined", False) or (
-                    isinstance(exc, OwnerPauseRefused) and active and active[2].get("not_started")):
+            unsent = getattr(exc, "mcp_unsent_joined", False) is True or (
+                isinstance(exc, OwnerPauseRefused) and active and active[2].get("not_started") is True)
+            if unsent:
                 confirmed()  # no call, with either no transport entry or joined cleanup
             if cfg.browser_bridge and _is_task_control(exc):
                 raise  # Stop and Pause reach the loop as they do from any Safety check.
+            if unsent and isinstance(exc, (OwnerPauseRefused, StoreError)):
+                from ouroboros.tools.tool_result import launch_refusal_result
+                return _replace_tool_result(launch_refusal_result(exc),
+                                            meta_updates={"mcp_call_not_sent": True})
             body = f"⚠️ MCP_TOOL_ERROR: {type(exc).__name__}: {_redact_error_text(exc, cfg)}"
             text = _model_facing_result(cfg, tool.raw_name, body)
-            return ToolResult(status="error", code="MCP_ERROR", text=text,
-                              meta={"dynamic_provider": True})
+            return ToolResult(
+                status="error",
+                code="MCP_ERROR",
+                text=text,
+                meta={"dynamic_provider": True, "mcp_call_not_sent": bool(unsent)},
+            )
         # Joined normal return (either SDK error bit): this invocation's call is over.
         from ouroboros.owner_pause import record_mcp_call_returned
 
@@ -1487,14 +1528,7 @@ class MCPManager:
         text = _redact_error_text(result.text, cfg)
         if not (cfg.browser_bridge and result.meta.get("host_verdict")):
             text = _model_facing_result(cfg, tool.raw_name, text)
-        final = ToolResult(
-            status=result.status,
-            code=result.code,
-            text=text,
-            meta={**dict(result.meta), "dynamic_provider": True},
-            producer_text=result.producer_text,
-            host_annotations=result.host_annotations,
-        )
+        final = _replace_tool_result(result, text=text, meta_updates={"dynamic_provider": True})
         if not advice and not note:
             return final
         # The bridge's Safety assessment ran after its page read and its guard

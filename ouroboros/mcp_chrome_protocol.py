@@ -30,6 +30,8 @@ NAVIGATIONS = frozenset({"navigate", "goto", "open_url"})
 INPUT_OPERATIONS = frozenset({"click", "double_click", "fill", "type", "press", "select",
                               "check", "uncheck", "drag", "upload", "submit", "scroll"})
 OPERATIONS = READ_OPERATIONS | NAVIGATIONS | INPUT_OPERATIONS
+READ_RESOURCES = frozenset({"Stylesheet", "Image", "Media", "Font", "Script", "TextTrack",
+                            "XHR", "Fetch", "Prefetch", "Manifest", "Other"})
 
 
 class ChromeStateError(RuntimeError):
@@ -380,9 +382,69 @@ def binding_reason(cfg: Any, ctx: Any, expected_hash: str = "") -> str:
         return f"BROWSER_SKILL_BINDING_REVOKED: skill binding could not be verified ({type(exc).__name__})"
 
 
+def lease_authority_reason(self: Any, ctx: Any) -> str:
+    """Use current task owners; a retained lease is not an outstanding tool call."""
+    from ouroboros.cancel_intents import cancel_pending
+    from ouroboros.mcp_task_sessions import _owner
+    from ouroboros.owner_pause import launch_admission
+    from ouroboros.tools.registry_guards import _resource_allowed
+
+    try:
+        if not self.is_current() or _owner(ctx) != (self.key[0], self.attempt):
+            return "BROWSER_SESSION_REVOKED: lease owner is no longer current"
+        if not _resource_allowed(ctx, "network"):
+            return "RESOURCE_CONSTRAINT_BLOCKED: lease admission requires allowed_resources.network"
+        metadata = getattr(ctx, "task_metadata", None) or {}
+        root_id = metadata.get("root_task_id") or getattr(ctx, "root_task_id", "") or self.key[0]
+        if any(cancel_pending(self.data_root, task_id, strict=True, propagate_busy=True)
+               for task_id in {self.key[0], root_id}):
+            return "BROWSER_SESSION_REVOKED: task cancellation is pending"
+        # No submission, retry or review-episode arming. The same live Pause
+        # and sleep owners must admit this new request before it is released.
+        with launch_admission(ctx, wait=False):
+            return ""
+    except Exception as exc:
+        return f"BROWSER_POLICY_UNAVAILABLE: lease task authority ({type(exc).__name__}: {exc})"
+
+
+def background_read_reason(self: Any, facts: Any, state: Any, ctx: Any) -> str:
+    """One intercepted read on the existing lease; never action/navigation authority."""
+    if (not isinstance(facts, dict) or facts.get("kind") != "request"
+            or "invocation_id" not in facts or facts["invocation_id"] is not None):
+        return "BROWSER_POLICY_UNAVAILABLE: callback invocation does not identify an idle request"
+    if (facts.get("method") not in ("GET", "HEAD") or facts.get("complete") is not True
+            or facts.get("has_post_data") is not False
+            or "post_data" not in facts or facts["post_data"] not in (None, "")
+            or not isinstance(facts.get("resource_type"), str)
+            or facts["resource_type"] not in READ_RESOURCES or type(facts.get("is_main_frame")) is not bool):
+        return "BROWSER_POLICY_UNAVAILABLE: background read requires a complete empty GET/HEAD subresource"
+    try:
+        owner = (self.key[0], self.attempt)
+        validate_state(state, owner)
+        candidate = validate_state(facts.get("state"), owner)
+    except ChromeStateError as exc:
+        return str(exc)
+    lease = state["lease"]
+    if (not state["connected"] or lease is None or not lease["guard_armed"]
+            or lease_key(candidate) != lease_key(state)
+            or facts.get("target_tab_id") != lease["tab_id"]):
+        return "BROWSER_LEASE_CHANGED: background read requires the same armed tab/document lease"
+    if reason := lease_authority_reason(self, ctx):
+        return reason
+    authority = _policy_inputs(ctx)
+    reason = (target_reason(ctx, candidate["lease"]["url"])
+              or request_reason(ctx, facts))
+    if reason:
+        return reason
+    if _policy_inputs(ctx) != authority:
+        return "BROWSER_POLICY_UNAVAILABLE: background actor authority changed during assessment"
+    return ""
+
+
 async def guard_callback(self, facts: dict[str, Any]) -> str:
-    """Settle one callback against its captured invocation, never a later call."""
+    """Settle against a captured invocation or the same idle read lease, never a later call."""
     invocation = self._chrome_invocation
+    previous, ctx = self._chrome_state, self.ctx
     if self.revoked:
         return "BROWSER_SESSION_REVOKED: task browser session is closing"
     if reason := await asyncio.to_thread(binding_reason, self.cfg, self.ctx, getattr(self, "_chrome_skill_hash", "")):
@@ -392,6 +454,27 @@ async def guard_callback(self, facts: dict[str, Any]) -> str:
     # if its state itself is well formed. Check this before reading state.
     if self._chrome_invocation is not invocation:
         return "BROWSER_POLICY_UNAVAILABLE: callback invocation closed during readiness check"
+    if invocation is None:
+        authority = _policy_inputs(ctx)
+        reason = await asyncio.to_thread(background_read_reason, self, facts, previous, ctx)
+        if not reason:
+            reason = await asyncio.to_thread(binding_reason, self.cfg, ctx, getattr(self, "_chrome_skill_hash", ""))
+            if reason:
+                self._mark_binding_revoked()
+        if not reason:
+            # Binding resolution yields: Pause, cancel, sleep or network authority
+            # may have changed while it ran. Recheck after that final binding wait.
+            reason = await asyncio.to_thread(lease_authority_reason, self, ctx)
+        if self.revoked:
+            return reason or "BROWSER_SESSION_REVOKED: task browser session is closing"
+        if reason:
+            return reason
+        if (self._chrome_invocation is not None or self._chrome_state is not previous
+                or self.ctx is not ctx or not self.is_current() or _policy_inputs(ctx) != authority):
+            return "BROWSER_POLICY_UNAVAILABLE: background read authority closed during assessment"
+        # No invocation counters, request/document receipts or observed state
+        # are advanced. In particular this cannot authorize a later document.
+        return reason
     if reason := invocation_reason(facts, invocation, self._chrome_last_step):
         return reason
     try:
@@ -495,6 +578,31 @@ def observe_state(self: Any, result: Any, *, allow_closed: bool = False) -> dict
 
 
 
+def observe_before_call(self: Any, name: str, timeout: int) -> dict[str, Any]:
+    """Only a positively clean explicit disconnect grants connect after an old lease."""
+    from ouroboros.mcp_task_sessions import BrowserBridgeRefusal
+
+    receipt = getattr(self, "_chrome_clean_disconnect", None)
+    prior = self._chrome_state
+    reconnect = (name == "browser_connect" and prior is not None and not prior["connected"]
+                 and self._chrome_lease_generation_floor >= 0)
+    if reconnect:
+        if receipt is None or lease_key(prior) != receipt:
+            raise BrowserBridgeRefusal("BROWSER_SESSION_DETACHED: connect requires a clean explicit disconnect")
+        if reason := lease_authority_reason(self, self.ctx):
+            raise BrowserBridgeRefusal(reason)
+    try:
+        state = self._observe_before(timeout, allow_closed=name in {STATE_TOOL, "browser_resume"} or reconnect)
+    except Exception:
+        self._chrome_clean_disconnect = None
+        raise
+    if receipt is not None and lease_key(state) != receipt:
+        self._chrome_clean_disconnect = None
+        if reconnect:
+            raise BrowserBridgeRefusal("BROWSER_LEASE_CHANGED: disconnected state changed before connect")
+    return state
+
+
 def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
                  timeout: int) -> tuple[ToolResult, str, str]:
     from ouroboros.mcp_client import _is_task_control, _tool_result_from_call_result
@@ -508,7 +616,7 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
             self.stop()
             raise BrowserBridgeRefusal(reason)
         self.ctx = ctx
-        state = self._observe_before(timeout, allow_closed=name == "browser_resume")
+        state = observe_before_call(self, name, timeout)
         reason = action_reason(ctx, name, args, state)
         if reason:
             raise BrowserBridgeRefusal(reason)
@@ -524,7 +632,7 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
             resolved_binding=binding)
         if not allowed:
             raise BrowserBridgeRefusal(advice, code="SAFETY_VIOLATION")
-        if self._observe_before(timeout, allow_closed=name == "browser_resume") != state:
+        if observe_before_call(self, name, timeout) != state:
             raise BrowserBridgeRefusal(
                 "BROWSER_STATE_CHANGED: Chrome lease changed during assessment; action not dispatched")
         if reason := _chrome_binding_reason(self.cfg, ctx, getattr(self, "_chrome_skill_hash", "")):
@@ -532,8 +640,6 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
             raise BrowserBridgeRefusal(reason)
         if reason := action_reason(ctx, name, args, state):
             raise BrowserBridgeRefusal(reason)
-        self._blocked.clear()
-        self._blocked_omitted = 0
         invocation_id = uuid.uuid4().hex
         self._chrome_invocation = (invocation_id, name, args)
         self._chrome_last_step = 0
@@ -541,6 +647,8 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
         self._chrome_requests.clear()
         self._chrome_documents.clear()
         self._chrome_navigation_pending = False
+        disconnect_receipt = getattr(self, "_chrome_clean_disconnect", None)
+        self._chrome_clean_disconnect = None
         try:
             raw = self._request(name, args, timeout, dispatch=True, invocation_id=invocation_id)
             from ouroboros.mcp_task_sessions import _retain_returned_response
@@ -552,7 +660,7 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
         blocked = [self._blocked.popleft() for _ in range(len(self._blocked))]
         try:
             result = _tool_result_from_call_result(raw)
-            after = self._observe(timeout, allow_closed=name in {"browser_disconnect", "browser_handoff"})
+            after = self._observe(timeout, allow_closed=name in {STATE_TOOL, "browser_disconnect", "browser_handoff"})
             reason = action_reason(ctx, "browser_state", {}, after)
             if not reason and after["connected"]:
                 from ouroboros.mcp_chrome_protocol import target_reason
@@ -570,10 +678,17 @@ def call_chrome(self, prefixed: str, name: str, args: dict, ctx: Any,
             from ouroboros.mcp_task_sessions import _post_dispatch_error
 
             result = _post_dispatch_error(name, reason, source, retention_gap)
-        note = ("⚠️ BROWSER_REQUEST_BLOCKED: Chrome guard refused during this call:\n"
+        elif result.status == "ok" and not self.revoked:
+            if (name == "browser_disconnect" and not after["connected"]
+                    and after["closure"] == {"revoked": False, "detached": True}):
+                self._chrome_clean_disconnect = lease_key(after)
+            elif name == STATE_TOOL and disconnect_receipt == lease_key(after):
+                self._chrome_clean_disconnect = disconnect_receipt
+        note = ("⚠️ BROWSER_REQUEST_BLOCKED: Chrome guard refusals since the previous response:\n"
                 + "\n".join(f"- {line}" for line in blocked)) if blocked else ""
         if self._blocked_omitted:
             note += f"\nEarlier guard diagnostics omitted: {self._blocked_omitted}."
+            self._blocked_omitted = 0
         return result, advice, note
 
 

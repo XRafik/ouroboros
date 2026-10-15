@@ -41,7 +41,8 @@ def _text_result(text):
 
 def _registered_call(tmp_path, monkeypatch, protocol, outcome, *, store_fails=False, transport=True,
                      failure=None, failure_phase="post", observed_state=None, tool_name=None,
-                     warm_up=False, target_policy=None, state_during_assessment=None):
+                     warm_up=False, target_policy=None, state_during_assessment=None,
+                     safety_advice="", guard_note=""):
     cfg = mcp_client.normalize_server_config({
         "id": "browser", "enabled": True, "transport": "stdio", "command": "node",
         "args": ["unused.js"], "browser_bridge": True, "browser_protocol": protocol,
@@ -70,7 +71,7 @@ def _registered_call(tmp_path, monkeypatch, protocol, outcome, *, store_fails=Fa
     session._chrome_navigation_pending = False
     session._read_stream = None
     monkeypatch.setitem(mcp_task_sessions._sessions, session.key, session)
-    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_k: (True, ""))
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_k: (True, safety_advice))
     monkeypatch.setattr(mcp_task_sessions, "_block_reason", lambda *_a: "")
     monkeypatch.setattr(mcp_chrome_protocol, "target_reason", target_policy or (lambda *_a: ""))
     monkeypatch.setattr(mcp_chrome_protocol, "binding_reason", lambda *_a: "")
@@ -92,6 +93,8 @@ def _registered_call(tmp_path, monkeypatch, protocol, outcome, *, store_fails=Fa
         if dispatch:
             if outcome == "timeout":
                 raise mcp_task_sessions.BrowserBridgeTimeout("action response timed out")
+            if guard_note:
+                session._blocked.append(guard_note)
             return _response()
         if outcome == "post_timeout" and len(calls) == 4:
             raise mcp_task_sessions.BrowserBridgeTimeout("post-state read timed out")
@@ -134,6 +137,24 @@ def _registered_call(tmp_path, monkeypatch, protocol, outcome, *, store_fails=Fa
             worker.join(timeout=2)
             assert not worker.is_alive()
             loop.close()
+
+
+@pytest.mark.parametrize("protocol", ["playwright", "ouroboros_chrome"])
+@pytest.mark.parametrize("annotation", ["none", "safety", "guard", "both"])
+def test_real_manager_composes_returned_browser_annotations(tmp_path, monkeypatch, protocol, annotation):
+    advice = "Safety advice from the host" if annotation in {"safety", "both"} else ""
+    note = "GET https://example.test/blocked: host refused" if annotation in {"guard", "both"} else ""
+    result, calls = _registered_call(tmp_path, monkeypatch, protocol, "ok",
+                                     safety_advice=advice, guard_note=note)
+    assert result.status == "ok" and result.code == ("SAFETY_WARNING" if advice else "OK")
+    assert "exact returned text\nλ" in result.text
+    assert result.meta["mcp_is_error"] is False and result.meta["dynamic_provider"] is True
+    assert bool(result.meta.get("safety_warning")) is bool(advice)
+    if advice:
+        assert advice in result.text
+    if note:
+        assert "BROWSER_REQUEST_BLOCKED" in result.text and note in result.text
+    assert sum(dispatched for _name, dispatched in calls) == 1
 
 
 @pytest.mark.parametrize("protocol,outcome", [("ouroboros_chrome", "detached"),
