@@ -8,7 +8,15 @@ from __future__ import annotations
 
 import ast
 import os
+import sys
+import tempfile
 from pathlib import Path
+
+
+def default_temp_parent() -> Path:
+    """A short macOS root keeps nested multiprocessing sockets inside AF_UNIX's path limit.
+    Other platforms retain their normal temporary-directory selection."""
+    return Path("/tmp") if sys.platform == "darwin" else Path(tempfile.gettempdir())
 
 
 def settings_keys() -> set[str]:
@@ -44,7 +52,7 @@ def scrub_environment(source, *, keep=()) -> dict[str, str]:
 # them (a durable test receipt must survive a Restart); every other key stays.
 LAUNCH_ONLY_PREFIXES = ("XPC_", "_PYI_")
 LAUNCH_ONLY_KEYS = frozenset({"PWD", "OLDPWD", "SHLVL", "_", "TERM_SESSION_ID", "SECURITYSESSIONID",
-                              "LaunchInstanceID"})
+                              "LaunchInstanceID", "LAUNCHINSTANCEID"})
 
 
 def without_launch_descriptors(env: dict) -> dict[str, str]:

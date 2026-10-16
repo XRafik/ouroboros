@@ -22,7 +22,7 @@ import {
 import { initHarnessAccounts } from './harness_accounts.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { confirmAndSendRestart } from './chat_activity.js';
-import { PROVIDER_TEST_INPUTS, SECRET_KEYS, bindSecretInputs, bindSettingsTabs, renderSettingsPage } from './settings_ui.js';
+import { PROVIDER_TEST_INPUTS, SETTINGS_INPUT_FIELDS, SECRET_KEYS, bindSecretInputs, bindSettingsTabs, renderSettingsPage } from './settings_ui.js';
 import { showToast } from './toast.js';
 import { escapeHtmlAttr as escapeHtml, formatDualVersion } from './utils.js';
 import { apiClient, apiFetch, cleanExtensionRoute, extensionRoutePath } from './api_client.js';
@@ -40,25 +40,7 @@ const BASE_SECRET_KEYS = new Set(SECRET_KEYS.map(([key]) => key));
 const pendingExtensionSettings = new Set();
 let setupContract = {};
 
-const INPUT_FIELDS = [
-    ['s-openai-base-url', 'OPENAI_BASE_URL'], ['s-openai-compatible-base-url', 'OPENAI_COMPATIBLE_BASE_URL'], ['s-cloudru-base-url', 'CLOUDRU_FOUNDATION_MODELS_BASE_URL'],
-    ['s-gigachat-scope', 'GIGACHAT_SCOPE'], ['s-gigachat-user', 'GIGACHAT_USER'], ['s-gigachat-base-url', 'GIGACHAT_BASE_URL'], ['s-gigachat-verify-ssl', 'GIGACHAT_VERIFY_SSL_CERTS'],
-    ['s-minimax-region', 'MINIMAX_REGION'],
-    ['s-zai-plan', 'ZAI_PLAN'],
-    ['s-server-host', 'OUROBOROS_SERVER_HOST', '127.0.0.1'],
-    // No review route is authored here: the review pool is the Reviewer mark
-    // on the Available subagents rows.
-    ['s-skills-repo-path', 'OUROBOROS_SKILLS_REPO_PATH'],
-    ['s-extra-ca-bundle', 'OUROBOROS_EXTRA_CA_BUNDLE'],
-    ['s-clawhub-registry-url', 'OUROBOROS_CLAWHUB_REGISTRY_URL'], ['s-websearch-source', 'OUROBOROS_WEBSEARCH_BACKEND', 'auto'], ['s-websearch-model', 'OUROBOROS_WEBSEARCH_MODEL'], ['s-gh-repo', 'GITHUB_REPO'],
-    ['s-local-source', 'LOCAL_MODEL_SOURCE'], ['s-local-filename', 'LOCAL_MODEL_FILENAME'], ['s-local-chat-format', 'LOCAL_MODEL_CHAT_FORMAT'],
-    ['s-subagent-worktree-root', 'OUROBOROS_SUBAGENT_WORKTREE_ROOT'], ['s-subagent-projects-root', 'OUROBOROS_SUBAGENT_PROJECTS_ROOT'],
-    ['s-evo-budget', 'OUROBOROS_POST_TASK_EVOLUTION_BUDGET_USD', '0'],
-    ['s-consciousness-daily-usd', 'OUROBOROS_CONSCIOUSNESS_DAILY_USD', '20'],  // float: NUMBER_FIELDS would truncate 20.5 to 20
-    ['s-evo-objective', 'OUROBOROS_EVOLUTION_PERSISTENT_OBJECTIVE', ''],
-    // Optional task bounds: a positive integer or "unlimited" (SSOT: ouroboros/settings_scales.py); a blank is refused by the server.
-    ['s-max-rounds', 'OUROBOROS_MAX_ROUNDS', 'unlimited'], ['s-task-lifetime', 'OUROBOROS_TASK_ABS_CEILING_SEC', 'unlimited'],
-];
+const INPUT_FIELDS = [...SETTINGS_INPUT_FIELDS];
 const VALUE_FIELDS = [
     // Effort is not a Settings draft: the range is edited in the chat composer alone, and Settings has no effort section.
     ['s-consciousness-autonomy', 'OUROBOROS_CONSCIOUSNESS_AUTONOMY', 'act'],
@@ -771,7 +753,7 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
         syncRuntimeModeBridgeState();
         syncPolicyState(page, s?._meta);
         syncPostTaskEvolutionUi();
-        refreshSafetySkipCounter();  // fire-and-forget; fills the 24h audited-skip note
+        refreshSafetySkipCounter();  // fire-and-forget; labels matches in the inspected event window
         void refreshSearchPreview();  // fire-and-forget; describes the applied search Source/Model
     }
 
@@ -1127,8 +1109,7 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
     }
 
     async function refreshSafetySkipCounter() {
-        // 24h count of durable safety_mode_skip audit events, so the owner sees how much
-        // the reduced coverage actually waved through.
+        // Count the last-24h matches inside the returned tail, not all of that day.
         const el = byId('s-safety-skip-counter');
         if (!el) return;
         try {
@@ -1139,11 +1120,10 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
                 const t = Date.parse(String(e?.ts || ''));
                 return Number.isFinite(t) && t >= cutoff;
             }).length;
-            // Honest window note: the count scans the recent events tail (2000), so a
-            // very busy day can undercount — say "recent", never overclaim exactness.
+            // The tail may cover less than a day, including when it has no matches.
             el.textContent = n > 0
-                ? `${n} safety check(s) waved through in the last 24h (audited; recent events window).`
-                : 'No safety checks waved through in the last 24h (recent events window).';
+                ? `${n} safety check(s) waved through among inspected recent events dated within 24h.`
+                : 'No waved-through safety checks found among inspected recent events dated within 24h.';
         } catch {
             el.textContent = '';
         }

@@ -1,6 +1,6 @@
 # 11. Frozen Contracts v1 (`ouroboros/contracts/`)
 
-ABI promise: the frozen shapes and helper semantics skills and browser consumers rely on, their extension rules, what stays deliberately unpinned, and the one break window an upgrading install must know. A removed field needs a versioned successor.
+ABI promise for skills and browser consumers, with one upgrade break window. A removed field needs a versioned successor.
 
 `ouroboros/contracts/` freezes §11.1 shapes/helpers. Additive browser ABI: `ouroboros/gateway/contracts.py`, JSDoc re-exports in `web/modules/api_types.js`, parity tests, `gateway/schema.py`-derived schemas, published by `GET /api/contract`.
 
@@ -45,11 +45,11 @@ ABI promise: the frozen shapes and helper semantics skills and browser consumers
 
 ### 11.2 What is NOT frozen (intentionally)
 
-The full `ToolContext` dataclass stays mutable implementation detail; the protocol pins only the minimum. Only shape keys are pinned, not raw WebSocket/HTTP values, and only the frontmatter schema, not the free-form SKILL.md body. `state/state.json` and `queue_snapshot.json` carry no `_schema_version` and read as version 0; `task_results/*.json` uses stamped admission owned by `task_result_schema.py` (§11.4).
+`ToolContext` stays mutable; its protocol pins only the minimum. Shape keys, not raw WebSocket/HTTP values, and frontmatter, not the SKILL.md body, are pinned. State and queue writers stamp `_schema_version: 1`; readers tolerate unstamped legacy version 0. Task documents in `current.sqlite` use `task_result_schema.py` admission (§11.4).
 
 ### 11.3 What to do when extending
 
-Add the field to its active frozen owner (§11.1), keep existing consumers working, and enforce the new surface in the contract/parity tests (CHECKLISTS item 23, `gateway_parity`, owns the review-time criteria). Removing anything from 11.1 is a deliberate ABI break needing a versioned successor and a release-row migration note; 11.4 carries only the current window's upgrade facts, the release ledger the rest.
+Add the field to its active frozen owner (§11.1), keep existing consumers working and enforce the new surface in contract/parity tests (review criteria: CHECKLISTS item 23, `gateway_parity`). Any removal from 11.1 is a deliberate ABI break requiring a versioned successor and release-row migration note; 11.4 carries only the current window's upgrade facts, the release ledger the rest.
 
 ### 11.4 Recent ABI Retirements
 
@@ -59,4 +59,4 @@ Add the field to its active frozen owner (§11.1), keep existing consumers worki
 - Review pool: `REVIEW_POOL_MIGRATED_SETTING_KEYS` (a `RETIRED_SETTING_KEYS` subset) migrates `OUROBOROS_REVIEWER_SLOTS` and §7's listed surface keys into `OUROBOROS_SUBAGENTS` reviewer rows. Only disk settings migrate; unconvertible input stays intact with its error. First save preserves `state/review_migrations/` and `state.json:review_pool_migrations`; first owner boot reports it. One list serves review (`GET /api/review-pool`); owners, factory fallback, receipts and ignored-environment notice: §7 Reading and writing the settings document and Review pool.
 - Gateway envelopes: the `api_v1` re-export and the `cost_usd`/`cost_usd_with_children`, `telegram_chat_id`, `project_last_viewed`/`project_hidden` aliases are gone; stored rows still read tolerantly, and `UiPreferencesResponse` answers 400 on an unknown key.
 - Plugin ABI: an existing hash-bound PASS keeps loading; manifest negotiation and defaults: §11.1 (`PluginAPI`).
-- Durable task rows: every `task_results/<id>.json` write stamps `_schema_version: 1`, with no converter for older rows; an inadmissible row is quarantined (log-only) and keeps its id occupied.
+- Durable task rows: writes stamp `_schema_version: 1`; `task_results/<id>.json` is import/export, not current authority. Inadmissible rows are quarantined (log-only), never converted, and keep their ids occupied.
