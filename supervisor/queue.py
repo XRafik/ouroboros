@@ -92,11 +92,13 @@ def init(drive_root: pathlib.Path) -> None:
     # A previous process's direct-chat turns must not outlive it in the roster,
     # and this clear is the last moment their ids exist: the roster is taken over
     # here and handed to snapshot restore below, which fences them like any other
-    # row the stop caught.
-    from supervisor.direct_roots import take_direct_roots
+    # row the stop caught. Durable direct rows of an ENDED server process that the
+    # roster never listed (a crash before its tick rewrote the fragment) join the
+    # same handover, so no direct result outlives the process that ran it.
+    from supervisor.direct_roots import adopt_orphaned_direct_results, take_direct_roots
 
     PRIOR_DIRECT_ROOTS.clear()
-    PRIOR_DIRECT_ROOTS.update(take_direct_roots(drive_root))
+    PRIOR_DIRECT_ROOTS.update(adopt_orphaned_direct_results(drive_root, take_direct_roots(drive_root)))
 
 
 def refresh_timeouts_from_settings(settings: dict) -> None:
@@ -273,6 +275,8 @@ def enqueue_task(
         if continuation:
             t["_consciousness_continuation"] = True
     attach_task_contract(apply_consciousness_authority(t))
+    from ouroboros.tool_access_roots import freeze_tool_profile
+    freeze_tool_profile(t)
     # The allowance read takes the cross-process ledger lock: read it BEFORE the queue
     # lock so a contended ledger never stalls every queue reader; only the live-root
     # count and the append must be one transaction with the lock (the window gates
@@ -399,11 +403,24 @@ def enqueue_task(
 
         lookup = "project_routing_fence_lookup_failed"  # the authority whose read failed
         try:
+            bindings_snapshot = None
+            if task_id not in RUNNING:
+                from ouroboros.project_placement import pending_placement, refresh_pending_placement
+
+                from ouroboros.projects_registry import _load_bindings
+
+                bindings_snapshot = _load_bindings(DRIVE_ROOT, strict=True)["bindings"]
+                binding = pending_placement(DRIVE_ROOT, t, bindings_snapshot=bindings_snapshot)
+                if binding:
+                    if not refresh_pending_placement(DRIVE_ROOT, t, binding=binding):
+                        raise ProjectAdmissionError(lookup, "The moved work could not be readmitted.")
+                    project_id, project_admission = t["project_id"], t["_project_admission"]
+                    has_project_admission = True
             if has_project_admission:
                 validate_project_admission(project_admission)
             if project_admission is None or project_admission["project"] is None:
                 unscoped = restoring_snapshot and host_unscoped(t)
-                project_id, known_room = task_project_membership(DRIVE_ROOT, t)
+                project_id, known_room = task_project_membership(DRIVE_ROOT, t, bindings_snapshot=bindings_snapshot)
                 if project_id and unscoped:
                     # Host-attested absence is the admitted scope: a later binding
                     # never retargets it (hold release applies the same rule).
