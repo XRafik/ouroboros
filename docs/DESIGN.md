@@ -109,6 +109,14 @@ the design bible above; neither has a decorative background.
 On Windows the desktop window keeps its ordinary system caption, buttons, Snap and
 resizing; only their light or dark tint follows the painted palette — the system
 tint, not the page's colour — and a High Contrast theme keeps its own colours.
+On macOS the main window is one surface: the page reaches the top edge under a
+transparent title bar, the real traffic lights sit level with the header row, empty
+parts of that band drag the window, and a double-click follows the Mac's setting:
+Zoom, Minimize, Do Nothing or Fill. Fill relies on an available undocumented native
+action, not an imitation by Zoom. Its appearance follows Light or Dark and inherits
+under System. In full screen the bar hides until the pointer reveals it; the setup
+and error windows and a UI that does not declare it keep the ordinary title bar. A
+browser, another OS or an older desktop app reserves nothing.
 
 Appearance belongs to a browser profile or desktop client, not an account or
 server setting. Existing saved Light/Dark choices keep their meaning. Storage
@@ -1296,11 +1304,13 @@ the final's typed outcome or the durable detail. An undurable Main receipt keeps
 a dashed border and a plain warning; the binding holds. The owner's routing line
 under his message steps aside while that work's portal stands in the feed; words
 passed on to the work later keep theirs. A Continue is the same card: the
-admitted successor takes the work's place and first name, each episode one meta
-line (`Episode 1 · 17:33–18:15 · Failed: <cause>`), the current one owning the
-chip.
+admitted successor takes the work's place and first name. Each episode has its
+own name, time and past outcome; only the current one owns the chip and controls.
+Expanded ordinary cards disclose earlier Files, timeline, Reviews and children
+in collapsible sections using their original content, never duplicate cards.
+A Project portal still reaches that content through its room.
 
-**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from recorded outcome/acceptance beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy copies the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames stay `role="system"` with unchanged plain text, so the Telegram mirror and Ouroboros's own context behave as before; no-answer endings and historical rows without an authored answer keep System voice and the Project reference. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
+**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from recorded outcome/acceptance beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice and the Project reference. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved task-acceptance PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 
@@ -1896,6 +1906,24 @@ uncertainty and unmet or unknown review obligations remain material. This phone
 projection never shortens full card reasons or rewrites outcomes. The status-only
 Main mirror follows the toggle too, but preserved intermediate content does not.
 Ordinary replies, files, questions and reply-editing Silent Mode remain independent. Unrecoverable old mirrors keep their text rather than guessing it is status-only. There is no new mode, cross-channel deduplication or retroactive rewrite.
+
+**Telegram typing means a reply is being prepared for that chat.** It is a
+native header cue, not a notification. While a reply the owner asked for is
+actively prepared and would reach a Telegram chat under the current mirror
+settings (Main and Project replies included), the bridge renews Telegram's
+typing action there, once per chat however many tasks back it, every few
+seconds at most. Ouroboros's own model and tool work counts; while that work
+waits, what it waits on counts when it works: a helper's own work, a delegated
+run the host currently observes running, or a review seat not waiting for model
+access. A running run's provider retry inside its engine carries no fact, so it
+reads as running. An intermediate message does not end the cue, and work
+resuming after a wait brings it back with no new start. By itself a question
+waiting for the owner, a wait for model access, a timer- or mail-only wait, a
+run queued or paused on its own question, Pause or Stop now renews nothing; a
+handed-off answer stops the helpers too, and background work nobody asked for
+and unknown state never count. An action already sent when the answer leaves
+may still be accepted after it, and Telegram may show the last action for up
+to five seconds more; no message, card, percentage or Stop button is added.
 
 **When the client runs.** Notifications are a property of a running client, and
 there is no push channel. On the desktop the Telegram bridge runs inside the same

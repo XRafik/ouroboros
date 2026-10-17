@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 
 import pytest
@@ -13,7 +14,6 @@ import pytest
 from ouroboros import review_checking as rc
 from ouroboros.gateways.claudexor import ClaudexorUnavailable
 from ouroboros.review_execution import (
-    ReviewRouteUnavailable,
     SessionInvocation,
     review_session_route,
     run_delegated_review_session,
@@ -23,6 +23,7 @@ from tests._review_session_route_shared import (  # noqa: F401 - autouse owned-g
     _owned_gateway_uses_each_test_transport,
 )
 from tests.test_review_checking import author  # noqa: F401
+from tests.test_review_checkout_lifecycle import directory_source
 from tests.test_review_session_rights import writable_engine  # noqa: F401
 from tests.test_review_thread_checking import (  # noqa: F401
     ThreadGateway,
@@ -110,7 +111,7 @@ def test_final_capture_inventory_matches_summary_after_a_failed_capture(
         source_root = tmp_path / "plain"
         source_root.mkdir()
         (source_root / "source.txt").write_bytes(b"immutable subject\n")
-        source = rc.freeze_checking_source(source_root, data_root=drive)
+        source = directory_source(source_root, drive)
     else:
         source = rc.freeze_checking_source(author, data_root=drive, subject=rc.SUBJECT_INDEX)
     area = Path(rc.prepare_seat_area(drive, "task", "op", source))
@@ -248,7 +249,8 @@ def _unlock(path):
 def _incomplete(receipt, path):
     """Explicitly incomplete and naming ``path``: never a complete receipt beside skipped bytes."""
     assert receipt["status"] in {"partial", "capture_failed"}, f"{path} was skipped behind a complete capture: {receipt}"
-    assert path in json.dumps([receipt.get("gaps"), receipt.get("error")]), receipt
+    # A native Windows error names it with (JSON-escaped) backslashes: compare one separator.
+    assert path in re.sub(r"\\+", "/", json.dumps([receipt.get("gaps"), receipt.get("error")])), receipt
 
 
 @_LOCKABLE
