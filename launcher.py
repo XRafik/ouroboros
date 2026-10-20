@@ -173,12 +173,18 @@ def _server_process_record_path() -> pathlib.Path:
 
 
 def _hidden_run(command, **kwargs):
-    """subprocess.run() with platform-appropriate hidden-window flags."""
-    return subprocess.run(command, **merge_hidden_kwargs(kwargs))
+    """Hidden bootstrap commands keep their own Job/lifeline until cleanup."""
+    from ouroboros.launcher_bootstrap import run_bootstrap_command
+
+    return run_bootstrap_command(command, _shutdown_event, **merge_hidden_kwargs(kwargs))
 
 
-def _hidden_popen(command, **kwargs):
+def _hidden_popen(command, *, bootstrap=False, **kwargs):
     """subprocess.Popen() with platform-appropriate hidden-window flags."""
+    if bootstrap:
+        from ouroboros.launcher_bootstrap import spawn_bootstrap_command
+
+        return spawn_bootstrap_command(command, _shutdown_event, **merge_hidden_kwargs(kwargs))["proc"]
     return subprocess.Popen(command, **merge_hidden_kwargs(kwargs))
 
 
@@ -1180,6 +1186,8 @@ def main(argv=()):
     def _on_closing() -> None:
         log.info("Window closing — graceful shutdown.")
         _shutdown_event.set()
+        from ouroboros.launcher_bootstrap import stop_bootstrap_commands
+        stop_bootstrap_commands()
         if background is not None and background.panic.is_set():
             return  # Panic owns persistence and hard exit, never ordinary teardown over it
         if _agent_proc is None and _webview_window is None:
@@ -1229,10 +1237,10 @@ def main(argv=()):
         class GitApi:
             def install_git(self):
                 if IS_MACOS:
-                    _hidden_popen(["xcode-select", "--install"])
+                    _hidden_popen(["xcode-select", "--install"], bootstrap=True)
                 elif IS_WINDOWS:
                     _hidden_popen(
-                        ["winget", "install", "Git.Git", "--source", "winget", "--accept-source-agreements"]
+                        ["winget", "install", "Git.Git", "--source", "winget", "--accept-source-agreements"], bootstrap=True
                     )
                 else:
                     for cmd in (
@@ -1240,7 +1248,7 @@ def main(argv=()):
                         ["sudo", "dnf", "install", "-y", "git"],
                     ):
                         try:
-                            _hidden_popen(cmd)
+                            _hidden_popen(cmd, bootstrap=True)
                             break
                         except FileNotFoundError:
                             continue

@@ -82,11 +82,24 @@ def test_panic_endpoint_requires_the_live_current_generation(monkeypatch, tmp_pa
     from ouroboros import server_process
 
     proc = SimpleNamespace(pid=41, poll=lambda: 0 if state == "dead" else None)
-    binding = {"pid": 42 if state == "foreign" else 41, "port": 9001 if state == "wrong-port" else 9000}
+    binding = {"pid": 42 if state == "foreign" else 41, "port": 9001 if state == "wrong-port" else 9000,
+               "host": "127.0.0.1"}
     monkeypatch.setattr(server_process, "read_service_bindings", lambda root: {"main": binding})
     monkeypatch.setattr(server_process, "service_binding_is_live", lambda value: state != "reused-pid")
     port = readiness.owned_server_port(None if state == "absent" else proc, 9000, tmp_path)
     assert port == (9000 if state == "owned" else None)
+
+
+@pytest.mark.parametrize("host,owned", [("127.0.0.1", True), ("0.0.0.0", True), ("127.0.0.2", False),
+                                     ("::1", False), ("::", False), (None, False)])
+def test_panic_binding_must_cover_the_http_destination(monkeypatch, tmp_path, host, owned):
+    from ouroboros import server_process
+
+    proc = SimpleNamespace(pid=41, poll=lambda: None)
+    monkeypatch.setattr(server_process, "read_service_bindings",
+                        lambda root: {"main": {"pid": 41, "port": 9000, "host": host}})
+    monkeypatch.setattr(server_process, "service_binding_is_live", lambda value: True)
+    assert readiness.owned_server_port(proc, 9000, tmp_path) == (9000 if owned else None)
 
 
 def test_early_panic_stops_retained_daemon_custody_and_its_work(stopped_world, monkeypatch, tmp_path):

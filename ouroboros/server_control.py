@@ -357,6 +357,7 @@ def execute_panic_stop(
         from ouroboros.tools.services import kill_all_services
         from ouroboros.tools.shell import kill_all_tracked_subprocesses
         from ouroboros.workspace_executor import kill_all_foreground
+        from supervisor import workers  # noqa: F401 — initialize the facade before its lifecycle leaf in a cold launcher
         from supervisor.worker_pool_lifecycle import kill_worker_tree
 
         # Singleton creation can wait on a startup lock; only already-owned handles

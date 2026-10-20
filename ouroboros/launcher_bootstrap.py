@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shutil
+import logging
 import subprocess
 import sys
 import time
@@ -25,6 +26,82 @@ DEFAULT_MANAGED_REMOTE_NAME = "managed"
 DEFAULT_MANAGED_LOCAL_BRANCH = "ouroboros"
 DEFAULT_MANAGED_LOCAL_STABLE_BRANCH = "ouroboros-stable"
 DEFAULT_MANAGED_REMOTE_STABLE_BRANCH = "ouroboros-stable"
+
+
+_BOOTSTRAP_COMMANDS = []  # live invocation owners only; never a scan of historical work
+
+
+def stop_bootstrap_commands() -> list[dict]:
+    """Request captured bootstrap children before early tray Panic hard-exits."""
+    from ouroboros.platform_layer import request_process_tree_kill
+
+    return [request_process_tree_kill(owner["proc"], job_handle=owner["container"]._job)
+            for owner in list(_BOOTSTRAP_COMMANDS) if owner["proc"] is not None]
+
+
+def spawn_bootstrap_command(command, shutdown, **kwargs):
+    """Capture a bootstrap command in the existing Job/lifeline owner before exposing its handle."""
+    from ouroboros.process_containment import ProcessContainer
+
+    if shutdown.is_set():
+        raise InterruptedError("Launcher shutdown stopped bootstrap admission")
+    owner = {"proc": None, "container": ProcessContainer(lifeline=True)}
+    _BOOTSTRAP_COMMANDS.append(owner)
+    try:
+        owner["proc"] = owner["container"].spawn(command, **kwargs)
+        if shutdown.is_set():
+            stop_bootstrap_commands()
+        return owner
+    except BaseException:
+        owner["container"].reap()
+        owner["container"].close()
+        _BOOTSTRAP_COMMANDS.remove(owner)
+        raise
+
+
+def run_bootstrap_command(command, shutdown, **kwargs):
+    """subprocess.run's result contract with early Quit/Panic and owned-tree cleanup."""
+    data, check, timeout = kwargs.pop("input", None), kwargs.pop("check", False), kwargs.pop("timeout", None)
+    if data is not None:
+        if "stdin" in kwargs:
+            raise ValueError("stdin and input arguments may not both be used")
+        kwargs["stdin"] = subprocess.PIPE
+    if kwargs.pop("capture_output", False):
+        if "stdout" in kwargs or "stderr" in kwargs:
+            raise ValueError("stdout and stderr arguments may not be used with capture_output")
+        kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    owner = spawn_bootstrap_command(command, shutdown, **kwargs)
+    proc, container = owner["proc"], owner["container"]
+    deadline = None if timeout is None else time.monotonic() + timeout
+    partial = None
+    try:
+        while True:
+            if shutdown.is_set():
+                stop_bootstrap_commands()
+                raise InterruptedError("Launcher shutdown interrupted bootstrap")
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise subprocess.TimeoutExpired(command, timeout,
+                    output=partial.output if partial else None, stderr=partial.stderr if partial else None)
+            try:
+                stdout, stderr = proc.communicate(data, timeout=min(0.2, remaining) if remaining is not None else 0.2)
+                break
+            except subprocess.TimeoutExpired as exc:
+                partial = exc
+                data = None  # communicate retains the pending input/output across retries
+        if check and proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, command, stdout, stderr)
+        return subprocess.CompletedProcess(command, proc.returncode, stdout, stderr)
+    finally:
+        error = container.reap()
+        container.close()
+        _BOOTSTRAP_COMMANDS.remove(owner)
+        proc.wait(timeout=5)
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream is not None:
+                stream.close()
+        if error:
+            logging.getLogger("launcher").error("Bootstrap command cleanup unconfirmed: %s", error)
 
 
 @dataclass(frozen=True)

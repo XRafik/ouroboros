@@ -29,6 +29,7 @@ def owned_server_port(proc, port, data_dir) -> Optional[int]:
     try:
         binding = read_service_bindings(data_dir).get("main")
         if (isinstance(binding, dict) and binding.get("pid") == proc.pid and binding.get("port") == port
+                and binding.get("host") in {"127.0.0.1", "0.0.0.0"}
                 and service_binding_is_live(binding) and proc.poll() is None):
             return port
     except (OSError, ValueError, TypeError):

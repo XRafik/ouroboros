@@ -446,10 +446,14 @@ class Background:
                     pass
             except Exception:
                 from ouroboros.config import DATA_DIR
+                from ouroboros.launcher_bootstrap import stop_bootstrap_commands
                 from ouroboros.server_control import execute_panic_stop
 
                 log.error("Panic cannot reach an owned server; using installation emergency stop.")
-                execute_panic_stop(None, None, data_dir=DATA_DIR, panic_exit_code=99, log=log)
+                try:
+                    log.error("Bootstrap stop requests: %s", stop_bootstrap_commands())
+                finally:
+                    execute_panic_stop(None, None, data_dir=DATA_DIR, panic_exit_code=99, log=log)
 
         # If main returns at a shutdown fence, keep the bounded persistence/exit
         # owner alive until it finishes; a daemon could lose the stop marker.

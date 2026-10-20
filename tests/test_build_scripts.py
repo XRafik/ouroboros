@@ -1260,7 +1260,7 @@ def test_launcher_retains_cross_platform_runtime_hooks():
 @pytest.mark.skipif(not _BUNDLE_FILES_PRESENT, reason=_PACKAGING_SKIP_REASON)
 def test_launcher_preserves_macos_git_setup_path():
     launcher_source = _pkg_read("launcher.py")
-    assert '_hidden_popen(["xcode-select", "--install"])' in launcher_source  # no window flag off Windows
+    assert '_hidden_popen(["xcode-select", "--install"], bootstrap=True)' in launcher_source  # owned, no window flag off Windows
     assert "Install Git (Xcode CLI Tools)" in launcher_source
     assert "Installing... A system dialog may appear." in launcher_source
 
