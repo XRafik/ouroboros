@@ -361,14 +361,14 @@ RESULT_VIEW_PARAMS: dict[str, dict[str, Any]] = {
 EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
     RESULT_VIEW_HEAD_ARG, RESULT_VIEW_TAIL_ARG,
     "max_chars", "max_lines", "start_char", "start_line",
-    "source_start_char", "source_end_char", "offset", "limit",
+    "source_start_char", "source_end_char", "offset", "limit", "page", "tail_lines",
 })
 
 # Tools whose own affordance IS paging: selects the recovery WORDING of a
 # partial view only; it exempts nothing from source persistence.
 PAGEABLE_TOOL_RESULTS: frozenset[str] = frozenset({
     "read_file", "chat_history", "journal_read", "tree_read", "recent_tasks", "query_code", "query_data",
-    "query_sql", "query_records", "vcs_read", "get_github_run_log", "list_github_run_artifacts",
+    "query_sql", "query_records", "list_github_run_artifacts",
 })
 
 

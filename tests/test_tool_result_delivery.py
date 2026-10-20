@@ -521,6 +521,28 @@ def test_requested_result_view_classifies_declared_range_parameters():
     assert requested_result_view({"path": "a", "max_lines": 10}) == (None, None)
     assert requested_result_view({"task_id": "t", "source_start_char": 0, "source_end_char": 9}) == (None, None)
     assert requested_result_view({"task_id": "t", "offset": 2, "limit": 5}) == (None, None)
+    assert requested_result_view({"run_id": 7, "page": 2}) == (None, None)
+    assert requested_result_view({"run_id": 7, "tail_lines": 500}) == (None, None)
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("list_github_run_artifacts", {"run_id": 7, "page": 2}),
+    ("get_github_run_log", {"run_id": 7, "tail_lines": 500}),
+])
+def test_explicit_github_views_keep_requested_content_when_frame_has_room(tmp_path, tool, args):
+    # The produced view exceeds the unsolicited share but fits the physical frame.
+    # An otherwise identical unrequested result remains subject to that share.
+    text = "chosen result\n" + "x" * 120_000 + "\nEND"
+    asked, asked_trace = _deliver(_ctx(tmp_path, "asked"),
+        [_row("asked", tool, text, args=args)], measured_fit(window=60_000, reserve=2_000))
+    plain, plain_trace = _deliver(_ctx(tmp_path, "plain"),
+        [_row("plain", tool, text, args={"run_id": 7})], measured_fit(window=60_000, reserve=2_000))
+    assert asked[0]["content"] == text
+    assert "result_partial" not in asked_trace["tool_calls"][0]
+    assert plain_trace["tool_calls"][0]["result_partial"] is True
+    assert plain[0]["content"] != text
+    ref = _source_ref(plain[0]["content"])
+    assert artifacts.read_actor_source_bytes(tmp_path, "plain", ref).decode() == text
 
 
 def test_producer_page_sizes_stay_positive_ints_for_every_paging_consumer():
