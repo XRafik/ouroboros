@@ -2028,8 +2028,9 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     background: var(--system-bubble-bg);
 }
 
+/* A message waiting for its echo: faded on white; on dark it keeps full ink and its words below say so. */
 .chat-bubble.pending {
-    opacity: 0.78;
+    opacity: var(--message-pending-opacity);
     border-style: dashed;
 }
 
@@ -2321,9 +2322,9 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 .chat-live-phase[data-chip-tone="live"] > .status-mark { min-width: calc(3 * var(--mark-dot) + 2 * var(--mark-gap)); }
 
 .chat-live-phase[data-chip-tone="live"] {
-    color: var(--accent-light);
+    color: var(--status-live-fg);
     border-color: var(--accent-25);
-    background: var(--accent-10);
+    background: var(--status-live-bg);
 }
 
 .chat-live-phase[data-chip-tone="owner"] {
@@ -9194,6 +9195,10 @@ body.keyboard-open .project-panel {
     line-height: var(--line-meta);
     color: var(--text-meta);
 }
+/* The owner's own record: an answered question's words and its ok dot (ui.css --mark-ok) take the recorded-answer
+   roles, the owner's blue on dark, the meta words and ok dot on white. An answer whose delivery is unknown keeps its
+   owner dot. */
+.chat-quiz-card[data-state="answered"] .chat-quiz-status { color: var(--tone-recorded-answer); --mark-ok: var(--tone-recorded-mark); }
 .chat-quiz-question {
     font-size: var(--type-body);
     line-height: var(--line-body, 1.5);
@@ -9226,8 +9231,9 @@ body.keyboard-open .project-panel {
 }
 /* An offered answer is an elevated card (owner 16.10: Material's elevated card, a choice and never a field): the
    capsule surface on the rest shadow like every pressable thing, the object radius because an answer can be a
-   paragraph; hover and press change its colour. Once the question settles the cards lie flat and the chosen one
-   takes the green tone. */
+   paragraph; hover and press change its colour. Once the question settles the other cards lie flat and the chosen
+   one takes the chosen-answer tone (ui.css: the owner's sapphire keeping its lift on dark, the green tone flat on
+   white). */
 .chat-quiz-options {
     display: flex;
     flex-direction: column;
@@ -9253,7 +9259,10 @@ body.keyboard-open .project-panel {
 .chat-quiz-option:hover:not(:disabled) { background: var(--surface-capsule-hover); }
 .chat-quiz-option:active:not(:disabled) { filter: var(--press); }
 .chat-quiz-option:disabled { color: var(--text-disabled); cursor: default; background: var(--surface-tray); box-shadow: none; }
-.chat-quiz-option.chosen { color: var(--status-ok-fg); background: var(--tone-green); }
+.chat-quiz-option.chosen { color: var(--tone-chosen-answer-ink); background: var(--tone-chosen-answer); }
+/* A settled answer is a record: its chosen card keeps the lift the theme gives it. A chosen card that still takes a
+   press (a choice dialog's radio card) stands like every capsule. */
+.chat-quiz-option.chosen:disabled { box-shadow: var(--tone-chosen-answer-shadow); }
 .chat-quiz-option.pending-choice {
     transition: none;
     box-shadow: var(--elev-rest), inset 0 0 0 1px var(--focus-accent-border);
@@ -9261,7 +9270,7 @@ body.keyboard-open .project-panel {
     color: var(--text-primary);
 }
 .chat-quiz-card [aria-disabled="true"] { cursor: default; }
-.chat-quiz-card [aria-disabled="true"]:not(.pending-choice) { opacity: .75; }
+.chat-quiz-card [aria-disabled="true"]:not(.pending-choice) { opacity: var(--quiz-held-opacity); }
 .chat-quiz-card [aria-disabled="true"]:hover:not(.pending-choice) {
     background: var(--surface-tray);
 }
@@ -9285,13 +9294,15 @@ body.keyboard-open .project-panel {
     color: var(--text-meta);
 }
 .chat-quiz-option:disabled .chat-quiz-option-detail { color: var(--text-disabled); }
-.chat-quiz-option.chosen .chat-quiz-option-detail { color: var(--text-meta); }
+.chat-quiz-option.chosen .chat-quiz-option-detail { color: var(--tone-chosen-answer-detail); }
+/* The asker's recommendation: a word of its own beside the option's label, in the chosen answer's ink on that card. */
 .chat-quiz-option-recommended {
     margin-left: var(--space-2, 8px);
     font-size: var(--type-meta);
     font-weight: 600;
-    color: var(--status-ok-fg);
+    color: var(--tone-recommended);
 }
+.chat-quiz-option.chosen .chat-quiz-option-recommended { color: var(--tone-chosen-answer-ink); }
 /* Free answer: the owner's own words when no offered option fits, in one frame that holds its Send as the composer
    holds its own. The frame wears the field's hairline and, while the words have focus, the field focus idiom; a card
    too narrow for both gives Send its own line inside the frame, at its end. */
@@ -9479,7 +9490,7 @@ body.keyboard-open .project-panel {
     overflow: hidden;
 }
 .chat-quote[data-author="user"] { --quote-ink: var(--user-sender); --quote-tint: var(--user-bubble-from); }
-.chat-quote[data-author="assistant"] { --quote-ink: var(--assistant-sender); --quote-tint: var(--accent-10); }
+.chat-quote[data-author="assistant"] { --quote-ink: var(--quote-assistant-ink); --quote-tint: var(--accent-10); }
 .chat-quote[data-author="system"] { --quote-ink: var(--system-sender); --quote-tint: var(--system-bubble-bg); }
 .chat-quote::before {
     content: "";
@@ -9996,7 +10007,7 @@ body.keyboard-open .project-panel {
     :root[data-theme] .chat-budget-pill.ui-chrome-control[data-attention="1"]:hover { background: var(--tone-amber-hover); }
 }
 :root[data-theme] :is(.project-panel-close, .mobile-nav-toggle, .nav-drawer-close) { border-radius: var(--pill-radius); }
-:root[data-theme] .chat-header-btn.danger.ui-chrome-control { background: var(--tone-red); color: var(--status-error-fg); }
+:root[data-theme] .chat-header-btn.danger.ui-chrome-control { background: var(--tone-red); color: var(--panic-ink); }
 :root[data-theme] .chat-budget-pill.ui-chrome-control {
     border-color: transparent; background: var(--surface-capsule); box-shadow: var(--elev-rest); transition: var(--motion-tone);
     -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass);
