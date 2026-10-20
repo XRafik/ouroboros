@@ -258,6 +258,12 @@ export function createChatReadingPosition({ visible, alive, ready, feed, anchors
             feed.scrollTop += offset;
             state.top = feed.scrollTop; state.stick = false; state.remember(true); updateButton();
         },
+        /** The newest edge in this task: a page shown again (WebKit drops a hidden page's offset, and the page's
+         * first frame must not paint its oldest loaded messages). followAfterLayout confirms it after layout. */
+        jumpToNewest() {
+            if (!alive() || !visible()) return;
+            feed.scrollTop = feed.scrollHeight; state.top = feed.scrollTop;
+        },
         followAfterLayout() {
             const token = generation;
             let passes = 0;
