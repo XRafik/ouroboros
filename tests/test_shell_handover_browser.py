@@ -4,7 +4,8 @@ Animating the opacity of Main's page restyles every row of a long history in Web
 Project, ~335 ms arriving from Settings, at 34 k elements), so shell_motion.js fades Main's words under a cover of the
 room's own background inside it and Main's own opacity never moves. A room that lies over Main (the Project panel, a
 page leaving over it) fades by its own opacity: the room under it must show through. No cover is left once the beat
-is over. Uses the static-server fixture; never starts the runtime or reads live data."""
+is over, and under reduced motion (no beat, only the arriving room's short fade) the cover lifts and goes the same way.
+Uses the static-server fixture; never starts the runtime or reads live data."""
 from __future__ import annotations
 
 import json
@@ -83,3 +84,27 @@ def test_main_s_words_fade_under_a_cover_and_the_rooms_over_it_fade_themselves(h
     arriving = [s['cover'] for s in facts['to_main'] if s['cover'] is not None]
     assert arriving and max(arriving) > 0.9 and min(arriving) < 0.05, ("arriving, the cover lifts off Main's words", facts)
     assert facts['covers_after_project'] == 0 and facts['covers_after_main'] == 0, ('the beat takes its cover away', facts)
+
+
+def test_with_reduced_motion_main_picked_in_the_drawer_is_uncovered_and_its_cover_goes(handover_ui, tmp_path):
+    page = seed_page(handover_ui, 390, 844)
+    page.emulate_media(reduced_motion='reduce')
+    facts = {'engine': handover_ui['engine']}
+    try:
+        page.goto(handover_ui['url'] + '/')
+        page.wait_for_selector('#chat-input', state='attached')
+        settle(page)
+        open_drawer(page, '#page-chat')
+        pick(page, '#primary-sidebar [data-nav-page="settings"]', '#page-settings')
+        open_drawer(page, '#page-settings')
+        facts['to_main'] = pick(page, '#primary-sidebar [data-nav-page="chat"]', '#page-settings')
+        page.wait_for_timeout(300)
+        facts['covers'] = page.evaluate(COVERS)
+    finally:
+        save_evidence(tmp_path, f'shell-cover-reduced-{handover_ui["engine"]}', facts)
+        print(json.dumps(facts))
+        page.close()
+    shown = [s['cover'] for s in facts['to_main'] if s['cover'] is not None]
+    assert shown and max(shown) > 0.5, ('the short fade lifts a cover off Main', facts)
+    assert facts['to_main'][-1]['cover'] is None and facts['covers'] == 0, ('then the cover goes: Main is seen', facts)
+    assert {s['main'] for s in facts['to_main']} == {'1'}, ("Main's own opacity never moves", facts)

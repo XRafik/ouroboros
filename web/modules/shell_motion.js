@@ -182,6 +182,8 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
         const b = newBeat();
         if (reducedMotion(win)) {
             fade(b, arriving, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.reducedIn, easing: 'ease-out', fill: 'backwards' });
+            // Nothing holds this beat: what it added goes once its fade has run.
+            Promise.all(b.anims.map((anim) => anim.finished.catch(() => null))).then(() => { if (beat === b) finish(false); });
             return;
         }
         b.holding = true;

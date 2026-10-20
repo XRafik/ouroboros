@@ -3821,6 +3821,7 @@ html[data-layout="stack"] #page-chat > .shell-cover {
     inset: 0;
     z-index: 2147483647;
     background: var(--bg-primary);
+    opacity: 0;  /* at rest it covers nothing: a fade that ends without holding its last frame leaves the room seen */
     pointer-events: none;
 }
 /* The chosen place's pill: the chosen row's own fill (and its left mark) under the drawer's rows, sliding from the old
