@@ -1,8 +1,9 @@
 """``POST /api/ui/holds``: the holds a page found when it opened become one System row per owning chat.
 
-A held app card is named in the chat it was published in, a skill's widget and page code in Main; a ``key@rev`` named once adds no
-row when another tab or device reports it again; a body of the wrong shape answers 400 and writes nothing; with no
-chat writer serving this data root nothing is written and the answer is 503.
+A held app card is named in the chat it was published in, a skill's widget and page code in the owner's chat; a
+``key@rev`` named once adds no row when another tab or device reports it again, and one being named right now waits
+for that report; a row whose write is not confirmed is reported again; a body of the wrong shape answers 400 and
+writes nothing; with no chat writer serving this data root nothing is written and the answer is 503.
 """
 
 from __future__ import annotations
@@ -98,6 +99,15 @@ def test_a_row_whose_write_is_not_confirmed_is_reported_again(tmp_path, client, 
     response = client.post("/api/ui/holds", json={"holds": [{"key": "module:device_voice:tts", "rev": "r1"}]})
     assert response.status_code == 503 and response.json()["reason_code"] == "not_confirmed"
     assert ui_holds._NAMED == {}, "the page keeps it unreported, and the next report names it"
+
+
+def test_a_hold_another_report_is_naming_now_is_left_for_the_next_load(client, rows, monkeypatch):
+    monkeypatch.setattr(ui_holds, "_NAMING", {"module:device_voice:tts@r1"})
+    response = client.post("/api/ui/holds", json={"holds": [{"key": "module:device_voice:tts", "rev": "r1"}]})
+    assert response.status_code == 503 and response.json()["reason_code"] == "in_flight" and rows == []
+    monkeypatch.setattr(ui_holds, "_NAMING", set())
+    assert client.post("/api/ui/holds", json={"holds": [{"key": "module:device_voice:tts", "rev": "r1"}]}).json() == {
+        "ok": True, "named": 1}, "once that report settled, this one names it"
 
 
 def test_without_a_chat_writer_nothing_is_written(tmp_path, client, monkeypatch):

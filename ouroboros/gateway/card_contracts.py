@@ -114,7 +114,7 @@ class UiHold(TypedDict):
 
 
 class UiHoldsSurface(TypedDict, total=False):
-    """Where the page runs, as raw facts: the desktop shell's bridge, the Telegram mini app's SDK."""
+    """Where the page runs, as raw facts: the desktop shell's bridge, inside the Telegram mini app."""
 
     pywebview: bool
     telegram: bool

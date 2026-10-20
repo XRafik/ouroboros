@@ -29,7 +29,7 @@ MAX_REPORTED_HOLDS = 64  # the ledger's own bound (web/modules/holds.js MAX_ENTR
 _KEY = re.compile(r"^(app|widget|module):\S{1,280}$")
 _NAMED: "OrderedDict[str, None]" = OrderedDict()
 _NAMED_MAX = 512
-_NAMING: set = set()  # markers a report is naming right now: a tab reporting at the same moment adds no row
+_NAMING: set = set()  # markers a report is naming right now: another tab's report of one waits for its next load
 
 
 class _ChatUnavailable(RuntimeError):
@@ -104,8 +104,9 @@ def _remember(markers: List[str]) -> None:
 async def api_ui_holds_post(request: Request) -> JSONResponse:
     """``{"holds": [{"key", "rev"}], "surface": {"pywebview", "telegram"}}`` → ``200 {ok, named}``.
 
-    ``400`` a body that is not this shape; ``503`` ``chat_unavailable`` (nothing was named) or ``not_confirmed``
-    (a row may be missing: the next page reports it again)."""
+    ``400`` a body that is not this shape; ``503`` ``chat_unavailable`` or ``in_flight`` (another report is naming
+    one of these now; nothing was named) or ``not_confirmed`` (a row may be missing); after a 503 the next page
+    reports again."""
     body = await request_json_or(request, None)
     holds = body.get("holds") if isinstance(body, dict) else None
     if not isinstance(holds, list) or len(holds) > MAX_REPORTED_HOLDS:
@@ -118,7 +119,9 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
         if not isinstance(key, str) or not _KEY.match(key):
             return json_error("each hold needs a key: app:, widget: or module:", 400)
         marker = f"{key}@{str(hold.get('rev') or '')[:128]}"
-        if marker in _NAMED or marker in _NAMING or marker in fresh:
+        if marker in _NAMING:  # unwritten yet: answering 200 here would let that tab mark it reported
+            return json_error("another report is naming this hold right now", 503, reason_code="in_flight")
+        if marker in _NAMED or marker in fresh:
             continue
         words, chat_id = _item(root, key)
         if words:
