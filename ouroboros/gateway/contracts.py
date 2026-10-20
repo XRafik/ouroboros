@@ -79,6 +79,13 @@ class CommandInbound(TypedDict):
 
     type: Literal["command"]
     cmd: str
+    client_surface: NotRequired[dict]
+
+
+class PanicAcceptedOutbound(TypedDict):
+    """The emergency owner accepted this connection's request; exit is unproved."""
+
+    type: Literal["panic_accepted"]
 
 
 class ExtensionInbound(TypedDict, total=False):
@@ -1399,6 +1406,7 @@ from ouroboros.gateway.client_contracts import FileBrowserListResponse, ServedUi
 WS_MESSAGE_TYPES: tuple[str, ...] = (
     "chat",
     "command",
+    "panic_accepted",  # immediate acceptance only, not proof of process exit
     "photo",
     "video",
     "document",
@@ -1421,7 +1429,7 @@ WS_MESSAGE_TYPES: tuple[str, ...] = (
 
 __all__ = [
     "CostPresentation",
-    "ChatInbound", "TaskConstraintInbound", "CommandInbound", "ExtensionInbound",
+    "ChatInbound", "TaskConstraintInbound", "CommandInbound", "PanicAcceptedOutbound", "ExtensionInbound",
     "TransportMetadata",
     "ChatOutbound",
     "PhotoOutbound", "VideoOutbound", "DocumentOutbound",
