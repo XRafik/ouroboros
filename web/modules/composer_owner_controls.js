@@ -912,8 +912,9 @@ function createContextModeControl({ el, row, saveContextMode, showToast, refresh
  * @param {(force?: boolean) => Promise<void>|void} deps.refreshState  a forced `/api/state` re-read
  * @param {() => void} [deps.onLayout]  a strip opened or closed on its own line
  * @param {HTMLElement} [deps.box]  independently sized page the composer docks inside
+ * @param {() => boolean} [deps.readingBack]  the owner's own gesture took the room off its newest row (composer_fold.js)
  */
-export function createComposerOwnerControls({ row, byId, apiFetch, saveEffortRange, showToast, refreshState, onLayout, projectId = '', box = null, win = globalThis.window, doc = globalThis.document }) {
+export function createComposerOwnerControls({ row, byId, apiFetch, saveEffortRange, showToast, refreshState, onLayout, projectId = '', box = null, win = globalThis.window, doc = globalThis.document, readingBack }) {
     let destroyed = false;
     const scoped = body => projectId ? { ...body, project_id: projectId } : body;
     const readback = reply => {
@@ -932,8 +933,10 @@ export function createComposerOwnerControls({ row, byId, apiFetch, saveEffortRan
     const capsules = [];
     // Measure the settled, closed row synchronously: keep names while it fits, else rings and
     // values. If long translated values still wrap, cap the widest with an ellipsis; accessible
-    // names and open strips keep full words. The closed names never flicker between fits.
-    const shownKids = () => Array.from(row.children || []).filter((kid) => widthOf(kid) > 0);
+    // names and open strips keep full words. The closed names never flicker between fits. Contributed chips take
+    // only the room the capsules leave (composer_chips.js), so their slot is never part of the fit.
+    const shownKids = () => Array.from(row.children || [])
+        .filter((kid) => widthOf(kid) > 0 && !kid.hasAttribute?.('data-composer-chips'));
     // A phone's ☰ leads the line and never wraps, so it is not what the line is read by: while the row folds it goes
     // down beside the field (composer_fold.js) and the line it left still holds the capsules.
     function wraps() {
@@ -988,7 +991,7 @@ export function createComposerOwnerControls({ row, byId, apiFetch, saveEffortRan
     textObserver?.observe(row, { childList: true, characterData: true, subtree: true });
     // On a phone the row folds away while the owner reads back through the room's history (composer_fold.js).
     const fold = box ? createComposerFold({ feed: box.querySelector('#chat-messages, .chat-messages'),
-        wrap: row?.closest?.('.chat-input-wrap'), row, win, doc }) : null;
+        wrap: row?.closest?.('.chat-input-wrap'), row, win, doc, readingBack }) : null;
 
     return {
         context,
