@@ -617,7 +617,9 @@ export function createChatInstance({
 
     const { captureVisibleTimelineAnchor, restoreVisibleTimelineAnchor, serializeTimelineAnchor, anchorOwnersReady } =
         createTimelineAnchors({ messagesDiv, liveCardRecords });
-    const rowSleep = createRowSleep({ feed: messagesDiv });  // far rows skipped once laid out (style.css)
+    // Far rows skipped once laid out (style.css); after a restyle every row's size may change at once, and the reading
+    // owner places the passage again.
+    const rowSleep = createRowSleep({ feed: messagesDiv, onRestyle: () => reading.reflow() });
     const reading = createChatReadingPosition({
         feed: messagesDiv, alive: () => !destroyed,
         // A row asleep that the write changed is laid out before the place is restored (chat_row_sleep.js).

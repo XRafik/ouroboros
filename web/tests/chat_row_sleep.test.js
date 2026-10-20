@@ -27,8 +27,9 @@ function stand() {
                 node.parentElement = null;
             },
             querySelectorAll(selector) {
+                const tags = selector.split(',').map((part) => part.trim());
                 const found = [];
-                const walk = (el) => { for (const kid of el.children) { if (kid.tagName.toLowerCase() === selector) found.push(kid); walk(kid); } };
+                const walk = (el) => { for (const kid of el.children) { if (tags.includes(kid.tagName.toLowerCase())) found.push(kid); walk(kid); } };
                 walk(node);
                 return found;
             },
@@ -222,4 +223,51 @@ test('a row near the view never sleeps, one that leaves it sleeps again; only me
     assert.deepEqual(s.laid(), [false, true, false], 'left behind, it sleeps; the one now near does not');
     s.run(40);
     assert.equal(control.hasAttribute('data-laid'), false, 'the history control never sleeps (its touch area reaches past it)');
+});
+
+test('without observers the module is inert, and a write may still ask it to settle', () => {
+    const sleep = createRowSleep({ feed: {}, win: { requestAnimationFrame: () => 0 } });
+    assert.doesNotThrow(() => { sleep.flush(); sleep.destroy(); }, 'a page without MutationObserver keeps working');
+});
+
+test('a restyle wakes every row and asks the reading owner to place the passage again', () => {
+    const s = stand();
+    s.feed.append(s.element(), s.element());
+    const placed = [];
+    createRowSleep({ feed: s.feed, win: s.win, onRestyle: () => placed.push(s.laid()) });
+    s.show(390);
+    s.run(2);
+    s.observers.root.callback([{ target: s.doc.documentElement, attributeName: 'data-theme' }]);
+    assert.deepEqual(placed, [[false, false]], 'woken first, then placed: the passage is measured at the new sizes');
+    s.run(2);
+    s.fonts.get('loadingdone')();
+    assert.deepEqual(placed, [[false, false], [false, false]], 'new fonts too');
+});
+
+test('a row removed before its frame is never marked; the row that stays still sleeps', () => {
+    const s = stand();
+    createRowSleep({ feed: s.feed, win: s.win });
+    s.show(390);
+    const gone = s.element(), kept = s.element();
+    s.added(gone, kept);
+    gone.remove();  // a history page replaced, a row superseded
+    s.run(2);
+    assert.equal(gone.hasAttribute('data-laid'), false, 'out of the feed, it is not marked');
+    assert.deepEqual(s.laid(), [true]);
+});
+
+test('a video sleeps only once its metadata has given it its size', () => {
+    const s = stand();
+    createRowSleep({ feed: s.feed, win: s.win });
+    s.show(390);
+    const row = s.element(), clip = s.element('video');
+    clip.readyState = 0;
+    row.append(clip);
+    s.added(row);
+    s.run(4);
+    assert.equal(row.hasAttribute('data-laid'), false, 'a video is 300x150 until its metadata arrives');
+    clip.readyState = 1;
+    clip.emit('loadedmetadata');
+    s.run(2);
+    assert.equal(row.hasAttribute('data-laid'), true);
 });

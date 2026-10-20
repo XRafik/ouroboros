@@ -3,7 +3,9 @@
 A row far from the screen sleeps (chat_row_sleep.js, style.css `> [data-laid]`) only at the size it was laid out at.
 Two things change a row's size without touching the feed's width:
 - the theme: the dark theme's recorded answer has a `Your choice` line the light one has not, so a theme switch wakes
-  every row and they sleep again at their new size, both ways;
+  every row and they sleep again at their new size, both ways, and the reading owner places the reader again (the
+  answered question above changed size at once, which WebKit's own anchoring does not absorb): a passage read
+  mid-history stays where it was, and a reader at the newest message stays there;
 - a late canonical answer adding the owner's words to a question far above the passage: the reading owner restores
   the passage inside its write, and the row the write changed is laid out before it does (`flush`), so the passage
   stays where it was, at once, two frames later and once the row sleeps again.
@@ -33,6 +35,7 @@ QUESTION = """() => { const row = document.querySelector('#chat-messages [data-q
     row.removeAttribute('data-laid'); const own = row.getBoundingClientRect().height;
     if (laid) row.setAttribute('data-laid', '');
     return { kept, own, laid, theme: document.documentElement.dataset.theme }; }"""
+NEWEST_GAP = "() => { const f = document.querySelector('#chat-messages'); return f.scrollHeight - f.clientHeight - f.scrollTop; }"
 LATE_ANSWER = """async () => {
     const frame = () => new Promise(r => requestAnimationFrame(r));
     const feed = document.querySelector('#chat-messages'); feed.style.overflowAnchor = 'none';
@@ -50,6 +53,20 @@ LATE_ANSWER = """async () => {
     const sync = take(); await frame(); await frame(); const after = take();
     for (let i = 0; i < 45; i += 1) await frame();
     return { before, sync, after, settled: take() }; }"""
+# The theme changes while the reader is mid-history, the answered question far above the passage.
+THEME_AT_PASSAGE = """async () => {
+    const frame = () => new Promise(r => requestAnimationFrame(r));
+    const frames = async (n) => { for (let i = 0; i < n; i += 1) await frame(); };
+    const feed = document.querySelector('#chat-messages'); feed.style.overflowAnchor = '';
+    feed.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+    feed.scrollTop = feed.scrollHeight / 2;
+    await frames(45);
+    const top = feed.getBoundingClientRect().top;
+    const passage = [...feed.children].find(n => n.getBoundingClientRect().bottom > top + 1 && n.getBoundingClientRect().height > 0);
+    const at = () => passage.getBoundingClientRect().top;
+    const before = at(), moves = [];
+    for (const theme of ['light', 'dark']) { window.ouroTheme.set(theme); await frames(45); moves.push(at() - before); }
+    return { moves }; }"""
 # A row a little above the passage grows by itself (no write of the reading owner): the browser anchors the passage.
 GROWS_ABOVE = """async () => {
     const frame = () => new Promise(r => requestAnimationFrame(r));
@@ -99,9 +116,11 @@ def test_rows_asleep_wake_for_a_theme_and_for_a_late_answer_above_the_passage(sl
         for theme in ('dark', 'light', 'dark'):
             page.evaluate("theme => window.ouroTheme.set(theme)", theme)
             page.evaluate(FRAMES, 45)
+            facts.setdefault('newest', []).append(page.evaluate(NEWEST_GAP))
             facts.setdefault('themes', []).append(page.evaluate(QUESTION))
         facts['late'] = page.evaluate(LATE_ANSWER)
         facts['grows'] = page.evaluate(GROWS_ABOVE)
+        facts['themeAtPassage'] = page.evaluate(THEME_AT_PASSAGE)
     finally:
         save_evidence(tmp_path, f'row-sleep-{sleep_ui["engine"]}', facts)
         print(json.dumps(facts))
@@ -111,6 +130,8 @@ def test_rows_asleep_wake_for_a_theme_and_for_a_late_answer_above_the_passage(sl
     assert light['own'] < dark['own'], ('the light theme has no `Your choice` line: the row is shorter', facts)
     for state in facts['themes']:
         assert abs(state['kept'] - state['own']) <= 0.5, ('asleep, the row keeps its own size in either theme', facts)
+    for gap in facts['newest']:
+        assert abs(gap) <= 1, ('at the newest message, a theme switch keeps the reader there', facts)
     late = facts['late']
     assert late['before']['laid'] and late['before']['above'], ('the question sleeps above the passage', facts)
     assert late['settled']['h'] > late['before']['h'] + 500, ('the late answer grew the row', facts)
@@ -121,3 +142,5 @@ def test_rows_asleep_wake_for_a_theme_and_for_a_late_answer_above_the_passage(sl
     assert grows['grew'] > 100 and not grows['passageLaid'], ('a row above grew; the passage near the view is uncontained', facts)
     assert abs(grows['moved']) <= 1, ('the browser holds the passage when a row above it grows by itself', facts)
     assert grows['control'] in (False, None), ('a history control never sleeps', facts)
+    for moved in facts['themeAtPassage']['moves']:
+        assert abs(moved) <= 1, ('a theme switch keeps the passage being read where it was', facts)

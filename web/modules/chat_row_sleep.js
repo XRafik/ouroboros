@@ -30,9 +30,11 @@ const RESTYLING = ['data-theme', 'data-layout', 'lang', 'dir'];
 const ROWS = '.chat-bubble, .chat-live-card';  // the rows that sleep; a history control or notice never does
 const NEAR = '100% 0px';  // within the feed's own height above and below its view
 
-export function createRowSleep({ feed, win = globalThis.window } = {}) {
+// `onRestyle`: the room's reading owner places the passage again once a restyle (theme, layout, language, fonts) has
+// woken every row: rows far from the view change size at once, which WebKit's scroll anchoring does not absorb.
+export function createRowSleep({ feed, win = globalThis.window, onRestyle } = {}) {
     if (!feed || typeof win?.requestAnimationFrame !== 'function' || typeof win.MutationObserver !== 'function') {
-        return { destroy() {} };
+        return { flush() {}, destroy() {} };
     }
     const doc = feed.ownerDocument;
     const due = new Map();  // row → the frame it may sleep at
@@ -76,7 +78,9 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
 
     function sleep(row) {
         if (near.has(row) || !row.matches?.(ROWS)) return;
-        const pictures = [...row.querySelectorAll('img')].filter((img) => !img.complete);
+        // A picture or a video whose size has not arrived yet (a video's box is 300x150 until its metadata).
+        const pictures = [...row.querySelectorAll('img, video')]
+            .filter((media) => (media.tagName === 'VIDEO' ? media.readyState === 0 : !media.complete));
         if (!pictures.length) { row.setAttribute(MARK, ''); return; }
         if (waiting.has(row)) return;
         waiting.add(row);
@@ -84,9 +88,9 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
             if (!waiting.delete(row) || destroyed || row.parentElement !== feed) return;
             queue(row, ADDED_FRAMES);
         };
-        for (const img of pictures) {
-            img.addEventListener('load', loaded, { once: true });
-            img.addEventListener('error', loaded, { once: true });
+        for (const media of pictures) {
+            media.addEventListener(media.tagName === 'VIDEO' ? 'loadedmetadata' : 'load', loaded, { once: true });
+            media.addEventListener('error', loaded, { once: true });
         }
     }
 
@@ -121,7 +125,8 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
     const changes = new win.MutationObserver(settle);
     changes.observe(feed, { childList: true, subtree: true, characterData: true, attributes: true,
         attributeFilter: RESIZING });
-    const restyled = doc?.documentElement ? new win.MutationObserver(() => wakeAll()) : null;
+    const restyle = () => { wakeAll(); onRestyle?.(); };
+    const restyled = doc?.documentElement ? new win.MutationObserver(restyle) : null;
     restyled?.observe(doc.documentElement, { attributes: true, attributeFilter: RESTYLING });
 
     // A new width wakes every row: each is laid out again at it. A hidden feed reads 0 and keeps its rows as they are;
@@ -135,8 +140,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
         if (due.size && !ticking) { ticking = true; win.requestAnimationFrame(tick); }
     }) : null;
     resized?.observe(feed);
-    const fontsLoaded = () => wakeAll();
-    doc?.fonts?.addEventListener?.('loadingdone', fontsLoaded);
+    doc?.fonts?.addEventListener?.('loadingdone', restyle);
 
     for (const row of feed.children) arrived(row);
 
@@ -151,7 +155,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
             restyled?.disconnect();
             watch?.disconnect();
             resized?.disconnect();
-            doc?.fonts?.removeEventListener?.('loadingdone', fontsLoaded);
+            doc?.fonts?.removeEventListener?.('loadingdone', restyle);
             due.clear();
         },
     };
