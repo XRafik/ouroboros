@@ -367,8 +367,8 @@ function syncNavigationState() {
         document.body.classList.toggle('project-panel-open', Boolean(activeProjectId));
     }
     // A Project room that was left is put away once the motion that shows it leaving has run.
-    const leftNow = [...rooms.retiring];
-    if (leftNow.length) Promise.all([settled, exit]).then(() => leftNow.forEach(([pid, inst]) => rooms.settle(pid, inst)));
+    const leftNow = rooms.exits();
+    if (leftNow.length) Promise.all([settled, exit]).then(() => leftNow.forEach(([pid, inst, at]) => rooms.settle(pid, inst, true, at)));
     // One commit for both layers (layers.js), after the panel's unhide so focus can go into it: the drawer, and the
     // Project panel's layer, modal only where it covers the room; on a phone only the covered room's inert (the whole
     // room restyles) waits for the card's motion.

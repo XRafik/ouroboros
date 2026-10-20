@@ -61,3 +61,21 @@ test('reopened during its exit it is the same room; a late put-away of a replace
     w.rooms.settle('p1', r);
     assert.equal(r.calls.filter((c) => c === 'destroy').length, 1, 'once');
 });
+
+test('left, reopened and left again: the first exit ending late settles nothing, the second puts the room away', () => {
+    const w = world();
+    const r = room();
+    w.instances.set('p1', r);
+    w.rooms.retire('p1');
+    const [first] = w.rooms.exits();
+    w.rooms.settle('p1', undefined, false);  // reopened during its exit …
+    w.rooms.retire('p1');                     // … and left again
+    const [second] = w.rooms.exits();
+    assert.deepEqual([first[0], first[1], second[0], second[1]], ['p1', r, 'p1', r], 'the same room, leaving twice');
+    w.rooms.settle(...first.slice(0, 2), true, first[2]);  // the first exit's motion ends during the second
+    assert.equal(w.rooms.retiring.get('p1'), r, 'still leaving: its words stay while the second exit runs');
+    assert.deepEqual([w.destroyed, r.page.inert, 'leaving' in r.page.dataset], [[], true, true]);
+    w.rooms.settle(...second.slice(0, 2), true, second[2]);
+    assert.deepEqual(w.destroyed, ['p1'], 'the second exit puts it away');
+    assert.deepEqual(w.rooms.exits(), []);
+});
