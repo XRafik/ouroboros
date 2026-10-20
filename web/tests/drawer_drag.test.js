@@ -147,6 +147,9 @@ test('a start is eligible anywhere on the room, the edge included, but a field, 
     const shown = world({ blockers: [{ getClientRects: () => [] }, { getClientRects: () => [{}] }] });
     open(shown); assert.deepEqual(shown.state.set, [], 'an open menu owns the finger'); shown.dispose();
     assert.match(FIELD_SELECTOR, /input, textarea/); assert.match(SIDEWAYS_SELECTOR, /\[data-scroll-x\]/); assert.match(BLOCKING_SELECTOR, /dialog\[open\]/);
+    // A closed menu's leaving picture and a folding Shade no longer own the finger; their live forms do.
+    for (const live of ['.ui-popup', '.chat-photo-menu']) assert.ok(BLOCKING_SELECTOR.includes(`${live}:not([data-leaving])`), live);
+    assert.ok(BLOCKING_SELECTOR.includes('.rw-shade:not([hidden]):not([inert])'));
     // A button, a link or a summary under the finger does not stop a drag: the click that ends it is swallowed.
     for (const control of ['button', 'a[href]', 'summary', 'label', 'details', '[role="button"]']) {
         assert.equal(FIELD_SELECTOR.split(', ').includes(control), false, control);
