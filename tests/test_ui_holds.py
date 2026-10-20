@@ -18,8 +18,7 @@ from ouroboros.gateway import ui_holds
 
 @pytest.fixture
 def rows(tmp_path, monkeypatch):
-    from supervisor import message_bus
-    from supervisor import schedule_notes
+    from supervisor import message_bus, schedule_notes
 
     sent = []
     monkeypatch.setattr(message_bus, "DATA_DIR", tmp_path)

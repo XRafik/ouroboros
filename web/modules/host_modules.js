@@ -161,10 +161,11 @@ export function createHostModules({ store, draft = null, win = globalThis.window
         for (const reason of ['start', 'all']) {
             const group = unnamed.filter((item) => holds.reason(moduleHoldKey(item), item.revision) === reason);
             if (!group.length) continue;
-            const names = [...new Set(group.map((item) => item.skill_label || item.skill))].join(', ');
-            const text = reason === 'start'
-                ? fmt('{names} did not start: the page stopped while it was starting last time.', { names })
-                : fmt('{names} did not start: this page was opened with everything held.', { names });
+            const labels = [...new Set(group.map((item) => item.skill_label || item.skill))];
+            const names = labels.join(', ');
+            const text = reason === 'all' ? fmt('{names} did not start: this page was opened with everything held.', { names })
+                : labels.length > 1 ? fmt('{names} did not start: the page stopped while they were starting last time.', { names })
+                    : fmt('{names} did not start: the page stopped while it was starting last time.', { names });
             notice(text, 'warn', { ttl: 0, action: { label: tr('holds.start_it', 'Start it'), run() {
                 group.forEach((item) => holds.release(moduleHoldKey(item)));
                 sync();

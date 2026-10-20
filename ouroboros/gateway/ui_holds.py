@@ -29,6 +29,7 @@ MAX_REPORTED_HOLDS = 64  # the ledger's own bound (web/modules/holds.js MAX_ENTR
 _KEY = re.compile(r"^(app|widget|module):\S{1,280}$")
 _NAMED: "OrderedDict[str, None]" = OrderedDict()
 _NAMED_MAX = 512
+_NAMING: set = set()  # markers a report is naming right now: a tab reporting at the same moment adds no row
 
 
 class _ChatUnavailable(RuntimeError):
@@ -117,7 +118,7 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
         if not isinstance(key, str) or not _KEY.match(key):
             return json_error("each hold needs a key: app:, widget: or module:", 400)
         marker = f"{key}@{str(hold.get('rev') or '')[:128]}"
-        if marker in _NAMED or marker in fresh:
+        if marker in _NAMED or marker in _NAMING or marker in fresh:
             continue
         words, chat_id = _item(root, key)
         if words:
@@ -125,6 +126,7 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
             fresh.append(marker)
     if not groups:
         return JSONResponse({"ok": True, "named": 0})
+    _NAMING.update(fresh)
     try:
         named = await run_sync_to_completion(_name_holds, root, groups, _surface_words(body.get("surface")))
     except _ChatUnavailable as exc:
@@ -133,6 +135,8 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
         log.warning("A ui_hold row was not confirmed", exc_info=exc.__cause__)
         _remember(exc.named)
         return json_error(str(exc), 503, reason_code="not_confirmed")
+    finally:
+        _NAMING.difference_update(fresh)
     _remember(named)
     return JSONResponse({"ok": True, "named": len(named)})
 

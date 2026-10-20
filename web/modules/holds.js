@@ -10,6 +10,8 @@
 // and Close on a card in a message, so they survive a reload on this device. The page that opens with `?hold=all`
 // holds every item for that load. Read once per page: this page's own starts in flight are never its holds.
 
+import { isTelegramHost } from './host_telegram.js';
+
 export const HOLDS_KEY = 'ouroboros.holds';
 export const START_SETTLE_MS = 1000;
 /** The one line a held item shows beside its own Open / Start, by the ledger's reason. */
@@ -162,7 +164,7 @@ export function reportFoundHolds(holds, post, { win = globalThis.window, wait = 
     const send = () => {
         if (sent) return;
         sent = true;
-        const surface = { pywebview: Boolean(win?.pywebview?.api), telegram: Boolean(win?.Telegram?.WebApp) };
+        const surface = { pywebview: Boolean(win?.pywebview?.api), telegram: isTelegramHost({ win, doc: win?.document }) };
         Promise.resolve().then(() => post({ holds: found, surface })).then(() => holds.reported(found))
             .catch(() => { /* not named: the next page reports it again; a lost report holds nothing back */ });
     };

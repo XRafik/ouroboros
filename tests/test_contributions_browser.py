@@ -325,9 +325,11 @@ def test_hold_all_starts_without_page_code_and_start_it_mounts_it_in_place(subsc
     page.locator(".chat-bubble.assistant .chat-message-action").wait_for()
     assert loaded == [], "no page module is even fetched"
     assert page.evaluate("window.voiceContext") is None
+    assert urlparse(page.url).query == "", "the flag leaves the address once read: a reload starts as usual"
+    page.evaluate("window.samePage = true")
     notice.get_by_role("button", name="Start it").click()
     page.wait_for_function("Array.isArray(window.voiceContext)")
-    assert urlparse(page.url).query == "hold=all", "no reload: the held code starts in this page"
+    assert page.evaluate("window.samePage") is True, "no reload: the held code starts in this page"
 
 
 def test_a_start_the_page_did_not_outlive_is_held_next_time_and_more_offers_no_reload_door(subscription_ui):
