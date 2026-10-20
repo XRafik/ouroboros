@@ -91,6 +91,7 @@ class AdoptedSnapshot(NamedTuple):
     baseline_sha: str
     path: str
     adopted_from: str
+    excluded_untracked: tuple = ()  # the snapshot's own exclusions, for the start receipt
 
 
 class ContinuationStart(NamedTuple):
@@ -331,7 +332,8 @@ def _adopted_snapshot(entry: Any, authority: Any) -> Tuple[Optional[AdoptedSnaps
             f"({record.get('error') or 'no registry entry or directory'}), so its work cannot be continued in "
             "the same tree. Apply or reject its captured patch with integrate_delegated_patch, then continue "
             "again: the next continuation starts from a fresh snapshot of the target.")
-    return AdoptedSnapshot(entry.snapshot_id, entry.baseline_sha, entry.execution_root, entry.run_id), "", ""
+    return AdoptedSnapshot(entry.snapshot_id, entry.baseline_sha, entry.execution_root, entry.run_id,
+                           tuple(record.get("excluded_untracked") or ())), "", ""
 
 
 def continuation_prompt(facts: Dict[str, Any], caller_text: str) -> str:

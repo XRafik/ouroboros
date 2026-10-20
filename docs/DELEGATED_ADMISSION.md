@@ -60,7 +60,8 @@ capture even when the shared authority tree moved; the evidence names the
 changed paths and keeps authorship unknown. A ready-with-changes result retains
 its private artifact and the existing locked apply check decides whether
 integration is safe. Excluded nested repositories remain outside the snapshot
-inventory and are disclosed as an untracked residual.
+inventory, are named on the start receipt and disclosed as an untracked residual
+(an ignored clone is not inventoried, and a tracked submodule is not populated).
 
 A child or reviewer without write authority but with configured
 `workspace_write`/`full` access is an evidence-only investigation: the same

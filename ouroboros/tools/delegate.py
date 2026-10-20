@@ -143,6 +143,7 @@ from ouroboros.tools.delegate_integration import (  # noqa: F401
     _resolve_retry_invocation,
     _resolved,
     _retry_binding_refusal,
+    _snapshot_facts,
     _validated_invocation,
     claimed_start_request,
     payload_host_instructions,
@@ -794,20 +795,6 @@ def _settle_refused_provision(ctx: ToolContext, gateway: Any, refusal: ToolResul
         reason=str(payload.get("reason") or "execution_snapshot_failed"),
         history_facts={**(history_facts or {}), **refusal_facts(payload),
                        "detail": str(payload.get("detail") or "")})
-
-
-def _snapshot_facts(handle: Any) -> Dict[str, Any]:
-    """Disclosure on the start receipt: how big the private snapshot is and how long
-    it took to provision (#1241). Facts only — nothing refuses or truncates on them."""
-    if handle is None:
-        return {}
-    if getattr(handle, "adopted_from", ""):
-        return {"reused_from_run": handle.adopted_from}  # a continuation's predecessor snapshot
-    file_baseline = getattr(handle, "file_baseline", {}) or {}
-    return {"entries": int(getattr(handle, "entry_count", 0) or 0),
-            "untracked_files": len(getattr(handle, "untracked_baseline", {}) or {}) + len(file_baseline),
-            "file_input_bytes": sum(int(item.get("size", 0) or 0) for item in file_baseline.values()),
-            "provisioning_sec": float(getattr(handle, "provisioning_sec", 0.0) or 0.0)}
 
 
 def _retire_orphaned_registration(ctx: ToolContext, gateway: Any, project_id: str, *,
