@@ -36,6 +36,12 @@ body {
     inherits: false;
     initial-value: 0;
 }
+/* The finger's settle (drawer_drag.js writes it on the drawer, its scrim and the room card) is not inherited either:
+   written on the room card it would restyle every row of the room at the release, the moment the drawer latches. */
+@property --drawer-settle {
+    syntax: '*';
+    inherits: false;
+}
 
 #app {
     display: grid;

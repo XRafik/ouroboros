@@ -109,3 +109,14 @@ def test_motion_rides_one_curve_and_three_durations_and_the_docked_panel_slides_
     app_js = _read("web/app.js")
     assert "afterMotion(projectPanel, { property }).done" in app_js, "the close waits for whichever motion runs"
     assert "PANEL_ARRIVAL_BOUND_MS = 300" in app_js and "hasPaintedHistory" in app_js.split("function arrivePanel", 1)[1]
+
+
+def test_what_the_drawer_writes_on_the_room_card_is_not_inherited():
+    """drawer_drag.js writes --drawer-p and --drawer-settle on the drawer, its scrim and the room card. An inherited
+    property written on the room card restyles every row of the room: at the release, the moment the drawer latches
+    (the owner's «залипает на моменте вибрации»), WebKit froze 150 ms on a long Main. Both are registered not inherited."""
+    css = _read("web/style.css")
+    for name in ("--drawer-p", "--drawer-settle", "--drag-width"):
+        rule = css.split(f"@property {name} {{", 1)[1].split("}", 1)[0]
+        assert "inherits: false;" in rule, name
+    assert "style.setProperty('--drawer-settle'" in _read("web/modules/drawer_drag.js")

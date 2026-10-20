@@ -892,6 +892,7 @@ textarea.ui-control { resize: vertical; }
     --mark-dot: 4px;
     --mark-gap: 3px;
     --mark-fact: 7px;
+    --mark-wave: status-mark-bounce;  /* a sheet that hides marks rests their wave with none */
     --mark-ink: currentColor;
     --mark-unread: var(--accent-light);
     --mark-owner: var(--amber);
@@ -919,7 +920,7 @@ textarea.ui-control { resize: vertical; }
 }
 /* The moving dots type: a wave 150 ms apart that lifts each dot 4px and a little larger (owner 20.10 2A). A sheet
    that hides marks rests their wave with `--mark-wave: none` (the closed phone drawer), never by painting them. */
-.status-mark[data-shape="moving"] > i { animation: var(--mark-wave, status-mark-bounce) 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.status-mark[data-shape="moving"] > i { animation: var(--mark-wave) 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
 .status-mark[data-shape="moving"] > i:nth-child(2) { animation-delay: 0.15s; }
 .status-mark[data-shape="moving"] > i:nth-child(3) { animation-delay: 0.3s; }
 .status-mark[data-shape="still"] { opacity: 0.4; }
