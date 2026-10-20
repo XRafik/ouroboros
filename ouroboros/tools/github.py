@@ -3,18 +3,28 @@
 ``_gh_run`` is the structured transport read; ``_gh_cmd`` projects it onto the string ABI.
 ``GH_TARGET_INVALID`` / ``GH_TARGET_REQUIRED`` refusals enter the tool-result sidecar. A target
 or missing-CLI refusal raised before the invocation's first ``gh`` launch is published
-``completed_no_effect``. The checks reader's literal ``gh api`` annotation path is the one
-subcall that does not take the explicit repo.
+``completed_no_effect``. The checks reader's literal ``gh api`` annotation path and the
+workflow readers' literal artifact paths are the subcalls that do not take the explicit repo.
+
+The text transport decodes, folds newlines and strips. ``_gh_run(..., capture_to=PATH, max_bytes=N)``
+is the exact branch: stdout streams into the file as written, the read stops at the cap and ends the
+process, bounding bytes captured into this process's destination, not gh's internal downloads or cache.
+Stderr is drained into a bounded buffer. Both branches share launch, custody and error classification.
+
+Workflow-run readers live in ``github_workflows`` and the pull-request writers in ``github_pr_write``;
+this module registers their entries so the Presence repo binding and the ``repo`` parameter cover them.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import pathlib
 import re
 import subprocess
+import threading
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from functools import wraps
@@ -69,6 +79,16 @@ _PR_COMMIT_COUNTS_QUERY = "query($ids:[ID!]!){nodes(ids:$ids){...on PullRequest{
 
 
 @dataclass(frozen=True)
+class GhCapture:
+    """The stdout bytes one exact-capture ``_gh_run`` wrote to its file, as written: no decoding, no strip."""
+    path: pathlib.Path
+    size: int
+    sha256: str
+    # The byte cap ended the read and the process; the file holds the first ``size`` bytes of a longer stream.
+    truncated: bool
+
+
+@dataclass(frozen=True)
 class GhResult:
     ok: bool
     text: str
@@ -77,6 +97,15 @@ class GhResult:
     # "target" is a local refusal and "deadline" a request the checks reader never sent;
     # neither is a subprocess exit or exception.
     failure: str
+    # The exact branch's capture; None for the text transport and for every failure.
+    capture: Optional[GhCapture] = None
+
+
+# One pipe read; stderr of an exact capture is kept up to this many bytes for classification. A stderr that
+# exceeds the cap is WITHHELD whole: any cut leaves a boundary a token can straddle, and redaction matches whole
+# values only, so no bounded tail is safe to show. The exit code stays; the HTTP status is then unknown.
+_CAPTURE_CHUNK = _CAPTURE_STDERR_CAP = 65536
+_CAPTURE_STDERR_WITHHELD = b"[stderr exceeded 64 KiB; diagnostics withheld]"
 
 
 def _merge_refused_before_effect(cmd: List[str], res: subprocess.CompletedProcess, stderr: str) -> bool:
@@ -94,6 +123,91 @@ def _merge_refused_before_effect(cmd: List[str], res: subprocess.CompletedProces
         return False
     return match["checkout"] is None or (len(args) == 6 and match["checkout"] == args[2]
                                          and match["action"] == ("rebase" if args[3] == "--rebase" else "merge"))
+
+
+def _exit_failure(cmd: List[str], res: subprocess.CompletedProcess, stderr: str) -> GhResult:
+    """Classify a nonzero exit from its complete stderr, then keep a bounded head.
+
+    Redact the WHOLE stderr first (a cut could split a token), read gh's own status marker before any
+    bounding, then keep a bounded head. gh writes the status in three deterministic shapes and nowhere
+    else: ``gh: <msg> (HTTP NNN)`` at the end of a line (``gh api`` with a message), ``gh: HTTP NNN``
+    (``gh api`` without one) and ``HTTP NNN: <msg> (<url>)`` — optionally wrapped as ``failed to fork:
+    HTTP NNN: …`` — from every other command. A marker quoted mid-sentence is prose, not a status.
+    HTTP status alone proves nothing about which CLI step failed."""
+    err = redact_known_values(stderr or "", [github_token_from_env_or_settings()])
+    status = _GH_STATUS_RE.search(err)
+    head = " | ".join([line.strip() for line in err.splitlines() if line.strip()][:3])
+    head = truncate_within_limit(head, 600)
+    return GhResult(False, "⚠️ GH_ERROR: " + head, res.returncode,
+                    int(status.group(1) or status.group(2)) if status else None,
+                    "pre_effect" if _merge_refused_before_effect(cmd, res, err) else "exit")
+
+
+def _capture_stdout(cmd: List[str], cwd: pathlib.Path, env: dict, timeout: int, path: pathlib.Path,
+                    max_bytes: int) -> tuple:
+    """Stream the process's stdout into ``path`` up to ``max_bytes``: (GhCapture, returncode, stderr, timed_out).
+
+    The cap stops stdout acquisition into our destination, not gh's internal network/cache work.
+    Stderr is drained on its own thread into a bounded buffer so neither pipe blocks the
+    other; the deadline kills the process from a timer. The file holds exactly the bytes hashed. The sink
+    is opened before the launch: an unwritable path fails here, never after a process started."""
+    sink = open(path, "wb")
+    try:
+        proc = subprocess.Popen(cmd, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    except BaseException:
+        sink.close()
+        raise
+    err_parts: List[bytes] = []
+    err_total = [0]
+    timed_out = [False]
+
+    def drain_stderr() -> None:
+        kept = 0
+        while True:
+            chunk = proc.stderr.read(_CAPTURE_CHUNK)
+            if not chunk:
+                return
+            err_total[0] += len(chunk)
+            if kept < _CAPTURE_STDERR_CAP:
+                err_parts.append(chunk[:_CAPTURE_STDERR_CAP - kept])
+                kept += len(err_parts[-1])
+
+    def expire() -> None:
+        timed_out[0] = True
+        proc.kill()
+
+    drain, timer = threading.Thread(target=drain_stderr, daemon=True), threading.Timer(timeout, expire)
+    digest, written, truncated = hashlib.sha256(), 0, False
+    try:
+        drain.start()
+        timer.start()
+        with sink:
+            while True:
+                chunk = proc.stdout.read(_CAPTURE_CHUNK)
+                if not chunk:
+                    break
+                keep = chunk[:max(0, max_bytes - written)]
+                if keep:
+                    sink.write(keep)
+                    digest.update(keep)
+                    written += len(keep)
+                if len(keep) < len(chunk):
+                    truncated = True
+                    proc.kill()
+                    break
+        proc.stdout.close()
+        returncode = proc.wait()
+    finally:
+        timer.cancel()
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        drain.join(timeout=5)
+        proc.stderr.close()
+    raw = _CAPTURE_STDERR_WITHHELD if err_total[0] > _CAPTURE_STDERR_CAP else b"".join(err_parts)
+    stderr = raw.decode("utf-8", errors="replace")
+    return GhCapture(path, written, digest.hexdigest(), truncated), returncode, stderr, timed_out[0]
 
 
 def _refuse(ctx: ToolContext, text: str, code: str = "TOOL_ARG_ERROR", *, no_effect: bool = False) -> str:
@@ -153,7 +267,8 @@ def github_cli_configured() -> bool:
 
 
 def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Optional[str] = None,
-            *, repo: object = _GENERIC_TRANSPORT) -> GhResult:
+            *, repo: object = _GENERIC_TRANSPORT, capture_to: Optional[pathlib.Path] = None,
+            max_bytes: int = 0) -> GhResult:
     # Only omitted internal API/Hub calls keep the generic transport contract.
     # Public repository tools always pass repo, including '' for Project focus.
     # The target refusals below publish a typed argument error into the calling
@@ -170,6 +285,8 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
                                          meta_updates={"operation_outcome": "completed_no_effect"})
         return GhResult(False, _publish_tool_result(ctx, typed) if typed else text, None, None, failure)
 
+    if capture_to is not None and (input_data is not None or type(max_bytes) is not int or max_bytes <= 0):
+        raise ValueError("an exact capture takes a positive max_bytes and no stdin")
     if repo is not _GENERIC_TRANSPORT and not isinstance(repo, str):
         return refused("", "target", ToolResult(
             status="error", code="TOOL_ARG_ERROR",
@@ -206,9 +323,24 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
             if workspace or room_dir or project:
                 env.pop("GH_REPO", None)  # Ambient defaults cannot replace the selected Project.
             if repo:
-                cmd.extend(["--repo", repo])
+                if args[:2] == ["repo", "view"]:
+                    # `gh repo view [<repository>] [flags]` names its target positionally; its INHERITED FLAGS list
+                    # only --help (gh 2.101 help), so `--repo` would be an unknown flag. Every other subcommand
+                    # this module sends lists `-R, --repo [HOST/]OWNER/REPO`.
+                    cmd[3:3] = [repo]
+                else:
+                    cmd.extend(["--repo", repo])
         if submitted is not None:
             submitted[0] = True
+        if capture_to is not None:
+            capture, returncode, stderr, timed_out = _capture_stdout(cmd, cwd, env, timeout, capture_to, max_bytes)
+            if timed_out:
+                return GhResult(False, f"⚠️ GH_TIMEOUT: exceeded {timeout}s.", None, None, "timeout")
+            if capture.truncated:  # The cap ended the process; its exit says nothing about the command.
+                return GhResult(True, "", None, None, "", capture)
+            if returncode != 0:
+                return _exit_failure(cmd, subprocess.CompletedProcess(cmd, returncode, "", stderr), stderr)
+            return GhResult(True, "", returncode, None, "", capture)
         res = subprocess.run(
             cmd,
             cwd=str(cwd),
@@ -219,22 +351,7 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
             env=env,
         )
         if res.returncode != 0:
-            # Redact the WHOLE stderr first (a cut could split a token), read gh's own
-            # status marker before any bounding, then keep a bounded head. gh writes the
-            # status in three deterministic shapes and nowhere else: ``gh: <msg> (HTTP NNN)``
-            # at the end of a line (``gh api`` with a message), ``gh: HTTP NNN`` (``gh api``
-            # without one) and ``HTTP NNN: <msg> (<url>)`` — optionally wrapped as
-            # ``failed to fork: HTTP NNN: …`` — from every other command. A marker quoted
-            # mid-sentence is prose, not a status.
-            err = redact_known_values(res.stderr or "", [github_token_from_env_or_settings()])
-            status = _GH_STATUS_RE.search(err)
-            head = " | ".join([line.strip() for line in err.splitlines() if line.strip()][:3])
-            head = truncate_within_limit(head, 600)
-            # Classified from the whole stderr, before the bounded head the receipt keeps.
-            # HTTP status alone proves nothing about which CLI step failed.
-            return GhResult(False, "⚠️ GH_ERROR: " + head, res.returncode,
-                            int(status.group(1) or status.group(2)) if status else None,
-                            "pre_effect" if _merge_refused_before_effect(cmd, res, err) else "exit")
+            return _exit_failure(cmd, res, res.stderr or "")
         return GhResult(True, res.stdout.strip(), res.returncode, None, "")
     except FileNotFoundError as e:
         missing = str(getattr(e, "filename", "") or "")
@@ -352,20 +469,49 @@ def _comment_on_issue(ctx: ToolContext, number: int, body: str, repo: str = "") 
     return f"✅ Comment added to issue #{number}."
 
 
+def _send_facts(res: GhResult) -> str:
+    """The facts of a failed gh send, never a verdict: gh's exit and HTTP status, a timeout, or a lost answer.
+
+    A nonzero exit alone does not prove GitHub rejected the request (gh can fail after the server acted), so
+    callers report the effect as unconfirmed and read it back instead of calling it refused."""
+    if res.failure in ("exit", "pre_effect"):
+        facts = ", ".join(filter(None, [f"exit {res.exit_code}" if res.exit_code is not None else "",
+                                        f"HTTP {res.http_status}" if res.http_status else ""]))
+        return f"ended with {facts or 'a nonzero exit'}: {res.text}"
+    if res.failure == "timeout":
+        return f"timed out: {res.text}"
+    return f"failed without an answer ({res.failure}): {res.text}"
+
+
 def _close_issue(ctx: ToolContext, number: int, comment: str = "", repo: str = "") -> str:
+    """Comment (when asked), then close: two sends, each reported by what it did.
+
+    A comment that fails stops the call before the close request, and the result says so; a close that
+    fails after the comment went through names the comment as done, so a retry can omit it."""
     if number <= 0:
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: issue number must be positive", no_effect=True)
 
+    commented = False
     if comment and comment.strip():
-        result = _comment_on_issue(ctx, number, comment, repo=repo)
-        if result.startswith("⚠️"):
-            return result
+        res = _gh_run(["issue", "comment", str(number), "--body-file", "-"], ctx, input_data=comment, repo=repo)
+        if not res.ok:
+            if res.failure in ("target", "cli_missing"):
+                return res.text  # Refused before any launch; the transport published the typed refusal.
+            return _refuse(ctx, (
+                f"⚠️ TOOL_ERROR: the closing comment request for issue #{number} {_send_facts(res)}. Whether the "
+                "comment was posted is not confirmed; the close request was not sent, so this call did not close the "
+                "issue."), "TOOL_ERROR")
+        commented = True
 
-    args = ["issue", "close", str(number)]
-    raw = _gh_cmd(args, ctx, repo=repo)
-    if raw.startswith("⚠️"):
-        return raw
-    return f"✅ Issue #{number} closed."
+    res = _gh_run(["issue", "close", str(number)], ctx, repo=repo)
+    if not res.ok:
+        if not commented:
+            return res.text
+        return _refuse(ctx, (
+            f"⚠️ PARTIAL_EFFECT: the closing comment was added to issue #{number}, but the close request "
+            f"{_send_facts(res)}. Whether the issue is closed is not confirmed; closing it again without "
+            "`comment` sends no second comment."), "TOOL_ERROR")
+    return f"✅ Issue #{number} closed." + (" The closing comment was added." if commented else "")
 
 
 def _pr_commit_counts(ctx: ToolContext, prs: list) -> dict | str:
@@ -634,28 +780,34 @@ def _pr_merge(ctx: ToolContext, number: int, expected_head_sha: str, method: str
 
 
 def _create_issue(ctx: ToolContext, title: str, body: str = "", labels: str = "", repo: str = "") -> str:
+    """Create, then label when asked: the created issue's identity survives a label step that fails."""
     if not title or not title.strip():
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: issue title cannot be empty.", no_effect=True)
 
     args = ["issue", "create", f"--title={title}"]
     if body:
         args.append("--body-file=-")
-        raw = _gh_cmd(args, ctx, input_data=body, repo=repo)
+        res = _gh_run(args, ctx, input_data=body, repo=repo)
     else:
-        raw = _gh_cmd(args, ctx, repo=repo)
+        res = _gh_run(args, ctx, repo=repo)
+    if not res.ok:
+        return res.text
+    created = f"✅ Issue created: {res.text}"
+    if not labels:
+        return created
 
-    if labels:
-        if not raw.startswith("⚠️"):
-            import re
-            match = re.search(r'/issues/(\d+)', raw)
-            if match:
-                issue_num = int(match.group(1))
-                label_args = ["issue", "edit", str(issue_num), f"--add-label={labels}"]
-                _gh_cmd(label_args, ctx, repo=repo)
-
-    if raw.startswith("⚠️"):
-        return raw
-    return f"✅ Issue created: {raw}"
+    match = re.search(r"/issues/(\d+)", res.text)
+    if not match:
+        return _refuse(ctx, (
+            f"⚠️ PARTIAL_EFFECT: issue created: {res.text} — labels {labels!r} were not requested: the create answer "
+            "named no issue number. Do not create the issue again; add the labels to the issue at that URL."), "TOOL_ERROR")
+    number = match.group(1)
+    labelled = _gh_run(["issue", "edit", number, f"--add-label={labels}"], ctx, repo=repo)
+    if labelled.ok:
+        return created
+    return _refuse(ctx, (
+        f"⚠️ PARTIAL_EFFECT: issue #{number} created: {res.text} — labels {labels!r} are not confirmed: the label "
+        f"request {_send_facts(labelled)}. Do not create the issue again; add the labels to #{number}."), "TOOL_ERROR")
 
 
 def _get_checks(ctx: ToolContext, number: int = 0, sha: str = "", wait_seconds: int = 0, repo: str = "") -> str:
@@ -670,9 +822,9 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("list_github_prs", {
             "name": "list_github_prs",
             "description": (
-                "List GitHub pull requests for the current repository. "
-                "Shows PR number, title, author, branch, commit count, and state. "
-                "Use before get_github_pr to identify which PR to inspect."
+                "List pull requests of one GitHub repository (repo, or the active Project's), at most 50 per call, "
+                "without pagination. Each row: number, title, author, head→base branch, draft and review decision, "
+                "commit count, creation date. Use before get_github_pr to identify which PR to inspect."
             ),
             "parameters": {"type": "object", "properties": {
                 "state": {"type": "string", "default": "open",
@@ -686,10 +838,10 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("get_github_pr", {
             "name": "get_github_pr",
             "description": (
-                "Get full details of a GitHub PR: metadata, description, commit list "
-                "with original author names/emails, changed files list, diff/patch "
-                "(truncated to 8000 chars), review comments, and mergeable state. "
-                "Includes exact commit SHAs for the selected repository."
+                "Read one GitHub pull request as a bounded view: metadata and mergeable state, description, commits, "
+                "changed files, diff and discussion. Cut with a notice: description at 2000 chars, file list at 50 "
+                "names, diff at 8000 chars, the first 5 reviews and 5 comments at 300 chars each; commit headlines "
+                "at 70 chars. Commits keep exact SHAs and original author names/emails."
             ),
             "parameters": {"type": "object", "properties": {
                 "number": {"type": "integer", "description": "PR number"},
@@ -720,7 +872,7 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("comment_on_pr", {
             "name": "comment_on_pr",
             "description": (
-                "Add a comment to a GitHub pull request. "
+                "Publish a comment on a GitHub pull request (an external write). "
                 "Use to acknowledge receipt, report integration status, request changes, "
                 "or leave an audit trail after integration."
             ),
@@ -763,7 +915,11 @@ def get_tools() -> List[ToolEntry]:
 
         ToolEntry("list_github_issues", {
             "name": "list_github_issues",
-            "description": "List GitHub issues. Use to check for new tasks, bug reports, or feature requests from the user or contributors.",
+            "description": (
+                "List issues of one GitHub repository (repo, or the active Project's), filtered by state and labels; "
+                "at most 50. Each row: number, title, author, labels and a 200-char body preview. "
+                "Use to check for new tasks, bug reports, or feature requests from the user or contributors."
+            ),
             "parameters": {"type": "object", "properties": {
                 "state": {"type": "string", "default": "open", "enum": ["open", "closed", "all"], "description": "Filter by state"},
                 "labels": {"type": "string", "default": "", "description": "Filter by label (comma-separated)"},
@@ -773,7 +929,10 @@ def get_tools() -> List[ToolEntry]:
 
         ToolEntry("get_github_issue", {
             "name": "get_github_issue",
-            "description": "Get full details of a GitHub issue including body and comments.",
+            "description": (
+                "Read one GitHub issue: state, author, labels, body (first 3000 chars) and the first 10 comments "
+                "(500 chars each). Longer parts are cut with a notice."
+            ),
             "parameters": {"type": "object", "properties": {
                 "number": {"type": "integer", "description": "Issue number"},
             }, "required": ["number"]},
@@ -781,7 +940,10 @@ def get_tools() -> List[ToolEntry]:
 
         ToolEntry("comment_on_issue", {
             "name": "comment_on_issue",
-            "description": "Add a comment to a GitHub issue. Use to respond to issues, share progress, or ask clarifying questions.",
+            "description": (
+                "Publish a comment on a GitHub issue (an external write). "
+                "Use to respond to issues, share progress, or ask clarifying questions."
+            ),
             "parameters": {"type": "object", "properties": {
                 "number": {"type": "integer", "description": "Issue number"},
                 "body": {"type": "string", "description": "Comment text (markdown)"},
@@ -790,7 +952,10 @@ def get_tools() -> List[ToolEntry]:
 
         ToolEntry("close_github_issue", {
             "name": "close_github_issue",
-            "description": "Close a GitHub issue with optional closing comment.",
+            "description": (
+                "Close a GitHub issue; with comment, that comment is published first. If it posts and closing then "
+                "fails, the comment stays published: do not post it again."
+            ),
             "parameters": {"type": "object", "properties": {
                 "number": {"type": "integer", "description": "Issue number"},
                 "comment": {"type": "string", "default": "", "description": "Optional closing comment"},
@@ -799,7 +964,11 @@ def get_tools() -> List[ToolEntry]:
 
         ToolEntry("create_github_issue", {
             "name": "create_github_issue",
-            "description": "Create a new GitHub issue. Use for tracking tasks, documenting bugs, or planning features.",
+            "description": (
+                "Open a new issue in one GitHub repository (an external write) with a title, optional body and labels. "
+                "Labels are added in a second request; if that request fails, the created issue is reported and its "
+                "labels are unconfirmed. Use for tracking tasks, documenting bugs, or planning features."
+            ),
             "parameters": {"type": "object", "properties": {
                 "title": {"type": "string", "description": "Issue title"},
                 "body": {"type": "string", "default": "", "description": "Issue body (markdown)"},
@@ -807,6 +976,12 @@ def get_tools() -> List[ToolEntry]:
             }, "required": ["title"]},
         }, _create_issue),
     ]
+    # The workflow readers and pull-request writers register HERE, not through their own ``get_tools``:
+    # the Presence repo binding and the ``repo`` parameter below cover exactly this module's entries.
+    from ouroboros.tools.github_pr_write import tool_entries as pr_write_entries
+    from ouroboros.tools.github_workflows import tool_entries as workflow_entries
+
+    tools += workflow_entries() + pr_write_entries()
     # Wrapped here, not at definition: nested handler calls share one invocation.
     tools = [replace(entry, handler=_one_invocation(entry.handler)) for entry in tools]
     for entry in tools:

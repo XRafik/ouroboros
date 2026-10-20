@@ -405,10 +405,13 @@ def get_tools() -> List[ToolEntry]:
             schema={
                 "name": "configure_presence",
                 "description": (
-                    "Create, list, or disable an owner-controlled binding from an authenticated "
-                    "transport room to one reviewed behavior skill. Use exact provider account, "
+                    "Manage owner-controlled Presence: create, list, or disable a binding from an authenticated "
+                    "transport room to one reviewed behavior skill, or set that behavior skill's Presence state. "
+                    "inspect lists its capability requests and current selections; select fills one request "
+                    "(request_id) with a tool, script or resource target; runtime sets model_slot/inline_max_rounds "
+                    "(reset_runtime clears them). Use exact provider account, "
                     "conversation and optional thread ids supplied by the owner or transport UI. "
-                    "Use workspace to select an existing working folder for new turns; memory stays shared."
+                    "Use workspace to select an existing working folder for new turns (empty clears it); memory stays shared."
                 ),
                 "parameters": {
                     "type": "object",

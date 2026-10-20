@@ -10,6 +10,7 @@ an id this tree never minted, and a prompt cache that expired while it waited.
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import time
 from pathlib import Path
@@ -217,10 +218,11 @@ def get_task_result_entry() -> ToolEntry:
     """The result/source reader schema lives beside its scoped handler."""
     return ToolEntry("get_task_result", {
         "name": "get_task_result",
-        "description": "Read the effective result or exact authority of a task, including one bounded canonical work-order source range when requested.",
+        "description": "Read a task's selected answer, current outcome and evidence (view=answer/summary/evidence/full), or its exact authority/source ranges. Omitted/full keeps the legacy complete response; short views name their omissions and do not count as reading those sources.",
         "parameters": {"type": "object", "required": ["task_id"], "properties": {
             "task_id": {"type": "string", "description": "Task ID returned by scheduling or exposed by the host routing manifest."},
-            "known_result_sha256": {"type": "string", "description": "Optional child_result_sha256 from a previous read. An exact match omits only unchanged result/trace text, retaining current facts and a full-read reference. Omit for full text; explicit authority/source requests always return their requested view."},
+            "known_result_sha256": {"type": "string", "description": "Conditional identity. With answer/summary/evidence it is the exact answer_sha256 (summary/evidence still refresh dynamic facts); with the legacy full view it retains the existing child_result_sha256 behavior."},
+            "view": {"type": "string", "enum": ["answer", "summary", "evidence", "full"], "description": "Optional semantic result view. Omitted/full preserves the legacy response exactly. Short views retain answer identity, terminal origin, outcome, host notice, and capability facts; summary adds current cost/custody/retry; evidence adds only authorized current-projection recipes."},
             "include_authority": {"type": "boolean", "default": False, "description": "Return the exact selected result, task contract, origin, artifact references, and current plan-review authority."},
             "include_work_order_source": {"type": "boolean", "default": False, "description": "Return the canonical work-order source projection; provide both source_start_char and source_end_char for the exact bounded range."},
             "include_completion_source": {"type": "boolean", "default": False,
@@ -249,6 +251,7 @@ def _get_task_result(
     presence_scope: str = "", review_source_sha256: str = "",
     presence_reentry_sha256: str = "", presence_reentry_offset: Any = None,
     view_head_chars: Any = None, view_tail_chars: Any = None, delegated_output_sha256: str = "",
+    view: str = "",
 ) -> str:
     """Read a task result, or a bounded canonical work-order/completion source range.
 
@@ -256,6 +259,26 @@ def _get_task_result(
     parameters bind; the loop's delivery honors them when it shapes the first
     view of this answer. They select nothing in the source arithmetic below.
     """
+    from ouroboros.tools.task_result_views import validate_result_view
+
+    try:
+        selected_view = validate_result_view(view)
+    except ValueError as exc:
+        return _publish_tool_result(ctx, ToolResult(
+            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR (get_task_result): {exc}",
+        ))
+    source_request = bool(
+        include_authority or include_work_order_source or include_completion_source or include_focus_source
+        or focus_source_sha256 or review_source_sha256 or delegated_output_sha256
+        or presence_reentry_sha256 or presence_reentry_offset is not None
+        or source_start_char is not None or source_end_char is not None
+    )
+    if selected_view not in {"", "full"} and source_request:
+        return _publish_tool_result(ctx, ToolResult(
+            status="error", code="TOOL_ARG_ERROR",
+            text=(f"⚠️ TOOL_ARG_ERROR (get_task_result): view={selected_view} is incompatible with "
+                  "authority/source selectors; use view=full or omit view"),
+        ))
     metadata = getattr(ctx, "task_metadata", {}) if isinstance(getattr(ctx, "task_metadata", {}), dict) else {}
     status_drive_root = Path(str(metadata.get("budget_drive_root") or getattr(ctx, "budget_drive_root", "") or ctx.drive_root))
     scoped = bool(str(presence_scope or "").strip())
@@ -421,6 +444,18 @@ def _get_task_result(
     # SSOT cost projection (C2): unknown never renders as $0.00 (and a null in
     # the stored result no longer crashes the f-string with a TypeError).
     from ouroboros.cost_projection import cost_display
+
+    if selected_view and selected_view != "full":
+        from ouroboros.tools.task_result_views import render_result_view
+
+        return render_result_view(
+            data, task_id=str(task_id), view=selected_view,
+            known_result_sha256=known_result_sha256,
+            child_result_sha256=child_result_sha256,
+            outcome_summary=outcome_summary,
+            capability_delta=disclosable_capability_delta(data),
+            presence_scope=str(presence_scope or ""),
+        )
 
     unchanged = _unchanged_result_reference(str(task_id), child_result_sha256, known_result_sha256)
     if unchanged:
@@ -629,8 +664,17 @@ def _wait_early_return_note(early) -> str:
 
 def _wait_for_task(
     ctx: ToolContext, task_id: str, timeout_sec: int = 180, known_result_sha256: str = "",
+    view: str = "",
 ) -> str:
     """Wait for a subtask to reach a terminal status."""
+    from ouroboros.tools.task_result_views import validate_result_view
+
+    try:
+        selected_view = validate_result_view(view)
+    except ValueError as exc:
+        return _publish_tool_result(ctx, ToolResult(
+            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR (wait_task): {exc}",
+        ))
     try:
         tid = validate_task_id(task_id)
     except ValueError as exc:
@@ -677,10 +721,15 @@ def _wait_for_task(
         window = {"requested_sec": requested, "window_sec": timeout, "window_bound": bound}
         extra += f"\n\n[WAIT_WINDOW] {json.dumps(window)}"
     tasks = waited.get("tasks") if isinstance(waited.get("tasks"), dict) else {}
-    result = _unsettled_wait_body(status_drive_root, tid, tasks.get(tid), known_result_sha256)
+    result = _unsettled_wait_body(
+        status_drive_root, tid, tasks.get(tid),
+        known_result_sha256 if selected_view in {"", "full"} else "",
+    )
     if not result:
-        result = (_get_task_result(ctx, tid, known_result_sha256=known_result_sha256)
-                  if known_result_sha256 else _get_task_result(ctx, tid))
+        kwargs = {"view": selected_view} if selected_view else {}
+        if known_result_sha256:
+            kwargs["known_result_sha256"] = known_result_sha256
+        result = _get_task_result(ctx, tid, **kwargs)
     return f"{header} after {waited.get('elapsed_sec', 0):.1f}s.{extra}\n\n{result}"
 
 
@@ -896,7 +945,7 @@ def _await_messages(ctx: ToolContext, timeout_sec: int = 0, mode: str = "in_slot
     return json.dumps(out, ensure_ascii=False)
 
 
-def _await_as_sleep(ctx: ToolContext, mode: str, **chosen: Any) -> str:
+def _await_as_sleep(ctx: ToolContext, mode: str, _tool_name: str = "await_messages", **chosen: Any) -> str:
     """The model's own warm/cold SLEEP (``ouroboros/model_sleep.py``): validate the
     selected sources, answer at once when one is already ready, else arm the park
     that follows this tool batch."""
@@ -910,7 +959,7 @@ def _await_as_sleep(ctx: ToolContext, mode: str, **chosen: Any) -> str:
         outcome = model_sleep.request_sleep(ctx, model_sleep.selectors(ctx, **chosen), mode)
     except (TypeError, ValueError) as exc:
         return _publish_tool_result(ctx, ToolResult(
-            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR (await_messages): {exc}",
+            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR ({_tool_name}): {exc}",
             meta={"operation_outcome": "completed_no_effect"}))
     return _publish_tool_result(ctx, ToolResult(status="ok", code="OK",
         text=json.dumps(outcome, ensure_ascii=False), meta={"sleep_question_notice": bool(outcome.get("questions"))}))
@@ -924,7 +973,7 @@ def await_messages_entry() -> ToolEntry:
     return ToolEntry("await_messages", {
         "name": "await_messages",
         "description": (
-            "Wait, without spending model rounds, until an unread message for THIS task exists "
+            "Wait without model rounds for this task's mail, or use mode=warm/cold for event-driven sleep (also exposed as sleep_until). In-slot, the default, waits until an unread message for THIS task exists "
             "in your mailbox (an addressed contribution from a peer task, a parent's steering, "
             "an owner message, a child's escalation) or the window elapses. Use it when you have "
             "asked a peer or your parent for its next turn and have nothing useful to do until "
@@ -968,6 +1017,36 @@ def await_messages_entry() -> ToolEntry:
             "wake_after_sec": {"type": "integer", "description": "Sleep: wake after this many seconds."},
         }},
     }, _await_messages, timeout_sec=get_per_call_timeout_ceiling_sec() + 60)
+
+
+def _sleep_until(ctx: ToolContext, mode: str = "warm", **chosen: Any) -> str:
+    """Purpose-named public adapter over the existing model-sleep path."""
+    return _await_as_sleep(ctx, mode, _tool_name="sleep_until", **chosen)
+
+
+def sleep_until_entry() -> ToolEntry:
+    """Sleep schema derived from await_messages without its in-slot branch."""
+    properties = deepcopy(await_messages_entry().schema["parameters"]["properties"])
+    properties.pop("timeout_sec", None)
+    properties["mode"] = {
+        "type": "string", "enum": ["warm", "cold"], "default": "warm",
+        "description": "warm keeps the process/browser and lends a pooled slot; cold saves continuation and releases the process after external-run custody is accepted.",
+    }
+    return ToolEntry("sleep_until", {
+        "name": "sleep_until",
+        "description": (
+            "Sleep without spending model rounds until selected mail, task/run settlement, a warm-only "
+            "owned-service exit, or a requested wake time. Use warm (default) to keep process/browser "
+            "state while lending a pooled slot; use cold to save continuation and release the process "
+            "after custody of bound external runs is accepted. Owner controls and descendant escalations "
+            "and owner messages still wake either mode; an already-ready source returns immediately. "
+            "With no selectors, any addressed mail wakes you. New questions from any ordinary run you "
+            "own also wake you; questions are delivered, never answered. A retained external writer "
+            "keeps its Project lane. Sleep time is excluded from execution time, not a calendar deadline. "
+            "Settlement is not success: read the result after waking."
+        ),
+        "parameters": {"type": "object", "additionalProperties": False, "properties": properties},
+    }, _sleep_until, safety_policy="skip")
 
 
 def _count_live_sibling_children(ctx: ToolContext, status_drive_root: Path, *, exclude_task_id: str) -> int:

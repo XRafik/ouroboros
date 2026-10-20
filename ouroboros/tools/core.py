@@ -1328,11 +1328,15 @@ def get_tools() -> List[ToolEntry]:
         }, _read_file),
         ToolEntry("list_files", {
             "name": "list_files",
-            "description": "List files under a resource root directory.",
+            "description": "List the entries of one directory in a declared resource root (subdirectories end with '/'), up to max_entries (default 500). "
+                           "Opt into depth/include for a bounded live tree, with scan limits and named gaps; it skips observed symlink directories and generated subtrees (not an atomic filesystem snapshot). To search contents use search_code or query_code.",
             "parameters": {"type": "object", "properties": {
                 "path": {"type": "string", "default": "."},
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo", "runtime_data", "task_drive", "skill_payload", "artifact_store", "user_files", "subagent_projects", "deliverables"], "description": _FILE_ROOT_DESCRIPTION},
                 "max_entries": {"type": "integer", "default": 500},
+                "depth": {"type": "integer", "minimum": 1, "maximum": 20, "default": 1, "description": "Tree levels; depth=1 with no include preserves the ordinary one-directory listing."},
+                "include": {"type": "string", "description": "Optional basename glob, including braces such as *.{py,js}; directories are traversed but not returned as matches."},
+                "max_scan": {"type": "integer", "minimum": 1, "maximum": 20000, "default": 2000, "description": "Opt-in tree's examined-entry bound, not just match count; one additional lookahead detects a cut directory. Packed checkpoints are omitted with a direct listing recipe."},
                 "bucket": {"type": "string", "description": "Required only for root=skill_payload."},
                 "skill_name": {"type": "string", "description": "Required only for root=skill_payload."},
             }, "required": []},
@@ -1340,8 +1344,8 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("write_file", {
             "name": "write_file",
             "description": (
+                "Create, overwrite or append UTF-8 file(s) in a declared resource root: path+content, or files=[...] for several. "
                 "For canonical output use root=artifact_store (created lazily), e.g. path=report.txt. Do not assume its physical directory already exists. "
-                "Write UTF-8 file(s) to a declared resource root. "
                 "With root omitted, relative paths use active_workspace; absolute paths select their permitted physical root, including user_files for home paths. "
                 "OK messages show root:path. "
                 "Overwriting an existing repo file returns the unified diff vs the "
@@ -1409,9 +1413,9 @@ def get_tools() -> List[ToolEntry]:
         }, _send_photo),
         ToolEntry("send_video", {
             "name": "send_video",
-            "description": "Send a video to the owner's chat (e.g. an anime animation). Requires a local file_path.",
+            "description": "Send a local video file to the owner's chat, with an optional caption. Requires file_path.",
             "parameters": {"type": "object", "properties": {
-                "file_path": {"type": "string", "description": "Local file path to video (preferred)"},
+                "file_path": {"type": "string", "description": "Local file path to the video."},
                 "caption": {"type": "string", "description": "Optional caption for the video"},
             }, "required": ["file_path"]},
         }, _send_video),
@@ -1446,7 +1450,7 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("search_code", {
             "name": "search_code",
             "description": (
-                "Search for a pattern in the repository code. "
+                "Search files under a declared resource root for literal text or a regex; returns root:file:line matches. "
                 "Literal search by default; set regex=True for regular expressions. "
                 "Scoped to path (default: entire active workspace). "
                 "Skips binaries, caches, vendor dirs, and files >1MB. "
@@ -1457,7 +1461,7 @@ def get_tools() -> List[ToolEntry]:
             ),
             "parameters": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "Search pattern (literal or regex)"},
-                "path": {"type": "string", "default": ".", "description": "Subdirectory to search (relative to repo root)"},
+                "path": {"type": "string", "default": ".", "description": "Subdirectory to search, relative to the selected root"},
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo", "runtime_data", "task_drive", "skill_payload", "artifact_store", "user_files", "subagent_projects", "deliverables"], "description": _FILE_ROOT_DESCRIPTION},
                 "bucket": {"type": "string", "description": "Required only for root=skill_payload."},
                 "skill_name": {"type": "string", "description": "Required only for root=skill_payload."},

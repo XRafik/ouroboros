@@ -447,10 +447,10 @@ def test_get_projection_is_passive_and_fresh_free_space_is_read_each_time(tmp_pa
     data = tmp_path / "data"
     _write(data / "observability" / "a.bin", 10)
     counter = StorageCounter()
+    before = sorted((str(path), path.stat().st_mtime_ns) for path in data.rglob("*"))
     listings = []
     real = os.scandir
     monkeypatch.setattr(os, "scandir", lambda path: listings.append(path) or real(path))
-    before = sorted((str(path), path.stat().st_mtime_ns) for path in data.rglob("*"))
     projection = counter.projection(data)
     assert projection == {"counting": None, "error": None, "volume": projection["volume"], "retention_days": projection["retention_days"],
                           "count": None, "free": projection["free"]}

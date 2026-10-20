@@ -30,10 +30,11 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "finish_task",
     "read_file", "list_files", "write_file", "edit_text",
     "apply_patch", "edit_batch",
-    "search_code", "query_code", "query_data", "plan_task",
+    "search_code", "query_code", "query_data", "query_sql", "query_records", "plan_task",
     "run_command", "run_script",
     "start_service", "service_status", "service_logs", "stop_service",
-    "vcs_status", "vcs_diff", "vcs_commit_reviewed", "commit_reviewed",
+    "vcs_status", "vcs_diff", "vcs_read", "vcs_commit_reviewed", "commit_reviewed",
+    "get_github_run_log", "list_github_run_artifacts", "download_github_artifact", "create_github_pr", "update_github_pr", "set_github_pr_ready",
     "vcs_restore", "vcs_revert", "vcs_pull_ff", "vcs_rollback",
     # One-shot deferred follow-up (W=A): core so a root task facing a typed wait
     # instant (e.g. a structurally unreachable review quorum with a known reset)
@@ -45,7 +46,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "wait_task", "wait_tasks", "get_task_result",
     # Serial addressed turns: wait for an unread mailbox entry without spending
     # model rounds (slot held, clamped to the per-call ceiling, delivers nothing).
-    "await_messages", "continue_in_background", "pause_task", "resume_task", "continue_task",
+    "await_messages", "sleep_until", "continue_in_background", "pause_task", "resume_task", "continue_task",
     # D#7 soft-join child controls (siblings of tell_task): inspect/decide a child's fate
     # before finalizing (peek = pure read, discard = explicit abandon, cancel = real stop).
     "cancel_task", "peek_task", "discard_child_result", "override_delegation_constraint",
@@ -56,7 +57,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "resume_child_task",
     # Task-tree coordination must be in the round-one envelope so a parent can publish the
     # shared frame BEFORE fanning out interdependent children (no enable_tools detour).
-    "tree_note", "tree_read",
+    "tree_note", "tree_read", "decide_child_results",
     # Main-chat routing capabilities the SYSTEM.md decision turn relies on
     # (kept in the core envelope so the anti-freeze ephemeral turn never needs an
     # enable_tools detour to route — though initial_tool_schemas exposes the full
@@ -68,7 +69,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "recent_tasks", "live_roots", "update_focus",
     "web_search",
     "browse_page", "browser_action", "analyze_screenshot", "view_image",
-    "ocr_pdf", "youtube_transcript", "extract_video_frames",
+    "ocr_pdf", "extract_pdf_text", "youtube_transcript", "extract_video_frames",
     "generate_image", "list_image_models", "recover_image",
     *OWNER_DELIVERY_TOOL_NAMES,
     "escalate",
@@ -100,8 +101,8 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # the cheap lane and finds the work harder raises itself instead of failing or
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
-    "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff",
+    "read_file", "list_files", "search_code", "query_code", "query_data", "query_sql", "query_records",
+    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
     # Memory: a child reads, writes knowledge notes and marks in its own name (the
     # host signs both with its focus) and publishes chronicle pages and parts only as
     # drafts signed with its focus (it is not the integrating mind, so tools/chronicle.py
@@ -109,7 +110,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # keeps identity and scratchpad, and receives the child's result as a report.
     "knowledge_read", "knowledge_list", "knowledge_write", "memory_read", "memory_mark", "chronicle_write",
     "chat_history", "recent_tasks", "get_task_result", "wait_task", "wait_tasks",
-    "await_messages",
+    "await_messages", "sleep_until",
     "escalate",
     "forward_to_worker", "peek_task", "cancel_task", "discard_child_result",
     # A recursive parent selects its OWN budget-paused children (#1196, Q9); the
@@ -125,7 +126,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # is a bounded tree-scoped write; its tagged child-result disposition branch also
     # updates the existing child result through join_ledger's lineage/hash authority.
     # It has no repo/control-plane effect, so remains valid for read-only subagents.
-    "tree_note", "tree_read", "override_delegation_constraint",
+    "tree_note", "tree_read", "decide_child_results", "override_delegation_constraint",
     # Nanny verbs grant no native child shell. A hosted session uses captured rights
     # in an evidence-only investigation copy when the task has no product-write
     # authority; explicit readonly, Observe and Presence ceilings still narrow it.
@@ -135,7 +136,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     "delegate_message",
     "web_search", "browse_page", "browser_action", "analyze_screenshot", "vlm_query", "view_image",
     # Bounded media projection: writes derived frames only under artifact_store/video_frames.
-    "ocr_pdf", "youtube_transcript", "extract_video_frames",
+    "ocr_pdf", "extract_pdf_text", "youtube_transcript", "extract_video_frames",
     # Reads this child's own callable catalog (the name-miss answer points here);
     # it grants nothing, unlike enable_tools, which stays Nano schema selection.
     "list_available_tools", "list_image_models",
@@ -162,15 +163,15 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # the cheap lane and finds the work harder raises itself instead of failing or
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
-    "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff",
+    "read_file", "list_files", "search_code", "query_code", "query_data", "query_sql", "query_records",
+    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
     "write_file", "edit_text",
     "apply_patch", "edit_batch",
     "run_command", "run_script",
     "start_service", "service_status", "service_logs", "stop_service",
     "integrate_subagent_patch", "compare_subagent_patches",
     "schedule_subagent", "wait_task", "wait_tasks", "get_task_result",
-    "await_messages",
+    "await_messages", "sleep_until",
     "escalate",
     "forward_to_worker", "peek_task", "cancel_task", "discard_child_result",
     "resume_child_task",
@@ -180,7 +181,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     "review_change",
     "knowledge_read", "knowledge_list", "knowledge_write", "memory_read", "memory_mark", "chronicle_write",
     "chat_history",
-    "tree_note", "tree_read", "override_delegation_constraint",
+    "tree_note", "tree_read", "decide_child_results", "override_delegation_constraint",
     # Same nanny verbs, same host-derived profile — an acting child hosts a
     # workspace_write session confined to a private snapshot of its own write
     # root, and explicitly integrates the captured diff (C1).
@@ -188,7 +189,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     "delegate_message",
     "integrate_delegated_patch",
     "web_search", "browse_page", "browser_action", "analyze_screenshot", "vlm_query", "view_image",
-    "ocr_pdf", "youtube_transcript", "extract_video_frames",
+    "ocr_pdf", "extract_pdf_text", "youtube_transcript", "extract_video_frames",
     "list_available_tools", "list_image_models", "generate_image", "recover_image",
 })
 
@@ -214,9 +215,9 @@ READ_ONLY_PARALLEL_TOOLS: frozenset[str] = frozenset({
     "inspect_harness",
     "inspect_subagent",
     "read_file", "list_files",
-    "search_code", "query_code", "query_data", "recent_tasks",
+    "search_code", "query_code", "query_data", "query_sql", "query_records", "recent_tasks",
     "web_search", "chat_history",
-    "vcs_status", "vcs_diff", "service_status", "service_logs",
+    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact", "service_status", "service_logs",
     "get_task_result", "list_projects", "memory_read",
 })
 
@@ -251,7 +252,7 @@ UNTRUNCATED_TOOL_RESULTS: frozenset[str] = frozenset({
     "get_task_result",
     "wait_task",
     "wait_tasks",
-    "await_messages",
+    "await_messages", "sleep_until",
     # A short receipt (id, operation, room); it never echoes the mark's text.
     "memory_mark",
 })
@@ -293,6 +294,8 @@ TOOL_RESULT_LIMITS: dict[str, int] = {
     "search_code": 80_000,
     "query_code": 80_000,
     "query_data": 80_000,
+    "query_sql": 80_000,
+    "query_records": 80_000,
     "service_logs": 80_000,
     # Best-of-N patch comparison shows several candidate diffs side by side; the
     # default 15k cap would truncate after the first one and defeat the tool.
@@ -365,6 +368,7 @@ EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
 # partial view only; it exempts nothing from source persistence.
 PAGEABLE_TOOL_RESULTS: frozenset[str] = frozenset({
     "read_file", "chat_history", "journal_read", "tree_read", "recent_tasks", "query_code", "query_data",
+    "query_sql", "query_records", "vcs_read", "get_github_run_log", "list_github_run_artifacts",
 })
 
 
@@ -469,7 +473,7 @@ OBSERVE_WORLD_MUTATION_TOOLS: frozenset[str] = frozenset({
     "browser_action", "submit_skill_to_hub", "toggle_skill", "skill_owner_action",
     "skill_install", "skill_update",
     "journal_write", "workpad_write",
-    "create_github_issue", "comment_on_issue", "comment_on_pr", "close_github_issue", "pr_merge",
+    "create_github_issue", "comment_on_issue", "comment_on_pr", "close_github_issue", "pr_merge", "create_github_pr", "update_github_pr", "set_github_pr_ready",
 })
 
 

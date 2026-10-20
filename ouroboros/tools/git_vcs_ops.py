@@ -68,9 +68,11 @@ def _vcs_binding(
     return resolved
 
 
-def _vcs_result(text: str, binding: ResolvedResourceBinding) -> str:
-    receipt = f"VCS target: root={binding.root}; repo={binding.base_path}"
-    rendered = str(text or "").rstrip()
+def _vcs_result(text: str, binding: ResolvedResourceBinding, *, preserve_text: bool = False) -> str:
+    receipt = f"VCS target: root={binding.root}; repo={binding.repository_path or binding.base_path}"
+    rendered = str(text or "") if preserve_text else str(text or "").rstrip()
+    if preserve_text:
+        return f"{rendered}\n\n{receipt}"
     return f"{rendered}\n\n{receipt}" if rendered else receipt
 
 
@@ -81,11 +83,15 @@ def _vcs_validation_refusal(ctx: ToolContext, text: str) -> str:
         result, meta_updates={"operation_outcome": "completed_no_effect"}))
 
 
-def _binding_relative_path(binding: ResolvedResourceBinding, requested: str) -> str:
+def _binding_relative_path(binding: ResolvedResourceBinding, requested: str, *, literal: bool = False) -> str:
+    if literal:
+        from ouroboros.tools.vcs_read import _literal_path
+
+        return _literal_path(binding, requested)
     if not str(requested or "").strip():
         return ""
     try:
-        relative = binding.target_path.relative_to(binding.base_path)
+        relative = binding.target_path.relative_to(binding.repository_path or binding.base_path)
     except ValueError as exc:
         raise ValueError("VCS path escapes the selected repository") from exc
     return str(relative) if str(relative) != "." else ""
@@ -97,14 +103,21 @@ def _git_status(
     max_chars: int = 0,
     root: str = "system_repo",
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
+    repository: str = "",
 ) -> str:
     try:
-        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
+        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=repository or path or ".")
         cmd = ["git", "status", "--porcelain"]
-        if relative := _git()._binding_relative_path(binding, path):
-            cmd.extend(["--", _git().safe_relpath(relative)])
+        if relative := _git()._binding_relative_path(binding, path, **({"literal": True} if repository else {})):
+            cmd.extend(["--", f":(literal){relative}" if repository else _git().safe_relpath(relative)])
+        if repository:
+            from ouroboros.tools.vcs_read import _run_read_git
+
+            output = _run_read_git(binding.repository_path or binding.base_path, cmd[1:])
+        else:
+            output = _git().run_cmd(cmd, cwd=binding.base_path)
         return _git()._vcs_result(
-            _git()._limit_git_output(_git().run_cmd(cmd, cwd=binding.base_path), max_chars),
+            _git()._limit_git_output(output, max_chars),
             binding,
         )
     except Exception as e:
@@ -123,11 +136,12 @@ def _git_diff(
     max_chars: int = 0,
     root: str = "system_repo",
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
+    repository: str = "",
     **kwargs,
 ) -> str:
     try:
-        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
-        repo_dir = binding.base_path
+        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=repository or path or ".")
+        repo_dir = binding.repository_path or binding.base_path
         base, head = str(kwargs.get("base") or ""), str(kwargs.get("head") or "")
         if head and (not base or staged):
             return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
@@ -137,10 +151,17 @@ def _git_diff(
         revisions = []
         for name, ref in (("base", base), ("head", head)):
             if ref:
-                tree = _git().run_cmd(["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"], cwd=repo_dir).strip()
+                if repository:
+                    from ouroboros.tools.vcs_read import _run_read_git
+
+                    tree = _run_read_git(repo_dir, ["rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"]).strip()
+                else:
+                    tree = _git().run_cmd(["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"], cwd=repo_dir).strip()
                 revisions.append(tree)
                 comparison.update({f"{name}_ref": ref, f"{name}_tree": tree})
         cmd = ["git", "diff"]
+        if repository:
+            cmd.extend(["--no-ext-diff", "--no-textconv", "--no-color"])
         if staged:
             cmd.append("--staged")
         if name_only:
@@ -148,8 +169,13 @@ def _git_diff(
         elif stat:
             cmd.append("--stat")
         cmd.extend(revisions)
-        if relative := _git()._binding_relative_path(binding, path):
-            cmd.extend(["--", _git().safe_relpath(relative)])
+        if relative := _git()._binding_relative_path(binding, path, **({"literal": True} if repository else {})):
+            cmd.extend(["--", f":(literal){relative}" if repository else _git().safe_relpath(relative)])
+        if repository and not (stat or name_only):
+            from ouroboros.tools.vcs_read import _protected_content_reason
+
+            if reason := _protected_content_reason(ctx, binding, relative, "show"):
+                return _git()._vcs_result(reason, binding)
         from ouroboros.protected_artifacts import shell_block_reason as protected_artifact_shell_block_reason
 
         protected_block = protected_artifact_shell_block_reason(
@@ -157,7 +183,13 @@ def _git_diff(
         )
         if protected_block:
             return _git()._vcs_result(protected_block, binding)
-        text = _git()._vcs_result(_git()._limit_git_output(_git().run_cmd(cmd, cwd=repo_dir), max_chars), binding)
+        if repository:
+            from ouroboros.tools.vcs_read import _run_read_git
+
+            output = _run_read_git(repo_dir, cmd[1:])
+        else:
+            output = _git().run_cmd(cmd, cwd=repo_dir)
+        text = _git()._vcs_result(_git()._limit_git_output(output, max_chars), binding)
         if comparison:
             import json
             comparison["kind"] = "tree_to_tree" if head else "tree_to_index" if staged else "tree_to_worktree"

@@ -177,15 +177,14 @@ def native_or_packet_attempt_rail(slot: Any, two_send_surface: bool) -> Any:
 # ---------------------------------------------------------------------------
 
 _INSPECTION_TOOL_NAMES = (
-    "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff", "compact_context",
+    "read_file", "list_files", "search_code", "query_code", "query_data", "query_sql", "query_records",
+    "vcs_status", "vcs_diff", "vcs_read", "compact_context",
 )
 
 _NATIVE_REVIEW_INSTRUCTIONS = (
     "You are an independent Ouroboros reviewer running a bounded read-only "
     "inspection episode. Retrieve the evidence yourself with the tools you are "
-    "given inside the repository root — read_file, list_files, search_code, "
-    "query_code, query_data, vcs_status, vcs_diff and compact_context. You cannot "
+    "given over the bound repository and admitted retained evidence. You cannot "
     "modify anything and have no shell. Read LARGE files in bounded chunks "
     "(read_file supports start_line/max_lines and start_char for long lines) instead of requesting a whole large "
     "document at once. The full required review surface may need several working views. "
@@ -308,8 +307,13 @@ def inspection_registry(root: str, drive_root: Any, task_id: str = "") -> tuple[
         # A paid review under a task keeps that task's canonical tree controls;
         # its scratch drive and reviewer label cannot supply Pause authority.
         ctx.task_id = scope.task_id
-        ctx.task_metadata = {"root_task_id": scope.root_task_id or scope.task_id,
-                             "budget_drive_root": str(scope.drive_root or drive_root)}
+        parent_task_id = str(scope.parent_task_id or "")
+        ctx.task_metadata = {
+            "root_task_id": scope.root_task_id or scope.task_id,
+            "parent_task_id": parent_task_id,
+            "delegation_role": "subagent" if parent_task_id else "root",
+            "budget_drive_root": str(scope.drive_root or drive_root),
+        }
         ctx.task_lifecycle_bound = True
     ctx.task_metadata["native_data_root"] = str(drive_root)
     registry.set_context(ctx)

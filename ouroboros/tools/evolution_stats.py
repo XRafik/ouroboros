@@ -221,12 +221,13 @@ def get_tools():
             {
                 "name": "generate_evolution_stats",
                 "description": (
-                    "Generate Evolution Time-Lapse data from git history and push to the webapp dashboard. "
+                    "Publish Evolution Time-Lapse data: build it from git history and commit it "
+                    "as docs/evolution.json to the configured GitHub repository (GITHUB_REPO) through the GitHub API "
+                    "for the webapp dashboard; this is an external write. "
                     "Collects per-commit metrics across three axes: "
                     "Technical (Python lines of code), Philosophical (BIBLE.md size), "
                     "Self-Concept (SYSTEM.md size). "
-                    "Pushes docs/evolution.json via GitHub API. "
-                    "Safe to call anytime; takes 15-30s for full history scan."
+                    "Takes 15-30s for full history scan."
                 ),
                 "parameters": {
                     "type": "object",

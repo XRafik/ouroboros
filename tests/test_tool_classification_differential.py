@@ -390,6 +390,22 @@ CURRENT_PRODUCER_CONTRACTS = {
     "native:TOOL_ERROR:PR_MERGE_": (True, "error"),
     "native:TOOL_ERROR:PR_MERGE_REFUSED": (True, "error"),
     "native:TOOL_ARG_ERROR:PR_MERGE_REFUSED": (True, "argument_error"),
+    # Same shape for the GitHub issue partial effects (github.py) and the pull-request
+    # writers (github_pr_write.py): every one publishes native TOOL_ERROR, while its
+    # bare text keeps the suffix chain's answer (`_FAILED` is an error, the rest are
+    # legacy warnings). Pin both; the retired oracle never saw these producers.
+    "PARTIAL_EFFECT": (False, "ok"),
+    "PR_CREATE_UNKNOWN": (False, "ok"),
+    "PR_EXISTS": (False, "ok"),
+    "PR_PRECHECK_FAILED": (True, "error"),
+    "PR_READY_UNKNOWN": (False, "ok"),
+    "PR_UPDATE_UNKNOWN": (False, "ok"),
+    "native:TOOL_ERROR:PARTIAL_EFFECT": (True, "error"),
+    "native:TOOL_ERROR:PR_CREATE_UNKNOWN": (True, "error"),
+    "native:TOOL_ERROR:PR_EXISTS": (True, "error"),
+    "native:TOOL_ERROR:PR_PRECHECK_FAILED": (True, "error"),
+    "native:TOOL_ERROR:PR_READY_UNKNOWN": (True, "error"),
+    "native:TOOL_ERROR:PR_UPDATE_UNKNOWN": (True, "error"),
     # Saved-setting selection uses the existing process access authority; its new
     # foreground refusal remains blocked through both text and native ACCESS_BLOCKED.
     "PROCESS_ENV_REFERENCE_BLOCKED": (True, "blocked"),

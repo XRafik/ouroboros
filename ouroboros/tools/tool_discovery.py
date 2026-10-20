@@ -258,9 +258,10 @@ def get_tools() -> List[ToolEntry]:
             schema={
                 "name": "enable_tools",
                 "description": (
-                    "Compatibility check for named tools (comma-separated). Tasks start "
-                    "with the selected envelope active, so this confirms registration instead "
-                    "of granting delayed core tools."
+                    "Load the full schemas of named tools this task may already call but whose "
+                    "schemas are not loaded yet (Nano, or a route's schema cap). Names already "
+                    "loaded, hidden by policy, or not found are reported as such. It grants no "
+                    "permission. Names are comma-separated."
                 ),
                 "parameters": {
                     "type": "object",

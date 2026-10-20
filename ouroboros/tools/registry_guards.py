@@ -336,6 +336,17 @@ def _disabled_tools(ctx: Any) -> frozenset:
         names.add("preflight_review")
     if "preflight_review" in names:
         names.add("advisory_review")
+    # Narrow new forms cannot bypass an older withheld capability. Positive
+    # Presence grants stay exact-name: none is migrated or broadened here.
+    if "query_data" in names:
+        names.update({"query_sql", "query_records"})
+    if "await_messages" in names:
+        names.add("sleep_until")
+    if "tree_note" in names:
+        names.add("decide_child_results")
+    for spellings in ({"commit_reviewed", "vcs_commit_reviewed"}, {"ocr_pdf", "extract_pdf_text"}):
+        if names & spellings:
+            names.update(spellings)
     return frozenset(names)
 
 
@@ -349,7 +360,8 @@ def disabled_tools_dispatch_only(ctx: Any) -> bool:
 _GITHUB_TOKEN_TOOLS = frozenset({
     "list_github_prs",
     "get_github_pr",
-    "get_github_checks",
+    "get_github_checks", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
+    "create_github_pr", "update_github_pr", "set_github_pr_ready",
     "comment_on_pr",
     "pr_merge",
     "list_github_issues",
@@ -360,6 +372,14 @@ _GITHUB_TOKEN_TOOLS = frozenset({
     "submit_skill_to_hub",
     "generate_evolution_stats",
 })
+_NETWORK_BUILTIN_TOOLS = _GITHUB_TOKEN_TOOLS | {
+    "vcs_pull_ff", "generate_image", "list_image_models", "recover_image",
+}
+
+
+def _builtin_network_allowed(ctx: Any, name: str) -> bool:
+    """Whether a built-in's network resource gate permits this task's call."""
+    return name not in _NETWORK_BUILTIN_TOOLS or _resource_allowed(ctx, "network")
 
 
 def _builtin_tool_availability(name: str, ctx: Any = None) -> tuple[bool, str, str]:
@@ -417,7 +437,16 @@ def _capability_resource_guard_result(
     metadata = getattr(ctx, "task_metadata", {}) if isinstance(getattr(ctx, "task_metadata", {}), dict) else {}
     if refusal := observe_argument_refusal(metadata, name, args):
         return ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED", text=refusal)
-    if name in _disabled_tools(ctx):
+    disabled = _disabled_tools(ctx)
+    operation_name = name
+    if name == "query_data":
+        operation_name = "query_sql" if args.get("op") == "sql" else "query_records"
+    elif name == "await_messages" and args.get("mode", "in_slot") in {"warm", "cold"}:
+        operation_name = "sleep_until"
+    elif name == "tree_note" and isinstance(args.get("payload"), dict):
+        if args["payload"].get("type") == "child_result_disposition":
+            operation_name = "decide_child_results"
+    if name in disabled or operation_name in disabled:
         return ToolResult(
             status="blocked",
             code="RESOURCE_CONSTRAINT_BLOCKED",
@@ -454,7 +483,7 @@ def _capability_resource_guard_result(
                 f"blocks {name!r}."
             ),
         )
-    if name in {"vcs_pull_ff", "generate_image", "list_image_models", "recover_image"} and not _resource_allowed(ctx, "network"):
+    if not _builtin_network_allowed(ctx, name):
         return ToolResult(
             status="blocked",
             code="RESOURCE_CONSTRAINT_BLOCKED",

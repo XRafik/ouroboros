@@ -9,8 +9,7 @@ from __future__ import annotations
 import inspect
 import os
 import pathlib
-
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from typing import TYPE_CHECKING
 
@@ -373,6 +372,7 @@ _IGNORE_ROOT_ARG_TOOLS: frozenset[str] = frozenset()
 _GENERIC_VCS_TARGET_TOOLS = frozenset({
     "vcs_status",
     "vcs_diff",
+    "vcs_read",
     "vcs_pull_ff",
     "vcs_restore",
     "vcs_revert",
@@ -564,6 +564,35 @@ def _build_builtin_target_binding(ctx: Any, name: str, args: dict[str, Any]) -> 
             skill_name=skill_name,
         )
 
+    # Repository selection is a dispatch fact, shared by the handler and every
+    # guard. A path filter is resolved inside that selected repository; it must
+    # never choose the repository by itself. Omitted repository on the older
+    # tools retains their historical path binding and target.
+    if name == "vcs_read" or (name in {"vcs_status", "vcs_diff"} and args.get("repository")):
+        repository = str(args.get("repository") or ".")
+        selected = _one(repository)
+        repo = selected.target_path
+        if not repo.is_dir() or not (repo / ".git").exists():
+            raise ValueError("repository must name a Git worktree root inside the selected root")
+        path = str(args.get("path") or "")
+        if path:
+            from ouroboros.utils import normalized_path_text
+
+            normalized_path = normalized_path_text(path)
+            parts = pathlib.PurePosixPath(normalized_path).parts
+            if (pathlib.PurePosixPath(normalized_path).is_absolute() or ".." in parts
+                    or normalized_path.startswith(":") or not normalized_path.strip()):
+                raise ValueError("path must be a literal repository-relative path")
+            target = (repo / normalized_path).resolve(strict=False)
+            if not target.is_relative_to(repo):
+                raise ValueError("path escapes the selected repository")
+        else:
+            target = repo
+        # Preserve the original resource root for Presence grants and relative
+        # protected-artifact policy paths. Git executes only in the selected
+        # worktree, carried separately from those policy coordinates.
+        return replace(selected, target_path=target, repository_path=repo)
+
     if name == "write_file" and args.get("files"):
         return tuple(
             _one(str(item.get("path") or ""))
@@ -705,6 +734,7 @@ def _binding_error_text(name: str, root: str, exc: Exception) -> str | ToolResul
         "apply_patch": "APPLY_PATCH_ERROR",
         "vcs_status": "GIT_ERROR",
         "vcs_diff": "GIT_ERROR",
+        "vcs_read": "GIT_ERROR",
         "vcs_pull_ff": "PULL_ERROR",
         "vcs_restore": "RESTORE_ERROR",
         "vcs_revert": "REVERT_ERROR",
@@ -719,7 +749,7 @@ def _binding_error_text(name: str, root: str, exc: Exception) -> str | ToolResul
     text = f"⚠️ {prefixes.get(name, 'TOOL_ERROR')}: {type(exc).__name__}: {detail}"
     if name == "query_code":
         return ToolResult(status="error", code="TOOL_ARG_ERROR", text=text)
-    if name in {"vcs_status", "vcs_diff"}:
+    if name in {"vcs_status", "vcs_diff", "vcs_read"}:
         return ToolResult(status="ok", code="GIT_ERROR", text=text)
     if name not in prefixes:
         return ToolResult(status="error", code="TOOL_ERROR", text=text)

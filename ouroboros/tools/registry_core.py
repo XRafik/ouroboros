@@ -142,6 +142,20 @@ _SYSTEM_INTRINSIC_REPO_MUTATION_TOOLS = frozenset({
 })
 
 
+def _alias_hidden(ctx: Any, entry: ToolEntry) -> bool:
+    """Hide exact duplicate spellings only outside sealed name-bound grants.
+
+    A Presence ceiling may select the old name alone, or bind the two names
+    differently. Keep its exact schema and dispatch identity, not a renamed grant.
+    Older aliases retain their existing presentation contract.
+    """
+    if entry.name in {"vcs_commit_reviewed", "ocr_pdf"} and entry.alias_for:
+        from ouroboros.presence_authority import presence_ceiling_from_context
+
+        return presence_ceiling_from_context(ctx) is None
+    return bool(entry.alias_for)
+
+
 def _presence_tool_allowed(ctx: Any, name: str) -> bool:
     """Positive ceiling for host-admitted presence work; absent is byte-compatible."""
 
@@ -315,7 +329,7 @@ class ToolRegistry:
         "project_journal", "presence",
         "recent_tasks",
         "query_code", "query_data", "review", "review_change", "search", "services", "shell", "skill_exec", "skill_publish",
-        "skill_preflight", "skill_source_tools", "subagent_integration", "task_tree", "tool_discovery", "verify", "vision",
+        "skill_preflight", "skill_source_tools", "subagent_integration", "task_tree", "tool_discovery", "vcs_read", "verify", "vision",
     ]
 
     def _load_modules(self) -> _ToolCatalog:
@@ -470,7 +484,7 @@ class ToolRegistry:
         return [
             e.name
             for e in self._entries.values()
-            if not e.alias_for  # compat aliases are callable, never advertised
+            if not _alias_hidden(self._ctx, e)
             if e.name not in disabled  # declarative tool policy (task_contract.disabled_tools)
             if _presence_tool_allowed(self._ctx, e.name)
             if _builtin_tool_availability(e.name, self._ctx)[0]
@@ -511,9 +525,9 @@ class ToolRegistry:
             elif entry.name in {"browse_page", "browser_action"}:
                 schema = copy.deepcopy(entry.schema)
                 if entry.name == "browse_page":
-                    schema["description"] = "Open an HTTP(S) URL (external, or localhost on non-Ouroboros ports) or a parent-readable file:// path in a headless browser. Returns page content as text, html, markdown, or screenshot (base64 PNG) — use it with analyze_screenshot to visually verify your own built apps. The Ouroboros API ports, private/link-local IPs, and other URL schemes are blocked for subagents. Use viewport to test mobile layouts (e.g. '375x812')."
+                    schema["description"] = "Open an HTTP(S) URL (external, or localhost on non-Ouroboros ports) or a parent-readable file:// path in this task's own headless Playwright browser (not the owner's signed-in Chrome) and return its content as text, html, markdown, or screenshot (base64 PNG) — use it with analyze_screenshot to visually verify your own built apps. The Ouroboros API ports, private/link-local IPs, and other URL schemes are blocked for subagents. Use viewport to test mobile layouts (e.g. '375x812')."
                 if entry.name == "browser_action":
-                    schema["description"] = "Perform action on the current browser page (external HTTP(S), localhost on non-Ouroboros ports, or a parent-readable file:// page). Actions: click (selector), fill (selector + value), select (selector + value), screenshot (base64 PNG), scroll (value: up/down/top/bottom). JavaScript evaluate is unavailable to local-readonly subagents."
+                    schema["description"] = "Act on the page open in this task's headless browser (from browse_page: external HTTP(S), localhost on non-Ouroboros ports, or a parent-readable file:// page). Actions: click (selector), fill (selector + value), select (selector + value), screenshot (base64 PNG), scroll (value: up/down/top/bottom), wait (selector + state, without navigation). JavaScript evaluate is unavailable to local-readonly subagents."
                     props = schema.get("parameters", {}).get("properties", {})
                     action_schema = props.get("action", {})
                     if isinstance((action_enum := action_schema.get("enum")), list):
@@ -715,7 +729,7 @@ class ToolRegistry:
         built_in = [
             schema
             for entry in self._entries.values()
-            if not entry.alias_for  # compat aliases are callable, never advertised
+            if not _alias_hidden(self._ctx, entry)
             if entry.name not in disabled_tools  # declarative tool policy (task_contract.disabled_tools)
             if _presence_tool_allowed(self._ctx, entry.name)
             if entry.name not in unavailable_tools
@@ -767,7 +781,7 @@ class ToolRegistry:
         # Core tools plus meta-tools for enabling extended tools.
         result = []
         for e in self._entries.values():
-            if e.alias_for:  # compat aliases are callable, never advertised
+            if _alias_hidden(self._ctx, e):
                 continue
             if e.name in disabled_tools:  # declarative tool policy (task_contract.disabled_tools)
                 continue
@@ -818,7 +832,7 @@ class ToolRegistry:
             return "outside this presence task's positive capability ceiling"
         if requested not in self._entries:
             return None
-        if self._entries[requested].alias_for:
+        if _alias_hidden(self._ctx, self._entries[requested]):
             # Mirrors get_schema_by_name: a compat alias is callable but never
             # advertised — discovery answers as for any non-public name.
             return None
@@ -845,7 +859,7 @@ class ToolRegistry:
         if not _presence_tool_allowed(self._ctx, requested):
             return None
         entry = self._entries.get(requested)
-        if entry and entry.alias_for:
+        if entry and _alias_hidden(self._ctx, entry):
             # Compat aliases are callable, never advertised — discovery answers
             # as it does for any non-public name.
             return None
@@ -922,7 +936,7 @@ class ToolRegistry:
         rows: List[Dict[str, Any]] = [
             {"name": name} for name in self.available_tools()
             if name not in registry_guards._WEB_TOOLS or _resource_allowed(self._ctx, "web")
-            if name not in {"vcs_pull_ff", "generate_image", "list_image_models", "recover_image"} or _resource_allowed(self._ctx, "network")
+            if registry_guards._builtin_network_allowed(self._ctx, name)
         ]
         for surface in ("ext_", "mcp_"):
             if namespace and not namespace.startswith(surface) or not _resource_allowed(self._ctx, "network"):

@@ -156,8 +156,14 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # Rolled for the infrastructure-under-load PR: forward_to_worker also writes into a requested
     # child's mailbox (read when it starts, or kept as unread mail), so its description and `task_id`
     # description say "running, queued or requested"; nothing else in the catalog changed.
+    # Rolled for the tool usability pass (70baf851... -> d01ff512...): list_files states what it
+    # lists and gains the opt-in tree parameters depth, include and max_scan (path, root and
+    # max_entries unchanged); write_file leads with create/overwrite/append and files=[...];
+    # search_code's lead says it searches a declared resource root and its `path` description says
+    # "relative to the selected root"; send_video drops its example and "(preferred)". No parameter
+    # changed type, default or required status; the other eight entries and every handler owner are identical.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "70baf8519aedbee949abab80b3c1e9f4ea78e29ad81387c65fcc8bfb8b56a996"
+        "d01ff512bd1541c8f4018eb29cc069dbe61e0434a521555f01a1a530483d7cf9"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

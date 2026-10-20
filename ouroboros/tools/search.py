@@ -878,7 +878,8 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("web_search", {
             "name": "web_search",
             "description": (
-                "Search the web with the configured Source and Model. Auto uses the eligible built-in "
+                "Search the web with the configured Source and Model; returns a summary lead (not a primary source) "
+                "with its sources. Auto uses the eligible built-in "
                 "routes listed in this task's runtime facts; a specific source is strict. "
                 "Skills, MCP and browser tools are independent choices. A per-call model override "
                 "follows the same source selection. Empty model uses the saved choice or provider defaults. "
