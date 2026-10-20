@@ -225,13 +225,15 @@ export function bindMenu(menu, { anchor, point, onClose, align = 'end', initialF
     doc.addEventListener('pointerdown', onOutside, true);
     menu.addEventListener('keydown', onKey);
     doc.defaultView.addEventListener('blur', onBlur);
-    const openedAt = anchor?.getBoundingClientRect();
+    // The anchor's middle: a row that lifts under its long-press menu (style.css, a scale about its middle) keeps it.
+    const middle = (box) => box && { x: box.left + (box.width || 0) / 2, y: box.top + (box.height || 0) / 2 };
+    const openedAt = middle(anchor?.getBoundingClientRect());
     const position = bindPopoverPosition(menu, {
         anchor, point, align, onAnchorScroll: () => {
-            const now = anchor?.getBoundingClientRect();
-            // A queued scroll event can arrive after opening without moving
-            // the trigger. Only an actual anchor move invalidates this menu.
-            if (!openedAt || !now || now.top !== openedAt.top || now.left !== openedAt.left) {
+            const now = middle(anchor?.getBoundingClientRect());
+            // A queued scroll event can arrive after opening without moving the trigger, and the feed's own reflow
+            // under a lifted row scrolls without moving it. Only an actual anchor move invalidates this menu.
+            if (!openedAt || !now || Math.abs(now.x - openedAt.x) > 0.5 || Math.abs(now.y - openedAt.y) > 0.5) {
                 close({ reason: 'scroll' });
             }
         },

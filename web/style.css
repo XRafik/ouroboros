@@ -9882,6 +9882,10 @@ body.keyboard-open .project-panel {
     z-index: 3;
     box-shadow: var(--elev-rest), 0 0 0 100vmax transparent;
     transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.24s ease-out;
+    /* The row's menu answers the press: iOS would also select a word under it and open its own edit menu over ours. */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
 }
 :root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-press="hold"] { transform: scale(0.985); }
 :root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-press="lift"] {

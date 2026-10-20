@@ -342,6 +342,10 @@ test('scroll inside the menu stays open; scrolling the page closes without a foc
     doc.defaultView.emit('scroll', { target: menu });
     doc.defaultView.emit('scroll');
     assert.deepEqual(closed, [], 'a queued event without movement does not close a just-opened menu');
+    // A row lifting under its long-press menu grows about its middle: the feed reflowing under it keeps the menu.
+    anchor.rect = { left: 274.5, right: 315.5, top: 207.8, bottom: 238.2, width: 41, height: 30.4 };
+    doc.defaultView.emit('scroll');
+    assert.deepEqual(closed, [], 'a lifted anchor has not moved');
     anchor.rect = { ...anchor.rect, top: anchor.rect.top - 10 };
     doc.defaultView.emit('scroll');
     assert.deepEqual(closed, ['scroll']);
