@@ -185,8 +185,8 @@ def test_read_file_on_an_admitted_directory_returns_the_listing_call(tmp_path):
 
     text = core_file_tools._read_file(ctx, "src")
     assert text.startswith("⚠️ NOT_FOUND: active_workspace:src is a directory, not a file.")
-    assert 'list_files(root="active_workspace", path="src")' in text
-    assert 'list_files(root="active_workspace", path="src", depth=3, include="*.py")' in text
+    assert f'list_files(root="active_workspace", path={json.dumps(str(ctx.repo_dir / "src"))})' in text
+    assert f'list_files(root="active_workspace", path={json.dumps(str(ctx.repo_dir / "src"))}, depth=3, include="*.py")' in text
     assert LegacyTextResultAdapter.from_text("read_file", text).code == "LEGACY_WARNING"
     assert ctx.last_read_view is None
 
@@ -207,9 +207,9 @@ def test_skill_payload_directory_hint_keeps_the_skill_identity(tmp_path, monkeyp
 
     hint = registry.execute("read_file", {**selector, "path": "scripts"})
     assert hint.startswith("⚠️ NOT_FOUND: skill_payload:scripts is a directory, not a file.")
-    assert 'list_files(root="skill_payload", path="scripts", bucket="external", skill_name="user-native")' in hint
+    assert f'list_files(root="skill_payload", path={json.dumps(str(payload / "scripts"))}, bucket="external", skill_name="user-native")' in hint
     # The recipe is usable as written: the same identity lists the directory.
-    assert json.loads(registry.execute("list_files", {**selector, "path": "scripts"})) == ["scripts/run.py"]
+    assert json.loads(registry.execute("list_files", {**selector, "path": str(payload / "scripts")})) == ["scripts/run.py"]
 
 
 def test_read_file_directory_hint_never_precedes_the_read_policy(tmp_path):

@@ -278,15 +278,15 @@ def _resource_allowed(ctx: Any, key: str) -> bool:
             resources.update(raw)
     if not resources:
         return True
-    for name in (key, f"allow_{key}"):
-        value = resources.get(name)
-        if isinstance(value, bool):
-            return value
     if key == "web":
         for name in ("network", "allow_network", "internet", "external_network"):
             value = resources.get(name)
             if isinstance(value, bool) and not value:
                 return False
+    for name in (key, f"allow_{key}"):
+        value = resources.get(name)
+        if isinstance(value, bool):
+            return value
     if key == "network":
         for name in ("internet", "external_network"):
             value = resources.get(name)
@@ -372,7 +372,7 @@ _GITHUB_TOKEN_TOOLS = frozenset({
     "submit_skill_to_hub",
     "generate_evolution_stats",
 })
-_NETWORK_BUILTIN_TOOLS = _GITHUB_TOKEN_TOOLS | {
+_NETWORK_BUILTIN_TOOLS = _WEB_TOOLS | _GITHUB_TOKEN_TOOLS | {
     "vcs_pull_ff", "generate_image", "list_image_models", "recover_image",
 }
 
@@ -474,21 +474,21 @@ def _capability_resource_guard_result(
                 "requires allowed_resources.web/network."
             ),
         )
-    if name in _WEB_TOOLS and not _resource_allowed(ctx, "web"):
-        return ToolResult(
-            status="blocked",
-            code="RESOURCE_CONSTRAINT_BLOCKED",
-            text=(
-                "⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.allowed_resources.web=false "
-                f"blocks {name!r}."
-            ),
-        )
     if not _builtin_network_allowed(ctx, name):
         return ToolResult(
             status="blocked",
             code="RESOURCE_CONSTRAINT_BLOCKED",
             text=(
                 "⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.allowed_resources.network=false "
+                f"blocks {name!r}."
+            ),
+        )
+    if name in _WEB_TOOLS and not _resource_allowed(ctx, "web"):
+        return ToolResult(
+            status="blocked",
+            code="RESOURCE_CONSTRAINT_BLOCKED",
+            text=(
+                "⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.allowed_resources.web=false "
                 f"blocks {name!r}."
             ),
         )

@@ -1397,11 +1397,13 @@ class MCPManager:
             t for t in tools_raw
             if not (isinstance(t, dict) and t.get("_pagination_truncated"))
         ]
+        tools_raw, literal_omissions = filter_schema_literals(tools_raw, lambda text: _redact_error_text(text, cfg))
         return {
             "ok": True,
             "server_id": cfg.id,
             "tool_count": len(tools_raw),
             "configuration_warnings": list(cfg.configuration_warnings),
+            **({"schema_omissions": literal_omissions} if literal_omissions else {}),
             **({"pagination_truncated": True} if truncated else {}),
             "tools": [
                 {

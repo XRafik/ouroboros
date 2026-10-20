@@ -45,6 +45,9 @@ def filter_schema_literals(rows: list, redact: Callable[[str], str]) -> tuple[li
     for row in rows:
         try:
             wrap_schema_text(row.get("input_schema"), redact)
+            metadata = row.get("metadata")
+            if isinstance(metadata, dict) and "outputSchema" in metadata:
+                wrap_schema_text(metadata["outputSchema"], redact, label_annotations=False)
         except SchemaLiteralSecret:
             omissions.append("MCP_SCHEMA_LITERAL_SECRET: " + redact(str(row.get("name") or "unnamed")))
         else:
@@ -52,7 +55,7 @@ def filter_schema_literals(rows: list, redact: Callable[[str], str]) -> tuple[li
     return kept, omissions
 
 
-def wrap_schema_text(value: Any, redact: Callable[[str], str]) -> Any:
+def wrap_schema_text(value: Any, redact: Callable[[str], str], *, label_annotations: bool = True) -> Any:
     """Return an independent schema copy; transform annotations, not instance data."""
     if not isinstance(value, dict):
         return _literal_copy(value, redact)
@@ -60,17 +63,19 @@ def wrap_schema_text(value: Any, redact: Callable[[str], str]) -> Any:
     for key, item in value.items():
         _literal_copy(key, redact)
         if key in {"description", "title"} and isinstance(item, str):
-            out[key] = untrusted_text(redact(item))
+            out[key] = untrusted_text(redact(item)) if label_annotations else redact(item)
         elif key in _SCHEMA_MAPS and isinstance(item, dict):
-            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact) for name, schema in item.items()}
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations)
+                        for name, schema in item.items()}
         elif key in _SCHEMA_ARRAYS and isinstance(item, list):
-            out[key] = [wrap_schema_text(schema, redact) for schema in item]
+            out[key] = [wrap_schema_text(schema, redact, label_annotations=label_annotations) for schema in item]
         elif key in _SCHEMA_VALUES:
-            out[key] = ([wrap_schema_text(schema, redact) for schema in item]
+            out[key] = ([wrap_schema_text(schema, redact, label_annotations=label_annotations) for schema in item]
                         if key == "items" and isinstance(item, list)
-                        else wrap_schema_text(item, redact))
+                        else wrap_schema_text(item, redact, label_annotations=label_annotations))
         elif key == "dependencies" and isinstance(item, dict):
-            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact) for name, schema in item.items()}
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations)
+                        for name, schema in item.items()}
         else:
             out[key] = _literal_copy(item, redact)
     return out
@@ -87,9 +92,14 @@ def tool_metadata(tool: Any) -> dict[str, Any]:
 
 
 def redact_metadata(value: Any, redact: Callable[[str], str]) -> Any:
-    """Apply the existing connection's secret-display policy to metadata strings."""
+    """Redact metadata keys and annotations while preserving output-schema literals."""
     if isinstance(value, dict):
-        return {key: redact_metadata(item, redact) for key, item in value.items()}
+        return {
+            redact(key) if isinstance(key, str) else key:
+                (wrap_schema_text(item, redact, label_annotations=False) if key == "outputSchema"
+                 else redact_metadata(item, redact))
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [redact_metadata(item, redact) for item in value]
     return redact(value) if isinstance(value, str) else value

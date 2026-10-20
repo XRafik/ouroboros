@@ -98,6 +98,72 @@ def test_sdk_metadata_is_json_and_independent():
     assert tool_metadata(SimpleNamespace(name="old")) == {}
 
 
+@pytest.mark.parametrize("output_schema", [
+    {"type": "object", "properties": {"result": {"const": "SECRET"}}},
+    {"type": "object", "properties": {"SECRET": {"type": "string"}}},
+    {"type": "object", "properties": {"result": {"default": "SECRET"}}},
+    {"type": "object", "properties": {"result": {"enum": ["SECRET"]}}},
+    {"type": "object", "properties": {"result": {"examples": ["SECRET"]}}},
+    {"type": "object", "properties": {"result": {"x-extra": {"nested": "SECRET"}}}},
+])
+def test_output_schema_secret_literals_withhold_descriptor_without_leak(output_schema):
+    import json
+
+    secret = "synthetic-output-secret"
+    secret_schema = json.loads(json.dumps(output_schema).replace("SECRET", secret))
+
+    async def listing(_cfg, _timeout):
+        return [
+            {"name": "bad", "input_schema": {"type": "object"},
+             "metadata": {"outputSchema": deepcopy(secret_schema)}},
+            {"name": "good", "input_schema": {"type": "object"},
+             "metadata": {"outputSchema": {"type": "object", "properties": {"result": {"const": "plain"}}}}},
+        ]
+
+    manager = mcp_client.MCPManager()
+    manager._async_list_tools = listing
+    config = {"id": "output", "enabled": True, "transport": "streamable_http",
+              "url": "https://example.test/mcp", "auth_token": secret}
+    manager.reconfigure({"MCP_ENABLED": True, "MCP_SERVERS": [config]})
+    refreshed = manager.refresh_server("output")
+    tested = manager.test_server(config)
+    rows = manager.list_tools_for_registry()
+    assert [row["raw_name"] for row in rows] == ["good"]
+    assert manager.resolve_tool_name("mcp_output__bad").status != "callable"
+    assert tested["tool_count"] == 1
+    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(manager.status_payload())
+    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(tested)
+    assert secret not in json.dumps([refreshed, tested, rows, manager.status_payload()])
+
+
+def test_output_schema_annotations_and_metadata_keys_are_redacted_without_changing_literals():
+    import json
+
+    secret = "synthetic-output-secret"
+    output_schema = {"type": "object", "description": "note " + secret,
+                     "properties": {"result": {"const": "ordinary", "title": "title " + secret}}}
+
+    async def listing(_cfg, _timeout):
+        return [{"name": "good", "input_schema": {"type": "object"},
+                 "metadata": {"outputSchema": deepcopy(output_schema),
+                              "annotations": {"annotation-" + secret: "value " + secret}}}]
+
+    manager = mcp_client.MCPManager()
+    manager._async_list_tools = listing
+    config = {"id": "output", "enabled": True, "transport": "streamable_http",
+              "url": "https://example.test/mcp", "auth_token": secret}
+    manager.reconfigure({"MCP_ENABLED": True, "MCP_SERVERS": [config]})
+    refreshed = manager.refresh_server("output")
+    tested = manager.test_server(config)
+    row = manager.list_tools_for_registry()[0]
+    expected = json.loads(json.dumps(output_schema).replace(secret, "<redacted:mcp-auth-token>"))
+    assert row["metadata"]["outputSchema"] == expected
+    assert row["metadata"]["outputSchema"]["properties"]["result"]["const"] == "ordinary"
+    assert "annotation-<redacted:mcp-auth-token>" in row["metadata"]["annotations"]
+    assert tested["tools"][0]["metadata"] == row["metadata"]
+    assert secret not in json.dumps([refreshed, tested, row, manager.status_payload()])
+
+
 @pytest.mark.serial
 @pytest.mark.parametrize("transport", ["http", "sse"])
 def test_real_sdk_to_registered_schema_preserves_complete_contract(tmp_path, monkeypatch, transport):

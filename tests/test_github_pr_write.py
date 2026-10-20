@@ -359,6 +359,34 @@ def test_update_only_unchanged_fields_reports_no_effect(fake, ctx):
     assert _typed(ctx).meta["operation_outcome"] == "completed_no_effect"
 
 
+def test_update_checks_requested_current_base_after_title_edit(fake, ctx):
+    gh = fake(pr=_open_pr())
+    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title",
+                                     base="main", expected_base_sha=BASE_SHA)
+    assert gh.kinds() == ["view", "edit", "view"]
+    assert gh.writes()[0].args == ["pr", "edit", "7", "--title=New title"]
+    assert "title confirmed; base main confirmed" in text
+    assert _typed(ctx).meta["operation_outcome"] == "completed"
+
+
+def test_update_current_base_retargeted_during_edit_is_unknown(fake, ctx):
+    gh = fake(pr=_open_pr())
+
+    def retarget_after_edit(args, ctx_, **kwargs):
+        result = FakeGitHub.__call__(gh, args, ctx_, **kwargs)
+        if gh.kind(args) == "edit":
+            gh.pr["baseRefName"] = "release"
+        return result
+
+    github_pr_write._gh_run = retarget_after_edit
+    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title",
+                                     base="main", expected_base_sha=BASE_SHA)
+    assert gh.writes()[0].args == ["pr", "edit", "7", "--title=New title"]
+    assert "title confirmed" in text and "base is 'release', you asked for 'main'" in text
+    assert "does not hold every requested value" in text
+    assert _typed(ctx).meta["operation_outcome"] == "unknown"
+
+
 @pytest.mark.parametrize("pr,fragment", [
     (_open_pr(headRefOid=MOVED), f"the head of PR #7 is at {MOVED}, you expected {SHA}; nothing was changed"),
     (_open_pr(state="MERGED"), "is merged, not open; nothing was changed"),

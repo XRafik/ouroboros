@@ -210,7 +210,8 @@ def test_gh_run_readers_add_run_identity_exact_capture_and_artifact_id(tmp_path,
                        "--hostname", "github.example"], ctx)
     assert json.loads(old_list.text)["artifacts"][0]["id"] == 501
     listing = github_workflows.list_run_artifacts(ctx, run_id=11)
-    assert "owner/selected run 11 attempt 1" in listing and "download_github_artifact(artifact_id=501" in listing
+    assert "owner/selected run 11:" in listing and "download_github_artifact(artifact_id=501" in listing
+    assert "attempt 1" not in listing  # artifact API is run-scoped, not attempt-scoped
     assert driver.kinds()[:4] == ["run_json", "artifacts", "run_json", "artifacts"]
     old_log_path = tmp_path / "old-log.bin"
     old_log = driver(["run", "view", "11", "--log", "--attempt", "1"], ctx,

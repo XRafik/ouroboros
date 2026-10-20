@@ -374,6 +374,7 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
     if current != head_sha:
         return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
                             "was changed. Re-read the pull request and decide again.", no_effect=True)
+    requested_base = base_arg
     if base_arg is not None and pr.get("baseRefName") == base_arg:
         # Supplying the current base does not cancel requested title/body edits.
         base_arg = None
@@ -396,7 +397,7 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
     args = ["pr", "edit", str(number)] + ([f"--title={title}"] if title is not None else []) + (
         ["--body-file=-"] if body is not None else []) + ([f"--base={base_arg}"] if base_arg is not None else [])
     sent = _gh_run(args, ctx, timeout=_WRITE_TIMEOUT, input_data=body if body is not None else None, repo=repo)
-    requested = dict(title=title, body=body, base=base_arg)
+    requested = dict(title=title, body=body, base=requested_base)
     after, res = _view(ctx, number, repo)
     if sent.ok:
         if after is None:
