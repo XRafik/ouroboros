@@ -7,7 +7,7 @@ import { bindScrollFade } from './modules/scroll_fade.js';
 import { initChat, createChatInstance } from './modules/chat.js';
 import { createStateSnapshotSequencer } from './modules/chat_activity.js';
 import { IDLE_SUMMARY, buildProjectActivityIndex, markWords, reconcileProjectRooms } from './modules/project_activity.js';
-import { createStatusMark, markView, paintStatusMark } from './modules/status_mark.js';
+import { createStatusMark, markView, paintStatusMark, syncMarkPhases } from './modules/status_mark.js';
 import { bindRowMenuGesture } from './modules/row_menu_gesture.js';
 import { initFiles } from './modules/files.js';
 import { draftPort, getContributions } from './modules/contributions.js';
@@ -84,6 +84,8 @@ const navState = {
 const layers = createLayerStack();
 // Loopback-only debug hook, like __ouroWs: browser tests read the stack through it.
 window.__ouroLayers = layers;
+// Every moving mark on the page rides one wave (status_mark.js), for the page's life.
+syncMarkPhases(document);
 const primarySidebar = document.getElementById('primary-sidebar');
 // The places come from the one registry (pages.js): Main into the pinned head, the tools into the foot that
 // follows the Projects, before the version. Nothing below looks a row up before this.
