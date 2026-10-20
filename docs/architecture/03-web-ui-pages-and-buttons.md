@@ -23,7 +23,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 - `page_header.js` / `page_icons.js` ← headers (`bindPageHeader` places tabs/path/actions), `bindTabStrip`, `renderSegmentedField` (`--segment-count`), icons; `settings_controls.bindEffortSegments` preserves empty inheritance.
 - `ui_interactions.js` ← `bindDialogFocus`, `bindMenu`, `bindPopoverPosition`, `bindEnterSubmit`; every binding returns teardown.
 - `status_mark.js` ← every status mark; `row_menu_gesture.js` ← a Project row menu's long press (DESIGN §10).
-- `scroll_fade.js` ← `bindScrollFade`: edge attributes from actually hidden content.
+- `scroll_fade.js` ← `bindScrollFade`: edge attributes from hidden content.
 - `api_client.js` / `api_types.js` / `model_route_types.js` / `decision_types.js` ← browser API calls with typed errors; mirrors of browser-facing contract shapes.
 - `ui_primitives.js` ← the one safe-field renderer, collector, tone/status and attribute-escape source; `ui_helpers.js` and `utils.js` re-export it, so author pages need no second renderer.
 - `ui_helpers.js` ← host bridge, shared row/badge helpers, keyboard menu lock, the action row under system and routing rows (`createSystemMessageActions`).
