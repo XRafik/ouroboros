@@ -919,12 +919,12 @@ def test_a_row_that_hides_gives_the_keyboard_to_the_projects_toggle(shell_ui, tm
         # lands on the Projects toggle instead of the page.
         page.locator(f'[data-nav-project-id="{pins[0]}"] .nav-project-kebab').focus()
         page.keyboard.press('Enter')
-        page.locator('body > .project-row-menu').wait_for()
+        page.locator('body > .project-row-menu:not([data-leaving])').wait_for()
         facts['in_menu'] = page.evaluate("() => document.activeElement.dataset.prm || ''")
         unpin(pins[1:])
         page.wait_for_function(hidden, arg=pins[0], timeout=20_000)
         settle(page)
-        facts['menus_after'] = page.locator('.project-row-menu').count()
+        facts['menus_after'] = page.locator('.project-row-menu:not([data-leaving])').count()
         facts['focus_after_menu'] = page.evaluate(FOCUS)
         # The keyboard on the other pinned row, which is unpinned too: the list empties, the toggle keeps the keyboard.
         page.locator(f'[data-project-id="{pins[1]}"]').focus()

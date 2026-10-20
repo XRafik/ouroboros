@@ -1084,7 +1084,7 @@ def test_keyboard_focus_escape_and_independent_controls(room_ui):
     wait_facts(page, "main", lambda f: not f["surfaceHidden"], "open for Files")
     with page.expect_file_chooser(timeout=5_000):
         page.locator("#chat-plus").click()
-        page.locator(".chat-plus-menu [data-plus-item='attach']").click()
+        page.locator(".chat-plus-menu:not([data-leaving]) [data-plus-item='attach']").click()
     wait_facts(page, "main", lambda f: f["surfaceHidden"], "Attach file dismissed the list")
     assert transport.posts == []
 

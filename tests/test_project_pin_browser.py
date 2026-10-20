@@ -124,7 +124,7 @@ def row(page, pid):
 
 
 def menu(page):
-    return page.locator('body > .project-row-menu')
+    return page.locator('body > .project-row-menu:not([data-leaving])')
 
 
 def order(page):

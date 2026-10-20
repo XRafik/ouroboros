@@ -213,7 +213,7 @@ def test_turn_into_project_keeps_the_card_as_its_portal(project_chat):
 def test_the_row_menu_opens_by_pointer_keyboard_and_touch_and_gives_focus_back(project_chat, tmp_path):
     page, expect = project_chat["page"], project_chat["expect"]
     card = _card(page, "creation")
-    menu = page.locator('.chat-row-menu')
+    menu = page.locator('.chat-row-menu:not([data-leaving])')
     card.locator('[data-live-title]').click(button="right")
     expect(menu.locator('[role="menuitem"]')).to_have_text(["Reply", "Copy", "Open project", "Pause", "Stop…"])
     expect(menu.locator('[role="menuitem"]').first).to_be_focused()
@@ -271,7 +271,7 @@ def test_a_reply_sends_only_the_quoted_rows_address(project_chat, tmp_path):
     expect(echo.locator('.chat-quote .chat-quote-author')).to_have_text("Ouroboros")
     # A work card's Reply is its row menu's (owner 17.10, Q9 B); it quotes the work by its task address.
     _card(page, "creation").locator('[data-live-title]').click(button="right")
-    page.locator('.chat-row-menu [data-row-action="reply"]').click()
+    page.locator('.chat-row-menu:not([data-leaving]) [data-row-action="reply"]').click()
     page.fill('#chat-input', "Stop after the third run")
     page.locator('#chat-send').click()
     assert page.evaluate("() => sentFrames.at(-1).reply_to") == "task:creation"

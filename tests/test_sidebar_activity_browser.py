@@ -249,11 +249,11 @@ def test_sidebar_activity_census_and_navigation(subscription_ui, width, theme, r
     kebab = page.locator(WORK).locator('..').locator('.nav-project-kebab')
     kebab.focus()
     page.keyboard.press('Enter')
-    menu = page.locator('body > .project-row-menu')
+    menu = page.locator('body > .project-row-menu:not([data-leaving])')
     menu.wait_for()
     page.keyboard.press('End')
     page.evaluate("""() => { window.sidebarKept = {
-        row:document.querySelector('[data-project-id="p-work"]'), menu:document.querySelector('.project-row-menu'),
+        row:document.querySelector('[data-project-id="p-work"]'), menu:document.querySelector('.project-row-menu:not([data-leaving])'),
         focus:document.activeElement, marker:document.querySelector('[data-project-id="p-work"] .status-mark')}; }""")
     owner_wait = activity('work', 'p-work', required_question=dict(wait_for_answer=True, owner_wait_state='waiting'))
     refresh(active_chat_activities=[owner_wait])
@@ -269,7 +269,7 @@ def test_sidebar_activity_census_and_navigation(subscription_ui, width, theme, r
     assert page.locator(WORK).get_attribute('aria-label').endswith(
         'Finalizing… · A question waits for your answer · new messages')
     assert page.evaluate("""() => sidebarKept.row === document.querySelector('[data-project-id="p-work"]')
-        && sidebarKept.menu === document.querySelector('.project-row-menu') && sidebarKept.focus === document.activeElement
+        && sidebarKept.menu === document.querySelector('.project-row-menu:not([data-leaving])') && sidebarKept.focus === document.activeElement
         && sidebarKept.marker === document.querySelector('[data-project-id="p-work"] .status-mark')""")
     assert page.locator('.nav-project-row').evaluate_all('els => els.map(el=>el.dataset.projectId)') == order
     capture('mixed-menu')
@@ -562,11 +562,11 @@ def test_sidebar_activity_rail_geometry(subscription_ui, width, theme, reduced):
     kebab.focus()
     same_rail(reference, assert_rail(page, rail_rows(page), states))
     page.keyboard.press('Enter')
-    page.locator('body > .project-row-menu').wait_for()
+    page.locator('body > .project-row-menu:not([data-leaving])').wait_for()
     same_rail(reference, assert_rail(page, rail_rows(page), states))
     capture('menu')
     page.keyboard.press('Escape')
-    page.locator('body > .project-row-menu').wait_for(state='detached')
+    page.locator('body > .project-row-menu:not([data-leaving])').wait_for(state='detached')
 
     # An incomplete census retains every observed room as an unconfirmed ring; new messages keep their crimson.
     refresh(active_chat_activities=[], active_chat_activities_complete=False)

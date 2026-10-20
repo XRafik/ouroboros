@@ -213,7 +213,7 @@ def test_living_cards_render_press_submit_and_keep(direct_server_with_data, engi
                         "a kept card presses the revision it was kept at"
                     page.screenshot(path=str(evidence / f"living-cards-{engine}-widgets.png"), animations="disabled")
                     kept.locator("[data-widget-menu-trigger]").click()
-                    page.locator(".skills-card-menu-dialog [data-widget-unpin]").click()
+                    page.locator(".skills-card-menu-dialog:not([data-leaving]) [data-widget-unpin]").click()
                     kept.wait_for(state="detached", timeout=30_000)
                 finally:
                     page.close()
