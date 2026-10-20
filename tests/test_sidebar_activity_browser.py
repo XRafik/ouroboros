@@ -179,8 +179,8 @@ def test_sidebar_activity_census_and_navigation(subscription_ui, width, theme, r
             assert (dot['width'], dot['height']) == size, (project, dot)
             assert dot['animation'] == ('status-mark-bounce' if shape == 'moving' and not reduced else 'none')
             if shape == 'moving' and not reduced:
-                assert dot['duration'] == '1.4s'
-                assert float(dot['delay'].removesuffix('s')) == pytest.approx(index * .2)
+                assert dot['duration'] == '1.15s'
+                assert float(dot['delay'].removesuffix('s')) == pytest.approx(index * .15)
 
     def capture(suffix):
         setup_browser.capture(page, f'sidebar-{theme}-{width}-{reduced}-{suffix}')

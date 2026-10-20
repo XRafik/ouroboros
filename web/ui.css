@@ -911,9 +911,10 @@ textarea.ui-control { resize: vertical; }
     border-radius: 50%;
     background: currentColor;
 }
-.status-mark[data-shape="moving"] > i { animation: status-mark-bounce 1.4s ease-in-out infinite; }
-.status-mark[data-shape="moving"] > i:nth-child(2) { animation-delay: 0.2s; }
-.status-mark[data-shape="moving"] > i:nth-child(3) { animation-delay: 0.4s; }
+/* The moving dots type: a wave 150 ms apart that lifts each dot 4px and a little larger (owner 20.10 2A). */
+.status-mark[data-shape="moving"] > i { animation: status-mark-bounce 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite; }
+.status-mark[data-shape="moving"] > i:nth-child(2) { animation-delay: 0.15s; }
+.status-mark[data-shape="moving"] > i:nth-child(3) { animation-delay: 0.3s; }
 .status-mark[data-shape="still"] { opacity: 0.4; }
 .status-mark[data-shape="still"][data-hue="unread"] { opacity: 0.6; }
 .status-mark[data-shape="pause"] { opacity: 0.7; }
@@ -931,8 +932,8 @@ textarea.ui-control { resize: vertical; }
 .status-mark[data-hue="failed"] { color: var(--red); }
 .status-mark[data-hue="neutral"] { color: var(--text-meta); }
 @keyframes status-mark-bounce {
-    0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-    30% { transform: translateY(-6px); opacity: 1; }
+    0%, 52%, 100% { transform: translateY(0) scale(1); opacity: 0.55; }
+    26% { transform: translateY(-4px) scale(1.18); opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
     .status-mark[data-shape="moving"] > i { animation: none; }

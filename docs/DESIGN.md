@@ -693,7 +693,8 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **The shape says what the work does.** For projected work the server names it
   (`mark`, `ouroboros/gateway/work_status.py` `mark_of`); the client adds only the
   four facts it alone knows (Room work status).
-  - *moving* — three 4 px dots 3 px apart in the 1.4 s bounce: work runs;
+  - *moving* — three 4 px dots 3 px apart in the 1.15 s typing wave (each lifts 4 px and a little larger,
+    150 ms after the one before): work runs;
   - *still* — the same dots at 40 %: queued, or a wait that ends by itself;
   - *pause* — two 2 × 8 px bars at 70 %: paused, by the owner or by Ouroboros, until Resume;
   - *ring* — a faint 7 px ring: not confirmed (an incomplete read, a closed socket), never a guess;
@@ -718,7 +719,7 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **Words carry the meaning.** A mark is decorative (`aria-hidden`); the word
   beside it or the place's accessible name says the same fact ("Working · new
   messages", "Something here waits for you"), so colour is never the only channel.
-- **Motion.** Only *moving* loops; reduced motion stops the bounce, and the moving
+- **Motion.** Only *moving* loops; reduced motion stops the wave, and the moving
   dots then stand at full strength, apart from the still ones. A mark that changes
   shape on a live chip keeps the moving dots' width, so the word beside it never
   moves. A status sentence's own dot (`.ui-status`, Settings sentences) is drawn by
