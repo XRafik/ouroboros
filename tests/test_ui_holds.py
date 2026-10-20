@@ -101,6 +101,24 @@ def test_a_row_whose_write_is_not_confirmed_is_reported_again(tmp_path, client, 
     assert ui_holds._NAMED == {}, "the page keeps it unreported, and the next report names it"
 
 
+def test_rows_written_before_an_unconfirmed_one_are_not_written_again(tmp_path, client, rows, monkeypatch):
+    from supervisor import message_bus
+
+    card, chats = _app_card(tmp_path, chat_id=7), []
+
+    def main_is_full(chat_id, text, **kw):
+        chats.append(chat_id)
+        if chat_id == 1:
+            raise RuntimeError("disk full")
+
+    monkeypatch.setattr(message_bus, "send_with_budget", main_is_full)
+    body = {"holds": [{"key": f"app:{card['card_id']}", "rev": card["app"]["sha256"]},
+                      {"key": "module:device_voice:tts", "rev": "r1"}]}
+    assert client.post("/api/ui/holds", json=body).status_code == 503
+    assert client.post("/api/ui/holds", json=body).status_code == 503
+    assert chats == [7, 1, 1], "the card's row was written once; only the unconfirmed one is tried again"
+
+
 def test_a_hold_another_report_is_naming_now_is_left_for_the_next_load(client, rows, monkeypatch):
     monkeypatch.setattr(ui_holds, "_NAMING", {"module:device_voice:tts@r1"})
     response = client.post("/api/ui/holds", json={"holds": [{"key": "module:device_voice:tts", "rev": "r1"}]})

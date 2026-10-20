@@ -36,13 +36,6 @@ class _ChatUnavailable(RuntimeError):
     """No chat writer serves this data root (no running supervisor): nothing was written."""
 
 
-class _NotConfirmed(RuntimeError):
-    """A row's write was not confirmed; ``named`` holds the markers of the rows written before it."""
-
-    def __init__(self, named: List[str]):
-        super().__init__("a hold row was not confirmed")
-        self.named = named
-
 
 def _surface_words(surface: Any) -> str:
     facts = surface if isinstance(surface, dict) else {}
@@ -70,35 +63,34 @@ def _item(root: pathlib.Path, key: str) -> Tuple[str, Optional[int]]:
     return f"the page code of {rest.partition(':')[0]}", None
 
 
-def _name_holds(root: pathlib.Path, groups: Dict[Optional[int], List[Tuple[str, str]]], surface: str) -> List[str]:
-    """One confirmed row per chat; the markers it named, in order."""
+def _remember(markers: List[str]) -> None:
+    for marker in markers:
+        _NAMED[marker] = None
+    while len(_NAMED) > _NAMED_MAX:
+        _NAMED.popitem(last=False)
+
+
+def _name_holds(root: pathlib.Path, groups: Dict[Optional[int], List[Tuple[str, str]]], surface: str) -> int:
+    """One confirmed row per chat, its holds remembered as soon as it is written (a report whose request was
+    cancelled meanwhile still counts); how many holds were named. An unconfirmed write raises."""
     from supervisor import message_bus
     from supervisor.schedule_notes import owner_chat_id
 
     data_root = message_bus.DATA_DIR
     if data_root is None or pathlib.Path(data_root).resolve() != root.resolve() or message_bus.try_get_bridge() is None:
         raise _ChatUnavailable("no chat writer serves this data root")
-    named: List[str] = []
+    named = 0
     for chat_id, items in groups.items():
         names = ", ".join(words for words, _marker in items)
         verb = "was" if len(items) == 1 else "were"
-        try:
-            message_bus.send_with_budget(
-                chat_id if chat_id is not None else owner_chat_id(root),
-                f"In {surface}, the page stopped while {names} {verb} starting.",
-                role="system", system_type="ui_hold", require_write=True, ensure_record_boundary=True,
-            )
-        except Exception as exc:
-            raise _NotConfirmed(named) from exc
-        named.extend(marker for _words, marker in items)
+        message_bus.send_with_budget(
+            chat_id if chat_id is not None else owner_chat_id(root),
+            f"In {surface}, the page stopped while {names} {verb} starting.",
+            role="system", system_type="ui_hold", require_write=True, ensure_record_boundary=True,
+        )
+        _remember([marker for _words, marker in items])
+        named += len(items)
     return named
-
-
-def _remember(markers: List[str]) -> None:
-    for marker in markers:
-        _NAMED[marker] = None
-    while len(_NAMED) > _NAMED_MAX:
-        _NAMED.popitem(last=False)
 
 
 async def api_ui_holds_post(request: Request) -> JSONResponse:
@@ -134,15 +126,12 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
         named = await run_sync_to_completion(_name_holds, root, groups, _surface_words(body.get("surface")))
     except _ChatUnavailable as exc:
         return json_error(str(exc), 503, reason_code="chat_unavailable")
-    except _NotConfirmed as exc:
-        log.warning("A ui_hold row was not confirmed", exc_info=exc.__cause__)
-        _remember(exc.named)
-        return json_error(str(exc), 503, reason_code="not_confirmed")
+    except Exception:  # the rows before it are remembered; the next page reports the rest again
+        log.warning("A ui_hold row was not confirmed", exc_info=True)
+        return json_error("a hold row was not confirmed", 503, reason_code="not_confirmed")
     finally:
         _NAMING.difference_update(fresh)
-    _remember(named)
-    return JSONResponse({"ok": True, "named": len(named)})
-
+    return JSONResponse({"ok": True, "named": named})
 
 
 __all__ = ["MAX_REPORTED_HOLDS", "api_ui_holds_post"]
