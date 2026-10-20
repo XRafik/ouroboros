@@ -134,10 +134,10 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   three-dot loop only while work runs. A surface that comes, goes or fades rides one
   curve, `--ease-sheet`, for `--motion-open` (340 ms, coming in), `--motion-close`
   (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
-  in); it moves by position and opacity, never blur. Two folds change a height on that
-  curve: the capsule row and the reply strip. The handover between places keeps its own
-  beat (`web/modules/shell_motion.js`); the expensive write of a change waits for its
-  motion's end (`web/modules/motion.js`).
+  in); it moves by position, opacity and a small scale, never blur. Two folds change a
+  height on that curve: the capsule row and the reply strip. The handover between places
+  keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
+  waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
   `:root[data-theme="light"]` (`--elev-*`, `--radius-object` / `-inner` / `-sheet`,
   `--surface-object` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,

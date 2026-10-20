@@ -12,6 +12,9 @@
 // the dark theme's recorded answer has a line the light one has not); they sleep again once the width has held.
 // A feed that is not shown lays nothing out: its rows wait until it is.
 //
+// A row holding a part sized by the window's height (a review's long detail or full body, a widget's JSON or chart:
+// style.css `vh`) never sleeps: only the window's height changes it, which wakes nothing else.
+//
 // Only message rows sleep (a bubble, a work card), and never within a screen of the feed's view: a skipped row is
 // contained (layout, style and paint), and WebKit's scroll anchoring does not hold the passage being read when rows
 // around it are contained (a row above the passage growing outside a write, a work card's buttons arriving after an
@@ -29,6 +32,7 @@ const RESIZING = ['class', 'hidden', 'open', 'style', 'src'];
 const RESTYLING = ['data-theme', 'data-layout', 'lang', 'dir'];
 const ROWS = '.chat-bubble, .chat-live-card';  // the rows that sleep; a history control or notice never does
 const NEAR = '100% 0px';  // within the feed's own height above and below its view
+const WINDOW_SIZED = '.chat-review-attempt-detail, .skill-review-full, .widget-json pre, .widget-chart-canvas';
 
 // `onRestyle`: the room's reading owner places the passage again once a restyle (theme, layout, language, fonts) has
 // woken every row: rows far from the view change size at once, which WebKit's scroll anchoring does not absorb.
@@ -77,7 +81,7 @@ export function createRowSleep({ feed, win = globalThis.window, onRestyle } = {}
     };
 
     function sleep(row) {
-        if (near.has(row) || !row.matches?.(ROWS)) return;
+        if (near.has(row) || !row.matches?.(ROWS) || row.querySelector?.(WINDOW_SIZED)) return;
         // A picture or a video whose size has not arrived yet (a video's box is 300x150 until its metadata).
         const pictures = [...row.querySelectorAll('img, video')]
             .filter((media) => (media.tagName === 'VIDEO' ? media.readyState === 0 : !media.complete));

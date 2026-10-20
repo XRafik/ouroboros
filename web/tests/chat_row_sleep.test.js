@@ -256,6 +256,18 @@ test('a row removed before its frame is never marked; the row that stays still s
     assert.deepEqual(s.laid(), [true]);
 });
 
+test('a row holding a part sized by the window\'s height never sleeps; its neighbour does', () => {
+    const s = stand();
+    createRowSleep({ feed: s.feed, win: s.win });
+    s.show(390);
+    const chart = s.element(), plain = s.element();
+    chart.querySelector = (selector) => (selector.split(',').some((part) => part.trim() === '.widget-chart-canvas') ? {} : null);
+    plain.querySelector = () => null;
+    s.added(chart, plain);
+    s.run(40);
+    assert.deepEqual(s.laid(), [false, true], 'only the window\'s height changes the chart: a size kept asleep would go stale');
+});
+
 test('a video sleeps only once its metadata has given it its size', () => {
     const s = stand();
     createRowSleep({ feed: s.feed, win: s.win });
