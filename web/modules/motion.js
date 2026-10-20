@@ -51,7 +51,7 @@ export function afterMotion(el, { property = 'transform', win = globalThis.windo
     let resolve;
     const done = new Promise((fn) => { resolve = fn; });
     if (!el || !win) { resolve('none'); return { done, cancel() {} }; }
-    const frame = (fn) => (win.requestAnimationFrame ? win.requestAnimationFrame(fn) : win.setTimeout(fn, 16));
+    const frame = (fn) => (win.requestAnimationFrame ? win.requestAnimationFrame(fn) : (win.setTimeout ?? setTimeout)(fn, 16));
     let ended = false;
     let timer = 0;
     const finish = (how) => {

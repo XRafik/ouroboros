@@ -9595,7 +9595,20 @@ body.keyboard-open .project-panel {
     background: linear-gradient(var(--quote-tint), var(--quote-tint)), var(--quote-glass);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
-    animation: chat-quote-in 0.16s ease-out;
+}
+/* It opens and closes like the capsule row's fold: its height from 0 on the sheet curve while its words fade, the
+   wrap's gap taken back while it is shut, so the row above it rises with it (chat_reply.js measures --reply-h). */
+.chat-input-wrap > .chat-quote--composer[data-motion] {
+    overflow: hidden;
+    max-height: var(--reply-h);
+    transition: max-height var(--motion-close) var(--ease-sheet), margin-bottom var(--motion-close) var(--ease-sheet),
+        border-block-width var(--motion-close) var(--ease-sheet), opacity var(--motion-fade) ease;
+}
+.chat-input-wrap > .chat-quote--composer[data-motion="shut"] {
+    max-height: 0;
+    margin-bottom: calc(-1 * var(--space-2));
+    border-block-width: 0;
+    opacity: 0;
 }
 .chat-quote--composer .chat-quote-main { flex: 1 1 auto; width: auto; padding-block: var(--space-2); padding-inline-start: var(--space-5); }
 /* In the rounded strip the author bar stands inside the curve, straight from end to end (the bubble quote's
@@ -9620,11 +9633,8 @@ body.keyboard-open .project-panel {
 }
 .chat-quote-cancel:hover { background: var(--menu-item-hover); color: var(--text-primary); }
 .chat-quote-cancel:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: -2px; }
-@keyframes chat-quote-in {
-    from { opacity: 0; transform: translateY(var(--space-1)); }
-}
 @media (prefers-reduced-motion: reduce) {
-    .chat-input-wrap > .chat-quote--composer { animation: none; }
+    .chat-input-wrap > .chat-quote--composer[data-motion] { transition: none; }
 }
 /* A finger needs the shared touch target on the controls these blocks add (the clamp toggle, the doubt's actions);
    the time under the doubt's actions then keeps clear of the Reply / Copy targets that sit on its line. */

@@ -11,6 +11,7 @@ import { authorOf, createRelayQuote, createReplyQuote, normalizeReplyRef, replyS
 import { fullText } from './text_fit.js';
 import { bindBubbleActions } from './message_actions.js';
 import { revealTimelineNode } from './chat_render_batch.js';
+import { afterMotion } from './motion.js';
 
 export const REPLY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"'
     + ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -142,16 +143,32 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         showToast(tr(`chat.reply.${code}`, words), 'info');
     }
 
+    // The strip opens and closes like the capsule row's fold (style.css): its height runs from 0 while its words fade,
+    // so the row above it rises with it instead of jumping; a reply staged over another one swaps in place.
+    function run(node, to) {
+        node.style.setProperty('--reply-h', `${node.offsetHeight}px`);
+        node.dataset.motion = to === 'open' ? 'shut' : 'open';
+        void node.offsetHeight;  // the motion starts from this height
+        node.dataset.motion = to;
+        return afterMotion(node, { property: 'max-height' }).done;
+    }
     function paint() {
-        strip?.remove();
+        const before = strip;
         strip = staged ? createReplyQuote(staged, { composer: true, onJump: jump, onCancel: () => cancel() }) : null;
         if (strip) {
             const main = strip.querySelector('.chat-quote-main');
             main.id = `${input.id}-reply`;
-            textRow.before(strip);
             // The field announces what it answers whenever it takes focus.
             input.setAttribute('aria-describedby', main.id);
+            if (before?.isConnected && before.dataset.motion !== 'shut') { before.replaceWith(strip); return; }
+            textRow.before(strip);
+            const opened = strip;
+            void run(opened, 'open').then(() => { if (opened.dataset.motion === 'open') delete opened.dataset.motion; });
         } else input.removeAttribute('aria-describedby');
+        if (before?.isConnected && before.dataset.motion !== 'shut') {
+            before.inert = true;  // leaving, its controls take no press
+            void run(before, 'shut').then(() => before.remove());
+        }
     }
 
     /**
