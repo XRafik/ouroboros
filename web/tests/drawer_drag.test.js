@@ -288,6 +288,18 @@ test('a slow release commits past half (open) or 30% (close); a fast one commits
     w.dispose();
 });
 
+test('a thumb that rests before it lifts is no fling; the same drag lifted while moving is', () => {
+    let w = world();
+    open(w, { from: 100, to: 100 + 12 + 80, steps: 4, dt: 16, up: false });  // fast, p = 0.25
+    w.touch('touchend', { x: 192, y: 300, dt: 150 });  // held still for 150 ms first
+    assert.deepEqual(w.state.set, [], 'under half and at rest: it springs back');
+    w.dispose();
+    w = world();
+    open(w, { from: 100, to: 100 + 12 + 80, steps: 4, dt: 16 });  // lifted 16 ms after its last move
+    assert.deepEqual(w.state.set, [true], 'lifted in motion it is a fling: it opens');
+    w.dispose();
+});
+
 test('the release settles at the finger\'s speed: a fling is quick, a slow release far from the end takes longer', () => {
     assert.equal(settleMs(0, 0), DRAG.settleMin, 'nothing left to travel: the shortest settle');
     assert.equal(settleMs(300, 0), DRAG.settleMax, 'a slow release far from the end: the longest');

@@ -226,16 +226,19 @@ export function bindDrawerDrag({
     function onEnd(event) {
         if (!g) return;
         const touch = touchIn(event.changedTouches, g.id);
-        if (touch) release(touch.clientX, true);
+        if (touch) release(touch.clientX, true, event.timeStamp ?? now());
     }
 
     /** The finger left at `x` (an end, or the system taking the touch): settle at the nearest state the finger's
      * speed points to, never stranded halfway. */
-    function release(x, byFinger = false) {
+    function release(x, byFinger = false, at = now()) {
         const gg = end();
         if (!gg || gg.mode !== 'drag') return;  // a tap, not a drag
-        const first = gg.samples[0];
-        const last = gg.samples[gg.samples.length - 1];
+        // The finger's speed as it left: only the moves of the window before the lift count, so a thumb that rested
+        // before it lifted is no fling.
+        const samples = gg.samples.filter((sample) => at - sample[0] <= DRAG.sampleWindow);
+        const first = samples[0];
+        const last = samples[samples.length - 1];
         const velocity = first && last && last[0] > first[0] ? (last[1] - first[1]) / (last[0] - first[0]) : 0;
         const travel = Math.abs((Number.isFinite(x) ? x : gg.lastX ?? gg.x0) - gg.x0);
         let open;
@@ -257,7 +260,7 @@ export function bindDrawerDrag({
     function onCancel(event) {
         if (!g) return;
         const touch = touchIn(event.changedTouches, g.id);
-        if (touch) release(touch.clientX ?? g.lastX);
+        if (touch) release(touch.clientX ?? g.lastX, false, event.timeStamp ?? now());
     }
 
     /** A second finger or a new width: back to the start, no history change. */

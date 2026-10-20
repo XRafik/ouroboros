@@ -375,6 +375,8 @@ def test_a_pull_past_fully_open_shows_the_drawer_at_the_edge_not_the_room(chromi
             cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': width - 110, 'y': y, 'id': 1}]})
             page.wait_for_timeout(32)
             facts['back'] = page.evaluate(PULLED)
+            # The thumb rests, then lifts: lifted while still moving back, the 100 px would be a fling that closes.
+            page.wait_for_timeout(150)
             cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []})
         finally:
             cdp.detach()
