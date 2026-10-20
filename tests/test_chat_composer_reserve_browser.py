@@ -88,6 +88,54 @@ def test_main_and_project_composer_clearance(direct_server_with_data, engine):
             browser.close()
 
 
+_FIRST_FRAME_BACK = """async () => {
+    document.querySelector('[data-nav-page="chat"]').click();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const messages = document.getElementById('chat-messages');
+    const last = [...messages.querySelectorAll('.chat-bubble')].at(-1);
+    return {lastBottom: last.getBoundingClientRect().bottom,
+            composerTop: document.getElementById('chat-input-area').getBoundingClientRect().top,
+            reserve: getComputedStyle(messages).getPropertyValue('--chat-input-reserve')};
+}"""
+
+
+@pytest.mark.ui_browser
+@pytest.mark.parametrize("engine", ["chromium", "webkit"])
+def test_main_behind_a_page_keeps_its_reserve_and_comes_back_above_the_composer(direct_server_with_data, engine):
+    """Main hidden behind a page measured its composer as 0 and wrote the 92 px minimum reserve; back on Main its
+    newest message was laid out 80 px low, under the composer, until the next measure (WebKit). Hidden, it keeps the
+    reserve it was laid out with, so the first frame back already clears the composer."""
+    from playwright.sync_api import sync_playwright
+
+    data = direct_server_with_data["data_dir"]
+    dialogue_store.append(data, "chat", {
+        "ts": "2026-09-17T10:00:00Z", "direction": "out", "chat_id": 1,
+        "text": "Main answer.\n" + "\n".join(f"Main line {i}" for i in range(40)), "format": "markdown",
+    })
+    with sync_playwright() as pw:
+        browser = getattr(pw, engine).launch()
+        try:
+            page = browser.new_page(viewport={"width": 390, "height": 734})
+            page.add_init_script(f"({_CAPTURE_TEST_SOCKET})()")
+            page.goto(direct_server_with_data["url"], wait_until="domcontentloaded")
+            page.wait_for_function("() => window.__testSockets?.some(s => s.readyState === 1)")
+            messages = page.locator('#chat-messages')
+            messages.locator('.chat-bubble').filter(has_text="Main answer").wait_for(state="visible")
+            page.locator('#chat-input').fill("one\ntwo\nthree\nfour")
+            page.evaluate(_SETTLE_RESTORE_FRAMES)
+            shown = messages.evaluate("m => getComputedStyle(m).getPropertyValue('--chat-input-reserve')")
+            page.locator('[data-nav-page="settings"]').evaluate("el => el.click()")
+            page.locator('#page-settings').wait_for(state="visible")
+            page.evaluate(_SETTLE_RESTORE_FRAMES)
+            hidden = messages.evaluate("m => getComputedStyle(m).getPropertyValue('--chat-input-reserve')")
+            back = page.evaluate(_FIRST_FRAME_BACK)
+        finally:
+            browser.close()
+    assert int(shown.strip().removesuffix("px")) > 92, shown
+    assert hidden == shown, ("hidden behind a page, Main kept its reserve", shown, hidden)
+    assert back["lastBottom"] <= back["composerTop"] + 1, ("the first frame back clears the composer", back)
+
+
 @pytest.mark.ui_browser
 @pytest.mark.serial
 def test_wizard_enabled_checkbox_stays_inline(subscription_ui):

@@ -2740,6 +2740,9 @@ export function createChatInstance({
     scrollBottomBtn?.addEventListener('click', showLatest);
 
     function updateMessagesPadding(preserveStickiness = true) {
+        // A room not displayed (Main behind a page) measures its bars as 0: it keeps the reserves it was laid out
+        // with, or it would come back with its newest message under the composer.
+        if (!page.getClientRects().length) return false;
         const mutate = () => {
             let changed = false;
             if (pageHeader && messagesDiv) {
