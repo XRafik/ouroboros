@@ -1358,14 +1358,17 @@ def get_tools() -> List[ToolEntry]:
                 "prompt": {"type": "string", "description":
                     "Direct start: a complete standalone task (why the work exists, decisions, material paths); "
                     "the session has none of my memory. The host appends my human's originating words verbatim. "
+                    "The run starts in my write root (a private snapshot of a Git tree); a path named here does not "
+                    "move it: for another repository, schedule a child whose workspace is that repository. "
                     "Configured-session retry/replacement: optional advisory coordination only; "
                     "the host supplies the canonical work order."},
                 "subagent_id": {"type": "string", "description":
                     "Exact agent_session id from Available subagents, required for direct starts including continue_from. "
                     "Omit for the configured snapshot and retry_of. Schedule API actors as recursive children instead."},
                 "access": {"type": "string", "enum": list(SESSION_ACCESS_LOWERING), "description":
-                    "Lower native access to readonly or workspace_write; omit to inherit the captured profile "
-                    "(new mutating sessions default full). Explicit readonly authority wins. Omit on retry_of."},
+                    "Lower native access to readonly or workspace_write; omit to inherit the captured profile (new mutating "
+                    "sessions default full; continue_from keeps the continued run's when narrower). Explicit readonly "
+                    "authority wins. Omit on retry_of."},
                 "effort": {"type": "string", "enum": ["auto", *EFFORT_SCALE], "default": "auto", "description":
                     "The run's reasoning effort: auto/omitted = this room's primary clamped into its helper "
                     "bounds; outside those bounds it runs at the nearest bound. A row my human pinned or a level in "

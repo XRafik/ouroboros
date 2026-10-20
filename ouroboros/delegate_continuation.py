@@ -24,6 +24,8 @@ definite no-run):
    the tree MAY already carry its patch;
 4. authority does not widen — native access is not wider than the run's
    recorded access, and a writing run writes for the target the old run held.
+   An omitted ``access`` keeps that recorded access (``inherited_access``),
+   so a continuation never refuses itself; an explicit one is the caller's.
 
 Everything else is a FACT, never a refusal: the cause (any terminal cause), an
 unread result, the patch disposition, another actor, route or configuration, a
@@ -247,7 +249,8 @@ def bind_continuation(ctx: Any, drive: Any, run_id: str, *, actor: Dict[str, Any
             or _ACCESS_RANK[this_access] > _ACCESS_RANK[entry.access]):
         return {}, REFUSAL_AUTHORITY_WIDENED, (
             f"Run {rid} ran with access {entry.access or 'unrecorded'!r}; this start derives "
-            f"{this_access or 'unrecorded'!r}. A continuation may keep or lower native access, never widen it.")
+            f"{this_access or 'unrecorded'!r}. A continuation may keep or lower native access, never widen it; "
+            "omit access to keep the run's own.")
     if this_access != "readonly" and (not entry.target_root or entry.target_root != str(target_root or "")):
         return {}, REFUSAL_TARGET_MISMATCH, (
             f"Run {rid} wrote for {entry.target_root or 'an unrecorded target'}; this task's present target is "
@@ -285,6 +288,27 @@ def bind_continuation(ctx: Any, drive: Any, run_id: str, *, actor: Dict[str, Any
         "advice": advice,
     }
     return facts, "", ""
+
+
+def inherited_access(ctx: Any, run_id: Any) -> Optional[str]:
+    """The lowering an omitted ``access`` takes on ``continue_from``: the run's recorded access.
+
+    The selected snapshot only ever lowers (``validate_subagent_snapshot``), so the start
+    runs at the narrower of today's captured profile and the continued run's, and the
+    task's own authority still shapes it (``_derive_authority``). ``full``, an unrecorded
+    access or unreadable custody inherits nothing: the floors above answer those.
+    """
+    from ouroboros.configured_subagents import SESSION_ACCESS_LOWERING
+    from ouroboros.delegate_custody_current import run
+
+    drive = custody.custody_root(ctx)
+    try:
+        entry = None if custody.custody_log_unreadable(drive) else run(drive, str(run_id or "").strip())
+    except Exception:
+        log.debug("Continued run's access unavailable for %s", run_id, exc_info=True)
+        return None
+    access = str(getattr(entry, "access", "") or "")
+    return access if access in SESSION_ACCESS_LOWERING else None
 
 
 def _adopted_snapshot(entry: Any, authority: Any) -> Tuple[Optional[AdoptedSnapshot], str, str]:
@@ -535,6 +559,7 @@ __all__ = [
     "continuation_prompt",
     "disposition_refusal",
     "engine_continues",
+    "inherited_access",
     "replayed_custody",
     "retry_matches_caller_text",
     "snapshot_handover",

@@ -43,7 +43,7 @@ runs in THAT snapshot, with the same execution root, baseline and binding, and
 takes its custody over, so the earlier work is captured once in the successor's
 cumulative patch. A predecessor whose patch was already applied or rejected is
 continued from a fresh snapshot of the target. The admission floors are unchanged:
-the continuation's access is the caller's own, never wider than the run it continues.
+an omitted access keeps the continued run's own, and a named one is never wider than it.
 
 The harness can execute model-generated commands under the operator's OS
 identity. It is not assumed hostile, but the host cannot review each command
