@@ -103,7 +103,9 @@ print(json.dumps({
 
 
 @pytest.mark.serial
-def test_pytest_scrubbed_child_keeps_disposable_state_root(tmp_path):
+def test_pytest_scrubbed_child_keeps_disposable_state_root(tmp_path, monkeypatch):
+    from tests import conftest as test_conftest
+
     repo = pathlib.Path(__file__).resolve().parents[1]
     fake_home = tmp_path / "home"
     fake_live = fake_home / "Ouroboros" / "data" / "state"
@@ -114,14 +116,13 @@ def test_pytest_scrubbed_child_keeps_disposable_state_root(tmp_path):
     }
     for path, content in sentinels.items():
         path.write_bytes(content)
-    disposable_state = pathlib.Path(os.environ["OUROBOROS_DATA_DIR"]) / "state"
-    disposable_paths = tuple(
-        disposable_state / name
-        for name in ("state.json", "state.last_good.json", "evolution_campaign.json")
-    )
-    disposable_before = {
-        path: path.read_bytes() if path.exists() else None for path in disposable_paths
-    }
+    # This test writes state and a campaign. Give the conftest child-env injector
+    # its own disposable root so earlier serial tests cannot leave it an
+    # unavailable state or a campaign that changes this probe's behavior.
+    disposable_root = tmp_path / "disposable-data"
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(disposable_root))
+    monkeypatch.setitem(test_conftest._PYTEST_DEFAULTS, "OUROBOROS_DATA_DIR", str(disposable_root))
+    monkeypatch.setitem(test_conftest._PYTEST_DEFAULTS, "OUROBOROS_SETTINGS_PATH", str(disposable_root / "settings.json"))
     code = """
 import json
 from supervisor import evolution_lifecycle, state
@@ -148,22 +149,18 @@ print(json.dumps({
             capture_output=True,
             text=True,
         )
+    except subprocess.CalledProcessError as exc:
+        raise AssertionError(
+            f"scrubbed child failed (exit {exc.returncode}); "
+            f"stderr tail: {(exc.stderr or '')[-2000:]!r}"
+        ) from exc
 
-        payload = json.loads(proc.stdout.strip().splitlines()[-1])
-        assert payload["pytest_loaded"] is False
-        assert pathlib.Path(payload["drive_root"]).resolve(strict=False) == pathlib.Path(
-            os.environ["OUROBOROS_DATA_DIR"]
-        ).resolve(strict=False)
-        assert payload["campaign_id"]
-        for path, content in sentinels.items():
-            assert path.read_bytes() == content
-    finally:
-        for path, content in disposable_before.items():
-            if content is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(content)
+    payload = json.loads(proc.stdout.strip().splitlines()[-1])
+    assert payload["pytest_loaded"] is False
+    assert pathlib.Path(payload["drive_root"]).resolve(strict=False) == disposable_root.resolve(strict=False)
+    assert payload["campaign_id"]
+    for path, content in sentinels.items():
+        assert path.read_bytes() == content
 
 
 @pytest.mark.serial

@@ -221,3 +221,19 @@ def test_real_sdk_to_registered_schema_preserves_complete_contract(tmp_path, mon
             process.should_exit = True
             thread.join(10)
             assert not thread.is_alive()
+
+
+def test_nested_metadata_output_schema_is_annotation_data_not_a_schema():
+    from ouroboros.mcp_schema import filter_schema_literals, redact_metadata
+
+    secret = "synthetic-nested-metadata-secret"
+    redact = lambda text: text.replace(secret, "<redacted>")
+    metadata = {"annotations": {"outputSchema": {"const": secret}},
+                "outputSchema": {"type": "string", "const": "ordinary"}}
+    rows = [{"name": "safe", "input_schema": {"type": "object"}, "metadata": metadata}]
+    kept, omitted = filter_schema_literals(rows, redact)
+    assert kept == rows and omitted == []
+    projected = redact_metadata(metadata, redact)
+    assert projected["annotations"]["outputSchema"]["const"] == "<redacted>"
+    assert projected["outputSchema"] == metadata["outputSchema"]
+    assert metadata["annotations"]["outputSchema"]["const"] == secret

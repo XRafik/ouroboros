@@ -91,15 +91,15 @@ def tool_metadata(tool: Any) -> dict[str, Any]:
     return result
 
 
-def redact_metadata(value: Any, redact: Callable[[str], str]) -> Any:
+def redact_metadata(value: Any, redact: Callable[[str], str], *, schema_root: bool = True) -> Any:
     """Redact metadata keys and annotations while preserving output-schema literals."""
     if isinstance(value, dict):
         return {
             redact(key) if isinstance(key, str) else key:
-                (wrap_schema_text(item, redact, label_annotations=False) if key == "outputSchema"
-                 else redact_metadata(item, redact))
+                (wrap_schema_text(item, redact, label_annotations=False) if schema_root and key == "outputSchema"
+                 else redact_metadata(item, redact, schema_root=False))
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [redact_metadata(item, redact) for item in value]
+        return [redact_metadata(item, redact, schema_root=False) for item in value]
     return redact(value) if isinstance(value, str) else value
