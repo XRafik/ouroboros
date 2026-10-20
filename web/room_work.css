@@ -83,6 +83,9 @@
 
 /* ---- carets and hidden parts, shared by the control and the rows --------------------------------------- */
 .rw-caret[hidden], .rw-secondary[hidden], .rw-where[hidden], .rw-chev[hidden] { display: none; }
+/* The mark keeps the moving dots' width in every shape, so a room going between Online and Working never moves
+   its caret (a state change never moves a neighbour). */
+.rw-trigger .status-mark { min-width: calc(3 * var(--mark-dot) + 2 * var(--mark-gap)); }
 .rw-caret, .rw-chev { flex: none; display: inline-flex; width: 10px; height: 10px; align-items: center; justify-content: center; }
 .rw-caret::before, .rw-chev::before {
     content: '';

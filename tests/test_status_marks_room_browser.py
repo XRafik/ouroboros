@@ -37,6 +37,7 @@ MARK = """(selector) => {
         shape: mark?.dataset.shape || '', hue: mark?.dataset.hue || '', count: place?.querySelectorAll('.status-mark').length || 0,
         // The laid-out size: a moving dot's wave scales it for a moment, which is not its size.
         sizes: parts.map((part) => `${part.offsetWidth}x${part.offsetHeight}`),
+        width: mark ? mark.getBoundingClientRect().width : 0,
         motion: parts.map((part) => getComputedStyle(part).animationName),
         color: mark ? color(mark) : '', ink: word ? color(word) : '', word: (word?.textContent || '').trim(),
         tokens: Object.fromEntries(['--mark-owner', '--green', '--red', '--text-meta', '--text-secondary', '--accent-light',
@@ -108,6 +109,10 @@ def test_the_room_bar_draws_one_mark_for_every_state(room_ui, theme):
         assert (state["shape"], state["hue"], state["sizes"], state["color"]) == ("dot", "owner", ONE, tokens["--mark-owner"]), state
     assert seen["answer"]["ink"] == tokens["--status-warn-fg"], seen["answer"]
     assert seen["live+answer"]["ink"] == tokens["--accent-light"] != tokens["--mark-owner"], seen["live+answer"]
+    # The bar's mark keeps the moving dots' width in every shape it draws, so the caret beside it never moves when
+    # the room starts or stops working.
+    widths = {name: seen[name]["width"] for name in ("idle", "live", "queued", "paused", "unknown", "answer")}
+    assert set(widths.values()) == {18}, widths
     # At rest the room is a status sentence: Online beside its own green dot.
     assert (seen["idle"]["shape"], seen["idle"]["hue"], seen["idle"]["sizes"]) == ("dot", "ok", ONE), seen["idle"]
     assert (seen["idle"]["color"], seen["idle"]["ink"]) == (tokens["--green"], tokens["--status-ok-fg"]), seen["idle"]

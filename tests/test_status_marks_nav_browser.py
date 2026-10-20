@@ -162,6 +162,34 @@ def test_the_menu_button_says_what_waits_behind_it_in_both_places(nav_ui, tmp_pa
     assert facts['unread']['fill'] == facts['crimson'] and facts['owner']['fill'] == facts['amber'], facts
 
 
+def test_the_closed_drawer_rests_its_moving_dots_and_opening_it_starts_them(nav_ui, tmp_path):
+    """On a phone the room card covers the closed drawer: its rows' moving dots rest instead of running unseen, and
+    run again, on the page's one wave, while the drawer is open. Docked they always run."""
+    ui = nav_ui
+    working = PROJECTS[0]['id']
+    page, _sync = open_app(ui, 390, 844, snapshot(work=[working]))
+    dots = f'#primary-sidebar [data-project-id="{working}"] .status-mark > i'
+    running = f"""() => [...document.querySelectorAll('{dots}')].map((i) => getComputedStyle(i).animationName)"""
+    facts = {'engine': ui['engine']}
+    try:
+        page.wait_for_function(f"() => document.querySelector('{dots}')?.parentElement.dataset.shape === 'moving'")
+        facts['closed'] = page.evaluate(running)
+        page.locator('#page-chat [data-mobile-nav-toggle]').click()
+        page.wait_for_function("() => document.getElementById('primary-sidebar').classList.contains('open')")
+        settle(page)
+        facts['open'] = page.evaluate(running)
+        page.set_viewport_size({'width': 1280, 'height': 844})
+        page.wait_for_function("() => document.documentElement.dataset.layout === 'docked'")
+        settle(page)
+        facts['docked'] = page.evaluate(running)
+    finally:
+        save_evidence(tmp_path, f'nav-drawer-dots-{ui["engine"]}', facts)
+        page.close()
+    assert facts['closed'] == ['none'] * 3, facts
+    assert facts['open'] == ['status-mark-bounce'] * 3, facts
+    assert facts['docked'] == ['status-mark-bounce'] * 3, facts
+
+
 def test_a_closed_project_whose_row_the_collapse_hides_gives_the_focus_to_the_toggle(nav_ui, tmp_path):
     """Opened by keyboard, then the list collapsed: closing the Project cannot return the focus to its hidden row, so
     the Projects toggle takes it, never the page body; with the list open the row takes it back as before."""
