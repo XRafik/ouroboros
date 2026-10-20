@@ -217,6 +217,21 @@ test('a sync that keeps the same modal picture writes no inert; only what change
     w.layers.destroy();
 });
 
+test('a sibling on the layer\'s own path that another owner made inert stays theirs through push, pop and destroy', () => {
+    const w = world();
+    const theirs = w.node('section', w.app);  // inside the shell, beside the room: the stack walks past it
+    theirs.inert = true;
+    const writes = countInertWrites(theirs);
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    assert.deepEqual([w.content.inert, w.panel.inert], [true, true], 'the ordinary siblings turn inert');
+    w.layers.pop('escape');
+    assert.deepEqual([w.content.inert, w.panel.inert], [false, false], 'and are released');
+    assert.equal(theirs.inert, true, 'theirs stays inert');
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    w.layers.destroy();
+    assert.deepEqual([w.content.inert, theirs.inert, writes], [false, true, []], 'never written: destroy releases only its own');
+});
+
 test('a batch settles once: one snapshot, one history entry, focus once; a replaced drawer leaves the room inert throughout', async () => {
     const w = world();
     const seen = [];
