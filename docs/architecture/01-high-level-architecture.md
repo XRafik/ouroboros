@@ -20,12 +20,12 @@ web/ — Web UI, a SPA of ES modules; chapter 3 owns the pages and the modules n
     welcome_preference.js, host_notice_text.js — Main's empty state from the hidden `welcome` preference; known host sentences without the leading pictograph (DESIGN "Chat authorship and System rows")
     project_answer.js — Main's Project lifecycle rows and folded mirrored answers (§3 Main rows)
     work_portal.js, task_episodes.js, project_handoff.js — one Main card per work: the portal and its binding sources, Continue episodes, the binding receipt's words (§3 Project handoff receipts)
-    chat_reply.js, chat_reply_quote.js, chat_row_menu.js, message_actions.js, routing_receipt.js, text_fit.js — replies and host-derived quotes, the row menu, saved-row actions, the owner message's routing receipt line, word-cut fitting (§3 Chat and Projects; DESIGN "Replies")
+    chat_reply.js, chat_reply_quote.js, chat_row_menu.js, row_menu_gesture.js, message_actions.js, routing_receipt.js, text_fit.js — replies and host-derived quotes, the row menus, saved-row actions, the owner message's routing receipt line, word-cut fitting (§3 Chat and Projects; DESIGN "Replies")
     composer.js — a room's composer: "+" menu, slots, Send (§3)
     chat_cards.js, card_components.js, card_frames.js — living cards in the feed and kept on Widgets; the sandboxed app frame (CLIENT_CONTRACT §5)
     contributions.js, composer_plus.js, composer_chips.js, host_modules.js — the contributions store and verbs; skills' "+" items and capsule-row chips; trusted page modules and their recovery (CLIENT_CONTRACT §11; DESIGN "Skills in the page")
     project_reference.js — the one Project pointer control and the only raiser of `ouro:open-project` (DESIGN "References and actions")
-    project_activity.js, work_status.js, work_types.js — Project dots and room words from the server's `rooms`/`works`; their typedefs (§3 Liveness census)
+    project_activity.js, work_status.js, work_types.js, status_mark.js — Project marks and room words from the server's `rooms`/`works`; their typedefs (§3 Liveness census)
     room_work.js, project_read_state.js — a room's header work list without execution authority; its read receipt (§3 Project rooms)
     model_wait.js — model-wait views and owner actions inside chat cards (§6 Quota and auth waits)
     task_checkpoints.js, cancel_presentation.js — typed checkpoints and cancellation-cause text shared by Chat and Logs (§3)
@@ -299,7 +299,7 @@ ouroboros/ — agent core and shared runtime (§6)
   owner_relay.py — `tell_task` relays: held owner quotes, one atomic mailbox row, the room's `relay_entry`, return addresses (§6 Owner routing verbs)
   owner_mailbox.py — per-task user message mailbox: revocation-aware drain, proven-empty peek, the closed provenance set
   peer_roster.py — host-listed roots from queue_snapshot/direct_roots, hidden included, with their recorded waits; admits source-bound inline Presence mailboxes for `forward_to_worker` (§12; §6 Owner routing verbs)
-  launcher_bootstrap.py, runtime_venv.py — Bundle-to-repo bootstrap, launch options, managed sync, native-host artifact synchronization and `--runtime-venv` for launcher.py (§2)
+  launcher_bootstrap.py, runtime_venv.py — Bootstrap/sync, source-shell handoff and compatibility probe, native host and body interpreter (§2)
   launcher_onboarding.py — First-run onboarding as the desktop launcher shows it: the gateway /onboarding page (§2)
   launcher_server_reaper.py — POSIX same-install stray-server termination by the PID-lock-owning launcher (Runtime topology below)
   launcher_readiness.py — The launcher's `/api/health` probe (§2 Boot order)
@@ -328,7 +328,7 @@ ouroboros/ — agent core and shared runtime (§6)
   skill_context_snapshot.py — Optional skill facts at the append-only tail; visible-base lease renewal (§6)
   skill_readiness.py — Execution readiness and next actions from review, hash, enablement, grants, dependencies and peer conflicts
   skill_peer_inventory.py, skill_conflicts.py — execution-time peers without payload reads: the `SkillPeer` projection and the one conflict verdict (§13)
-  skill_dependencies.py — Dependency-spec resolution and installed-readiness probe for skills
+  skill_dependencies.py — Dependency-spec resolution, the one package-readying seam and its owner sentences
   skill_repair_admission.py — selected-skill development admission against an immutable `base_content_hash`; no long shell lock or rollback (§6 Skills and extensions)
   skill_owner_attestation.py — Skip review / Turn on anyway: the owner accepts exact bytes without LLM review (§13)
   skill_identity.py, skill_install_record.py, skill_acceptance.py, skill_builtin.py — Release digest and record conversion; install record; install-basis/owner-edit acceptance; the built-in source (§13)
@@ -353,7 +353,7 @@ ouroboros/ — agent core and shared runtime (§6)
     clawhub.py, fetcher.py, adapter.py, install.py, install_specs.py, isolated_deps.py, provenance.py — Registry, fetch, adaptation, install specs, isolated deps, receipts
   skill_lifecycle_queue.py — Single FIFO skill-mutation lane and event snapshot (§13)
   skill_lifecycle_actions.py — Shared grant/toggle/turn-on-when-ready effects and owner-action admission for every adapter
-  skill_uninstall_state.py — Marketplace-uninstall tombstones and explicitly authorized local payload/state deletion, with separate retention contracts
+  skill_uninstall_state.py — Uninstall tombstones, the removal rule both removers admit by, authorized local payload/state deletion
   skill_review_runner.py — Writes `review_job.json` and `skill_review_*` events; separate review, dependency and extension outcomes; a replayed verdict never overrides an owner disable
   server_auth.py — Non-localhost network gate via `OUROBOROS_NETWORK_PASSWORD`; warns when unset (§8)
   server_control.py, server_entrypoint.py, server_runtime.py, server_web.py — restart and panic stop; CLI parsing, data-root admission and port binding; startup wiring and WS liveness; `ServedUI` (§4 main interface)
