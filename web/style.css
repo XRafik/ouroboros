@@ -3846,8 +3846,8 @@ html[data-layout="stack"] #primary-sidebar.shell-sliding .nav-row.active::before
 html[data-layout="stack"] #primary-sidebar.shell-handoff :is(.nav-row, .nav-project-row) { transition: none; }
 /* Under the closed drawer the room card hides its rows: their moving marks rest instead of running unseen (most of a
    page's running animations), and start again with the drawer, in the page's one phase (status_mark.js). */
-html[data-layout="stack"] #primary-sidebar:not(.open):not(.dragging) .status-mark[data-shape="moving"] > i {
-    animation: none;
+html[data-layout="stack"] #primary-sidebar:not(.open):not(.dragging) {
+    --mark-wave: none;
 }
 /* A tap on a drawer row answers with its colour at once (a press is colour, never a sink): without a hover the rows
    had only iOS's grey flash. */
