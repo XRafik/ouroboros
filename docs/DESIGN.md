@@ -1937,7 +1937,8 @@ controls remain live; the unfinished checkpoint never erases the outcome.
 ### Widgets board
 
 The Widgets page is a board of live cards. The owner arranges the board; each
-widget's content belongs to its author.
+widget's content belongs to its author. The board scrolls with crisp edges: no
+fade dims a card where the list cuts it.
 
 - **A masonry in the owner's order.** Cards are packed into columns like a
   Pinterest board: in the order the owner set with each card's move handle,
