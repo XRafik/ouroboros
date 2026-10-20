@@ -592,7 +592,7 @@ def test_unreadable_wait_does_not_abort_other_pending_restore(tmp_path, monkeypa
     restored = {t["id"]: t for t in workers.PENDING}
     assert {"saved-warm", "bystander"} <= restored.keys()
     assert restored["saved-warm"]["_owner_wait_resume"]["wait_id"] == wait["wait_id"]
-    assert budget_hold_fact(restored["saved-warm"])["dispatchable"] is False
+    assert budget_hold_fact(restored["saved-warm"]) and "_resume_selection" not in restored["saved-warm"]
     assert not restored["saved-warm"].get("_terminalization_retry")
     assert not has_active_intent(tmp_path, "saved-warm", strict=True)
     if reason == "owner_pause":

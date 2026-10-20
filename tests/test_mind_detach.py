@@ -248,6 +248,6 @@ def test_failed_pause_source_stays_visible_without_dispatch_authority(tmp_path, 
     held = workers.PENDING[0]
     assert held["id"] == "head" and held["_is_direct_chat"]
     assert budget_hold_fact(held)["reason"] == (HOLD_SAVED_WORK if unreadable else HOLD_UNSAVED_PAUSE)
-    assert not budget_hold_fact(held)["dispatchable"]
+    assert budget_hold_fact(held) and "_resume_selection" not in held
     assert not held.get("_budget_pause_resume")
     assert recover_direct_pause(task) and len(workers.PENDING) == 1

@@ -395,7 +395,7 @@ def test_a_fence_keeps_its_first_declared_author_and_a_press_that_declared_nobod
         assert request_owner_pause("solo", request_id="legacy-mind")["ok"]
     assert request_owner_pause("solo", request_id="owner-later", by=owner)["ok"]
     fence = read_fence(tmp_path, "solo")
-    assert "by" not in fence and pause_author(fence)["actor"] == "ouroboros"
+    assert fence["by"]["actor"] == "ouroboros" and pause_author(fence)["actor"] == "ouroboros"
     assert pause_author(fence)["text"] == "Freeing the worker for the update"
 
 

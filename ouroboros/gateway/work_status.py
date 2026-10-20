@@ -174,7 +174,6 @@ def classify_member(row: Mapping[str, Any], raw: Optional[Mapping[str, Any]] = N
         state["confirmed"] = False
         return state
     hold = raw.get("hold") if isinstance(raw.get("hold"), dict) else {}
-    hold = {} if hold.get("selected") else hold
     since = raw.get("paused_at") or row.get("started_at") or None
     if phase in {"budget_paused", "budget_pausing"}:
         cause = str(row.get("pause_cause") or "unknown")

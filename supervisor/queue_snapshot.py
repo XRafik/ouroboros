@@ -131,7 +131,7 @@ _PENDING_FIELDS = (
     'predecessor_authority_source', 'metadata', 'origin_message_ref', 'origin_message_text',
     '_attempt', 'review_reason', 'review_source_task_id', '_budget_pause',
     'budget_resumed_at', '_terminalization_retry', '_cancel_intent_authority_hold', '_owner_wait_resume',
-    '_budget_pause_resume', '_budget_pause_hold', '_continuation_prepared', '_admission_owner_token',
+    '_budget_pause_resume', '_budget_pause_hold', '_resume_selection', '_continuation_prepared', '_admission_owner_token',
     '_is_direct_chat', 'detached_at', 'detached_by',
 )
 
@@ -231,7 +231,8 @@ def persist_queue_snapshot(reason: str = "") -> bool:
         for task in [*pending_items, *(meta.get("task") or {} for _, meta in running_items)]:
             if str(task.get("root_task_id") or task.get("id") or "") in fenced:
                 member = {key: task[key] for key in ("id", "_budget_pause", "_continuation_prepared") if key in task}
-                for key, fields in ((BUDGET_HOLD_KEY, ("selected", "fence_id")),
+                for key, fields in ((BUDGET_HOLD_KEY, ("reason",)),
+                                    ("_resume_selection", ("fence_id",)),
                                     ("_budget_pause_resume", ("pause_id", "grant_id", "authority", "root_fence_id", "selected_by", "root_grant_id", "root_resume_generation"))):
                     if key in task:
                         value = task[key]

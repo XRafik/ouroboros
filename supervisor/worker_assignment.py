@@ -705,21 +705,21 @@ def _choose_candidate(queue, remaining, unresolved_invalid_id_set, refused_this_
 
                     revoke_exact_budget_resume(candidate, "root_resume_generation_stale")
                 else:
-                    # Stale zero-dispatch selection returns to UNSELECTED
-                    # (#1196, Q9), retaining hold ID but dropping dead grant.
-                    # The next selection must record a live root grant.
-                    from supervisor.events_budget import (
-                        BUDGET_HOLD_KEY, HOLD_ROOT_FENCE_LIFTED, hold_budget_row,
-                    )
+                    from supervisor.events_budget import HOLD_ROOT_FENCE_LIFTED, hold_budget_row
+                    from ouroboros.task_results import resolve_task_lineage
 
-                    stale = candidate.get(BUDGET_HOLD_KEY) or {}
-                    hold_budget_row(
-                        candidate, reason=str(stale.get("reason") or HOLD_ROOT_FENCE_LIFTED),
-                        detail="root_resume_generation_stale",
-                        extra={**{key: stale[key] for key in ("root_task_id", "fence_id")
-                                  if key in stale},
-                               "stale_root_grant_id": str(stale.get("root_grant_id") or "")},
-                        result_root=pathlib.Path(candidate.get("budget_drive_root") or _pool().DRIVE_ROOT))
+                    candidate.pop("_resume_selection", None)
+                    lineage = resolve_task_lineage(candidate.get("id"), **{key: candidate.get(key) for key in (
+                        "metadata", "root_task_id", "parent_task_id", "delegation_role",
+                        "original_task_id", "timeout_retry_from")})
+                    if not lineage["is_root_task"]:
+                        root_id = lineage["root_task_id"]
+                        latch = queue.BUDGET_ROOT_FENCES.get(root_id) or {}
+                        hold_budget_row(candidate, reason=HOLD_ROOT_FENCE_LIFTED,
+                            detail="root_resume_generation_stale",
+                            extra={"root_task_id": root_id, "fence_id": str(latch.get("fence_id") or ""),
+                                   "cause": str(latch.get("cause") or "")},
+                            result_root=pathlib.Path(candidate.get("budget_drive_root") or _pool().DRIVE_ROOT))
                 queue.persist_queue_snapshot(reason="stale_child_resume_held")
                 continue
             if _candidate_ineligible(queue, candidate, remaining, running, selected=selected,

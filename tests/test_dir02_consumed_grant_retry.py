@@ -129,7 +129,7 @@ def test_consumed_g1_selection_after_recovery(
     print("G1 -> acknowledged return -> crash retry -> child:", pushed[-1])
     assert pushed[-1]["ok"], pushed[-1]
     selected = next(t for t in host.pending if t["id"] == child_id)
-    assert selected[eb.BUDGET_HOLD_KEY]["root_grant_id"] == g1["grant_id"]
+    assert selected[eb.SELECTION_KEY]["root_grant_id"] == g1["grant_id"]
     assert eb.budget_resume_dispatch_allowed(queue, selected) is True
     assert [t["id"] for t in _assign(host, monkeypatch)] == [child_id]
 
@@ -204,7 +204,7 @@ def test_holding_stop_lends_no_g1_and_owner_resume_rebinds_the_child(host, monke
     selected = _select_child_as(host, "held")
     assert selected["ok"], selected  # current J by source: root_resume_generation_stale (P3)
     child = _row(host, CHILD)
-    assert child[eb.BUDGET_HOLD_KEY]["root_grant_id"] == g2["grant_id"]
+    assert child[eb.SELECTION_KEY]["root_grant_id"] == g2["grant_id"]
     assert eb.budget_resume_dispatch_allowed(queue, child) is True
 
 
@@ -212,8 +212,8 @@ def test_newer_owner_pause_defeats_projected_g1(host, monkeypatch, clock, reaper
     plan = _fresh_plan(monkeypatch)
     pause, g1, _exact = _consumed_g1_tree(host, monkeypatch, clock, plan)
     _stop_boot(monkeypatch, returning=True)
-    projected = _row(host, "held")[eb.BUDGET_HOLD_KEY]
-    assert projected["selected"] and projected["grant_id"] == g1["grant_id"], projected
+    projected = _row(host, "held")[eb.SELECTION_KEY]
+    assert projected["grant_id"] == g1["grant_id"], projected
     [running] = _assign(host, monkeypatch)
     assert running["id"] == "held"
     assert _loop_once(host, monkeypatch, running, plan=plan)["kind"] == "working"
@@ -232,7 +232,7 @@ def test_newer_owner_pause_defeats_projected_g1(host, monkeypatch, clock, reaper
     assert eb.live_root_resume_grant(queue, "held", host.root)["grant_id"] == g3["grant_id"]
     outcome = _select_child_as(host, "held")
     assert outcome["ok"], outcome
-    assert _row(host, CHILD)[eb.BUDGET_HOLD_KEY]["root_grant_id"] == g3["grant_id"]
+    assert _row(host, CHILD)[eb.SELECTION_KEY]["root_grant_id"] == g3["grant_id"]
 
 
 def test_consumed_exact_grant_beats_an_older_saved_hold_after_return(host, monkeypatch, clock, reaper):
@@ -256,13 +256,13 @@ def test_consumed_exact_grant_beats_an_older_saved_hold_after_return(host, monke
     exact = bp.budget_pause_row(host.root, "held")
     assert exact["state"] == bp.STATE_RESUMED and exact["grant"]["grant_id"] == g5["grant_id"]
     live = workers.RUNNING["held"]["task"]
-    assert live[eb.BUDGET_HOLD_KEY]["root_grant_id"] == g2["grant_id"], "precondition: older hold survives"
+    assert eb.SELECTION_KEY not in live, "the new exact handoff supersedes the older selection"
     assert eb.live_root_resume_grant(queue, "held", host.root)["grant_id"] == g5["grant_id"]
     assert eb.budget_hold_fact(_row(host, CHILD))["root_grant_id"] == g5["grant_id"]
 
     _stop_boot(monkeypatch, returning=True)  # acknowledged automatic return
     returned = _row(host, "held")
-    assert returned[eb.BUDGET_HOLD_KEY]["grant_id"] == g5["grant_id"]
+    assert returned[eb.SELECTION_KEY]["grant_id"] == g5["grant_id"]
     assert eb.live_root_resume_grant(queue, "held", host.root)["grant_id"] == g5["grant_id"]
     outcome = _select_child_as(host, "held")
     assert outcome["ok"], outcome
@@ -305,7 +305,7 @@ def test_retry_actor_return_projects_on_its_physical_row(host, monkeypatch, cloc
     _loop_once(host, monkeypatch, resumed, plan=plan, events=_supervisor_events(host))
     assert eb.live_root_resume_grant(queue, "held", host.root)["grant_id"] == g1["grant_id"]
     _stop_boot(monkeypatch, returning=True)
-    hold = _row(host, running["id"])[eb.BUDGET_HOLD_KEY]
+    hold = _row(host, running["id"])[eb.SELECTION_KEY]
     assert (hold["root_task_id"], hold["grant_id"]) == ("held", g1["grant_id"]), hold
     assert eb.live_root_resume_grant(queue, "held", host.root)["grant_id"] == g1["grant_id"]
     child = _row(host, CHILD)

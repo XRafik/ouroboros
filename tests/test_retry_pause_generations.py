@@ -416,7 +416,7 @@ def test_root_resume_holds_queued_children_for_selection_without_a_projected_lat
     assert queue.resume_budget_paused_task(children[0], selected_by="held")["ok"]
     assert [t["id"] for t in _assign(host, monkeypatch)] == [children[0]], "only the selected child runs"
     [sibling] = [t for t in workers.PENDING if t["id"] == children[1]]
-    assert budget_hold_fact(sibling)["selected"] is False
+    assert budget_hold_fact(sibling) and "_resume_selection" not in sibling
     newer = pause("newer")  # a replacement Pause: the older Resume selects nothing more
     assert newer["fence_id"] != first["fence_id"]
     late = queue.resume_budget_paused_task(children[1], selected_by="held")

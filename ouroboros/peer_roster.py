@@ -267,7 +267,7 @@ def _queue_hold_facts(task: Dict[str, Any], stored: Dict[str, Any], waiting: Lis
 
     facts: List[Dict[str, Any]] = []
     hold = task.get("_budget_pause_hold") if isinstance(task.get("_budget_pause_hold"), dict) else {}
-    if hold and not hold.get("selected"):
+    if hold:
         reason = str(hold.get("reason") or "")
         code = _HOLD_CODES.get(reason) or ("restore_failed" if reason.startswith("restore_refused:") else "held")
         text = REASON_TEXT.get(code, code)

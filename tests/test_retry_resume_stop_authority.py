@@ -116,7 +116,7 @@ def test_pending_stop_vetoes_retry_resume(host, monkeypatch, clock, reaper, door
                 assert _loop_once(host, monkeypatch, sent, plan=plan)["kind"] == "pause"
         assert owner_pause.read_fence(host.root, "held")["state"] == "released"
         assert "held" not in queue.BUDGET_ROOT_FENCES
-        assert child in host.pending and not child.get("_budget_pause_hold", {}).get("selected")
+        assert child in host.pending and "_resume_selection" not in child
         assert not _assign(host, monkeypatch), "old children need explicit selection"
 
 

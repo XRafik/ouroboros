@@ -94,7 +94,7 @@ def test_recovered_native_wait_needs_explicit_resume_then_dispatches_once(restar
     env = _held(restart_case, monkeypatch, stage=stage, project=project)
     workers.assign_tasks()
     workers.assign_tasks()
-    assert not env.sent and env.task["_budget_pause_hold"]["selected"] is False
+    assert not env.sent and "_budget_pause_hold" in env.task and "_resume_selection" not in env.task
     assert not env.task.get("_project_admission_restore_hold")
     assert explicit_resume_required(queue, env.task, owner_paused=False)
     assert _activity(env)["can_resume"] is True
@@ -139,7 +139,7 @@ def test_explicit_resume_keeps_current_native_authority_refusals(restart_case, m
     refused = queue.resume_budget_paused_task(case.task_id)
     assert not refused["ok"], refused
     assert workers.PENDING == [before] and not env.sent
-    assert task["_owner_wait_resume"] == env.carrier and not task["_budget_pause_hold"]["selected"]
+    assert task["_owner_wait_resume"] == env.carrier and "_budget_pause_hold" in task and "_resume_selection" not in task
 
 
 @pytest.mark.parametrize("carrier,fallback", [(None, "working"), ({}, "zero"),
@@ -177,7 +177,7 @@ def test_read_gap_without_valid_native_authority_never_falls_back(restart_case, 
     else:
         task["_owner_wait_resume"] = copy.deepcopy(carrier)
     refused = queue.resume_budget_paused_task(env.case.task_id)
-    assert not refused["ok"] and not task["_budget_pause_hold"]["selected"]
+    assert not refused["ok"] and "_budget_pause_hold" in task and "_resume_selection" not in task
     assert not env.sent and workers.PENDING == [task]
 
 
@@ -213,7 +213,7 @@ def test_failed_selection_publication_keeps_the_native_wait_unselected(restart_c
         before.pop("_budget_pause", None)
     assert env.task == before and not env.sent
     workers.assign_tasks()
-    assert not env.sent and not env.task["_budget_pause_hold"]["selected"]
+    assert not env.sent and "_budget_pause_hold" in env.task and "_resume_selection" not in env.task
     assert queue.resume_budget_paused_task(env.case.task_id)["ok"]
     assert "_budget_pause_hold" not in env.task
     _assert_original_dispatch(env)
@@ -226,7 +226,7 @@ def test_unrelated_restore_hold_has_no_new_resume_button_or_release(restart_case
     assert not explicit_resume_required(queue, env.task, owner_paused=False)
     assert _activity(env)["can_resume"] is False
     assert queue.resume_budget_paused_task(env.case.task_id) == {"ok": False, "error": reason}
-    assert not env.sent and env.task["_budget_pause_hold"]["selected"] is False
+    assert not env.sent and "_budget_pause_hold" in env.task and "_resume_selection" not in env.task
 
 
 @pytest.mark.parametrize("stage", ["early", "late"])
@@ -255,7 +255,7 @@ def test_technical_resume_rejoins_native_work_without_monetary_selection(restart
     assert [row["id"] for row in siblings] == [sibling["id"]]
     monkeypatch.setattr(state, "budget_remaining", lambda *_args, **_kwargs: 100.0)
     workers.assign_tasks()
-    assert not env.sent and not env.task["_budget_pause_hold"]["selected"]
+    assert not env.sent and "_budget_pause_hold" in env.task and "_resume_selection" not in env.task
     # Assignment independently rechecks the sibling before Resume touches the root.
     [revalidated] = [row for row in workers.PENDING if row["id"] != case.task_id]
     assert siblings[0]["_project_admission_restore_hold"]["reason"] == "project_routing_fence_lookup_failed"

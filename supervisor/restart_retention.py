@@ -376,8 +376,7 @@ def restart_held(task: Any) -> bool:
     from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_OWNER_RESTART
 
     hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    return isinstance(hold, dict) and str(hold.get("reason") or "") == HOLD_OWNER_RESTART \
-        and not hold.get("selected")
+    return isinstance(hold, dict) and str(hold.get("reason") or "") == HOLD_OWNER_RESTART
 
 
 def never_started(task: Any) -> bool:
@@ -847,7 +846,8 @@ def recover_saved_running(rows: Iterable[Dict[str, Any]], drive_root: Any, *,
     host already owes, or no usable source keeps the ordinary interrupted path.
     """
     from ouroboros.task_results import _TRULY_TERMINAL_STATUSES, load_task_result
-    from supervisor.events_budget import HOLD_SAVED_WORK, continue_consumed_resume_selection, hold_budget_row
+    from supervisor.events_budget import HOLD_SAVED_WORK, hold_budget_row
+    from ouroboros.work_stop import retain_consumed_selection
 
     returning = set((transaction or {}).get("return_ids") or [])
     rows = [row for row in rows or () if isinstance(row, dict)]
@@ -876,7 +876,7 @@ def recover_saved_running(rows: Iterable[Dict[str, Any]], drive_root: Any, *,
             fold_running_clock(task, row)  # confirmed waits newer than the saved source (#939)
             stamp_execution_handoff(task, row)
             if auto:
-                continue_consumed_resume_selection(task, stored.get("budget_pause") or {})
+                retain_consumed_selection(task, stored.get("budget_pause") or {})
         except Exception:
             log.warning("Saved work of %s unreadable at restore; ordinary interrupted path", task_id, exc_info=True)
             refused[task_id] = "unreadable"

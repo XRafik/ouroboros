@@ -23,6 +23,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from ouroboros.control_actor import control_actor, mind_resume_refusal
+from ouroboros.work_stop import SELECTION_KEY, retain_consumed_selection
 from ouroboros.utils import utc_now_iso
 
 log = logging.getLogger(__name__)
@@ -150,7 +151,7 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
     from supervisor import queue as q
     from supervisor.continuation_admission import action_writers
     from supervisor.events_budget import (
-        BUDGET_HOLD_KEY, HOLD_ROOT_FENCE_LIFTED, _root_resume_state, hold_root_resume_descendants,
+        _root_resume_state, hold_root_resume_descendants,
     )
     from supervisor.owner_pause_control import (
         _warm_paused_direct_turn, complete_owner_pause_latch, warm_paused_member,
@@ -217,7 +218,7 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
                                            actor_id=task_id if actor else None)
     except Exception:
         return {'ok': False, 'error': 'owner_pause_custody_unreadable'}
-    grant = {**control_actor(), "grant_id": uuid.uuid4().hex, "granted_at": utc_now_iso(), "granted_at_ts": time.time(),
+    grant = {"by": control_actor(), "grant_id": uuid.uuid4().hex, "granted_at": utc_now_iso(), "granted_at_ts": time.time(),
              "single_use": True, "selected_by": str(selected_by or "owner"), "authority": "explicit_resume",
              'root_resume_basis': root_state['basis'], "generation": int(fence.get("generation") or 0), "warm": True}
     projected = None
@@ -259,17 +260,16 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
                 if isinstance(live, dict):
                     live.pop('_budget_pause_resume', None)
                     # The released durable fence now contains this warm grant.
-                    # Retain its current queue selection using the existing
-                    # carrier; older consumed exact history remains unchanged.
+                    # Retain its current queue selection; older consumed exact
+                    # history remains unchanged.
                     basis = {**root_state['basis'], 'owner': {
                         **root_state['basis']['owner'],
                         'grant_id': grant['grant_id'],
                         'grant_generation': int(grant['generation']),
                         'revoked': False,
                     }}
-                    live[BUDGET_HOLD_KEY] = {
-                        'reason': HOLD_ROOT_FENCE_LIFTED,
-                        'selected': True, 'selected_by': 'owner',
+                    live[SELECTION_KEY] = {
+                        'by': grant['by'], 'selected_by': 'owner',
                         'selected_at': grant['granted_at'],
                         'root_task_id': root_task_id,
                         'root_grant_id': grant['grant_id'],
@@ -508,7 +508,7 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
     generation = int(row.get("resume_generation") or 0) + 1
     pause_generation = int(row.get("pause_generation") or 0)
     grant = {
-        **control_actor(), **({"owner_pause_fence_id": owner_fence_id} if owner_fence_id else {}),
+        "by": control_actor(), **({"owner_pause_fence_id": owner_fence_id} if owner_fence_id else {}),
         "grant_id": uuid.uuid4().hex, "granted_at": utc_now_iso(), "granted_at_ts": now,
         "single_use": True, "paused_duration_sec": prior_paused + max(0.0, now - paused_at),
         "executed_sec_before_pause": round(executed_sec, 3),
@@ -545,16 +545,14 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
         **({"sleep_exclusion_since": now}
            if row.get("reason") == "sleep" or explicit_execution_timeout_sec(task) is not None else {}),
         **{key: grant[key] for key in (
-            'selected_by', 'authority', 'sleep_id', 'root_grant_id',
+            'selected_by', 'by', 'authority', 'sleep_id', 'root_grant_id',
             'root_resume_generation', 'root_fence_id', 'root_resume_basis')},
     }
     task["budget_resumed_at"] = grant["granted_at"]
-    # Release a re-validated restore/revocation hold in place (``selected`` flips,
-    # nothing is erased); the prior hold is kept for the snapshot rollback below.
-    released_hold = hold if hold and not hold.get("selected") else None
-    if released_hold is not None:
-        task[BUDGET_HOLD_KEY] = {**released_hold, "selected": True, "selected_at": utc_now_iso(),
-                                 "selected_by": grant["selected_by"], "released_reason": "exact_resume_granted"}
+    # The exact handoff owns selection until consumption; old stops survive only
+    # in these local rollback copies, never in the new grant or selection.
+    released_hold = task.pop(BUDGET_HOLD_KEY, None)
+    prior_selection = task.pop(SELECTION_KEY, None)
     fence = q.BUDGET_ROOT_FENCES.get(root_task_id)
     fence_released = False
     held_siblings: List[str] = []
@@ -579,6 +577,8 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
         task["_budget_pause"] = prior_pause
         if released_hold is not None:
             task[BUDGET_HOLD_KEY] = released_hold
+        if prior_selection is not None:
+            task[SELECTION_KEY] = prior_selection
         if fence_released:
             q.BUDGET_ROOT_FENCES[root_task_id] = fence
         for member in q.PENDING:
@@ -781,9 +781,7 @@ def revoke_exact_budget_resume(task: Dict[str, Any], reason: str) -> bool:
         except (OSError, ValueError, TypeError, RuntimeError):
             continuing = False  # retained hold; restore/tick re-reads before deciding absence
         if continuing:
-            from supervisor.events_budget import continue_consumed_resume_selection
-
-            continue_consumed_resume_selection(task, row)
+            retain_consumed_selection(task, row)
             task.pop("_budget_pause_resume", None)
             q.append_jsonl(q.DRIVE_ROOT / "logs" / "events.jsonl",
                            {"ts": utc_now_iso(), "type": "budget_resume_carrier_retired",

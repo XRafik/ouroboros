@@ -21,9 +21,10 @@ def test_new_saved_pause_does_not_rearm_historic_selected_panic(tmp_path, monkey
     task, _ = _parked(tmp_path, monkeypatch, task_id="root", scope="root")
     if not saved_pause:
         task.pop("_budget_pause")
-    task[BUDGET_HOLD_KEY] = {"hold_id": "historic-panic", "reason": HOLD_PANIC,
-                            "selected": selected, "selected_by": "owner", "fence_id": "older-fence",
-                            "root_task_id": "root"}
+    if selected:
+        task["_resume_selection"] = {"selected_by": "owner", "fence_id": "older-fence", "root_task_id": "root"}
+    else:
+        task[BUDGET_HOLD_KEY] = {"reason": HOLD_PANIC, "root_task_id": "root"}
     before = copy.deepcopy(task)
     saved = budget_pause.budget_pause_row(tmp_path, "root")
     sent = []
@@ -32,12 +33,11 @@ def test_new_saved_pause_does_not_rearm_historic_selected_panic(tmp_path, monkey
     assert not sent
     assert budget_pause.budget_pause_row(tmp_path, "root") == saved
     if saved_pause or not selected:
-        assert task[BUDGET_HOLD_KEY] == before[BUDGET_HOLD_KEY]
+        assert task.get(BUDGET_HOLD_KEY) == before.get(BUDGET_HOLD_KEY)
+        assert task.get("_resume_selection") == before.get("_resume_selection")
         assert task.get("_budget_pause") == before.get("_budget_pause")
     else:
-        assert task[BUDGET_HOLD_KEY]["reason"] == HOLD_PANIC
-        assert task[BUDGET_HOLD_KEY]["selected"] is False
-        assert task[BUDGET_HOLD_KEY]["detail"] == "root_resume_generation_stale"
+        assert BUDGET_HOLD_KEY not in task and "_resume_selection" not in task
 
 
 @pytest.mark.parametrize("late_carrier", ["none", "before_assignment", "before_root_resume"])
@@ -54,7 +54,7 @@ def test_new_root_pause_invalidates_child_selection_until_selected_again(tmp_pat
     workers.PENDING.remove(root)  # root ran, then paused for a second time
     root2, _ = _parked(tmp_path, monkeypatch, task_id="root", scope="root")
     assert "_budget_pause_resume" not in child and "_budget_pause" in child
-    assert not sibling["_budget_pause_hold"]["selected"]
+    assert "_budget_pause_hold" in sibling and "_resume_selection" not in sibling
     if late_carrier != "none":
         child.clear()
         child.update(old_child)  # a stale queue carrier cannot bypass either consumer
@@ -74,7 +74,7 @@ def test_new_root_pause_invalidates_child_selection_until_selected_again(tmp_pat
     workers.assign_tasks()
     assert [row["id"] for row in sent] == ["root", "child"]
     assert sent[-1]["_budget_pause_resume"]["root_grant_id"] == second["grant_id"]
-    assert not sibling["_budget_pause_hold"]["selected"]
+    assert "_budget_pause_hold" in sibling and "_resume_selection" not in sibling
 
 
 def test_assignment_rechecks_root_grant_even_when_no_fence_is_left(tmp_path, monkeypatch):
@@ -463,15 +463,15 @@ def test_a_zero_dispatch_selection_is_rechecked_against_the_live_root_grant_at_d
     sibling = _fenced_member(workers, "sibling", "root")
     first = queue.resume_budget_paused_task("root")
     assert first["ok"] and queue.resume_budget_paused_task("sibling", selected_by="root")["ok"]
-    assert sibling["_budget_pause_hold"]["selected"] is True
-    assert sibling["_budget_pause_hold"]["root_grant_id"] == first["grant_id"]
+    assert "_resume_selection" in sibling and "_budget_pause_hold" not in sibling
+    assert sibling["_resume_selection"]["root_grant_id"] == first["grant_id"]
     workers.PENDING.remove(root)  # the root ran on, then paused AGAIN under global scope: no new fence
     _parked(tmp_path, monkeypatch, task_id="root", scope="global")
     assert "root" not in queue.BUDGET_ROOT_FENCES
     sent = []
     _idle_worker(workers, sent)
     workers.assign_tasks()
-    assert sent == [] and sibling["_budget_pause_hold"]["selected"] is False
+    assert sent == [] and "_budget_pause_hold" in sibling and "_resume_selection" not in sibling
     assert sibling["_budget_pause_hold"]["detail"] == "root_resume_generation_stale"
     second = queue.resume_budget_paused_task("root")
     assert second["ok"] and second["grant_id"] != first["grant_id"]
@@ -481,7 +481,7 @@ def test_a_zero_dispatch_selection_is_rechecked_against_the_live_root_grant_at_d
     workers.WORKERS[0].busy_task_id = None
     workers.assign_tasks()
     assert [task["id"] for task in sent] == ["root", "sibling"]
-    assert sent[-1]["_budget_pause_hold"]["root_grant_id"] == second["grant_id"]
+    assert sent[-1]["_resume_selection"]["root_grant_id"] == second["grant_id"]
 
 
 def test_a_hold_ended_by_control_inside_the_refused_dispatch_rail_is_a_truthful_terminal(tmp_path, monkeypatch):

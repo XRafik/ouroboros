@@ -23,6 +23,7 @@ from ouroboros.event_usage import event_token_counts
 from ouroboros.budget_pause import BUDGET_HOLD_KEY, budget_fence_selected, budget_hold_fact  # noqa: F401
 from ouroboros.utils import append_jsonl, utc_now_iso
 from ouroboros.task_results import STATUS_SCHEDULED, write_task_result
+from ouroboros.work_stop import SELECTION_KEY, resume_selection, stop_record
 
 log = logging.getLogger(__name__)
 
@@ -200,10 +201,10 @@ def _set_root_budget_pause_locked(root_task_id: str, pause: Dict[str, Any], *,
                 continue
             if isinstance(member.get("_budget_pause_resume"), dict):
                 revoke_exact_budget_resume(member, "new_root_budget_fence")
-            hold = member.get(BUDGET_HOLD_KEY)
-            if isinstance(hold, dict) and hold.get("selected"):
+            if isinstance(member.get(SELECTION_KEY), dict) and budget_hold_fact(member) is None:
                 hold_budget_row(member, reason=HOLD_ROOT_FENCE_LIFTED,
-                                extra={"root_task_id": root_task_id, "fence_id": row["fence_id"]})
+                                extra={"root_task_id": root_task_id, "fence_id": row["fence_id"],
+                                       "cause": str(row.get("cause") or "")})
     return row
 
 
@@ -775,16 +776,16 @@ def budget_resume_dispatch_allowed(q: Any, task: Dict[str, Any]) -> Optional[boo
     """A child selection belongs to the CURRENT root grant and fence only.
 
     Both carriers are revalidated at dispatch: an exact grant handoff and a
-    zero-dispatch hold selection alike name the root grant they were selected
+    zero-dispatch selection alike name the root grant they were selected
     under, so a root that is pausing or paused again (with or without a new
     fence) admits neither on its old selection (#1196, owner Q9).
     ``None`` holds this dispatch on unreadable retry/root-grant authority;
     ``False`` retains stale-selection handling. Resolve the physical root once.
     """
     handoff = task.get("_budget_pause_resume")
-    hold = task.get(BUDGET_HOLD_KEY) if isinstance(task.get(BUDGET_HOLD_KEY), dict) else None
+    selection = task.get(SELECTION_KEY)
     exact = isinstance(handoff, dict)
-    carrier = handoff if exact else (hold if hold is not None and hold.get("selected") else None)
+    carrier = handoff if exact else (selection if isinstance(selection, dict) else None)
     if carrier is None:
         return True
     root_id = str(task.get("root_task_id") or task.get("id") or "")
@@ -883,9 +884,11 @@ def hold_budget_row(task: Dict[str, Any], *, reason: str, detail: str = "",
     Keep the PENDING identity, remove stale resume grants and project the same
     reason to the result. Restore can require valid existing result authority.
     """
-    hold = {"reason": str(reason), "detail": str(detail or "")[:300], "held_at": utc_now_iso(),
-            "selected": False, "dispatchable": False, **(extra or {})}
+    from ouroboros.control_actor import control_actor
+
+    hold = stop_record(str(reason), held_at=utc_now_iso(), detail=detail, by=control_actor(), binding=extra)
     task.pop("_budget_pause_resume", None)
+    task.pop(SELECTION_KEY, None)
     task[BUDGET_HOLD_KEY] = hold
     if result_root is not None:
         try:
@@ -957,7 +960,7 @@ def hold_root_resume_descendants(q: Any, root_id: str, fence: dict, grant: dict,
                              and pause.get("scope") == "root" and pause.get("root_task_id") == root_id
                              and pause.get("fence_id") == fence.get("fence_id"))
         hold = member.get(BUDGET_HOLD_KEY) if isinstance(member.get(BUDGET_HOLD_KEY), dict) else None
-        if (hold is not None and not hold.get("selected") and str(hold.get("reason") or "") == HOLD_ROOT_FENCE_LIFTED
+        if (hold is not None and str(hold.get("reason") or "") == HOLD_ROOT_FENCE_LIFTED
                 and str(hold.get("root_grant_id") or "") != grant["grant_id"]):
             rebound[member_id] = dict(hold)
             member[BUDGET_HOLD_KEY] = {**hold, "root_grant_id": grant["grant_id"],
@@ -968,7 +971,9 @@ def hold_root_resume_descendants(q: Any, root_id: str, fence: dict, grant: dict,
             # selected child fail the dispatch fence comparison. Rollback above
             # retains the original hold, including that id.
             member[BUDGET_HOLD_KEY].pop("fence_id", None)
-        if (pause is not None and not fence_derived) or hold is not None:
+        # Existing choices survive this transaction; dispatch revalidates their old fence.
+        if ((pause is not None and not fence_derived) or hold is not None
+                or isinstance(member.get(SELECTION_KEY), dict)):
             continue
         if fence_derived:
             markers[member_id] = member.pop("_budget_pause")
@@ -1115,8 +1120,8 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
     from ouroboros.control_actor import control_actor, mind_resume_refusal
     if refusal := mind_resume_refusal(result_root, task):
         return refusal
-    selection = {**hold, **control_actor(), "selected": True, "selected_at": utc_now_iso(),
-                 "selected_by": str(selected_by or "owner")}
+    selection = resume_selection(hold, by=control_actor(), selected_at=utc_now_iso(),
+                                 selected_by=str(selected_by or "owner"))
     if not native_read_gap:
         selection['root_resume_basis'] = current['root_resume_basis']
         # A new owner choice does not inherit an obsolete upstream grant.
@@ -1131,6 +1136,7 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
             selection.update(root_grant_id=root_grant["grant_id"],
                              root_resume_generation=int(root_grant["generation"]))
     prior_pause = task.pop("_budget_pause", None)
+    prior_selection = task.get(SELECTION_KEY)
 
     rebound, invalidated, exact_rebound = [], [], []
     if not native_read_gap and actor and not q.BUDGET_ROOT_FENCES.get(root_task_id):
@@ -1151,30 +1157,37 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
                         and ('root_resume_basis' not in handoff
                              or handoff['root_resume_basis'] == current['root_resume_basis'])):
                     # Preserve the owner's existing choice, as for an unbound
-                    # selected hold below. Only its queue dispatch binding
+                    # selection below. Only its queue dispatch binding
                     # changes; the exact single-use grant is not reissued.
                     exact_rebound.append((member, handoff))
                     continue
                 # As at fenced root Resume, revocation remains safe even if
                 # publication fails: an unused continuation is never replayed.
                 revoke_exact_budget_resume(member, 'root_resume_generation_changed')
-            prior = member.get(BUDGET_HOLD_KEY)
-            if not isinstance(prior, dict) or member.get('_budget_pause_resume'):
+            if member.get('_budget_pause_resume'):
                 continue
-            stale_lifted = (not prior.get('selected')
-                            and prior.get('reason') == HOLD_ROOT_FENCE_LIFTED
-                            and prior.get('root_grant_id'))
-            unbound_owner = (prior.get('selected') and prior.get('selected_by') == 'owner'
-                             and not prior.get('root_grant_id') and not prior.get('fence_id'))
-            if stale_lifted or unbound_owner:
-                rebound.append((member, prior))
-            elif prior.get('selected'):
-                invalidated.append((member, prior))
+            held = budget_hold_fact(member)
+            if held is not None:
+                if held.get('reason') == HOLD_ROOT_FENCE_LIFTED and held.get('root_grant_id'):
+                    rebound.append((member, BUDGET_HOLD_KEY, held))
+                continue
+            prior = member.get(SELECTION_KEY)
+            if isinstance(prior, dict):
+                if prior.get('selected_by') == 'owner' and not prior.get('root_grant_id') and not prior.get('fence_id'):
+                    rebound.append((member, SELECTION_KEY, prior))
+                else:
+                    invalidated.append((member, prior))
 
     def withdraw(persist: bool = True) -> None:
         task[BUDGET_HOLD_KEY] = dict(hold)
-        for member, prior in rebound + invalidated:
-            member[BUDGET_HOLD_KEY] = prior
+        task.pop(SELECTION_KEY, None)
+        if prior_selection is not None:
+            task[SELECTION_KEY] = prior_selection
+        for member, key, prior in rebound:
+            member[key] = prior
+        for member, prior in invalidated:
+            member.pop(BUDGET_HOLD_KEY, None)
+            member[SELECTION_KEY] = prior
         for member, prior in exact_rebound:
             member['_budget_pause_resume'] = prior
         if prior_pause is not None:
@@ -1183,28 +1196,28 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
             q.persist_queue_snapshot(reason='budget_hold_selection_withdrawn')
 
     def publish() -> bool:
-        if native_read_gap:
-            task.pop(BUDGET_HOLD_KEY, None)  # Rejoin the same wait; no money or child grant is created.
-        else:
-            task[BUDGET_HOLD_KEY] = selection
+        task.pop(BUDGET_HOLD_KEY, None)
+        if not native_read_gap:  # A native repair rejoins its wait without creating a money or child grant.
+            task[SELECTION_KEY] = selection
         for member, prior in exact_rebound:
             member['_budget_pause_resume'] = {
                 **prior, 'root_grant_id': selection['root_grant_id'],
                 'root_resume_generation': selection['root_resume_generation'],
                 'root_resume_basis': current['root_resume_basis'],
             }
-        for member, prior in rebound:
-            member[BUDGET_HOLD_KEY] = {
+        for member, key, prior in rebound:
+            member[key] = {
                 **prior, 'root_grant_id': selection['root_grant_id'],
                 'root_resume_generation': selection['root_resume_generation'],
                 'root_resume_basis': current['root_resume_basis'],
             }
-            member[BUDGET_HOLD_KEY].pop('fence_id', None)
-        for member, prior in invalidated:
+            member[key].pop('fence_id', None)
+        for member, _prior in invalidated:
             hold_budget_row(
-                member, reason=str(prior.get('reason') or HOLD_ROOT_FENCE_LIFTED),
+                member, reason=HOLD_ROOT_FENCE_LIFTED,
                 detail='root_resume_generation_changed',
-                extra={'root_task_id': root_task_id})
+                extra={'root_task_id': root_task_id, 'root_grant_id': selection['root_grant_id'],
+                       'root_resume_generation': selection['root_resume_generation']})
         return bool(q.persist_queue_snapshot(reason='budget_hold_selected'))
 
     from ouroboros.owner_pause import complete_consumed_member_resume
@@ -1228,56 +1241,6 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
     )
     return {"ok": True, "task_id": task_id, "root_task_id": root_task_id,
             "selection": "budget_hold_released", "same_generation": True}
-
-
-def continue_consumed_resume_selection(task: Dict[str, Any], pause_row: Dict[str, Any]) -> bool:
-    """Retain a consumed selection while retiring its execution handoff.
-
-    Preserve the own grant and its upstream binding separately. This does not
-    classify the row as a root: live readers revalidate that role. A matching
-    consumed handoff supersedes an older selected carrier, never a real hold.
-    A member of another root's tree never lends a root grant; its spent handoff
-    retires without creating a new dispatch carrier. Classify only the row's
-    own lineage here, so a transient retry-chain read cannot lose root evidence.
-    """
-    from ouroboros.budget_pause import STATE_RESUMED
-    from ouroboros.task_results import resolve_task_lineage
-
-    lineage = resolve_task_lineage(task.get("id"), **{key: task.get(key) for key in (
-        "metadata", "root_task_id", "parent_task_id", "delegation_role", "original_task_id",
-        "timeout_retry_from")})
-    handoff = task.get("_budget_pause_resume") if isinstance(task.get("_budget_pause_resume"), dict) else {}
-    grant = pause_row.get("grant") if isinstance(pause_row.get("grant"), dict) else {}
-    prior = task.get(BUDGET_HOLD_KEY) if isinstance(task.get(BUDGET_HOLD_KEY), dict) else {}
-    if not (handoff.get("authority") == "explicit_resume"
-            and grant.get("authority") == "explicit_resume"
-            and pause_row.get("state") == STATE_RESUMED and grant.get("consumed_at")
-            and not grant.get("revoked_at") and grant.get("grant_id")
-            and handoff.get("grant_id") == grant["grant_id"]
-            and handoff.get("pause_id") == pause_row.get("pause_id")
-            and handoff.get("source_ref") == pause_row.get("source_ref")
-            and handoff.get("grant_generation") == grant.get("generation")
-            and (not prior or prior.get("selected"))):
-        return False
-    if lineage["parent_task_id"] and lineage["root_task_id"] != lineage["task_id"]:
-        # The matching consumed handoff superseded this selected carrier.
-        # Its caller retires the handoff; do not expose an older selection
-        # underneath it, or manufacture a new member dispatch carrier.
-        task.pop(BUDGET_HOLD_KEY, None)
-        return False
-    kept = {key: value for key, value in prior.items() if key != "fence_id"}
-    task[BUDGET_HOLD_KEY] = {
-        **kept,
-        "reason": kept["reason"] if kept.get("reason") in SELECTABLE_HOLD_REASONS else HOLD_SAVED_WORK,
-        "selected": True, "selected_by": str(grant.get("selected_by") or "owner"),
-        "selected_at": str(grant.get("granted_at") or ""),
-        "root_task_id": str(task.get("root_task_id") or task.get("id") or ""),
-        "grant_id": grant["grant_id"], "grant_generation": int(grant["generation"]),
-        "root_grant_id": str(grant.get("root_grant_id") or ""),
-        "root_resume_generation": int(grant.get("root_resume_generation") or 0),
-        **({"fence_id": str(grant["root_fence_id"])} if grant.get("root_fence_id") else {}),
-    }
-    return True
 
 
 def _root_resume_state(q: Any, root_task_id: str, result_root: pathlib.Path, *,
@@ -1345,7 +1308,7 @@ def _root_resume_grants(state: Dict[str, Any]) -> tuple:
 
     current, row = state['task'], state['pause']
     owner, basis = state['owner_fence'], state['basis']
-    hold = current.get(BUDGET_HOLD_KEY) or {}
+    selection = current.get(SELECTION_KEY) or {}
     grant = row.get('grant') or {}
     warm = owner.get('resume_grant') or {}
     if (budget_hold_fact(current) is not None or current.get('_owner_hold')
@@ -1353,9 +1316,9 @@ def _root_resume_grants(state: Dict[str, Any]) -> tuple:
         return {}, {}
     latch = state['latch']
     if latch:
-        if budget_fence_selected(current, latch) and hold.get('root_grant_id'):
-            return {'grant_id': str(hold['root_grant_id']),
-                    'generation': int(hold['root_resume_generation']), 'pause_id': ''}, {}
+        if budget_fence_selected(current, latch) and selection.get('root_grant_id'):
+            return {'grant_id': str(selection['root_grant_id']),
+                    'generation': int(selection['root_resume_generation']), 'pause_id': ''}, {}
         return {}, {}
     if any(current.get(key) for key in (
             '_budget_pause', '_continuation_prepared')):
@@ -1388,20 +1351,19 @@ def _root_resume_grants(state: Dict[str, Any]) -> tuple:
     handoff = current.get('_budget_pause_resume') or {}
     if exact and handoff.get('grant_id') == exact['grant_id']:
         return exact, durable
-    if (hold.get('selected') and hold.get('reason') in SELECTABLE_HOLD_REASONS
-            and hold.get('selected_by') == 'owner' and not hold.get('fence_id')
+    if (selection and selection.get('selected_by') == 'owner' and not selection.get('fence_id')
             and not handoff):
-        if hold.get('grant_id'):
+        if selection.get('grant_id'):
             if (exact and row.get('state') == STATE_RESUMED and grant.get('consumed_at')
                     and grant.get('authority') == 'explicit_resume'
-                    and hold['grant_id'] == grant.get('grant_id')
-                    and hold.get('grant_generation') == grant.get('generation')):
+                    and selection['grant_id'] == grant.get('grant_id')
+                    and selection.get('grant_generation') == grant.get('generation')):
                 return exact, durable
-        elif (hold.get('root_grant_id') and int(hold.get('root_resume_generation') or 0) > 0
-              and (hold.get('root_resume_basis') == basis
-                   or 'root_resume_basis' not in hold and not row and not owner)):
-            return {'grant_id': str(hold['root_grant_id']),
-                    'generation': int(hold['root_resume_generation']), 'pause_id': ''}, durable
+        elif (selection.get('root_grant_id') and int(selection.get('root_resume_generation') or 0) > 0
+              and (selection.get('root_resume_basis') == basis
+                   or 'root_resume_basis' not in selection and not row and not owner)):
+            return {'grant_id': str(selection['root_grant_id']),
+                    'generation': int(selection['root_resume_generation']), 'pause_id': ''}, durable
 
     if current and warmed:
         # A current selection above supersedes historical warm authority. A

@@ -259,8 +259,8 @@ def test_live_held_continue_resume_selects_same_successor_and_assigns_it(tmp_pat
     assert billing["billing_group_id"] == PRED
     assert billing["billing_group_limit_usd"] == 20.0
     assert billing["billing_group_limit_source"] == "initial_task_admission"
-    assert sent[0]["_budget_pause_hold"]["selected"] is True
-    assert sent[0]["_budget_pause_hold"]["selected_by"] == "owner"
+    assert "_budget_pause_hold" not in sent[0] and "_resume_selection" in sent[0]
+    assert sent[0]["_resume_selection"]["selected_by"] == "owner"
     # Resume released only this successor; the independent readonly request is
     # still unresolved custody for the money/Pause census.
     assert _delegated(conflicting_writers(queue, PRED)) == ["inv-review", "run-review"]

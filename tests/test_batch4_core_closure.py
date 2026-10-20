@@ -343,7 +343,7 @@ def test_manual_synthetic_hold_gets_fresh_observation_after_mutation(tmp_path, m
             assert queue._queue_lock.acquire(timeout=0.5)
             try:
                 if race == "grant":
-                    root["_budget_pause_hold"]["root_grant_id"] = "replacement-grant"
+                    root["_resume_selection"]["root_grant_id"] = "replacement-grant"
                 elif race == "stop":
                     request_cancel(tmp_path, "child", reason="Stop", source="owner")
                 elif race == "pause":

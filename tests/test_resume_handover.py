@@ -509,7 +509,7 @@ def _fail_member_release(monkeypatch, failure):
     published = []
 
     def fail_release(*_args, **_kwargs):
-        published.append(any((row.get("_budget_pause_hold") or {}).get("selected") for row in workers.PENDING))
+        published.append(any(row.get("_resume_selection") for row in workers.PENDING))
         raise failure
 
     monkeypatch.setattr(owner_pause, "select_member_resume", fail_release)

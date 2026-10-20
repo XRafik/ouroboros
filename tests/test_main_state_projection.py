@@ -229,7 +229,7 @@ def _hold(reason):
     ({"_budget_pause_hold": _hold("continuation_writer_unsettled")}, False, False),
     ({"_budget_pause_hold": _hold("restore_refused:invalid_budget_fence_snapshot")}, False, False),
     ({"_continuation_prepared": "sha"}, False, False),
-    ({"_budget_pause_hold": {**_hold("owner_restart_hold"), "selected": True}}, False, False),
+    ({"_resume_selection": {"selected_by": "owner"}}, False, False),
     ({}, False, False),
 ], ids=["exact-budget", "zero-dispatch-budget", "under-owner-fence", "owner-saved", "unheld-sleep",
         "held-saved-sleep", "panic-held-sleep", "restart-hold", "saved-work-hold", "writer-hold",
@@ -492,7 +492,7 @@ def test_an_interrupted_owner_resume_of_a_project_member_offers_its_existing_res
     assert after["fence_id"] == before["fence_id"] and after["state"] == before["state"], "the tree stays fenced"
     assert after["selected_members"][CHILD]["grant_id"] == grant_id, "completed on its own consumed grant"
     [held] = workers.PENDING
-    assert held[BUDGET_HOLD_KEY]["selected"] is True and held[BUDGET_HOLD_KEY]["selected_by"] == "owner"
+    assert BUDGET_HOLD_KEY not in held and held["_resume_selection"]["selected_by"] == "owner"
     assert not _attention_rows(_member_state(client), CHILD), "a completed Resume leaves Main"
     sent = worker(host, monkeypatch)
     workers.assign_tasks()

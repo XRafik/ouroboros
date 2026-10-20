@@ -220,8 +220,8 @@ def install_fence(root_drive: Any, root_task_id: str, *, request_id: str,
     from ouroboros.utils import utc_now_iso
 
     from ouroboros.control_actor import control_actor, pause_author
-    declared = {"by": dict(by)} if by else {}
-    attribution = {**control_actor(), **declared}
+    author = {**control_actor(), **(by or {})}
+    attribution = {"by": author} if author else {}
     outcome: Dict[str, Any] = {}
 
     def update(current: dict) -> Optional[dict]:
@@ -246,7 +246,7 @@ def install_fence(root_drive: Any, root_task_id: str, *, request_id: str,
             raise OwnerPauseRefused("task_terminal")
         if fence_closed(old) and not _resume_outstanding(actor_current if actor_current is not None else current, old):
             requests[request_id] = {**attribution, "fence_id": old["fence_id"], "generation": old.get("generation")}
-            fence = {**old, **({} if pause_author(old)["actor"] else declared), "requests": requests}
+            fence = {**old, **({} if pause_author(old)["actor"] else attribution), "requests": requests}
             outcome.update(fence=fence, created=False)
             return stamp_task_result_schema({**current, "owner_pause": fence})
         fence = {

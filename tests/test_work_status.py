@@ -34,7 +34,7 @@ def test_writer_held_continue_waits_and_is_never_the_owners_turn():
     # The same parked row without the writer hold is a pause, not a wait.
     assert ws.classify_member(held, {"hold": {}})["activity"] == "paused"
     # A hold the owner's selection already released explains nothing.
-    assert ws.classify_member(held, {"hold": {"reason": "continuation_writer_unsettled", "selected": True}})[
+    assert ws.classify_member(held, {"hold": {}, "_resume_selection": {"selected_by": "owner"}})[
         "activity"] == "paused"
 
 
@@ -60,6 +60,8 @@ def test_pause_author_reads_the_declared_record_and_never_defaults_to_the_owner(
     # Legacy fences: the mind's own record, at the top or as its first press on the same fence.
     legacy = {"fence_id": "f1", "actor": "mind", "reason": " for the update ", "requested_at": "R", "paused_at": "P"}
     assert pause_author(legacy) == {"actor": "ouroboros", "text": "for the update", "at": "R"}
+    assert pause_author({**legacy, "text": "new wording"}) == {
+        "actor": "ouroboros", "text": "new wording", "at": "R"}
     pressed_later = {"fence_id": "f1", "requested_by": "owner", "requested_at": "R",
                      "requests": {"a": {"fence_id": "f1"}, "b": {"fence_id": "f1", "actor": "mind", "reason": "x"},
                                   "c": {"fence_id": "f0", "actor": "mind", "reason": "older fence"}}}

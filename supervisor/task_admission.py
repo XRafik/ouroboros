@@ -664,7 +664,7 @@ def revalidate_project_holds() -> None:
     if not held:
         return
     effects = ("_project_admission_restore_hold", "_terminalization_retry", "_owner_hold",
-               "_owner_wait_resume", "_budget_pause", "_budget_pause_resume", BUDGET_HOLD_KEY)
+               "_owner_wait_resume", "_budget_pause", "_budget_pause_resume", "_resume_selection", BUDGET_HOLD_KEY)
     before = [copy.deepcopy({key: task[key] for key in effects if key in task}) for task in held]
     counts = Counter(row.get("id") for row in queue.PENDING)
     # Restore's parent rule, re-read at release: exact continuations are saved work.

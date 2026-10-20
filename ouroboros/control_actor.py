@@ -35,13 +35,15 @@ def pause_author(fence: dict | None) -> dict:
                         if isinstance(entry, dict) and entry.get("fence_id") == fence.get("fence_id")]
     for entry in legacy:
         if entry.get("actor") == "mind":
-            return {"actor": "ouroboros", "text": str(entry.get("reason") or "").strip(), "at": at}
+            return {"actor": "ouroboros", "text": str(entry.get("text") or entry.get("reason") or "").strip(), "at": at}
     return {"actor": "", "text": "", "at": at}
 
 
 @contextmanager
 def mind_control(actor_task_id: str, reason: str):
-    token = _ACTOR.set({"actor": "mind", "actor_task_id": actor_task_id, "reason": reason})
+    from ouroboros.utils import utc_now_iso
+
+    token = _ACTOR.set({"actor": "ouroboros", "task_id": actor_task_id, "text": reason, "at": utc_now_iso()})
     try:
         yield
     finally:

@@ -140,7 +140,7 @@ def test_owner_restart_holds_the_never_started_queue_and_keeps_it_through_later_
     assert [row["id"] for row in workers.PENDING] == ["child-of-live", "queued-root"]
     held = workers.PENDING[1]
     hold = budget_hold_fact(held)
-    assert hold is not None and hold["reason"] == HOLD_OWNER_RESTART and hold["dispatchable"] is False
+    assert hold is not None and hold["reason"] == HOLD_OWNER_RESTART and hold["release"] == "resume"
     projected = load_task_result(tmp_path, "queued-root")
     assert projected["status"] == STATUS_SCHEDULED and projected["reason_code"] == HOLD_OWNER_RESTART
     for task_id in ("root-live", "retry-row"):
@@ -168,7 +168,7 @@ def test_owner_restart_holds_the_never_started_queue_and_keeps_it_through_later_
     outcome = queue.resume_budget_paused_task("queued-root")
     assert outcome["ok"] is True and outcome["task_id"] == "queued-root"
     assert budget_hold_fact(restored) is None
-    assert restored["_budget_pause_hold"]["selected_by"] == "owner"
+    assert restored["_resume_selection"]["selected_by"] == "owner"
 
 
 def test_a_queued_unused_resume_grant_returns_to_its_pause_instead_of_being_cancelled(tmp_path, monkeypatch):

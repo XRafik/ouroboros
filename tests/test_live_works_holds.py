@@ -17,7 +17,7 @@ def _snapshot(root, *, running=(), pending=()):
 
 def test_a_writer_held_continue_reads_as_held_for_the_earlier_attempt(tmp_path):
     write_task_result(tmp_path, "c", "scheduled", title="Continue: Release")
-    held = {"reason": "continuation_writer_unsettled", "held_at": "2026-10-17T11:00:00Z", "selected": False}
+    held = {"reason": "continuation_writer_unsettled", "held_at": "2026-10-17T11:00:00Z"}
     _snapshot(tmp_path, pending=[{"id": "c", "attempt": 1, "task": {
         "id": "c", "chat_id": 42, "_budget_pause_hold": held,
         "metadata": {"continuation": {"predecessor_task_id": "p"}}}}])
@@ -28,7 +28,7 @@ def test_a_writer_held_continue_reads_as_held_for_the_earlier_attempt(tmp_path):
     assert "held (reason=earlier_work_unconfirmed" in render_roster_note(independent_roots(tmp_path))
     # A hold the owner already selected explains nothing any more.
     _snapshot(tmp_path, pending=[{"id": "c", "attempt": 1, "task": {
-        "id": "c", "chat_id": 42, "_budget_pause_hold": {**held, "selected": True}}}])
+        "id": "c", "chat_id": 42, "_resume_selection": {"selected_by": "owner"}}}])
     assert "waiting" not in independent_roots(tmp_path)["roots"][0]
 
 

@@ -373,7 +373,7 @@ def queued_admitted_dispatch(task: Any) -> bool:
     from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_UNSAVED_PAUSE
 
     hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    intent = isinstance(hold, dict) and hold.get("reason") == HOLD_UNSAVED_PAUSE and not hold.get("selected")
+    intent = isinstance(hold, dict) and hold.get("reason") == HOLD_UNSAVED_PAUSE
     return bool(isinstance(task, dict) and task.get("admitted_dispatch") == "possible"
                 and not any(task.get(key) for key in (
                     "_owner_hold", "_budget_pause", "_budget_pause_resume", "_owner_wait_resume",
@@ -639,7 +639,7 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
             STATUS_SCHEDULED,
             reason_code="",
             resource_limit={
-                **prior_pause, **control_actor(),
+                **prior_pause, "by": control_actor(),
                 "status": "resumed",
                 "resumed_at": resumed_at,
                 "auto_resume": False,

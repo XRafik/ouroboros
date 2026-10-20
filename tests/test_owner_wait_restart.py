@@ -380,7 +380,7 @@ def test_old_snapshot_never_revives_unproven_or_spent_wait(restart_case, monkeyp
         return
     [row] = workers.PENDING
     if refusal == "bad_source":
-        assert restored == 1 and budget_hold_fact(row)["dispatchable"] is False
+        assert restored == 1 and budget_hold_fact(row) and "_resume_selection" not in row
         assert row["_owner_wait_resume"]["source_ref"] == case.wait["source_ref"]
         assert path.read_bytes() == b"broken source", "holding must not rewrite the original"
         commands = stdqueue.Queue()

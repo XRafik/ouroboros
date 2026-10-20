@@ -99,7 +99,7 @@ def test_unrestorable_source_holds_the_row_with_its_marker_and_a_later_grant_rel
     held = workers.PENDING[0]
     assert held["id"] == "corrupt-1" and held["_budget_pause"]["exact_continuation"] is True
     hold = budget_hold_fact(held)
-    assert hold["reason"] == "restore_refused:pause_source_unreadable" and hold["dispatchable"] is False
+    assert hold["reason"] == "restore_refused:pause_source_unreadable" and hold["release"] == "resume"
     sent = []
     workers.WORKERS[0] = affirm_ready(SimpleNamespace(wid=0, busy_task_id=None, reaping=False,
                                          in_q=SimpleNamespace(put=lambda t: sent.append(dict(t)))))
@@ -110,7 +110,7 @@ def test_unrestorable_source_holds_the_row_with_its_marker_and_a_later_grant_rel
     source.write_bytes(original)
     granted = queue.resume_budget_paused_task("corrupt-1")
     assert granted["ok"] is True and granted["released_hold"] == "restore_refused:pause_source_unreadable"
-    assert budget_hold_fact(held) is None and held["_budget_pause_hold"]["selected"] is True
+    assert budget_hold_fact(held) is None and "_budget_pause_hold" not in held and "_budget_pause_resume" in held
     workers.assign_tasks()
     assert [t["id"] for t in sent] == ["corrupt-1"]
 
@@ -187,7 +187,7 @@ def test_root_re_resume_rebinds_fence_lifted_sibling_holds_to_the_live_grant(tmp
     # The model's selection is granted under the LIVE root grant only.
     selected = queue.resume_budget_paused_task("sib-3", selected_by="root-3")
     assert selected["ok"] is True and selected["selection"] == "budget_hold_released"
-    assert budget_hold_fact(sibling) is None and sibling["_budget_pause_hold"]["selected_by"] == "root-3"
+    assert budget_hold_fact(sibling) is None and sibling["_resume_selection"]["selected_by"] == "root-3"
 
 
 def test_model_issued_child_selection_needs_the_roots_live_grant(tmp_path, monkeypatch):
@@ -365,8 +365,8 @@ def test_selecting_one_member_of_a_fenced_root_never_lifts_the_latch(tmp_path, m
     granted = queue.resume_budget_paused_task("m1-f2")
     assert granted["ok"] is True and granted["selection"] == "budget_hold_released"
     assert queue.BUDGET_ROOT_FENCES["root-f2"]["fence_id"] == fence["fence_id"]  # the latch stands
-    assert first["_budget_pause_hold"]["selected"] is True
-    assert first["_budget_pause_hold"]["fence_id"] == fence["fence_id"]
+    assert "_budget_pause_hold" not in first and "_resume_selection" in first
+    assert first["_resume_selection"]["fence_id"] == fence["fence_id"]
     # The UI truth follows the same rule: one row released, the other still paused.
     assert budget_pause_fact(first) is None
     assert budget_pause_fact(second)["fence_id"] == fence["fence_id"]
@@ -400,7 +400,7 @@ def test_a_selection_bound_to_an_older_fence_does_not_pre_release_a_new_one(tmp_
         workers.WORKERS[0].busy_task_id = "other"
     workers.assign_tasks()
     assert sent == []
-    assert not member.get("_budget_pause_hold", {}).get("selected")
+    assert "_resume_selection" not in member
 
 
 def test_root_resume_holds_a_fence_bound_child_marker_instead_of_stranding_it(tmp_path, monkeypatch):
@@ -708,7 +708,7 @@ def test_assignment_keeps_a_paused_roots_reason_over_the_selection_it_ran_under(
     returned to an unselected hold."""
     from ouroboros import budget_pause
     from ouroboros.task_results import load_task_result, write_task_result
-    from supervisor.events_budget import BUDGET_HOLD_KEY, budget_resume_dispatch_allowed, install_exact_budget_pause
+    from supervisor.events_budget import BUDGET_HOLD_KEY, budget_hold_fact, budget_resume_dispatch_allowed, install_exact_budget_pause
     from supervisor.owner_pause_control import request_owner_pause
     from supervisor.restart_retention import hold_stopped_queue
     from tests._budget_pause_exact_helpers import _fast_hold, _mock_pause_observation
@@ -727,25 +727,25 @@ def test_assignment_keeps_a_paused_roots_reason_over_the_selection_it_ran_under(
     _idle_worker(workers, sent)
     workers.assign_tasks()
     assert [task["id"] for task in sent] == ["alpha"]
-    ran_under = dict(workers.RUNNING["alpha"]["task"][BUDGET_HOLD_KEY])
-    assert ran_under["selected"] is True and ran_under["reason"] == "saved_work_hold"
+    ran_under = dict(workers.RUNNING["alpha"]["task"]["_resume_selection"])
+    assert ran_under["selected_by"] == "owner" and "reason" not in ran_under
 
     assert request_owner_pause("alpha", request_id="pause-after-resume")["ok"]
     _ctx, limit = _member_ctx(tmp_path, "alpha", "alpha")
     install_exact_budget_pause(_sup(tmp_path, queue, workers), "alpha",
                                budget_pause.exact_pause_marker(_park(limit))["checkpoint"])
     [paused] = workers.PENDING
-    assert paused["_budget_pause"]["reason"] == "owner" and paused[BUDGET_HOLD_KEY] == ran_under
+    assert paused["_budget_pause"]["reason"] == "owner" and paused["_resume_selection"] == ran_under
     assert budget_resume_dispatch_allowed(queue, paused) is False, "the old choice names no Pause latch"
     assert load_task_result(tmp_path, "alpha", strict=True)["reason_code"] == "owner_paused"
     member = {"id": "alpha-child", "type": "task", "chat_id": 0, "_attempt": 1, "root_task_id": "alpha",
-              "parent_task_id": "alpha", "admitted_dispatch": "none", BUDGET_HOLD_KEY: dict(ran_under)}
+              "parent_task_id": "alpha", "admitted_dispatch": "none", "_resume_selection": dict(ran_under)}
     workers.PENDING.append(member)
     assert budget_resume_dispatch_allowed(queue, member) is False
 
     workers.assign_tasks()
     assert [task["id"] for task in sent] == ["alpha"]
-    assert paused[BUDGET_HOLD_KEY] == ran_under and "_budget_pause" in paused
+    assert paused["_resume_selection"] == ran_under and "_budget_pause" in paused
     assert load_task_result(tmp_path, "alpha", strict=True)["reason_code"] == "owner_paused"
-    assert member[BUDGET_HOLD_KEY]["selected"] is False
+    assert "_resume_selection" not in member and budget_hold_fact(member)
     assert member[BUDGET_HOLD_KEY]["detail"] == "root_resume_generation_stale"

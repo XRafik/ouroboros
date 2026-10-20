@@ -16,7 +16,7 @@ def test_owner_tree_and_restart_hold_do_not_inherit_a_budget_label():
     assert _activity_pause_cause({"_budget_pause_hold": {"reason": "saved_work_hold"}}, {}) == "restart"
     # Once the owner's Resume released (selected) that hold, a later owner Pause names itself.
     for reason in ("owner_restart_hold", "saved_work_hold"):
-        released = {"_budget_pause_hold": {"reason": reason, "selected": True}}
+        released = {"_resume_selection": {"selected_by": "owner"}}
         assert _activity_pause_cause(released, {"cause": "owner_pause"}) == "owner"
     assert _activity_pause_cause({}, {}) == "unknown"
     assert _activity_pause_cause({"reason_code": "budget_exhausted"}, {}) == "budget"

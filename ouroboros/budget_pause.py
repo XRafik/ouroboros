@@ -1129,12 +1129,12 @@ def budget_hold_fact(task) -> Optional[Dict[str, Any]]:
     admission fence was lifted by that root's Resume — lifting the fence must
     not make it assignable, the model selects it explicitly (owner Q9) — a row
     whose exact continuation could not be restored, and a row whose spent
-    grant could not be revoked. ``selected`` is the only release.
+    grant could not be revoked. Release deletes this record; Q9 selection is separate.
     """
     if isinstance(task, dict) and task.get("_continuation_prepared"):
         return {"reason": "continuation_publication_unconfirmed", "selected": False, "dispatchable": False}
     hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    return hold if isinstance(hold, dict) and not hold.get("selected") else None
+    return hold if isinstance(hold, dict) else None
 
 
 def budget_fence_selected(task: Any, fence: Any) -> bool:
@@ -1147,7 +1147,7 @@ def budget_fence_selected(task: Any, fence: Any) -> bool:
     generation it was granted against, so a later fence — a root that paused
     again — is never pre-released by an older selection (#1196, owner Q9).
 
-    The exact Resume handoff, when present, decides alone (an older selected hold
+    The exact Resume handoff, when present, decides alone (an older selection
     never rescues it): an ``explicit_resume`` grant naming its pause, its grant
     and this fence, issued by the owner or under a named root grant generation.
     Sleep readiness is never money. A row paused again, a stale consumed carrier
@@ -1168,8 +1168,8 @@ def budget_fence_selected(task: Any, fence: Any) -> bool:
                     and (handoff.get("selected_by") == "owner"
                          or str(handoff.get("root_grant_id") or "").strip()
                          and int(handoff.get("root_resume_generation") or 0) > 0))
-    hold = task.get(BUDGET_HOLD_KEY)
-    return bool(isinstance(hold, dict) and hold.get("selected") and str(hold.get("fence_id") or "") == fence_id)
+    selection = task.get("_resume_selection")
+    return bool(isinstance(selection, dict) and str(selection.get("fence_id") or "") == fence_id)
 
 
 # --- resume (loop side) -----------------------------------------------------------------
