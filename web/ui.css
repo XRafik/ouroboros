@@ -252,6 +252,12 @@
     --chat-photo-min-box: calc(var(--touch-target-min) + 14px);
     --chat-media-bubble-max: 520px;
     --chat-attach-thumb-size: 28px;
+    /* Message fields (DESIGN §3, "Quiz card"): the composer's control height, which a question's Send shares; the one
+       cap a message field grows to before it scrolls (chat_input_sizing.js reads it as the field's max-height); and
+       the row a question's voice line and head share, its × as tall as the row. */
+    --composer-control-height: 32px;
+    --message-field-max-height: 140px;
+    --quiz-row-height: 28px;
     /* The smallest comfortable touch target; a coarse pointer (a phone) raises it to a finger's 44px (below). */
     --touch-target-min: 36px;
     /* The hit extension's inset (the recipe below): out only on the sides that fall short of the touch minimum. The

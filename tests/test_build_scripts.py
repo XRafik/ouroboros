@@ -1251,14 +1251,16 @@ def test_launcher_retains_cross_platform_runtime_hooks():
     assert "_prepare_windows_webview_runtime" in launcher_source
     assert "git_install_hint()" in launcher_source
     assert "create_kill_on_close_job" in launcher_source
-    assert "kill_process_on_port(int(companion_port))" in launcher_source
-    assert "force_kill_pid(child.pid)" in launcher_source
+    assert "kill_runtime_orphans(DATA_DIR" in launcher_source
+    reaper = _pkg_read("ouroboros/launcher_server_reaper.py")
+    assert "kill_process_on_port(int(companion_port))" in reaper
+    assert "force_kill_pid(child.pid)" in reaper
 
 
 @pytest.mark.skipif(not _BUNDLE_FILES_PRESENT, reason=_PACKAGING_SKIP_REASON)
 def test_launcher_preserves_macos_git_setup_path():
     launcher_source = _pkg_read("launcher.py")
-    assert 'subprocess.Popen(["xcode-select", "--install"])' in launcher_source
+    assert '_hidden_popen(["xcode-select", "--install"], bootstrap=True)' in launcher_source  # owned, no window flag off Windows
     assert "Install Git (Xcode CLI Tools)" in launcher_source
     assert "Installing... A system dialog may appear." in launcher_source
 

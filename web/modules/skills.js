@@ -4,7 +4,7 @@
 // default and never waits for a source or GitHub: it reads the local listing and
 // the serialized lifecycle queue, and every owner action keeps its own words,
 // confirmation and refusal. Browse and Sources live in their own modules.
-import { bindTabStrip, renderPageHeader, renderTabStrip } from './page_header.js';
+import { bindPageHeader, bindTabStrip, renderPageHeader, renderTabStrip } from './page_header.js';
 import { bindMenu } from './ui_interactions.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { showToast } from './toast.js';
@@ -974,6 +974,8 @@ export function initSkills(ctx = {}) {
         dataAttr: 'data-tab', activeClass: 'is-active',
         onChange(tabName) { closeMenus(); activeTab = tabName; activateTab(tabName); paintChrome(); showActive(); },
     });
+    // On a desk Installed, Browse and Sources start the bar that Update all and Refresh end (DESIGN "Page header").
+    const disposeBar = bindPageHeader(root.querySelector('.app-page-header'));
 
     const onRefresh = async () => {
         refreshBtn.disabled = true;
@@ -1045,6 +1047,7 @@ export function initSkills(ctx = {}) {
         browse.destroy();
         sourcesView.destroy();
         tabs.destroy();
+        disposeBar();
         unsubscribe?.();
         refreshBtn.removeEventListener('click', onRefresh);
         updateAllBtn.removeEventListener('click', updateAll);

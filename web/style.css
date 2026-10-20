@@ -482,7 +482,7 @@ html[data-layout="stack"] .resize-handle { display: none; }
 .chat-live-project-status { flex: none; }
 
 /* Inline, it is ONE capsule wherever content points at a Project: under a System row or a mirrored answer
-   (`createSystemMessageActions`), at the end of a routed message's receipt line, in a mirrored question's head
+   (`createSystemMessageActions`), at the end of a routed message's receipt line, in a mirrored question's voice line
    before the question and its options. It stands on the rest shadow like every pressable capsule and takes no width
    of its own: a long name ellipsizes inside the row it is given, its title and accessible name stay whole. */
 .chat-quiz-project.chat-live-project-card-btn {
@@ -496,9 +496,34 @@ html[data-layout="stack"] .resize-handle { display: none; }
 }
 .chat-quiz-project.chat-live-project-card-btn:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: 2px; }
 
-/* A Project question mirrored into Main is the Project's own quiz card (docs/DESIGN.md "Project question mirror"):
-   the capsule names its Project in the head; a head that cannot hold the name beside the status wraps. */
-.project-question-card .chat-quiz-head { flex-wrap: wrap; }
+/* A question's voice line (chat_media.bubbleFrameNode `voice`; docs/DESIGN.md "Quiz card"): `Ouroboros` and, in a
+   Main copy, the Project it comes from, one 28px row above the card's own head. The capsule takes the row's height
+   at the line's size and its free width, the name ellipsizing first; a finger keeps the touch minimum through
+   `.ui-hit-area`. Neither edge line widens the bubble: the card under them decides its width. */
+.chat-bubble-voice {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    min-height: var(--quiz-row-height);
+    margin-bottom: var(--space-2);
+    contain: inline-size;
+}
+/* Under a finger the capsule and the head's × each reach past their rows to the touch minimum, more than the
+   --space-2 between the rows holds. The line keeps a finger's width free at its end, over the ×, so a low tap on ↗
+   never lands on Close, both targets stay whole and the rows keep their height. */
+@media (pointer: coarse) {
+    .chat-bubble-voice:has(> .ui-hit-area) { padding-inline-end: var(--touch-target-min); }
+}
+.chat-bubble > .chat-bubble-voice > .sender { flex: none; margin: 0; }
+.chat-bubble-voice > .chat-quiz-project.chat-live-project-card-btn {
+    min-height: var(--quiz-row-height);
+    padding: 0 var(--space-3);
+    gap: 6px;
+    font-size: var(--type-meta);
+    line-height: var(--line-meta);
+}
+.chat-bubble-voice > .chat-quiz-project .chat-live-project-name { font-weight: 600; }
 
 /* The footer: a work portal (work_portal.js) closes with the strip across the card's full width, under the work's
    own controls. The card clips its corners, so the ring is the inset variant; a long name takes two lines. */
@@ -569,15 +594,16 @@ html[data-layout="stack"] .resize-handle { display: none; }
     .chat-question-nav { padding: 0 10px; gap: 4px; }
     .chat-question-nav-word, .chat-question-nav-arrow { display: none; }
 }
-/* A quiz card's head ends with its status and, while it takes an answer, one quiet × that closes it. */
-.chat-quiz-head-end { margin-inline-start: auto; display: inline-flex; align-items: center; gap: var(--space-3); min-width: 0; }
+/* A quiz card's head ends, while it takes an answer, with one quiet × that closes it, as tall as the head's row; a
+   finger's target is the shared `.ui-hit-area`. */
+.chat-quiz-head-end { flex: none; margin-inline-start: auto; display: inline-flex; align-items: center; }
 .chat-quiz-close {
     position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    width: var(--quiz-row-height);
+    height: var(--quiz-row-height);
     padding: 0;
     border: 1px solid var(--ui-card-border);
     border-radius: 50%;
@@ -588,7 +614,6 @@ html[data-layout="stack"] .resize-handle { display: none; }
 .chat-quiz-close:hover:not(:disabled) { color: var(--text-primary); border-color: var(--focus-accent-border); }
 .chat-quiz-close:disabled { color: var(--text-disabled); cursor: default; }
 .chat-quiz-close:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: 2px; }
-@media (pointer: coarse) { .chat-quiz-close::after { content: ''; position: absolute; inset: -10px; } }
 /* An owner-required action is a System message: the task, one sentence, the task's own controls. */
 .owner-action-body { display: flex; flex-direction: column; gap: var(--space-2); }
 .owner-action-reason { font-size: var(--type-meta); color: var(--text-meta); }
@@ -770,13 +795,15 @@ html[data-layout="stack"] .resize-handle { display: none; }
     margin-left: auto;
 }
 
+.files-browser-header > .files-browser-actions { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+
 .files-crumb {
     border: none;
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
     font-size: 12px;
-    max-width: min(360px, 70vw);
+    max-width: min(360px, 100%);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -973,8 +1000,8 @@ html[data-layout="stack"] .resize-handle { display: none; }
 
 /* The one header (page_header.js; DESIGN "Shell"): one row, `☰ · title · status … actions · ×`. The leading
    slot holds ☰ (shown by the stack layout), the title row the place's name and the room's status, the toolbar the
-   actions, the trailing slot a Project's ×. A tab strip is not in the row: it is its own strip under it, and a
-   page has no caption line. */
+   actions, the trailing slot a Project's ×. On a desk a page's tabs or location take the hidden title's place in
+   the row (`.app-page-lead`); in the stack layout they are their own strip under it. A page has no caption line. */
 .page-header,
 .app-page-header {
     display: grid;
@@ -1038,8 +1065,8 @@ html[data-layout="docked"] .app-page-header[data-empty] {
     display: none;
 }
 /* In the macOS desktop window the band under the transparent title bar is the window's handle
-   (launcher_window_chrome.py: a plain press there moves the window, a press on a control stays the page's). An
-   empty header keeps that band as a plain strip, so a page's tabs and controls start below it. */
+   (launcher_window_chrome.py: a plain press there moves the window, a press on a control stays the page's). A
+   header with nothing to show (Widgets) keeps that band as a plain strip, so the page starts below it. */
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] {
     display: block;
     height: var(--window-chrome-top);
@@ -1075,12 +1102,93 @@ html[data-layout="docked"] .app-page-header[data-empty] {
     }
 }
 
-/* The tab strip is its own strip under the header row (it scrolls sideways by design). */
+/* In the stack layout the tab strip is its own strip under the header row (it scrolls sideways by design). */
 .app-page-tabs {
     flex: 0 0 auto;
     min-width: 0;
     padding: 0 var(--page-header-padding-x) var(--page-header-padding-bottom);
 }
+
+/* A page's own navigation in its bar (page_header.js bindPageHeader; DESIGN "Page header", owner 19.10 A). On a desk
+   the bar of a page the sidebar names has two ends, as Main's has: its start holds the page's tabs or Files' location
+   where the hidden title stood, its end the page's actions, every control at the chrome height on Main's line (in
+   the macOS window, centred on the band under the transparent title bar, whose empty parts still move the window).
+   The strip keeps its sideways scroll, fades and revealed choice, and lends its tabs' shadows room below the bar
+   without taking presses there. The stack layout keeps the nodes under the row. */
+.app-page-lead { display: flex; align-items: center; min-width: 0; }
+.app-page-lead > * { min-width: 0; }
+.app-page-lead:empty,
+.app-page-tabs:not(:has(> *)) { display: none; }
+/* A narrow content column gives the existing toolbar its own wrapping row; navigation lives below it. */
+html[data-layout="docked"] .app-page-header[data-narrow] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "toolbar"; }
+html[data-layout="docked"] .app-page-header[data-narrow] > .app-page-leading { display: none; }
+html[data-layout="docked"] .app-page-header[data-narrow] > .app-page-title-block { position: absolute; }
+html[data-layout="docked"] .app-page-header[data-narrow] > .app-page-toolbar { flex-wrap: wrap; }
+html[data-layout="docked"] .app-page-header[data-narrow] > .app-page-toolbar > button { flex: none; }
+html[data-layout="docked"] .app-page-header[data-lead] {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "title toolbar";
+    min-height: 50px;
+    padding-block: 0;
+}
+:root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-lead] {
+    min-height: max(50px, var(--window-chrome-top));
+}
+html[data-layout="docked"] .app-page-header[data-lead] > .app-page-leading { display: none; }
+html[data-layout="docked"] .app-page-header[data-lead] > .app-page-toolbar :is(.btn, button) {
+    height: var(--chrome-control-h);
+    min-height: var(--chrome-control-h);
+    padding-block: 0;
+}
+html[data-layout="docked"] .app-page-lead .app-tab-strip {
+    flex: 1 1 auto;
+    padding: 10px var(--space-1) 26px;
+    margin: 0 0 -16px calc(-1 * var(--space-1));
+    scroll-padding-inline: var(--space-1);
+    pointer-events: none;
+}
+html[data-layout="docked"] .app-page-lead .app-tab {
+    height: var(--chrome-control-h);
+    padding-block: 0;
+    pointer-events: auto;
+}
+/* Files: the folder's location starts the bar at reading size, each folder by its name, the one you are in in primary
+   ink. A location longer than the bar's start scrolls inside it as a tab strip does, fading where folders hide: it
+   rests at its end (files.js), so the folders above give way first, and no folder is wider than the strip less one
+   fade, so the one you are in rests clear of it (a longer name ellipsizes; its words stay its accessible name). Its
+   own actions (Paste, + File, + Dir) join Refresh at the bar's end. */
+html[data-layout="docked"] .app-page-lead > .files-breadcrumb {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 2px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-padding-inline: var(--space-4);
+    scrollbar-width: none;
+    --crumb-fade-start: 0px;
+    --crumb-fade-end: 0px;
+    -webkit-mask-image: linear-gradient(to right, transparent, black var(--crumb-fade-start),
+        black calc(100% - var(--crumb-fade-end)), transparent);
+    mask-image: linear-gradient(to right, transparent, black var(--crumb-fade-start),
+        black calc(100% - var(--crumb-fade-end)), transparent);
+}
+html[data-layout="docked"] .app-page-lead > .files-breadcrumb::-webkit-scrollbar { display: none; }
+html[data-layout="docked"] .app-page-lead > .files-breadcrumb[data-scroll-start] { --crumb-fade-start: var(--space-4); }
+html[data-layout="docked"] .app-page-lead > .files-breadcrumb[data-scroll-end] { --crumb-fade-end: var(--space-4); }
+html[data-layout="docked"] .app-page-lead .files-crumb {
+    flex: none;
+    max-width: min(360px, calc(100% - var(--space-4)));
+    min-height: var(--chrome-control-h);
+    padding: 0 var(--space-1);
+    font-size: var(--type-body);
+    font-weight: 500;
+}
+/* Inset: the strip clips an outer ring (DESIGN "Focus"). */
+html[data-layout="docked"] .app-page-lead .files-crumb:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: -2px; }
+html[data-layout="docked"] .app-page-lead .files-crumb:last-of-type { color: var(--text-primary); }
+html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-size: var(--type-body); }
+.files-browser-header:not(:has(> *)) { display: none; }
 
 .app-tab-strip {
     display: flex;
@@ -1569,7 +1677,7 @@ html[data-layout="docked"] .app-page-header[data-empty] {
         overflow-y: auto;
     }
     .files-sidebar > * { flex-shrink: 0; }
-    .files-sidebar .files-list { overflow: visible; }
+    .files-sidebar .files-list { overflow: visible; flex-basis: auto; }
 
 }
 
@@ -3769,7 +3877,6 @@ html[data-layout="stack"] .chat-page-note {
 }
 
 .chat-input-wrap {
-    --composer-control-height: 32px;
     --composer-control-font-size: 12px;
     --composer-control-shadow: inset 0 1px 0 rgba(var(--neutral-rgb), 0.055), 0 8px 22px rgba(0, 0, 0, 0.12);
     flex: 1;
@@ -4095,7 +4202,7 @@ textarea.chat-input {
        chat_input_sizing.js picks content sizing, else writes the measured height. */
     height: var(--chat-input-height, auto);
     min-height: 32px;
-    max-height: 140px;
+    max-height: var(--message-field-max-height);
     line-height: 1.45;
 }
 #chat-input[data-sizing="content"],
@@ -6292,7 +6399,6 @@ button.skills-mark { cursor: pointer; min-height: 0; }
 
 .widgets-list {
     position: relative;
-    margin-top: 16px;
     height: var(--masonry-h, auto);
 }
 
@@ -6993,10 +7099,6 @@ html[data-layout="stack"] .chat-toolbar-row,
 html[data-layout="stack"] #chat-input,
 html[data-layout="stack"] textarea.chat-input {
     min-width: 0;
-}
-
-html[data-layout="stack"] .chat-input-wrap {
-    --composer-control-height: 32px;
 }
 
 html[data-layout="stack"] .chat-toolbar-row {
@@ -8967,15 +9069,18 @@ body.keyboard-open .project-panel {
     border-radius: var(--radius);
     background: var(--ui-card-bg);
 }
+/* The head is one row in every room: `[Question] ● status … ×`, every item centred on one 28px row. It never
+   wraps: on a very narrow card the status takes a second line inside its own slot, so its words stay whole. */
 .chat-quiz-head {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     gap: var(--space-2, 8px);
+    min-height: var(--quiz-row-height);
 }
 .chat-quiz-chip {
     flex: 0 0 auto;
-    padding: 1px 8px;
+    padding: 0 8px;
+    line-height: 20px;
     white-space: nowrap;
     border-radius: var(--pill-radius);
     font-size: var(--type-meta);
@@ -8989,7 +9094,9 @@ body.keyboard-open .project-panel {
     display: inline-flex;
     align-items: center;
     gap: var(--space-2, 8px);
+    min-width: 0;
     font-size: var(--type-meta);
+    line-height: var(--line-meta);
     color: var(--text-meta);
 }
 .chat-quiz-question {
@@ -9007,12 +9114,19 @@ body.keyboard-open .project-panel {
     min-inline-size: 0;
 }
 .chat-quiz-stake .inline-code { font-size: inherit; }
-/* The host's own sentence under the question (who asks, how the run started, the owner's last message). */
-.chat-quiz-host-facts {
+/* A question's time line (chat_media.bubbleFrameNode `foot`): `15:18 · Asked by …`, the host's own sentence (who
+   asks, how the run started, the owner's last message) after the time it qualifies, one meta sentence whose second
+   line starts at the bubble's edge. The dot is drawn, so a copy of the sentence stays the host's words. */
+.chat-bubble-foot {
+    margin-top: var(--space-3);
     font-size: var(--type-meta);
-    line-height: var(--line-meta, 1.35);
+    line-height: var(--line-meta);
+    contain: inline-size;
+}
+.chat-bubble-foot > * { display: inline; margin: 0; }
+.chat-bubble-foot > * + *::before { content: "·"; content: "·" / ""; margin-inline: 6px; }
+.chat-quiz-host-facts {
     color: var(--text-meta);
-    min-inline-size: 0;
     overflow-wrap: anywhere;
 }
 /* An offered answer is an elevated card (owner 16.10: Material's elevated card, a choice and never a field): the
@@ -9062,7 +9176,10 @@ body.keyboard-open .project-panel {
 }
 .chat-quiz-feedback[hidden], .chat-quiz-feedback [hidden] { display: none; }
 .chat-quiz-submission-note, .chat-quiz-storage-note { flex-basis: 100%; white-space: pre-wrap; }
+.chat-quiz-feedback > :is(.chat-quiz-submission-note, .chat-quiz-storage-note):empty { display: none; }
 .chat-quiz-storage-note { color: var(--status-warn-fg); }
+/* Recovery reads as one row under the answer: Forget (only the local copy) at its start, the server actions at its end. */
+.chat-quiz-feedback > .chat-quiz-forget { margin-inline-end: auto; }
 .chat-quiz-feedback button:focus-visible {
     outline: 2px solid var(--focus-accent-border); outline-offset: 2px;
 }
@@ -9080,38 +9197,63 @@ body.keyboard-open .project-panel {
     font-weight: 600;
     color: var(--status-ok-fg);
 }
-/* Free answer: the owner's own words when no offered option fits. */
+/* Free answer: the owner's own words when no offered option fits, in one frame that holds its Send as the composer
+   holds its own. The frame wears the field's hairline and, while the words have focus, the field focus idiom; a card
+   too narrow for both gives Send its own line inside the frame, at its end. */
 .chat-quiz-comment-box {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-1, 4px);
-}
-.chat-quiz-comment {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--space-2, 8px);
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
     border: 1px solid var(--ui-card-border);
     border-radius: var(--radius-inner);
     background: var(--ui-card-bg-soft);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.chat-quiz-comment-box:has(> .chat-quiz-comment:focus) {
+    border-color: var(--focus-accent-border);
+    box-shadow: 0 0 0 3px var(--focus-accent-ring);
+}
+/* The words grow to one cap, then scroll (chat_input_sizing.js picks the engine's content sizing, else writes the
+   measured height); two lines at rest. */
+.chat-quiz-comment {
+    flex: 1 1 16em;
+    min-width: 0;
+    box-sizing: border-box;
+    height: var(--chat-input-height, auto);
+    min-height: calc(2em * var(--line-body) + 12px);  /* two lines of its own type: a finger's field reads at 16px */
+    max-height: var(--message-field-max-height);
+    padding: 6px 0;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
     color: var(--text-primary);
     font-family: inherit;
     font-size: var(--type-body);
     line-height: var(--line-body, 1.5);
-    resize: vertical;
+    resize: none;
 }
+.chat-quiz-comment[data-sizing="content"] { field-sizing: content; }
+.chat-quiz-comment[data-sizing="fit"] { overflow-y: hidden; }
 .chat-quiz-comment::placeholder { color: var(--text-meta); }
 /* Main's removal of an unknown late answer: a secondary action at its natural width. */
 .chat-quiz-card > .chat-quiz-dismiss { align-self: flex-start; }
-/* Send is the primary action's crimson capsule; until there is something to send it lies flat. */
+/* Send is the primary action's crimson capsule at the composer's control height; until there is something to send it
+   lies flat. */
 .chat-quiz-send {
-    align-self: flex-start;
-    padding: 6px 16px;
+    flex: none;
+    height: var(--composer-control-height);
+    padding: 0 var(--space-4);
     border: 0;
     border-radius: var(--pill-radius);
     background: var(--tone-crimson);
     color: var(--tone-crimson-ink);
-    font-size: var(--type-meta);
+    font-size: var(--button-font-size);
     font-weight: 600;
+    line-height: 1;
     box-shadow: var(--elev-rest);
     cursor: pointer;
     transition: var(--motion-tone);
@@ -9120,7 +9262,6 @@ body.keyboard-open .project-panel {
 .chat-quiz-send:active:not(:disabled) { filter: var(--press); }
 .chat-quiz-send:disabled { color: var(--text-disabled); background: var(--surface-tray); box-shadow: none; cursor: default; }
 .chat-quiz-option:focus-visible,
-.chat-quiz-comment:focus-visible,
 .chat-quiz-send:focus-visible,
 .chat-quiz-more:focus-visible {
     outline: 2px solid var(--focus-accent-border);

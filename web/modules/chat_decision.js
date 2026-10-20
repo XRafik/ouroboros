@@ -74,6 +74,8 @@ export function createChatDecision({
     const quizViews = new Map();
     const mirrors = new Map();
     const detailReads = new Map();
+    // Each card's host-facts line: it lives on the bubble's time line, outside the card (DESIGN "Quiz card").
+    const hostFacts = new WeakMap();
     const questionKey = (taskId, quizId) => JSON.stringify([String(taskId || ''), String(quizId || '')]);
     let disposed = false;
     let questionNavigation = 0;
@@ -686,9 +688,11 @@ export function createChatDecision({
         const wait = waitFacts(current);
         const existing = quizViews.get(key);
         if (existing) {
-            // A narrower first delivery may have lacked the host's sentence; a later one adds it.
-            if (quiz.hostFacts && !existing.querySelector('.chat-quiz-host-facts')) {
-                existing.querySelector('.chat-quiz-question')?.nextElementSibling?.before(hostFactsLine(quiz.hostFacts));
+            // A narrower first delivery may have lacked the host's sentence; a later one fills its line in place.
+            const facts = hostFacts.get(existing);
+            if (quiz.hostFacts && facts && !facts.textContent) {
+                facts.textContent = quiz.hostFacts;
+                facts.hidden = false;
             }
             if (quiz.comment) existing.dataset.ownerComment = quiz.comment;
             else if (Object.hasOwn(current, 'comment')) delete existing.dataset.ownerComment;
@@ -738,12 +742,11 @@ export function createChatDecision({
         const statusLabel = document.createElement('span');
         statusLabel.className = 'chat-quiz-status-text';
         status.append(createStatusMark(document, 'chat-quiz-mark'), statusLabel);
-        // The status and the card's quiet Close end the head together, so a wrap moves both.
+        // One row in every room: the status describes the question, so it sits beside the chip, and the card's
+        // quiet Close alone ends the row. Where the question comes from is the bubble's voice line (frameNode).
         const headEnd = document.createElement('span');
         headEnd.className = 'chat-quiz-head-end';
-        headEnd.append(status);
-        // The mirror's one addition to the Project form: the chip that opens it in its Project.
-        head.append(chip, ...(mirror ? [mirrorChip(mirror)] : []), headEnd);
+        head.append(chip, status, headEnd);
         card.append(head);
 
         // DRY with the chat surface (owner requirement): question and stake go
@@ -756,7 +759,6 @@ export function createChatDecision({
         if (mountMarkdown) mountMarkdown(question, questionText);
         else question.textContent = questionText;
         card.append(question);
-        if (quiz.hostFacts) card.append(hostFactsLine(quiz.hostFacts));
         syncQuestionMaterials(card, quiz.materials, renderMaterial);
 
         if (quiz.stake) {
@@ -831,7 +833,11 @@ export function createChatDecision({
         if (quiz.comment) card.dataset.ownerComment = quiz.comment;
         setCardState(card, quiz.state, quiz.answeredIndex);
         if (complete) submissions.attach(card, quiz);
-        const framed = frameNode(msg, card);
+        // The bubble says who asks and when: a Main copy's Project reference joins its voice line beside
+        // `Ouroboros` (the mirror's one addition to the Project form), the host's sentence its time line.
+        const facts = hostFactsLine(quiz.hostFacts);
+        hostFacts.set(card, facts);
+        const framed = frameNode(msg, card, { voice: mirror ? [mirrorChip(mirror)] : [], foot: [facts] });
         const disposeMarkdown = enhanceMarkdown && mountMarkdown ? enhanceMarkdown(card) : null;
         if (mirror) mirror.disposeMarkdown = disposeMarkdown;
         return framed;
