@@ -38,6 +38,7 @@ import { isStackLayout, onLayoutChange } from './modules/layout.js';
 import { createLayerStack } from './modules/layers.js';
 import { afterMotion, reducedMotion } from './modules/motion.js';
 import { createShellMotion } from './modules/shell_motion.js';
+import { createRoomRetirement } from './modules/room_retire.js';
 import { createTelegramHost } from './modules/host_telegram.js';
 import { DRAWER_DRAG, bindDrawerDrag } from './modules/drawer_drag.js';
 import { haptic } from './modules/haptics.js';
@@ -295,7 +296,7 @@ function syncDrawerScrim(painted, settled) {
 // rooms (a page, the Project panel, a Project room in it), what of it takes the breath, the rows the pill slides between.
 function handoverBetween(from, to) {
     const room = (scene, other) => (scene.project
-        ? (other.project ? (retiring.get(scene.project) || projectInstances.get(scene.project))?.page : projectPanel)
+        ? (other.project ? (rooms.retiring.get(scene.project) || projectInstances.get(scene.project))?.page : projectPanel)
         : document.getElementById(`page-${scene.page}`));
     const arriving = room(to, from);
     const breathe = arriving === projectPanel ? [...projectPanel.children].filter((el) => !el.classList.contains('room-veil')) : [arriving];
@@ -366,8 +367,8 @@ function syncNavigationState() {
         document.body.classList.toggle('project-panel-open', Boolean(activeProjectId));
     }
     // A Project room that was left is put away once the motion that shows it leaving has run.
-    const leftNow = [...retiring];
-    if (leftNow.length) Promise.all([settled, exit]).then(() => leftNow.forEach(([pid, inst]) => settleRetired(pid, inst)));
+    const leftNow = [...rooms.retiring];
+    if (leftNow.length) Promise.all([settled, exit]).then(() => leftNow.forEach(([pid, inst]) => rooms.settle(pid, inst)));
     // One commit for both layers (layers.js), after the panel's unhide so focus can go into it: the drawer, and the
     // Project panel's layer, modal only where it covers the room; on a phone only the covered room's inert (the whole
     // room restyles) waits for the card's motion.
@@ -593,31 +594,8 @@ function destroyProjectInstance(pid) {
     projectPaintRequests.delete(pid);
 }
 
-// A Project room that is left keeps its content while it leaves (DESIGN §10 "Motion"): retired (out of the live
-// instances, not read: chat.js leave; inert), then put away once its exit has run, as destroyProjectInstance does
-// (a room holding unsendable work stays, hidden). Reopened meanwhile, it is the same room.
-const retiring = new Map();  // pid → the instance leaving the screen
-function setLeaving(inst, leaving) {
-    inst.page.inert = leaving;
-    if (leaving) { inst.page.dataset.leaving = ''; inst.leave?.(); } else { delete inst.page.dataset.leaving; inst.stay?.(); }
-}
-function retireProjectInstance(pid) {
-    const inst = projectInstances.get(pid);
-    if (!inst?.page || inst.page.hidden) { destroyProjectInstance(pid); return; }
-    projectInstances.delete(pid);
-    cancelProjectPaint(pid, inst);
-    setLeaving(inst, true);
-    retiring.set(pid, inst);
-}
-// Reopened (`put` false) or its exit run: back among the instances, or destroyed where a new room took its place.
-function settleRetired(pid, inst = retiring.get(pid), put = true) {
-    if (!inst || retiring.get(pid) !== inst) return;
-    retiring.delete(pid);
-    setLeaving(inst, false);
-    if (projectInstances.has(pid)) { inst.destroy?.(); return; }
-    projectInstances.set(pid, inst);
-    if (put) destroyProjectInstance(pid);
-}
+// A Project room that is left keeps its content while it leaves (room_retire.js); app.js says when it has left.
+const rooms = createRoomRetirement({ instances: projectInstances, cancelPaint: cancelProjectPaint, destroy: destroyProjectInstance });
 
 let projectNavigationGeneration = 0;
 function closeProjectPanel({ sync = true, reveal = false } = {}) {
@@ -625,7 +603,7 @@ function closeProjectPanel({ sync = true, reveal = false } = {}) {
     projectReveals.clear();
     const activeId = navState.activeProjectId;
     navState.activeProjectId = null;
-    if (activeId) retireProjectInstance(activeId);
+    if (activeId) rooms.retire(activeId);
     // Anything left is a hidden pending-work survivor; keep it hidden.
     for (const [pid, inst] of projectInstances) {
         inst.closeTransient?.();
@@ -662,10 +640,10 @@ async function openProjectPanel(project, { closeDrawer = true, openOnly = false,
         // One live panel: every OTHER project instance is destroyed (or hidden and
         // marked when it holds pending work) before the target is created/shown; the one
         // on screen, left from the open phone drawer, is retired to fade out inside the card.
-        settleRetired(project.id, undefined, false);
+        rooms.settle(project.id, undefined, false);
         const handingOver = isStackLayout() && navState.mobileDrawerOpen && closeDrawer;
         for (const pid of [...projectInstances.keys()]) {
-            if (pid !== project.id) (handingOver ? retireProjectInstance : destroyProjectInstance)(pid);
+            if (pid !== project.id) (handingOver ? rooms.retire : destroyProjectInstance)(pid);
         }
         let inst = projectInstances.get(project.id);
         if (!inst) {

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import vm from 'node:vm';
+import { createRoomRetirement } from '../modules/room_retire.js';
 
 // The span below is delimited by line breaks; normalize CRLF so a Windows
 // checkout (core.autocrlf) reads the same bytes the delimiters expect.
@@ -369,15 +370,15 @@ function navigationHarness({ pendingWork, exitAtOnce = true }) {
         projectPanelTitle: {}, projectPanelBody: {}, ctx: {},
         // The panel's exit has run by the next sync here (as under reduced motion): a retired room is put away.
         showPage: async () => true, isStackLayout: () => false, createChatInstance: instance,
-        syncNavigationState() { if (exitAtOnce) for (const [pid, inst] of [...context.retiring]) context.settleRetired(pid, inst); },
+        syncNavigationState() { if (exitAtOnce) for (const [pid, inst] of [...context.rooms.retiring]) context.rooms.settle(pid, inst); },
         markProjectViewed: async (id, revision) => { acked.push([id, revision]); },
-        console: { error() {} },
+        console: { error() {} }, createRoomRetirement,
     });
     vm.runInContext(`let projectNavigationGeneration = 0, projectPanelOpeningSince = 0;
-        const retiring = new Map();
-        ${['cancelProjectPaint', 'destroyProjectInstance', 'setLeaving', 'retireProjectInstance', 'settleRetired',
+        ${['cancelProjectPaint', 'destroyProjectInstance',
         'closeProjectPanel', 'openProjectPanel', 'freshProjectRow', 'revealProjectQuestion'].map(lift).join('\n')}\n${ackSource}
-        Object.assign(globalThis, { retiring, settleRetired });
+        const rooms = createRoomRetirement({ instances: projectInstances, cancelPaint: cancelProjectPaint, destroy: destroyProjectInstance });
+        Object.assign(globalThis, { rooms });
         globalThis.api = { open: (options) => openProjectPanel(lastProjectRows[0], options), close: () => closeProjectPanel() };`,
     context);
     return { acked, built, held, project, context, api: context.api };
@@ -500,13 +501,13 @@ test('a closed room is retired for its exit, reopened as the same room, and a la
     assert.ok(room.refreshes >= reads, 'and it reads its history as any reopen does');
     // Closed again and put away when the exit has run.
     h.api.close();
-    h.context.settleRetired('p1', room);
+    h.context.rooms.settle('p1', room);
     assert.equal(room.destroyed, true);
-    assert.equal(h.context.retiring.size, 0);
+    assert.equal(h.context.rooms.retiring.size, 0);
     // A late put-away of a room another one replaced destroys only itself.
     await h.api.open();
     const next = h.built[1];
-    h.context.settleRetired('p1', room);
+    h.context.rooms.settle('p1', room);
     assert.equal(next.destroyed, false, 'the new room is untouched by the old one\'s put-away');
 });
 
