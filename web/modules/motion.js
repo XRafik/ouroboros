@@ -1,13 +1,13 @@
 /** May anything move, and when has a motion ended (docs/DESIGN.md §10 "Motion").
  *
- * The stylesheet owns every duration and curve; script keeps no copy of one. `afterMotion(el)` waits for the element's
- * own transition of one property: its `transitionend` or `transitioncancel` (a child's, another property's, or one from
- * a transition replaced while a new one runs, never ends it); else the element's computed duration plus delay and one
- * frame, because WebKit fires nothing for a transition it skipped (a hidden element, a value that did not change, one
- * interrupted before it ran); else, when nothing transitions (reduced motion, `transition: none`), the next frame. Its
- * promise never rejects and says how it ended. `reducedMotion()` is the one reader of the system's motion preference,
- * and `onReducedMotionChange` follows it while the app runs: the desktop shell and the Telegram mini app have no reload
- * key to pick a new one up. */
+ * The stylesheet owns the surface motion's durations and curve (shell_motion.js keeps the handover's own beat).
+ * `afterMotion(el)` waits for the element's own transition of one property: its `transitionend` or `transitioncancel`
+ * (a child's, another property's, or one from a transition replaced while a new one runs, never ends it); else the
+ * element's computed duration plus delay and one frame, because WebKit fires nothing for a transition it skipped (a
+ * hidden element, a value that did not change, one interrupted before it ran); else, when nothing transitions (reduced
+ * motion, `transition: none`), the next frame. Its promise never rejects and says how it ended. `reducedMotion()` is
+ * the one reader of the system's motion preference, and `onReducedMotionChange` follows it while the app runs: the
+ * desktop shell and the Telegram mini app have no reload key to pick a new one up. */
 
 const REDUCE = '(prefers-reduced-motion: reduce)';
 
