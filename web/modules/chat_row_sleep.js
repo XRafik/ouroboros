@@ -11,6 +11,12 @@
 // A new width, new fonts, another theme, layout or language wake every row (a row's size can depend on any of them:
 // the dark theme's recorded answer has a line the light one has not); they sleep again once the width has held.
 // A feed that is not shown lays nothing out: its rows wait until it is.
+//
+// Only message rows sleep (a bubble, a work card), and never within a screen of the feed's view: a skipped row is
+// contained (layout, style and paint), and WebKit's scroll anchoring does not hold the passage being read when rows
+// around it are contained (a row above the passage growing outside a write, a work card's buttons arriving after an
+// older page, moved the passage by their height); a contained row also clips what reaches past it, such as a
+// control's larger touch area. Near the view the browser renders every row anyway: nothing is lost there.
 
 const MARK = 'data-laid';
 const ADDED_FRAMES = 2;     // a row added is laid out by the next frame; it sleeps after the one after
@@ -21,6 +27,8 @@ const HELD_FRAMES = 12;     // a width that held this long has stopped moving (c
 const RESIZING = ['class', 'hidden', 'open', 'style', 'src'];
 // What on the page's root restyles every row: the theme, the layout, the language and its direction.
 const RESTYLING = ['data-theme', 'data-layout', 'lang', 'dir'];
+const ROWS = '.chat-bubble, .chat-live-card';  // the rows that sleep; a history control or notice never does
+const NEAR = '100% 0px';  // within the feed's own height above and below its view
 
 export function createRowSleep({ feed, win = globalThis.window } = {}) {
     if (!feed || typeof win?.requestAnimationFrame !== 'function' || typeof win.MutationObserver !== 'function') {
@@ -50,18 +58,35 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
     };
     const wakeAll = () => { for (const row of feed.children) wake(row, ADDED_FRAMES); };
 
+    // The rows near the view, which never carry the mark; one that leaves may sleep again.
+    const near = new Set();
+    const watch = typeof win.IntersectionObserver === 'function' ? new win.IntersectionObserver((entries) => {
+        for (const entry of entries) {
+            if (entry.isIntersecting) {
+                near.add(entry.target);
+                if (entry.target.hasAttribute(MARK)) entry.target.removeAttribute(MARK);
+            } else if (near.delete(entry.target)) queue(entry.target, ADDED_FRAMES);
+        }
+    }, { root: feed, rootMargin: NEAR }) : null;
+    const arrived = (row) => {
+        if (!row.matches?.(ROWS)) return;
+        watch?.observe(row);
+        queue(row, ADDED_FRAMES);
+    };
+
     function sleep(row) {
+        if (near.has(row) || !row.matches?.(ROWS)) return;
         const pictures = [...row.querySelectorAll('img')].filter((img) => !img.complete);
         if (!pictures.length) { row.setAttribute(MARK, ''); return; }
         if (waiting.has(row)) return;
         waiting.add(row);
-        const arrived = () => {
+        const loaded = () => {
             if (!waiting.delete(row) || destroyed || row.parentElement !== feed) return;
             queue(row, ADDED_FRAMES);
         };
         for (const img of pictures) {
-            img.addEventListener('load', arrived, { once: true });
-            img.addEventListener('error', arrived, { once: true });
+            img.addEventListener('load', loaded, { once: true });
+            img.addEventListener('error', loaded, { once: true });
         }
     }
 
@@ -86,7 +111,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
     const settle = (records) => {
         for (const record of records) {
             if (record.target === feed) {
-                for (const node of record.addedNodes) if (node.nodeType === 1) queue(node, ADDED_FRAMES);
+                for (const node of record.addedNodes) if (node.nodeType === 1) arrived(node);
                 continue;
             }
             const row = rowOf(record.target);
@@ -113,7 +138,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
     const fontsLoaded = () => wakeAll();
     doc?.fonts?.addEventListener?.('loadingdone', fontsLoaded);
 
-    for (const row of feed.children) queue(row, ADDED_FRAMES);
+    for (const row of feed.children) arrived(row);
 
     return {
         // The changes written so far wake their rows now, not at the next microtask: a reader's place measured right
@@ -124,6 +149,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
             destroyed = true;
             changes.disconnect();
             restyled?.disconnect();
+            watch?.disconnect();
             resized?.disconnect();
             doc?.fonts?.removeEventListener?.('loadingdone', fontsLoaded);
             due.clear();

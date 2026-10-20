@@ -1731,12 +1731,13 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     content-visibility: auto;
 }
 
-/* Rows asleep at rest (chat_row_sleep.js; owner 20.10, 3A): a row laid out at the feed's width with everything in it
-   is skipped while far from the screen and keeps that size, its own; a row that changes, a new width and new fonts
-   wake it. Only such rows: a row that takes its real size only as it nears the screen moves the passage being read in
-   WebKit, and landings, history pages and the bottom are measured against exact rows
-   (tests/test_chat_lazy_rows_browser.py). With the rows far away skipped, moving the room card under the drawer no
-   longer restyles and repaints the whole feed. */
+/* Rows asleep at rest (chat_row_sleep.js; owner 20.10, 3A): a bubble or work card laid out at the feed's width with
+   everything in it, and more than a screen from the view, is skipped and keeps that size, its own; a row that
+   changes, comes near the view, a new width, theme or fonts wake it. Only such rows: a row that takes its real size
+   only as it nears the screen moves the passage being read in WebKit, as does a contained row near the view (WebKit's
+   scroll anchoring then fails); landings, history pages and the bottom are measured against exact rows
+   (tests/test_chat_lazy_rows_browser.py, tests/test_chat_row_sleep_browser.py). With the rows far away skipped,
+   moving the room card under the drawer no longer restyles and repaints the whole feed. */
 :is(#chat-messages, .chat-messages) > [data-laid] {
     content-visibility: auto;
 }

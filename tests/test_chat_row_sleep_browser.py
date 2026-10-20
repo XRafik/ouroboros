@@ -8,6 +8,9 @@ Two things change a row's size without touching the feed's width:
   the passage inside its write, and the row the write changed is laid out before it does (`flush`), so the passage
   stays where it was, at once, two frames later and once the row sleeps again.
 The feed's own scroll anchoring is switched off for the second check, so the reading owner alone holds the passage.
+- a row above the passage growing outside any write (a work card's buttons arriving after an older page): the browser's
+  own scroll anchoring holds the passage, which WebKit does only while the rows near the view are not contained; rows
+  sleep only far from the view (and a history control never), so the passage stays.
 Uses the static-server fixture; never starts the runtime or reads live data."""
 from __future__ import annotations
 
@@ -47,6 +50,23 @@ LATE_ANSWER = """async () => {
     const sync = take(); await frame(); await frame(); const after = take();
     for (let i = 0; i < 45; i += 1) await frame();
     return { before, sync, after, settled: take() }; }"""
+# A row a little above the passage grows by itself (no write of the reading owner): the browser anchors the passage.
+GROWS_ABOVE = """async () => {
+    const frame = () => new Promise(r => requestAnimationFrame(r));
+    const feed = document.querySelector('#chat-messages'); feed.style.overflowAnchor = '';
+    feed.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 }));
+    feed.scrollTop = feed.scrollHeight / 3;
+    for (let i = 0; i < 45; i += 1) await frame();
+    const top = feed.getBoundingClientRect().top;
+    const rows = [...feed.children];
+    const passage = rows.find(n => n.getBoundingClientRect().bottom > top + 1 && n.getBoundingClientRect().height > 0);
+    const above = rows[rows.indexOf(passage) - 3];
+    const before = passage.getBoundingClientRect().top;
+    const grown = above.getBoundingClientRect().height;
+    const extra = document.createElement('p'); extra.textContent = 'Arrived later. '.repeat(60); above.append(extra);
+    await frame(); await frame();
+    return { moved: passage.getBoundingClientRect().top - before, grew: above.getBoundingClientRect().height - grown,
+        passageLaid: passage.hasAttribute('data-laid'), control: document.querySelector('#chat-messages > .chat-load-older')?.hasAttribute('data-laid') ?? null }; }"""
 
 
 @pytest.fixture(params=['webkit', 'chromium'])
@@ -81,6 +101,7 @@ def test_rows_asleep_wake_for_a_theme_and_for_a_late_answer_above_the_passage(sl
             page.evaluate(FRAMES, 45)
             facts.setdefault('themes', []).append(page.evaluate(QUESTION))
         facts['late'] = page.evaluate(LATE_ANSWER)
+        facts['grows'] = page.evaluate(GROWS_ABOVE)
     finally:
         save_evidence(tmp_path, f'row-sleep-{sleep_ui["engine"]}', facts)
         print(json.dumps(facts))
@@ -96,3 +117,7 @@ def test_rows_asleep_wake_for_a_theme_and_for_a_late_answer_above_the_passage(sl
     for moment in ('sync', 'after', 'settled'):
         assert abs(late[moment]['y'] - late['before']['y']) <= 1, (f'the passage stays ({moment})', facts)
     assert late['settled']['laid'], ('and the row sleeps again at its new size', facts)
+    grows = facts['grows']
+    assert grows['grew'] > 100 and not grows['passageLaid'], ('a row above grew; the passage near the view is uncontained', facts)
+    assert abs(grows['moved']) <= 1, ('the browser holds the passage when a row above it grows by itself', facts)
+    assert grows['control'] in (False, None), ('a history control never sleeps', facts)

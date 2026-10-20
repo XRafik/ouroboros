@@ -6,15 +6,17 @@ import { createRowSleep } from '../modules/chat_row_sleep.js';
 // A feed of rows, its observers and its frames, by hand: a test fires what the browser would.
 function stand() {
     const frames = [];
-    const observers = { changes: null, root: null, size: null };
+    const observers = { changes: null, root: null, size: null, near: null };
     const fonts = new Map();
     const doc = { fonts: { addEventListener: (type, fn) => fonts.set(type, fn), removeEventListener: (type) => fonts.delete(type) },
         documentElement: { nodeType: 1 } };
-    const element = (tag = 'div') => {
+    // A row is a bubble unless told otherwise; `matches` answers for its class.
+    const element = (tag = 'div', kind = tag === 'div' ? 'chat-bubble' : '') => {
         const attrs = new Map();
         const node = {
             nodeType: 1, tagName: tag.toUpperCase(), parentElement: null, children: [], ownerDocument: doc,
             listeners: new Map(), complete: true,
+            matches: (selector) => Boolean(kind) && selector.split(',').some((part) => part.trim() === `.${kind}`),
             hasAttribute: (name) => attrs.has(name),
             setAttribute: (name, value) => { attrs.set(name, String(value)); },
             removeAttribute: (name) => { attrs.delete(name); },
@@ -53,6 +55,12 @@ function stand() {
             observe() { this.connected = true; }
             disconnect() { this.connected = false; }
         },
+        IntersectionObserver: class {
+            constructor(callback, options) { this.callback = callback; this.options = options; this.watched = new Set(); observers.near = this; }
+            observe(target) { this.watched.add(target); }
+            unobserve(target) { this.watched.delete(target); }
+            disconnect() { this.watched.clear(); }
+        },
     };
     const run = (count = 1) => { for (let i = 0; i < count; i += 1) frames.splice(0).forEach((fn) => fn()); };
     const show = (width) => { feed.clientWidth = width; observers.size.callback([]); };
@@ -82,6 +90,7 @@ test('rows sleep only once laid out at a shown feed\'s width, two frames after t
     assert.equal(s.frames.length, 0, 'nothing due: no frame is asked for');
     sleep.destroy();
     assert.equal(s.observers.changes.connected || s.observers.size.connected || s.observers.root.connected, false);
+    assert.equal(s.observers.near.watched.size, 0);
     assert.equal(s.fonts.size, 0);
 });
 
@@ -193,4 +202,24 @@ test('another theme, layout or language wakes every row; their own changes stay 
     assert.deepEqual(s.laid(), [false, false], 'the dark theme\'s recorded answer has a line the light one has not');
     s.run(2);
     assert.deepEqual(s.laid(), [true, true], 'laid out in the new theme, they sleep again');
+});
+
+test('a row near the view never sleeps, one that leaves it sleeps again; only message rows sleep', () => {
+    const s = stand();
+    const row = s.element(), card = s.element('div', 'chat-live-card'), control = s.element('div', 'chat-load-older');
+    s.feed.append(control, row, card);
+    createRowSleep({ feed: s.feed, win: s.win });
+    assert.equal(s.observers.near.options.root, s.feed);
+    assert.deepEqual([...s.observers.near.watched], [row, card], 'a history control is never watched');
+    s.show(390);
+    s.observers.near.callback([{ target: row, isIntersecting: true }]);
+    s.run(2);
+    assert.deepEqual(s.laid(), [false, false, true], 'near the reader a row is not contained: the browser anchors on it');
+    s.observers.near.callback([{ target: card, isIntersecting: true }]);
+    assert.equal(card.hasAttribute('data-laid'), false, 'coming near, a sleeping row wakes at once');
+    s.observers.near.callback([{ target: row, isIntersecting: false }]);
+    s.run(2);
+    assert.deepEqual(s.laid(), [false, true, false], 'left behind, it sleeps; the one now near does not');
+    s.run(40);
+    assert.equal(control.hasAttribute('data-laid'), false, 'the history control never sleeps (its touch area reaches past it)');
 });
