@@ -559,12 +559,13 @@ def pid_lock_acquire(path: str) -> bool:
 def pid_lock_release(path: str) -> None:
     """Release the PID lock."""
     global _lock_fd
-    if _lock_fd is not None:
-        with contextlib.suppress(Exception):
-            file_unlock(_lock_fd.fileno())
-        with contextlib.suppress(Exception):
-            _lock_fd.close()
-        _lock_fd = None
+    if _lock_fd is None:
+        return  # already released, or another launcher owns the new PID file
+    with contextlib.suppress(Exception):
+        file_unlock(_lock_fd.fileno())
+    with contextlib.suppress(Exception):
+        _lock_fd.close()
+    _lock_fd = None
     with contextlib.suppress(Exception):
         os.unlink(path)
 
@@ -1318,6 +1319,12 @@ def merge_hidden_kwargs(kwargs: dict) -> dict:
     if hidden := subprocess_hidden_kwargs():
         result["creationflags"] = result.get("creationflags", 0) | hidden.get("creationflags", 0)
     return result
+
+
+def inherited_console_kwargs() -> dict:
+    """A successor keeps this process's console (a terminal run); Windows hides it only when there is none (GUI)."""
+    attached = not IS_WINDOWS or _kernel32.GetConsoleProcessList((ctypes.wintypes.DWORD * 1)(), 1)
+    return {} if attached else subprocess_hidden_kwargs()
 
 
 # Git installation hint.

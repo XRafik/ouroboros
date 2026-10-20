@@ -1,9 +1,9 @@
 # 1. High-Level Architecture
 
-Modules, devtools, gateway/CLI, host and data map. Packaged launcher recovers failed server edits. Server: direct turns/supervision; crash-isolated queued workers.
+Modules, devtools, gateway/CLI, host and data map. Launcher recovery depends on an importable shell (§2). Server: direct turns/supervision; crash-isolated queued workers.
 
 ```
-User → launcher.py (desktop/native) — the shared lifecycle; an immutable packaged shell, or source over an immutable seed on Android and the managed container (Runtime topology below; §2)
+User → launcher.py (desktop/native) — shared lifecycle; packaged or managed source over an immutable seed (Runtime topology below; §2)
 launcher.py spawns server.py (Starlette+uvicorn) — HTTP + WebSocket on configurable host:port; bind host via `OUROBOROS_SERVER_HOST` (§4; §7)
 web/ — Web UI, a SPA of ES modules; chapter 3 owns the pages and the modules not listed here (§3)
   ui.css — the shared palette/control stylesheet of the SPA, onboarding and author pages (§3 Navigation)
@@ -23,7 +23,7 @@ web/ — Web UI, a SPA of ES modules; chapter 3 owns the pages and the modules n
     chat_reply.js, chat_reply_quote.js, chat_row_menu.js, row_menu_gesture.js, message_actions.js, routing_receipt.js, text_fit.js — replies and host-derived quotes, the row menus, saved-row actions, the owner message's routing receipt line, word-cut fitting (§3 Chat and Projects; DESIGN "Replies")
     composer.js — a room's composer: "+" menu, slots, Send (§3)
     chat_cards.js, card_components.js, card_frames.js — living cards in the feed and kept on Widgets; the sandboxed app frame (CLIENT_CONTRACT §5)
-    contributions.js, composer_plus.js, composer_chips.js, host_modules.js — the contributions store and verbs; skills' "+" items and capsule-row chips; trusted page modules and their recovery (CLIENT_CONTRACT §11; DESIGN "Skills in the page")
+    contributions.js, composer_plus.js, composer_chips.js, host_modules.js, holds.js — the contributions store and verbs; skills' "+" items and capsule-row chips; trusted page modules; the start ledger (CLIENT_CONTRACT §11; DESIGN "Skills in the page")
     project_reference.js — the one Project pointer control and the only raiser of `ouro:open-project` (DESIGN "References and actions")
     project_activity.js, work_status.js, work_types.js, status_mark.js — Project marks and room words from the server's `rooms`/`works`; their typedefs (§3 Liveness census)
     room_work.js, project_read_state.js — a room's header work list without execution authority; its read receipt (§3 Project rooms)
@@ -228,7 +228,7 @@ ouroboros/ — agent core and shared runtime (§6)
   reference_books.py — the ordered Architecture/Development reader and validator; the free worktree book balance against the cached official merge-base, unknown when unavailable, never a block (DEVELOPMENT "Documentation contract")
   local_model_server.py — read-only local formatter measurement and serving-process probe
   context_compaction.py — atomic-unit compaction with provenance capsules and transactional apply (§6 Context fitting)
-  context_health.py — health invariants; delegated-run obligations stay globally visible (another task's fold to one line per owner): a preserved-and-invisible result is how work rots on disk (§6 Context fitting)
+  context_health.py — health invariants; own delegated obligations full, all foreign work one exact-source pointer (§6 Context fitting)
   context_runtime_facts.py — the runtime section's fact builders
   headless.py, history_retention.py — child-drive isolation, answer/file adoption, workspace patches, memory export; typed `sensitive_blocked` exclusions (§6 Headless finalization; §10)
   task_custody.py — the one child-drive deletion owner (`settle_child_drive`) and per-task custody lock (§6 Headless finalization)
@@ -300,10 +300,10 @@ ouroboros/ — agent core and shared runtime (§6)
   owner_mailbox.py — per-task user message mailbox: revocation-aware drain, proven-empty peek, the closed provenance set
   peer_roster.py — host-listed roots from queue_snapshot/direct_roots, hidden included, with their recorded waits; admits source-bound inline Presence mailboxes for `forward_to_worker` (§12; §6 Owner routing verbs)
   launcher_bootstrap.py, runtime_venv.py — Bootstrap/sync, source-shell handoff and compatibility probe, native host and body interpreter (§2)
-  launcher_onboarding.py — First-run onboarding as the desktop launcher shows it: the gateway /onboarding page (§2)
-  launcher_server_reaper.py — POSIX same-install stray-server termination by the PID-lock-owning launcher (Runtime topology below)
+  launcher_onboarding.py — The desktop launcher's onboarding: the gateway /onboarding page (§2)
+  launcher_server_reaper.py — Startup stray-server discovery; recorded-owner close/Panic cleanup (§9)
   launcher_readiness.py — The launcher's `/api/health` probe (§2 Boot order)
-  launcher_windows_runtime.py — Windows-only pythonnet/pywebview runtime preparation
+  launcher_windows_runtime.py — Windows runtime; pre-import legacy GUI handoff (§2)
   launcher_background.py — Desktop background mode: close vs quit, the one consent question, second-launch activation (§9); `DesktopApi`, the alert half the bridge's `MainApi` inherits (§3)
   launcher_appearance.py, launcher_window_chrome.py — Windows caption tint; macOS per-document title bar and appearance (§3)
   launcher_tray.py, launcher_tray_macos.py — Windows notification-area icon; macOS menu-bar item, Dock reopen, quit marking (§9)
@@ -438,6 +438,7 @@ ouroboros/ — agent core and shared runtime (§6)
     schedules.py — Cron schedule HTTP surface
     files.py — File Browser and chat upload
     ui_preferences.py — Install-wide `state/ui_preferences.json`: widgets, layout, welcome, voice choice and contribution arrangement
+    ui_holds.py — found holds as System rows (§4)
     ui_i18n.py — `GET/POST /api/ui/i18n*`: interface language and translation memory (i18n_memory.py); the language POST is a locked owner-settings write of `OUROBOROS_UI_LANGUAGE`
     models.py — Model catalog, provider probes, local-model lifecycle
     extensions.py — Extensions/skills HTTP surface (routes: §4)

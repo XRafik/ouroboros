@@ -1,4 +1,4 @@
-import { renderPageHeader, renderSegmentedField, renderTabStrip, bindTabStrip } from './page_header.js';
+import { bindPageHeader, renderPageHeader, renderSegmentedField, renderTabStrip, bindTabStrip } from './page_header.js';
 import { renderAgentAccountsSection, renderAgentsServiceBanner } from './harness_accounts.js';
 import { renderSubagentsSection } from './subagents_settings.js';
 import { languageBlockHtml } from './settings_language.js';
@@ -1062,7 +1062,9 @@ export function bindSettingsTabs(root, options = {}) {
 
     root.activateSettingsTab = activate;
     activate(state?.settingsActiveSubtab || 'providers', false);
-    return () => { tabs.destroy(); delete root.activateSettingsTab; };
+    // On a desk the eight tabs are the bar's start, scrolling inside it (docs/DESIGN.md "Page header").
+    const disposeBar = bindPageHeader(root.querySelector('.app-page-header'));
+    return () => { tabs.destroy(); disposeBar(); delete root.activateSettingsTab; };
 }
 
 export function bindSecretInputs(root) {

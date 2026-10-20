@@ -13,6 +13,7 @@ import { initFiles } from './modules/files.js';
 import { draftPort, getContributions } from './modules/contributions.js';
 import { bridgeContributedActions } from './modules/message_actions.js';
 import { startHostModules } from './modules/host_modules.js';
+import { getHolds, reportFoundHolds } from './modules/holds.js';
 import { startVoice } from './modules/voice_controls.js';
 import { createNotificationActivation, getNotifier } from './modules/notifications.js';
 import { showToast } from './modules/toast.js';
@@ -503,6 +504,8 @@ contributions.attach({ ws });
 const visibleDraft = draftPort(() => projectInstances.get(navState.activeProjectId) || mainChat);
 bridgeContributedActions({ store: contributions, draft: visibleDraft });
 startVoice({ hosts: startHostModules({ store: contributions, draft: visibleDraft }) });
+// The starts the previous page did not outlive are named in the chat that owns each item (holds.js, POST /api/ui/holds).
+reportFoundHolds(getHolds(), (payload) => apiClient.reportUiHolds(payload));
 
 function hydrateOpenChatsFromState(data, snapshotRequestedAt) {
     mainChat?.hydrateStateSnapshot?.(data, snapshotRequestedAt);

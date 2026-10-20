@@ -304,6 +304,7 @@ D20 = "Presence"
 "ouroboros/gateway/task_continue.py" = "D11"
 "ouroboros/gateway/tasks.py" = "D11"
 "ouroboros/gateway/ui_preferences.py" = "D11"
+"ouroboros/gateway/ui_holds.py" = "D11"  # a page's found holds named as System rows
 "ouroboros/gateway/contributions.py" = "D14"
 "ouroboros/gateway/ui_i18n.py" = "D11"
 "ouroboros/gateway/ui_i18n_contracts.py" = "D11"

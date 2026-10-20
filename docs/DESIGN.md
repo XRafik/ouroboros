@@ -371,7 +371,7 @@ and pending state decide what is sent; a message is sent once. Shift+Enter
 breaks the line; Ctrl, Cmd or Alt with Enter send like Enter. Enter sends
 nothing when it commits an input-method composition or the field is empty,
 disabled, read-only or settled, and once when held; a rejected answer keeps
-its draft. The composer grows with its text or placeholder to one cap, then
+its draft. A message field grows with its text or placeholder to one cap, then
 scrolls. Touch keyboards are asked for a Send label; support varies. Every
 other multiline field — file editors, JSON, settings and widget forms — keeps
 Enter as a line break.
@@ -836,11 +836,13 @@ this Project" came to be drawn six ways. The rule is therefore about intents.
   everywhere else: under a mirrored answer or a System lifecycle row (in the
   shared `createSystemMessageActions` row, token spacing, wrapping, focus-ring
   clearance), at the end of the owner's routed message's one receipt line
-  ("Passed on to «work» in", "Started as a task in"), and in a question head,
-  where the Project is named before the options. The whole capsule is the
+  ("Passed on to «work» in", "Started as a task in"), and in a Main question
+  copy's voice line beside `Ouroboros`, at that line's 28px height and meta size
+  (`.ui-hit-area` keeps a finger's target; under a finger the line leaves the
+  head's × its column, so neither takes the other's). The whole capsule is the
   target, with one fill whose hover and press deepen the whole capsule; no
   border, ring or hairline, and no width that depends on where it sits. Long
-  names: two lines in the strip, ellipsis in the capsule, no smaller type;
+  names: two lines in the strip, ellipsis in the capsule, never smaller type;
   accessible names stay whole.
 - A **command** is a button: it changes or confirms something, or goes to a
   place that is not such a reference (`Load older messages`, `Open widgets`).
@@ -1388,8 +1390,11 @@ answer, and the answer arrives as their own message in that chat. After
 settlement, status and the owner's recorded answer keep both forms readable.
 Anatomy, top to bottom:
 
-1. **Head** — neutral `Question` chip (`--type-meta`, neutral pair) and a status
-   as a 7 px status mark + text, the mark amber while the task waits for the answer. The lifecycle word family is closed and leads with the one
+1. **Head** — one 28px row in every room: neutral `Question` chip (`--type-meta`,
+   neutral pair), the status beside it as a 7 px status mark + text, amber while
+   the task waits for the answer. The row never wraps (a narrow card's long status
+   takes two lines in place). The voice line above names who asks and a Main copy's
+   Project. The lifecycle word family is closed and leads with the one
    word that answers "is there an unanswered question for me?":
    `Waiting for your answer` needs positive wait evidence (the task's live wait
    record, or the original required flag before any record exists); a resumed
@@ -1403,8 +1408,9 @@ Anatomy, top to bottom:
    Pressing immediately shows `Sending…` and the brand-marked choice, keeping the
    full form and focus, the head's mark neutral until the answer is confirmed; inert controls use subdued ink and submitted fields become
    read-only. No success before canonical confirmation. `Not confirmed` means unknown,
-   not failed: only then show Check status, Retry same answer and Forget unconfirmed
-   local answer. Recovery first reads exact-quiz truth; explicit retry sends identical
+   not failed: only then, under the answer, show Forget unconfirmed local answer
+   (quiet, first), Check status and Retry same answer. Recovery first reads exact-quiz
+   truth; explicit retry sends identical
    bytes. Forget cannot cancel or retract a server answer; answered-with-delivery-owed
    remains recorded.
    While the card takes an answer the head ends with one quiet × (`Close question
@@ -1417,11 +1423,11 @@ Anatomy, top to bottom:
    paragraphs, lists, checklists, tables and code keep the shared rich-content
    gutter, rhythm and bounded code scrolling. The card never infers a title from
    the first line or rewrites authored Markdown to fit, and the question has no
-   quiz-specific length cap. Directly under it, a muted plain-text host line
-   (`.chat-quiz-host-facts`, `--type-meta`, `--text-meta`) states what only the
-   host knows: the asking task, how its run started and when the owner last
-   wrote in this chat, unknown facts said as unknown; without `host_facts` the
-   line is absent.
+   quiz-specific length cap. After the bubble's time (`15:18 · Asked by …`) a muted
+   plain-text host sentence (`.chat-quiz-host-facts`, `--text-meta`) states what only
+   the host knows: the asking task, how its run started and when the owner last
+   wrote in this chat, unknown facts said as unknown; without `host_facts` it is
+   absent until a delivery carries it.
 3. **Stake** — optional one-liner (`At stake: …`), `--type-meta`, `--text-meta`.
 4. **Options** — zero to six real owner actions: elevated cards (the capsule surface
    on the rest shadow with the object radius; a choice, never a field), the label in
@@ -1429,9 +1435,11 @@ Anatomy, top to bottom:
    the card. Hover and press change the card's colour. After settlement they lie flat
    in `--text-disabled`; the chosen option takes the ok pair, its detail the meta ink. Options are capped by the shared Python↔JS constant
    (`MAX_QUIZ_OPTIONS`); with none, the free answer is the whole answer.
-5. **Free answer** — while the card is open, a compact always-visible field
-   (`Your answer or comment…`, the field's hairline) with a `Send my answer`
-   crimson capsule, enabled and standing only once something is typed; it is a message field, so Enter sends and
+5. **Free answer** — while the card is open, one always-visible frame (the field's
+   hairline and focus idiom) holds the words, named `Your answer`, and at its trailing
+   bottom edge the `Send my answer` crimson capsule at the composer's height, enabled
+   and standing only once something is typed; a narrow card gives Send its own line in
+   the frame. It is a message field: its words grow to one cap, then scroll; Enter sends and
    Shift+Enter breaks the line (§3 "Controls and editable choices"). No option
    ever has to be the least wrong one: the text rides with an option click as
    the owner's remark, or goes alone as the owner's own answer. It uses the
@@ -1441,7 +1449,8 @@ Anatomy, top to bottom:
    Origin-local drafts and frozen attempts persist across closure only with a
    persistent browser profile (older private WebViews erase them: Appearance above).
    Restore reads, never resends; storage failure warns to keep/copy words.
-   **Clear local draft** removes unsent words, not submitted answers. Canonical
+   Emptying the field releases its draft and a refusal note about it, never a sent
+   or unconfirmed answer; nothing else clears drafts. Canonical
    settlement clears the copy; winning bytes appear literally as `Owner's answer: …`
    under the options, beside the highlighted choice or as the whole answer if none,
    retaining line breaks (`--type-body`/`--text-primary`).
@@ -1454,10 +1463,10 @@ Anatomy, top to bottom:
 
 Inside a bubble the card adds no box: the bubble is its object. Its × is a quiet
 control, without a body until hover. The card uses tokens for every
-type size and colour, including pill radius and option gap. Every focusable element shares the 2px `--focus-accent-border` ring
-with 2px offset. Component min/max widths keep local literals, as elsewhere in chat.
+type size and colour, including pill radius and option gap. Every focusable control shares the 2px `--focus-accent-border` ring
+with 2px offset; the answer's frame wears the field idiom instead (§3 Focus). Component min/max widths keep local literals, as elsewhere in chat.
 
-**Project question mirror.** Main is the list of what needs the owner; nothing waits in a section of its own. A Project question's Main copy is the Project's own `buildQuizCard` card, whole as anatomized above, in an assistant bubble at its ask time in the feed; the Project reference beside `Question` opens the exact original, and answers, materials and recovery controls work in Main. It uses the shared ring and `--project` tints; names ellipsize (full titles) before status; narrow heads wrap. History, live pointers and the census share one task/quiz card and lifecycle wording; the canonical current questions only confirm or settle copies the feed holds, never mount them, and an incomplete read withholds only what its typed gaps name. Optional, resumed and terminal-author questions stay answerable until answered or closed; no display/history cap drops them. Replaced questions stay read-only. The owner closes from the card; a model closes its own or a host-proven continued task line's question, or a finished task's, always with its own reason. Closure records a reason, never an answer/approval. A late answer left delivery-unknown by a restart offers Remove from pending (no resend, never marked delivered). Publication destination stays fixed across Project conversion; current room membership controls display. Explicit materials use registered task artifacts and the existing reader.
+**Project question mirror.** Main is the list of what needs the owner; nothing waits in a section of its own. A Project question's Main copy is the Project's own `buildQuizCard` card, whole as anatomized above, in an assistant bubble at its ask time in the feed; the Project reference in its voice line opens the exact original, and answers, materials and recovery controls work in Main. It uses the shared ring and `--project` tints; names ellipsize (full titles); the head stays the room's own row. History, live pointers and the census share one task/quiz card and lifecycle wording; the canonical current questions only confirm or settle copies the feed holds, never mount them, and an incomplete read withholds only what its typed gaps name. Optional, resumed and terminal-author questions stay answerable until answered or closed; no display/history cap drops them. Replaced questions stay read-only. The owner closes from the card; a model closes its own or a host-proven continued task line's question, or a finished task's, always with its own reason. Closure records a reason, never an answer/approval. A late answer left delivery-unknown by a restart offers Remove from pending (no resend, never marked delivered). Publication destination stays fixed across Project conversion; current room membership controls display. Explicit materials use registered task artifacts and the existing reader.
 
 A task that cannot continue without the owner is one System message in the feed, stamped when first seen: the task, one sentence, its own controls (revision-bound model access, Resume/Stop, children's included; activity counts each work once, its helpers within it). Sign-in, unobservable automatic access, disabled automatic continuation, budget pauses and Resume-only holds qualify; viable automatic account/quota recovery, queues, self-waking sleep, background scope verification and own Pause stay quiet. Deduplicate the same quiz/wait identity, not all waits on a task; the message leaves when a complete census drops the row. Missing action evidence stays unavailable; visibility never authorizes login, budget changes or automatic Resume.
 
@@ -1514,8 +1523,11 @@ its plain words (the text Telegram gets) with one status line — `Loading the c
 card is no longer available.`, `This skill is off.` — never an empty box. A press on a card's control is the owner's:
 it says `Sending…`, then `Sent ✓` or the honest failure, and a control meant once locks after it counted. A frame in
 a message (an app, a skill's widget) is at least 120 px and at most 70 % of the window, with `Expand` / `Collapse`
-beyond; at most three run at once, started near the view, and a far one rests as its words with `Open`. What an app
-hands back lands as one line in the owner's draft: nothing in a card ever sends. Copy takes the plain words, Reply
+beyond; at most three run at once, started near the view, and a far one rests as its words with `Open`. A running
+frame has `Close`, which leaves it as its words with `Open` on this device until the owner opens it again; a frame
+held after a start the page did not outlive rests the same way with its one line (Skills in the page). An app's
+script error, unhandled rejection or policy refusal shows on the status line (`App error: …`). What an app hands
+back lands as one line in the owner's draft: nothing in a card ever sends. Copy takes the plain words, Reply
 and the row menu work as on any message, and a card that grows while the room follows its newest message keeps it
 in view.
 
@@ -1653,13 +1665,26 @@ capsule, lists what folds; with no room even for it (a phone's row, which ☰
 leads), each chip is listed in "+" under its skill's name. A skill's trusted page module works
 only through its small context (its provider, a notice, words into the draft)
 and never draws into the composer or the feed. A module that fails is off for
-this page with one notice naming it; the rest of the page keeps working. A
-start that did not finish (the page froze or crashed while page modules
-started) skips them all next time and says so, with Start with plugins;
-`?plugins=off` starts without them on purpose and offers Restart with plugins.
-Main's More menu offers Restart without plugins on every surface, the macOS
-app's Help menu Start without plugins; a page that a module froze is left
-through that menu or by reopening it, which then starts without them.
+this page with one notice naming it; the rest of the page keeps working.
+
+**A start the page did not outlive is not repeated by itself.** A page
+module, a skill's module or route frame and an app card are code the core did
+not write; on WebKit (the macOS app, iPhone, Telegram on iOS), Android WebView
+and Firefox they share the page's one thread, so one that loops or blows up at
+its start takes the whole page with it, and no menu inside that page can be
+pressed. The host writes each start to a ledger on this device before the code
+runs and clears it once the page outlived the start; whatever the next open finds
+there is not started by itself. A held card rests as its words with Open, a held
+widget as its facade with Start, both with the one line `Held back: the page
+stopped while this was starting last time.`; held page modules are named in one
+notice with Start it. The owner's press starts it (an app without the state it
+saved, which may be the cause), and a new revision of the code starts as usual.
+Code that stops the page later than a second after its start is not held; Close,
+Stop or the skill's switch stops it. The way out of a page that froze is the
+surface's own: quit or close it and open it again. Opened with `?hold=all`, a page holds every such item for that
+load (`Held back: this page was opened with everything held.`), each released by
+its own control. Ouroboros reads the fact in one System row in the chat that
+owns the item.
 
 ### Voice controls
 
@@ -1961,6 +1986,10 @@ widget's content belongs to its author.
   the column count changes only where a card is painted; a running widget
   keeps its frame and its state. Keyboard focus keeps the card's original
   position until the window reloads.
+- **Stop holds until Start.** A framed card the owner stopped rests as its
+  facade with Start on this device across reloads, until Start or a launch
+  policy of Auto or Keep running starts it. A card whose last start the page
+  did not outlive rests the same way, with its one line (Skills in the page).
 - **One arrangement per installation.** Order and widths are owner UI state
   stored on the server, the same for every window and device of the
   installation; when two windows arrange at once the last change wins. A
@@ -2168,7 +2197,7 @@ engineering rules; no second policy list may exist.
 never *look, I am still working*. It exists so the owner can leave the window
 and still be reached by a question or a finished task.
 
-**Startup & background.** Settings → Behavior owns host lifecycle choices, separate from the client-local Appearance controls. Sign-in startup is off until the owner opts in and always names the computer running Ouroboros, even in a remote client. OS registration is the truth: another copy, an OS-disabled entry and an unavailable app build stay visible, never a saved-settings guess. Automatic startup preserves Panic stops and saved pauses; an explicit owner start releases Panic. The second control, *keep Ouroboros running in the background when the window is closed*, is also off until chosen and lives in the host's settings. Until the owner decides, the first close of the desktop window asks once — Ouroboros will keep working in the background (tasks, schedules, Telegram): keep it running, or quit? — and the answer becomes that checkbox; dismissing the question quits. macOS labels its buttons Keep running and Quit; Windows keeps standard OK and Cancel, with a line saying OK keeps it running and Cancel quits. While it is on, closing hides the window behind a live indicator (the Windows notification-area icon; the macOS menu-bar item and Dock) whose menu shows the server's real state (work only from confirmed phases; starting, an error, unconfirmed activity or no answer said as such) and offers Open, Panic and Quit; if no indicator appears the close quits, so a hidden process always has a visible way back. Quit, Cmd+Q and signing out always quit, unasked. A sign-in start stays hidden only when both checkboxes are on and the indicator actually appeared; opening the app while it starts shows the window; there is no third "start minimized" setting. Linux shows the background control as not yet available; closing quits there. Android keeps its existing automatic boot entry by default, under the same Panic-preservation contract. The card is last on Behavior: set once; on a browser or Docker host it only explains itself. A control the host cannot offer says why as a plain note in meta ink (no warning dot); two controls with the same reason say it once, after both; a state the owner can change (another copy, an entry the OS turned off) is a warning, a failed read or write an error. Notes and statuses start at the checkbox label's text, a status dot hanging under the checkbox.
+**Startup & background.** Behavior owns host lifecycle choices; Appearance is client-local. Sign-in startup is opt-in and names the host computer, also in remote clients. OS registration is truth, never a saved-settings guess: another copy, OS-disabled entry and unavailable build remain visible. Automatic startup preserves Panic and saved pauses; an explicit owner start releases Panic. *Keep Ouroboros running in the background when the window is closed* is also opt-in, stored on the host. First close asks once whether to keep tasks, schedules and Telegram running; its answer sets the checkbox, dismissal quits. macOS uses Keep running/Quit; Windows uses standard OK/Cancel and explains which keeps running. Closing with background on hides only behind a live indicator, so a hidden process always has a visible way back; otherwise it quits. Windows keeps one icon even with background/notifications off: after runtime and PID-lock/automatic-start checks, before Git/bootstrap. macOS shows its menu-bar item and Dock while background is on. The menu names starting, confirmed work, errors, unconfirmed activity or no answer; it offers Open, Panic and Quit. Early Panic stops installation work, including the retained daemon, and persists the stop marker; failed stops/writes are disclosed. Quit, Cmd+Q and sign-out quit unasked. Automatic start hides only with both checkboxes on and a live indicator; opening during boot shows the window. There is no separate start-minimized setting. Linux says background is unavailable and closes to quit. Android retains automatic boot by default with Panic preservation. This card is last on Behavior; browser/Docker hosts explain it without offering unsupported controls. Unavailable controls explain why in meta ink, without a warning dot; duplicate reasons appear once after both. Changeable states (another copy, OS-disabled entry) use warning; failed reads/writes use error. Notes align with checkbox text, status dots hang beneath the checkbox.
 
 **Telegram completion messages are separate from these client alerts.** The
 existing completion toggle Off suppresses every additional terminal line, failures
@@ -2260,14 +2289,15 @@ promise that anyone saw a banner: its notification settings, Focus and Do Not
 Disturb still decide. macOS uses `UNUserNotificationCenter`, whose one permission
 question is asked only from the owner's gesture — switching notifications on, or
 Test — never by an alert, which falls back while the question is unasked; Windows
-shows a notification-area balloon, which Windows 10/11 present as a system
-notification, on an icon of its own per notification so that each click opens
-its own source; Linux uses the freedesktop notification service when
+shows a balloon on Ouroboros's one notification-area icon, presented as a system
+notification on Windows 10/11; a source handoff can change the window/taskbar
+identity to Python. Handoff removes the old icon before its successor starts;
+a gap or Explorer ghost after a crash remains possible; Linux uses the freedesktop notification service when
 the desktop runs one. Not yet allowed, denied, unavailable or failed is a typed
 answer, never silence (an error the system returns instead of asking is that
 error, not a denial): that alert falls back to the browser banner or the in-app
 toast. One the system took without answering in time may still appear, so
-nothing else is shown for it and its click still opens its source. In-app
+nothing else is shown; its click opens the newest accepted source on that icon. In-app
 updates do not replace the desktop app, so an app built before this capability
 falls back and Settings says that system notifications need the current app.
 Android's host keeps its own channel for its own service; its page has no system
@@ -2306,10 +2336,11 @@ the conversation. Project identity comes from the full registry, including rooms
 outside the sidebar. An unavailable destination leaves the view in place and says
 so. A Main-transport notice opens Main, including Telegram; numeric addresses
 never imply a Project. A system notification first opens the window, hidden or not,
-then the same source. No reply is composed from the banner. The one exception is
-the fallback banner the desktop indicator shows while the window is hidden in
-background mode (Windows, when no system notification was shown): its click
-opens the window as it was left and does not navigate.
+then the same source. No reply is composed from the banner. Windows names no balloon
+in a click (owner decision: one icon), so any balloon click, an older entry in
+Windows' list included, opens the newest balloon's source; when that is the
+fallback banner the indicator shows for a hidden window (no system
+notification shown), the click opens the window as it was left, no navigation.
 
 **Content is private by default.** Only the kind of event is shown until the
 owner turns message text on, because a banner can appear on a shared screen.
@@ -2356,10 +2387,11 @@ notifications need the current app.
   first observed frame is its terminal — it would notify once.
 - An event that happens while the socket is down never rings: reconnect replays
   history, and history is deliberately silent.
-- A Windows balloon stays in Windows' notification list only while its icon is
-  in the notification area: until it is clicked, until a fourth retires the
-  oldest of three, or until the app quits. One that timed out or was dismissed
-  keeps its icon; nothing is shown again.
+- On Windows a click opens the newest balloon's source whichever entry was
+  clicked, and a balloon stays in Windows' list at most until the app quits;
+  nothing is shown again. An exit removes the icon within a bounded wait: a
+  shell that does not confirm in time can leave it until the pointer passes,
+  and an updated launcher's own icon can briefly appear beside it.
 - An alert the system took without confirming in time can stay unseen: it is
   not repeated in the app, and Settings says so. On Linux its click cannot open
   the source, because the server's id for it never came back.
@@ -2487,16 +2519,23 @@ it) and returns focus to its opener on close. The shell draws one close glyph an
 one More glyph (`web/modules/page_icons.js`).
 
 **Page header.** One component (`web/modules/page_header.js`) draws every page's
-header and the Project panel's, as one row that never wraps. No decorative icon.
-On docked, a page the column already names shows no title; status, actions and
-tabs remain, and a header with nothing to show draws no bar. A Project shows its
-name. In the stack layout the row is at most 56 px: ☰, the place's name, its
-status, then Panic and ⋯; the name wins over the status word, which a short row
-drops whole, keeping its mark. Whenever the bar itself is narrow, on a phone or in a narrow window,
+header and the Project panel's, as one row except the narrow toolbar below. No decorative icon.
+On docked, a page the column already names shows no title: its tabs or Files'
+location take that place and its actions the end, on Main's line, so the bar has
+two ends as Main's does; tabs or a location that do not fit scroll inside it (a
+location rests at the folder you are in, no folder wider than the bar's start),
+and in the macOS window its empty parts still move the window. A header with nothing to show draws
+no bar (Widgets keeps the plain band). A Project shows its name. In the stack
+layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
+⋯, with the page's tabs, or Files' location and its actions, under it
+(`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
+drops whole, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
+content column is too narrow, including while the sidebar is resized; the toolbar wraps in its
+own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's
 width. While a mode it holds is on (Evolve, Consciousness), ⋯ takes its tone,
-with no corner dot. Tabs sit under the row and a history note hangs under the bar, neither
-inside it; a page has no caption line, its sidebar row and its tabs name it.
+with no corner dot. A history note hangs under the bar, never inside it; a page
+has no caption line, its sidebar row and its tabs name it.
 
 **Doors and containers.** An object whose only job is to take you somewhere is a
 door: the whole object is the target and one state layer covers all of it (a file
@@ -2511,9 +2550,10 @@ applies only where a pointer can hover (`@media (hover: hover)`).
 (`--touch-target-min`); a control whose look is smaller keeps its look and gains
 the invisible hit area of the one `.ui-hit-area` recipe in `web/ui.css`, which a
 link inside a sentence takes too so the sentence keeps its lines. Nothing that
-acts is hidden until hover there (a Project row's menu is reached by its long press). No page scrolls sideways at any width; only
-code, tables and tab strips scroll sideways, inside themselves, with a fade where
-content hides. Text wraps before it widens a column.
+acts is hidden until hover there (a Project row's menu is reached by its long press).
+No page scrolls sideways at any width; only code, tables, tab strips and a bar's
+Files location scroll sideways, inside themselves, with a fade where content
+hides. Text wraps before it widens a column.
 
 **Telegram.** Inside the Telegram Mini App the page tells Telegram it is ready,
 fills the screen, turns off Telegram's swipe-down so lists scroll, shows
@@ -2525,7 +2565,7 @@ System appearance, and respects Telegram's safe areas
 Enforcement: `tests/test_design_system_gate_browser.py` visits every registered
 page and every Settings tab in WebKit and Chromium at 360, 390, a Telegram-like
 390 × 780, 719, 720, 721, 1280 and short windows (no page scrolls sideways, coarse
-targets reach 44 px, header bars stay one row, one scroller per sidebar, Projects
+targets reach 44 px, default-width bars stay one row, one scroller per sidebar, Projects
 scroll by touch); `tests/test_shell_layout_static.py`,
 `tests/test_shell_header_static.py`, `tests/test_shell_drawer_static.py`,
 `tests/test_shell_tokens_static.py`, `tests/test_pages_registry_static.py` and

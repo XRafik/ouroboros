@@ -156,8 +156,10 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # Rolled for the infrastructure-under-load PR: forward_to_worker also writes into a requested
     # child's mailbox (read when it starts, or kept as unread mail), so its description and `task_id`
     # description say "running, queued or requested"; nothing else in the catalog changed.
+    # Rolled for the start ledger: show_card's description adds one sentence (on most devices an app
+    # shares the owner's page thread, so heavy computation belongs in a blob: Worker); nothing else changed.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "70baf8519aedbee949abab80b3c1e9f4ea78e29ad81387c65fcc8bfb8b56a996"
+        "77bf2ec02eb5a03bcaa415791f4deb864ad402caf966a5054a8defe0cb19091f"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

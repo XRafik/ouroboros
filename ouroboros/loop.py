@@ -258,13 +258,14 @@ def _provider_unavailable_result(
             control_reason=control_reason, wait_cause=wait_cause,
         )
     if is_context_overflow:
+        reason = "context_overflow" if ctx.accumulated_usage.get("reason_code") == "context_overflow" else "llm_api_error"
         text, usage, llm_trace = _forced_fallback_result(
             ctx, llm_trace, fallback, "context_overflow",
             source="context_overflow_local_salvage", host_words=not salvaged,
         )
         usage.update(
             execution_status=RESULT_INFRA_FAILED,
-            reason_code="llm_api_error",
+            reason_code=reason,
             _last_llm_error_kind="context_overflow",
         )
         return with_terminal_notice(text, usage, llm_trace)
