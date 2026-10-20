@@ -120,7 +120,11 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   controls and a setting's value.
 - Space: 4 / 8 / 12 / 16 / 24; 14 between messages; 12 x 18 inside a bubble.
 - Motion: 120 ms for colour and shadow (`--motion-tone`); no press motion; the
-  three-dot loop only while work runs.
+  three-dot loop only while work runs. Anything that moves rides one curve,
+  `--ease-sheet`, for `--motion-open` (340 ms, a surface coming in), `--motion-close`
+  (280 ms, going out) or `--motion-fade` (180 ms); only position and opacity move,
+  never size or blur; the expensive write of a change waits for its motion's end
+  (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
   `:root[data-theme="light"]` (`--elev-*`, `--radius-object` / `-inner` / `-sheet`,
   `--surface-object` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
@@ -2474,9 +2478,28 @@ column comes up from under it and the card's words fade; nothing darkens. Pulled
 past fully open the card gives like a rubber band, the column's edge filling the
 gap. Released, or when the system takes the touch, it settles the rest of the way
 at the finger's speed (180–400 ms); ☰ opens it in 340 ms and × or the room's
-quarter close it in 280 ms, on the iOS sheet curve `cubic-bezier(0.32, 0.72, 0, 1)`.
-The quarter's clear scrim comes and goes with it. Reduced motion keeps the finger
-tracking and drops the rest.
+quarter close it in 280 ms, on the iOS sheet curve (`--ease-sheet`). A thumb that
+rests before it lifts is no fling. The quarter's clear scrim comes and goes with
+it. Reduced motion keeps the finger tracking and drops the rest.
+
+**Moving between places.** On a phone a place picked in the open drawer changes
+inside the room card: the drawer stays painted for one 160 ms beat while the
+leaving room's words fade out and the arriving room fades in with one breath
+(scale .97 → 1), the chosen place's pill slides from its old row to the tapped one,
+then the drawer's own close brings the card home; opening the drawer switches the
+pill on where you are (owner 20.10, 4A; `web/modules/shell_motion.js`). The stack,
+history and Back change at the tap; only the covered room's inert waits for the
+card, because it restyles the whole room. A Project room that is left keeps its
+rows until its exit has run and is the same room when reopened meanwhile. Docked,
+navigation stays instant; the Project panel comes in from the window's right edge
+once its room has painted (or after a read's 300 ms bound, with its loading row)
+and goes back there whole, only its scrim fading (owner 20.10, Q2 A). A dismissed
+toast fades where it stood while the ones that stay glide into its place. Moving
+status marks share one document phase while keeping their three-dot delay
+(`web/modules/status_mark.js`); repainting an unchanged mark does not restart it,
+and under the closed phone drawer they rest. Reduced motion keeps only short fades
+(the arriving room, the docked panel) and stops the wave. No veil covers the app
+while it reconnects: the room's bar says Reconnecting….
 
 **Haptics.** Inside Telegram, and only there (its HapticFeedback; a browser and the
 desktop app have none), a few moments are felt, one meaning each: the drawer,
