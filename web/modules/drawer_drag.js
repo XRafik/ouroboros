@@ -51,8 +51,8 @@ export const FIELD_SELECTOR = 'input, textarea, select, video, audio, [role="sli
 export const SIDEWAYS_SELECTOR = 'pre, code, table, .md-table-wrap, .app-tab-strip, [data-scroll-x]';
 // What lies over the room and owns the finger while it is open (shown, not merely mounted): a dialog, the reader,
 // a menu, the Shade. A Project open on the phone is the room: the drag opens the drawer over it, as ☰ does.
-export const BLOCKING_SELECTOR = 'dialog[open], .marketplace-modal-backdrop, .ui-popup, .task-control-menu, '
-    + '.chat-photo-menu, .rw-shade:not([hidden]), details.chat-header-more[open]';
+export const BLOCKING_SELECTOR = 'dialog[open], .marketplace-modal-backdrop, .ui-popup:not([data-leaving]), .task-control-menu, '
+    + '.chat-photo-menu, .rw-shade:not([hidden]):not([inert]), details.chat-header-more[open]';
 
 /** The chain under the finger keeps its own sideways gesture: a `touch-action: none` element (the effort strip) or a
  * scroller that can move sideways. */

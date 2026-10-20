@@ -29,7 +29,7 @@ ROW = """sel => { const row = document.querySelector(sel); const r = row.getBoun
         transform: getComputedStyle(row).transform, shadow: getComputedStyle(row).boxShadow,
         mark: mark ? { armed: mark.dataset.armed || '', k: Number(mark.style.getPropertyValue('--reply-k')), shown: mark.isConnected } : null,
         staged: document.getElementById('chat-input-reply')?.textContent || '', scrollTop: document.getElementById('chat-messages').scrollTop,
-        menu: [...document.querySelectorAll('.chat-row-menu [data-row-action]')].map((item) => item.dataset.rowAction) }; }"""
+        menu: [...document.querySelectorAll('.chat-row-menu:not([data-leaving]) [data-row-action]')].map((item) => item.dataset.rowAction) }; }"""
 # Playwright leaves the order of init scripts undefined: the recorder patches the stub's Telegram whether the stub is
 # already there or assigns it later.
 RECORD_HAPTICS = """(() => { const played = window.__haptics = [];

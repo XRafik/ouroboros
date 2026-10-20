@@ -793,6 +793,16 @@ textarea.ui-control { resize: vertical; }
 }
 
 .ui-popup[hidden], dialog.ui-popup:not([open]) { display: none; }
+/* A popup grows a little from where it was opened as it fades in (--ui-popup-origin, ui_interactions.js measures it),
+   and its picture leaves the same way when it closes. Reduced motion: at once. */
+.ui-popup:not([hidden]) {
+    transform-origin: var(--ui-popup-origin, 50% 0);
+    animation: ui-popup-in var(--motion-fade) var(--ease-sheet);
+}
+@keyframes ui-popup-in { from { opacity: 0; transform: scale(0.96); } }
+@media (prefers-reduced-motion: reduce) {
+    .ui-popup:not([hidden]) { animation: none; }
+}
 
 /* ---- Floating chrome ----------------------------------------------------------------------------------------------
    Controls that float over scrolling content (Main's header group) share one box: height, baseline and the pill

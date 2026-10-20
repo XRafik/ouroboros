@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { afterMotion, reducedMotion, onReducedMotionChange } from '../modules/motion.js';
+import { afterMotion, leaveAsPicture, motionMs, reducedMotion, onReducedMotionChange } from '../modules/motion.js';
 
 function world(style = {}) {
     const timers = [];
@@ -107,4 +107,48 @@ test('an end from a transition that was replaced ends nothing while the new one 
     animations = [];
     w.el.fire('transitionend', { propertyName: 'transform' });
     assert.equal(await outcome(wait.done), 'end');
+});
+
+test('a token\'s duration is read from the stylesheet; without one it is nothing', () => {
+    const win = { document: { documentElement: {} }, getComputedStyle: () => ({ getPropertyValue: (name) => (name === '--motion-fade' ? ' 180ms' : '') }) };
+    assert.equal(motionMs('--motion-fade', win), 180);
+    assert.equal(motionMs('--motion-none', win), 0);
+    assert.equal(motionMs('--motion-fade', {}), 0, 'no window: nothing');
+});
+
+test('what closes leaves as its picture: a copy without ids, inert and unseen, removed when its motion ends', async () => {
+    const played = [];
+    let finish;
+    const makeNode = (attrs = {}) => {
+        const node = { attrs: { ...attrs }, style: {}, inert: false, children: [], isConnected: true,
+            setAttribute(name, value) { this.attrs[name] = value; },
+            removeAttribute(name) { delete this.attrs[name]; },
+            matches: (selector) => selector === 'dialog' && attrs.tag === 'dialog',
+            querySelectorAll() { return this.children; },
+            animate(frames, timing) { played.push([frames, timing]); return { finished: new Promise((resolve) => { finish = resolve; }) }; },
+            remove() { this.removed = true; } };
+        return node;
+    };
+    const child = makeNode({ id: 'menu-item' });
+    const menu = makeNode({ id: 'menu' });
+    let picture = null;
+    menu.cloneNode = () => { picture = makeNode({ id: 'menu' }); picture.children = [makeNode({ id: 'menu-item' })]; return picture; };
+    menu.after = (node) => { node.placed = true; };
+    menu.children = [child];
+    const win = { matchMedia: () => ({ matches: false }) };
+    const frames = [{ opacity: 1 }, { opacity: 0 }];
+    assert.equal(leaveAsPicture(menu, frames, { duration: 180, win }), picture);
+    assert.deepEqual([picture.placed, picture.attrs.id, picture.children[0].attrs.id], [true, undefined, undefined]);
+    assert.deepEqual([picture.attrs['aria-hidden'], 'data-leaving' in picture.attrs, picture.inert, picture.style.pointerEvents],
+        ['true', true, true, 'none']);
+    assert.deepEqual(played, [[frames, { duration: 180, easing: 'ease-in', fill: 'forwards' }]]);
+    finish();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(picture.removed, true, 'gone once its motion has ended');
+    // Nothing to play: reduced motion, no duration, a dialog, an element no longer on the page.
+    assert.equal(leaveAsPicture(menu, frames, { duration: 180, win: { matchMedia: () => ({ matches: true }) } }), null);
+    assert.equal(leaveAsPicture(menu, frames, { duration: 0, win }), null);
+    assert.equal(leaveAsPicture(makeNode({ tag: 'dialog' }), frames, { duration: 180, win }), null);
+    assert.equal(leaveAsPicture({ ...menu, isConnected: false }, frames, { duration: 180, win }), null);
+    assert.equal(played.length, 1);
 });

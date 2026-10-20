@@ -46,6 +46,27 @@ function transitionMs(el, property, win) {
     return longest;
 }
 
+/** A motion token's duration in ms (`--motion-fade`), read from the stylesheet: script keeps no copy of it. */
+export function motionMs(token, win = globalThis.window) {
+    try { return toMs(win.getComputedStyle(win.document.documentElement).getPropertyValue(token).trim()); } catch { return 0; }
+}
+
+/** What closes leaves as its picture: a copy of `el` (no ids, inert, hidden from assistive tech) plays `frames` where
+ * `el` stood while `el` itself goes at once, so a close decides nothing later than it did. Reduced motion, a dialog
+ * (the top layer) or an engine without element animations: nothing. */
+export function leaveAsPicture(el, frames, { duration = 0, easing = 'ease-in', win = globalThis.window } = {}) {
+    if (!el?.isConnected || !duration || reducedMotion(win) || typeof el.animate !== 'function' || el.matches?.('dialog')) return null;
+    const picture = el.cloneNode(true);
+    for (const node of [picture, ...picture.querySelectorAll('[id]')]) node.removeAttribute('id');
+    picture.setAttribute('aria-hidden', 'true');
+    picture.setAttribute('data-leaving', '');
+    picture.inert = true;
+    picture.style.pointerEvents = 'none';
+    el.after(picture);
+    picture.animate(frames, { duration, easing, fill: 'forwards' }).finished.catch(() => {}).finally(() => picture.remove());
+    return picture;
+}
+
 /** `{ done: Promise<'end'|'cancel'|'timeout'|'none'>, cancel() }` for `el`'s transition of `property`. */
 export function afterMotion(el, { property = 'transform', win = globalThis.window } = {}) {
     let resolve;

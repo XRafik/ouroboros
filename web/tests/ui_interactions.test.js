@@ -64,6 +64,9 @@ class Node extends Events {
     append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node); } }
     getClientRects() { return this.isConnected && !this.closest('[hidden]') ? [this.rect] : []; }
     getBoundingClientRect() { return this.rect; }
+    // The laid-out size, as a browser reports it without the element's own transform.
+    get offsetWidth() { return this.rect.width ?? 0; }
+    get offsetHeight() { return this.rect.height ?? 0; }
     focus() { if (this.isConnected) this.ownerDocument.activeElement = this; }
 }
 function environment() {
@@ -297,6 +300,7 @@ test('menu fits a short/narrow viewport and keyboard wraps over enabled actions'
     assert.equal(menu.css.get('--ui-popup-left'), '142px');
     assert.equal(menu.css.get('--ui-popup-top'), '104px');
     assert.equal(menu.css.get('--ui-popup-max-height'), '196px');
+    assert.equal(menu.css.get('--ui-popup-origin'), '153px 100px', 'opening above its anchor, it grows from the anchor\'s middle at its foot');
     assert.equal(doc.activeElement, options[0]);
     menu.emit('keydown', { target: options[0], key: 'ArrowUp' });
     assert.equal(doc.activeElement, options[2]);
@@ -409,6 +413,7 @@ test('popup uses visual viewport bounds and point coordinates without an input o
     const binding = bindPopoverPosition(popup, { point: { x: 300, y: 230 } });
     assert.equal(popup.css.get('--ui-popup-left'), '152px');
     assert.equal(popup.css.get('--ui-popup-top'), '122px');
+    assert.equal(popup.css.get('--ui-popup-origin'), '120px 80px', 'it grows from the press, clamped to its own box');
     binding.destroy();
     assert.equal(doc.defaultView.listenerCount() + doc.defaultView.visualViewport.listenerCount(), 0);
 });
