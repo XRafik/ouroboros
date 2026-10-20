@@ -123,10 +123,13 @@ export function normalizeQuiz(msg) {
     };
 }
 
+// The host's sentence rides the bubble's time line (docs/DESIGN.md "Quiz card"). The node exists from the first
+// paint and stays hidden until a delivery carries the sentence, so a later, richer one fills it in place.
 export function hostFactsLine(text) {
     const line = document.createElement('div');
     line.className = 'chat-quiz-host-facts';
     line.textContent = text;  // ids, times and counts of one question: a sentence, not a translation key
+    line.hidden = !text;
     return line;
 }
 
@@ -170,17 +173,20 @@ const CLOSE_GLYPH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none"
 // The same answer and explicit no-answer closure controls serve Main and Project. Closing is one
 // quiet × at the end of the card's head (a tall card's foot can be screens away), one tap with no
 // reason to type; it waits while an answer is typed, so a mis-tap never discards the owner's words.
+// The answer is one frame holding its words and its Send, as the composer holds its own.
 export function appendQuestionReplyControls(card, quiz, { submit, close, showToast, onDomWrite }) {
     const box = document.createElement('div');
     box.className = 'chat-quiz-comment-box';
     const field = document.createElement('textarea');
     field.className = 'chat-quiz-comment'; field.rows = 2; field.maxLength = MAX_DECISION_COMMENT;
+    // The placeholder is an example, never the field's only name (DESIGN §3).
+    field.setAttribute('aria-label', tr('quiz.answer_label', 'Your answer'));
     field.placeholder = tr('quiz.answer_placeholder', 'Your answer or comment…');
     const send = document.createElement('button');
-    send.type = 'button'; send.className = 'chat-quiz-send';
+    send.type = 'button'; send.className = 'chat-quiz-send ui-hit-area';
     send.textContent = tr('quiz.send_answer', 'Send my answer'); send.disabled = true;
     const closeButton = document.createElement('button');
-    closeButton.type = 'button'; closeButton.className = 'chat-quiz-close';
+    closeButton.type = 'button'; closeButton.className = 'chat-quiz-close ui-hit-area';
     const closeLabel = tr('quiz.close_question', 'Close question without answering');
     closeButton.setAttribute('aria-label', closeLabel); closeButton.title = closeLabel;
     closeButton.innerHTML = CLOSE_GLYPH;
