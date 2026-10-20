@@ -43,19 +43,23 @@ class BootstrapContext:
 
 def checkout_sha(repo_dir: pathlib.Path) -> str:
     """HEAD of the checkout, or "" when Git or the repository is unavailable (never a guess)."""
+    from ouroboros.platform_layer import merge_hidden_kwargs
+
     try:
-        shown = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(repo_dir), capture_output=True,
-                               text=True, encoding="utf-8", check=False)
+        shown = subprocess.run(["git", "rev-parse", "HEAD"], **merge_hidden_kwargs(
+            {"cwd": str(repo_dir), "capture_output": True, "text": True, "encoding": "utf-8", "check": False}))
     except OSError:
         return ""
     return shown.stdout.strip() if shown.returncode == 0 else ""
 
 
-_LOADED_CHECKOUT_SHA = ""  # the checkout whose modules the launcher process imported (its first launch)
+_LOADED_CHECKOUT_SHA = ""  # the commit whose modules this launcher process imported (remember_loaded_checkout)
 
 
 def remember_loaded_checkout(repo_dir: pathlib.Path, *, bundle_dir: pathlib.Path | None = None) -> str:
-    """Record the loaded generation once: macOS before bootstrap can advance the checkout, elsewhere at first start."""
+    """Record once, before bootstrap can advance the checkout, which commit the launcher's modules came
+    from: a frozen app or a seed copy imported them from ``bundle_dir`` (its manifest's ``source_sha``),
+    the checkout's own launcher from ``repo_dir`` (its HEAD)."""
     global _LOADED_CHECKOUT_SHA
     if _LOADED_CHECKOUT_SHA:
         return _LOADED_CHECKOUT_SHA
@@ -67,13 +71,13 @@ def remember_loaded_checkout(repo_dir: pathlib.Path, *, bundle_dir: pathlib.Path
 
 
 def launcher_sources_changed(repo_dir: pathlib.Path, loaded_sha: str | None = None, *,
-                             bundle_dir: pathlib.Path | None = None, packaged: bool = False) -> bool:
+                             bundle_dir: pathlib.Path | None = None, packaged: bool = False,
+                             source_root: pathlib.Path | None = None) -> bool:
     """True when the landed checkout changed a module the launcher process has loaded.
 
-    The launcher imports its helpers once; a body adoption (or any release) that
-    lands another version of them while the agent is down leaves that process
-    serving stale code, so its exit-42 branch re-executes the launcher exactly
-    then (the same move the seed-bundle first run makes). The comparison is the
+    The launcher imports its helpers once; a cold start or body adoption that
+    finds another version in the checkout hands off through ``exec_source_launcher``.
+    A server-only update leaves the launcher running. The comparison is the
     checkout's own history, not the file system: the commit the launcher imported
     from (``loaded_sha``, "" when unknown: never a relaunch) against the commit
     that now serves, over the loaded modules' repository paths plus ``launcher.py``.
@@ -81,21 +85,22 @@ def launcher_sources_changed(repo_dir: pathlib.Path, loaded_sha: str | None = No
     them ``<pkg>/<module>.pyc`` or ``.py`` there); they count under their repository
     paths. A path counts as named or resolved: a macOS app's bundle is
     ``Contents/Frameworks``, whose ``<pkg>`` links into ``Contents/Resources``, so
-    there only the named path lies inside the bundle.
+    there only the named path lies inside the bundle. ``source_root`` also covers
+    seed hosts that import from a separate image directory (the container's /app).
 
-    ``packaged`` (a frozen launcher's cold check) counts the whole packaged trees,
+    ``packaged`` (the cold check) counts the whole packaged trees,
     ``ouroboros`` and ``supervisor``, not only what is loaded so far: later imports
     (Panic sweep, restart acknowledgement, server records) would come from the seed
     too. Conservative by design: a body-only change there hands off as well, while a
-    ``server.py``-only update keeps the frozen launcher.
+    ``server.py``-only update keeps the launcher.
     """
-    import sys
+    from ouroboros.platform_layer import merge_hidden_kwargs
 
     loaded_sha = _LOADED_CHECKOUT_SHA if loaded_sha is None else loaded_sha
     head = checkout_sha(repo_dir)
     if not loaded_sha or not head or head == loaded_sha:
         return False
-    roots = [pathlib.Path(os.path.abspath(root)) for root in (repo_dir, bundle_dir) if root]
+    roots = [pathlib.Path(os.path.abspath(root)) for root in (repo_dir, bundle_dir, source_root) if root]
     roots += [root.resolve() for root in roots]
     loaded = {"launcher.py", *(("ouroboros", "supervisor") if packaged else ())}
     for module in list(sys.modules.values()):
@@ -111,7 +116,7 @@ def launcher_sources_changed(repo_dir: pathlib.Path, loaded_sha: str | None = No
         if relative is not None:
             loaded.add((relative.with_suffix(".py") if relative.suffix == ".pyc" else relative).as_posix())
     probe = subprocess.run(["git", "diff", "--quiet", loaded_sha, head, "--", *sorted(loaded)],
-                           cwd=str(repo_dir), capture_output=True, check=False)
+                           **merge_hidden_kwargs({"cwd": str(repo_dir), "capture_output": True, "check": False}))
     return probe.returncode == 1
 
 
@@ -753,13 +758,28 @@ def shell_runtime_facts(repo_dir: pathlib.Path, seed: pathlib.Path | None, shell
     entry = macos_source_entry(seed) if macos and seed else None
     return {"shell_version": shell_version, "bundle_version": bundle_version,
             "source_launcher": not frozen,
-            "source_revision": remember_loaded_checkout(repo_dir, bundle_dir=seed if frozen and macos else None),
+            "source_revision": remember_loaded_checkout(repo_dir, bundle_dir=seed if frozen else None),
             "macos_source_entry": bool(entry and pathlib.Path(sys.executable) == entry) if macos and seed else None}
 
 
+# Consumed by launcher.py's stdlib prologue before any package import.
+LAUNCHER_HANDOFF_ENV = "OUROBOROS_LAUNCHER_HANDOFF"
+
+
 def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_lock: Callable[[], None],
-                         desktop: bool, macos: bool) -> None:
-    """Hand off to compatible managed source, keeping the running shell if the probe fails."""
+                         acquire_lock: Callable[[], bool], before_release: Callable[[], None],
+                         on_failure: Callable[[], None], desktop: bool, macos: bool) -> None:
+    """Hand off to compatible managed source; keep the shell on probe or spawn refusal.
+
+    macOS selects its signed entry and probes imports/protocol with plain Python before
+    teardown or unlocking. POSIX replaces the process image with that exact command.
+    Windows spawns a quoted argv, preserving an attached CLI console and hiding only
+    when there is none. Remove the old icon while holding the lock; a definite refusal
+    reacquires it before restoring the shell, or exits if another launcher took it.
+    A successor that starts and then fails is not a spawn refusal; no retry state is kept.
+    """
+    from ouroboros.platform_layer import IS_WINDOWS, inherited_console_kwargs
+
     entry = macos_source_entry(context.bundle_dir) if macos else None
     frozen = getattr(sys, "frozen", False)
     if entry is not None and not source_launcher_importable(
@@ -773,10 +793,23 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
     context.log.info("Loading managed source launcher through %s", command[0])
     # The source shell needs the dependencies bootstrap installed in the userbase,
     # too. Do not export PYTHONHOME or change any child's process/bundle identity.
+    env = {**os.environ, LAUNCHER_HANDOFF_ENV: "1"}
     if entry is not None:
-        os.environ.update(embedded_python_env(context.data_dir))
+        env = embedded_python_env(context.data_dir, env)
+    before_release()
     release_lock()
-    os.execv(command[0], command)
+    try:
+        if not IS_WINDOWS:
+            os.execve(command[0], command, env)  # returns only by raising
+        subprocess.Popen(command, env=env, close_fds=True, **inherited_console_kwargs())
+    except Exception:
+        context.log.error("The checkout's launcher did not start", exc_info=True)
+        if acquire_lock():
+            on_failure()
+            return
+        context.log.error("Another launcher took the single-instance lock meanwhile; this one exits")
+        os._exit(1)
+    os._exit(0)  # no atexit release over the successor's PID lock
 
 
 def source_launcher_importable(context: BootstrapContext, *, desktop: bool, python: str | None = None,

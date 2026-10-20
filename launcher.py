@@ -19,6 +19,22 @@ import webbrowser
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
+
+def _rehome_legacy_handoff() -> None:
+    """Before package adoption can wait: repair a recognized legacy GUI handoff once."""
+    marked, args = os.environ.pop("OUROBOROS_LAUNCHER_HANDOFF", ""), sys.argv[1:]
+    if sys.platform == "win32" and not getattr(sys, "frozen", False) and not marked and "--no-ui" not in args \
+            and any(arg.split("=", 1)[0] == "--seed-bundle" for arg in args):
+        # This existing Windows leaf is stdlib-only; importing its package would run adoption first.
+        import runpy
+
+        runpy.run_path(str(pathlib.Path(__file__).parent / "ouroboros" / "launcher_windows_runtime.py"))[
+            "rehome_legacy_handoff"](args)
+
+
+if __name__ == "__main__":
+    _rehome_legacy_handoff()
+
 # Seal-safe imports: the current interpreter needs the flag before project imports;
 # PYTHONDONTWRITEBYTECODE alone only affects later child interpreters. Bundle writes
 # would invalidate a macOS signature and trigger AppTranslocation.
@@ -61,7 +77,7 @@ from ouroboros.launcher_onboarding import (
     setup_recovery_menu,
 )
 from ouroboros.launcher_background import (Background, DesktopApi, activate_running_instance, background_env,
-                                           request_tray_cleanup, stop_tray_before_exit)
+                                           request_tray_cleanup, restore_tray_after_handoff, stop_tray_before_exit)
 from ouroboros.launcher_server_reaper import (
     reap_same_install_strays as _reap_same_install_strays_impl,
 )
@@ -105,8 +121,6 @@ CRASH_WINDOW_SEC = 120
 MACOS_SOURCE_ENTRY_PROTOCOL = 1
 # One bounded visible retry when dependency installation fails.
 _DEPS_RETRY_DELAY_SEC = 5
-_CREATE_SUSPENDED = getattr(subprocess, "CREATE_SUSPENDED", 0x4) if IS_WINDOWS else 0
-_CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if IS_WINDOWS else 0
 
 # WA6: globally suppress bytecode writes for the launcher process itself and any
 # naive os.environ.copy() child it spawns. A signed+notarized macOS .app must not
@@ -175,7 +189,8 @@ def _bundle_dir() -> pathlib.Path:
 
 def _exec_source_launcher() -> None:
     exec_source_launcher(_bootstrap_context(), _launch_argv, release_lock=release_pid_lock,
-                         desktop=not _external_ui, macos=IS_MACOS)
+                         acquire_lock=acquire_pid_lock, before_release=lambda: stop_tray_before_exit(lambda: None),
+                         on_failure=restore_tray_after_handoff, desktop=not _external_ui, macos=IS_MACOS)
 
 
 def _shell_facts() -> dict:
@@ -458,15 +473,8 @@ def start_agent(port: int = AGENT_SERVER_PORT) -> subprocess.Popen:
         "stdout": subprocess.PIPE,
         "stderr": subprocess.STDOUT,
     }
-    if IS_WINDOWS:
-        popen_kwargs["creationflags"] = (
-            popen_kwargs.get("creationflags", 0)
-            | _CREATE_NEW_PROCESS_GROUP
-            | _CREATE_SUSPENDED
-        )
-    else:
-        popen_kwargs.update(subprocess_new_group_kwargs())
-
+    popen_kwargs.update(subprocess_new_group_kwargs(suspended=IS_WINDOWS))  # Windows resumes it once its Job owns it
+    # Hidden-window flags: the server starts without a console window (CREATE_NO_WINDOW on Windows).
     proc = _hidden_popen([EMBEDDED_PYTHON, str(server_py)], **popen_kwargs)
     _agent_proc = proc
 
@@ -702,7 +710,6 @@ def agent_lifecycle_loop(port: int = AGENT_SERVER_PORT) -> None:
         _external_host_result = update_external_host(_external_host_update, EMBEDDED_PYTHON, log, _shutdown_event)
         if _shutdown_event.is_set():
             break  # Native preparation has reaped its owned processes before returning.
-        remember_loaded_checkout(REPO_DIR)  # the checkout at first start, unless main() recorded macOS's generation
         proc = start_agent(port)
         if _shutdown_event.is_set():
             stop_agent()
@@ -797,8 +804,8 @@ def agent_lifecycle_loop(port: int = AGENT_SERVER_PORT) -> None:
                         "import them — see the pip output above for the cause.",
                         MAX_CRASH_RESTARTS, CRASH_WINDOW_SEC,
                     )
-            if _external_seed_bundle is not None or launcher_sources_changed(REPO_DIR, bundle_dir=_bundle_dir()):
-                _exec_source_launcher()
+            if launcher_sources_changed(REPO_DIR, bundle_dir=_bundle_dir(), source_root=pathlib.Path(__file__).parent):
+                _exec_source_launcher()  # a refused successor: this launcher starts the next generation itself
             continue
 
         now = time.time()
@@ -1185,15 +1192,26 @@ def main(argv=()):
         return
 
     import atexit
-    atexit.register(release_pid_lock)
+    atexit.register(lambda: stop_tray_before_exit(release_pid_lock))
 
     if not automatic_launch_allowed(options.launch_intent, DATA_DIR, log):
         return
-    if IS_MACOS:  # the code actually imported, before bootstrap can advance the checkout (elsewhere: first start)
-        remember_loaded_checkout(pathlib.Path(__file__).parent,
-                                 bundle_dir=_bundle_dir() if getattr(sys, "frozen", False) else None)
+    # Record the loaded generation before bootstrap can advance the managed checkout.
+    remember_loaded_checkout(REPO_DIR, bundle_dir=_bundle_dir() if getattr(sys, "frozen", False) or pathlib.Path(
+        __file__).resolve() != (REPO_DIR / "launcher.py").resolve() else None)
+
+    def _on_closing() -> None:
+        log.info("Window closing — graceful shutdown.")
+        _shutdown_event.set()
+        stop_agent()
+        _kill_orphaned_children()
+        stop_tray_before_exit(release_pid_lock)
+        os._exit(0)
+
     # Listen before the long boot: a manual second launch meanwhile is kept and opens the window once it exists.
-    background = None if _headless else Background(lambda: _on_closing(), _read_port_file, _shutdown_event).listen(PID_FILE)
+    background = None if _headless else Background(_on_closing, _read_port_file, _shutdown_event).listen(PID_FILE)
+    if _shutdown_event.is_set():
+        return  # Early Panic owns persistence and exit; bootstrap must not start beside it.
 
     if not check_git():
         log.warning("Git not found.")
@@ -1223,7 +1241,7 @@ def main(argv=()):
         class GitApi:
             def install_git(self):
                 if IS_MACOS:
-                    subprocess.Popen(["xcode-select", "--install"])
+                    _hidden_popen(["xcode-select", "--install"])
                 elif IS_WINDOWS:
                     _hidden_popen(
                         ["winget", "install", "Git.Git", "--source", "winget", "--accept-source-agreements"]
@@ -1303,16 +1321,19 @@ def main(argv=()):
             print(f"Ouroboros did not start: {refusal}", file=sys.stderr, flush=True)
             sys.exit(1)
 
-    if IS_MACOS and getattr(sys, "frozen", False):
-        # Cold launch loads updated helpers, including any it would import later from the seed, before a server
-        # or normal window; no source entry returns to this frozen bootstrap. Preserve an Open received during boot.
-        if macos_source_entry(_bundle_dir()) is None:
-            log.warning("This app lacks the macOS source entry; source restarts need a new app installation "
-                        "to preserve the app profile and notification identity.")
-        elif launcher_sources_changed(REPO_DIR, bundle_dir=_bundle_dir(), packaged=True):
-            if background is not None and background._open_pending:
-                _launch_argv += ["--launch-intent", "owner"]
-            _exec_source_launcher()
+    if _shutdown_event.is_set():
+        return  # Panic during bootstrap must not hand off or start an owner-intent server.
+
+    # Cold handoff includes helpers imported later from the seed. An old macOS app keeps its identity;
+    # a current one uses the signed source entry. Preserve an Open received during boot on every desktop.
+    if IS_MACOS and getattr(sys, "frozen", False) and macos_source_entry(_bundle_dir()) is None:
+        log.warning("This app lacks the macOS source entry; source restarts need a new app installation "
+                    "to preserve the app profile and notification identity.")
+    elif launcher_sources_changed(REPO_DIR, bundle_dir=_bundle_dir(), packaged=True,
+                                  source_root=pathlib.Path(__file__).parent):
+        if background is not None and background._open_pending:
+            _launch_argv += ["--launch-intent", "owner"]
+        _exec_source_launcher()
 
     # D-8: decide here, PRESENT after the gateway is healthy. Everything above
     # (single-instance lock, Git, managed-repo bootstrap/seed validation) is a
@@ -1536,14 +1557,6 @@ def main(argv=()):
         # Never returns: keep-alive loop + teardown + sys.exit inside.
         _run_headless_main(url, actual_port, lifecycle_thread)
 
-    def _on_closing() -> None:
-        log.info("Window closing — graceful shutdown.")
-        _shutdown_event.set()
-        stop_agent()
-        _kill_orphaned_children()
-        stop_tray_before_exit(release_pid_lock)
-        os._exit(0)
-
     window = webview.create_window(
         f"Ouroboros v{APP_VERSION}",
         url=url,
@@ -1567,9 +1580,7 @@ if __name__ == "__main__":
     if sys.platform == "darwin":
         try:
             shell_path = subprocess.check_output(
-                ["/bin/bash", "-l", "-c", "echo $PATH"],
-                text=True,
-                timeout=5,
+                ["/bin/bash", "-l", "-c", "echo $PATH"], **merge_hidden_kwargs({"text": True, "timeout": 5}),
             ).strip()
             if shell_path:
                 os.environ["PATH"] = shell_path

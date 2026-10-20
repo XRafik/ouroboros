@@ -1320,6 +1320,12 @@ def merge_hidden_kwargs(kwargs: dict) -> dict:
     return result
 
 
+def inherited_console_kwargs() -> dict:
+    """A successor keeps this process's console (a terminal run); Windows hides it only when there is none (GUI)."""
+    attached = not IS_WINDOWS or _kernel32.GetConsoleProcessList((ctypes.wintypes.DWORD * 1)(), 1)
+    return {} if attached else subprocess_hidden_kwargs()
+
+
 # Git installation hint.
 
 def git_install_hint() -> str:

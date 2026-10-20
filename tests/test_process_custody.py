@@ -37,6 +37,11 @@ _POSIX_ONLY = pytest.mark.skipif(
 # explicitly justifying it here.
 _POPEN_ALLOWLIST = {
     "launcher.py",                        # custody host process (pre-runtime)
+    # The launcher's Windows handoff (exec_source_launcher): its one Popen is the next
+    # launcher, a custody host itself, and this launcher exits right after it starts.
+    "ouroboros/launcher_bootstrap.py",
+    # The same one-shot launcher replacement, before package imports/adoption can wait.
+    "ouroboros/launcher_windows_runtime.py",
     "ouroboros/process_custody.py",       # the chokepoint itself
     "ouroboros/platform_layer.py",        # primitives (hidden_run helpers)
     # ProcessContainer.spawn IS the custody for the hermetic gate's short-lived

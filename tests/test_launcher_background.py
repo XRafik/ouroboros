@@ -291,7 +291,7 @@ def test_tray_quit_is_a_plain_exit_without_panic(settings, monkeypatch, tmp_path
     assert not (tmp_path / "state" / "panic_stop.flag").exists()
 
 
-def test_tray_panic_posts_the_servers_emergency_stop_and_shows_the_window_on_failure(settings, monkeypatch, make):
+def test_tray_panic_leaves_the_running_servers_emergency_stop_in_charge(settings, monkeypatch, make):
     sent = []
 
     class Response:
@@ -303,8 +303,6 @@ def test_tray_panic_posts_the_servers_emergency_stop_and_shows_the_window_on_fai
 
     def urlopen(request, timeout):
         sent.append((request.full_url, request.get_method(), json.loads(request.data)))
-        if len(sent) > 1:
-            raise OSError("server gone")
         return Response()
 
     monkeypatch.setattr(lb.urllib.request, "urlopen", urlopen)
@@ -312,9 +310,41 @@ def test_tray_panic_posts_the_servers_emergency_stop_and_shows_the_window_on_fai
     background.request_panic()
     wait_for(lambda: len(sent) == 1)
     assert sent[0] == ("http://127.0.0.1:8765/api/command", "POST", {"cmd": "/panic"})
+    assert background.events == [] and window.calls == []
+    assert not background.shutdown.is_set()
+    assert not (settings.parent / "state" / "panic_stop.flag").exists()
+
+
+@pytest.mark.parametrize("failed_writer", [None, "flag", "controls"])
+def test_early_tray_panic_latches_stop_and_exits_even_when_persistence_fails(settings, monkeypatch, make, failed_writer):
+    from ouroboros import server_control
+    from ouroboros.launcher_bootstrap import automatic_launch_allowed
+
+    background, window = make()
+    background.window = None  # early icon: no server and no pywebview window yet
+    writes, write_flag = [], server_control._write_panic_flag
+    exit_threads, original_exit = [], background.exit_launcher
+    background.exit_launcher = lambda: (exit_threads.append(threading.current_thread().daemon), original_exit())
+
+    def persist(kind, root):
+        assert background.shutdown.is_set() and background.quit.is_set(), "fence before I/O"
+        writes.append(kind)
+        if failed_writer == kind:
+            raise OSError("unwritable state")
+        if kind == "flag":
+            write_flag(root)
+
+    monkeypatch.setattr(server_control, "_write_panic_flag", lambda root: persist("flag", root))
+    monkeypatch.setattr(server_control, "_persist_panic_controls", lambda root: persist("controls", root))
     background.request_panic()
-    wait_for(lambda: "show" in window.calls)
-    assert background.events == []
+    wait_for(lambda: "exit" in background.events)
+    assert writes == ["flag", "controls"], "each persistence attempt is independent"
+    assert exit_threads == [False], "returning from main must not kill the pending Panic writer"
+    assert background.shutdown.is_set() and background.quit.is_set()
+    assert not background._open_pending and window.calls == []
+    if failed_writer != "flag":
+        assert (settings.parent / "state" / "panic_stop.flag").read_text() == "panic"
+        assert not automatic_launch_allowed("automatic", settings.parent, lb.log)
 
 
 @pytest.mark.parametrize("answer,hidden", [
@@ -480,18 +510,47 @@ def test_panic_removes_the_indicator_without_waiting_and_before_the_lock(monkeyp
         def stop(self, *, wait):
             calls.append((self.name, wait))
 
-    monkeypatch.setattr(lb, "_active", Started("indicator"))
-    monkeypatch.setattr(lb, "_notifier", Started("notifications"))  # Windows' notification icons
+    monkeypatch.setattr(lb, "_active", Started("indicator"))  # Windows: also the notifications' one icon
     lb.request_tray_cleanup()
     lb.stop_tray_before_exit(lambda: calls.append("release"), wait=0)
-    assert calls == [("indicator", 0), ("notifications", 0), ("indicator", 0), ("notifications", 0), "release"]
+    assert calls == [("indicator", 0), ("indicator", 0), "release"]
     calls.clear()
     lb.stop_tray_before_exit(lambda: calls.append("release"))
-    assert calls == [("indicator", 0.5), ("notifications", 0.5), "release"]
+    assert calls == [("indicator", 0.5), "release"]
     monkeypatch.setattr(lb, "_active", None)
     calls.clear()
     lb.stop_tray_before_exit(lambda: calls.append("release"))
-    assert calls == [("notifications", 0.5), "release"], "no background icon: the notification icons still go"
+    assert calls == ["release"], "no icon: only the lock"
+
+
+@pytest.mark.parametrize("idle,restarts", [(True, True), (True, False), (False, True)])
+def test_failed_handoff_restores_the_icon_or_a_hidden_window_without_a_second_pump(
+        settings, monkeypatch, make, idle, restarts):
+    choose(settings, "true")
+    background, window = make()
+    assert close(background, window) is False
+    lb.stop_tray_before_exit(lambda: None)
+    if not idle:
+        background.indicator._idle.clear()  # removal acknowledged, pump has not ended
+    background.indicator.comes_up = restarts
+    monkeypatch.setattr(lb, "INDICATOR_WAIT_SEC", 0.01)
+    lb.restore_tray_after_handoff()
+    if idle and restarts:
+        assert background.indicator.ready.is_set() and not window.visible
+        background.show_window()
+        assert window.visible
+    else:
+        assert not background.indicator.ready.is_set() and window.visible
+        assert not background.indicator.hidden, "no hidden shell without a way back"
+
+
+def test_panic_does_not_restore_an_indicator_after_handoff_failure(settings, monkeypatch, make):
+    background, window = make()
+    assert background._indicator_up()
+    lb.stop_tray_before_exit(lambda: None)
+    background.shutdown.set()
+    lb.restore_tray_after_handoff()
+    assert not background.indicator.ready.is_set() and window.calls == []
 
 
 def test_turning_background_off_removes_the_icon_only_while_the_window_is_visible(settings, monkeypatch, make):
@@ -511,6 +570,114 @@ def test_turning_background_off_removes_the_icon_only_while_the_window_is_visibl
     background.show_window()
     background._poll()
     assert ("dispose", 0.0) in background.events and not background.indicator.ready.is_set()
+
+
+class NotifyingIndicator(FakeIndicator):
+    carries_notifications = True  # Windows: system notifications are balloons on this icon
+
+
+@pytest.mark.parametrize("quit_during_boot", [False, True])
+def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
+        settings, monkeypatch, quit_during_boot):
+    import atexit
+    import launcher
+    from ouroboros import launcher_tray
+    from tests.test_launcher_source_handoff import Continued, Exited
+
+    choose(settings, "false")
+    events, owners, finalizers = [], [], []
+
+    class EarlyIndicator(NotifyingIndicator):
+        def _launch(self):
+            events.append("icon")
+            return super()._launch()
+
+        def _dispose(self, wait):
+            events.append("remove icon")
+            self._stopped()
+
+    original_background = lb.Background
+
+    def owner(*args):
+        background = original_background(*args)
+        owners.append(background)
+        return background
+
+    def check_git():
+        background = owners[0]
+        assert background.window is None and background.indicator.ready.is_set()
+        assert events == ["runtime", "lock", "allowed", "listen", "icon"]
+        background.show_window()
+        assert background._open_pending, "Open before the window exists is kept"
+        if quit_during_boot:
+            background.request_quit()  # callback must already exist, even before Git/bootstrap
+        raise Continued()
+
+    def leave(code):
+        events.append(("exit", code))
+        raise Exited(code)
+
+    monkeypatch.setattr(lb, "indicator_class", lambda: EarlyIndicator)
+    monkeypatch.setattr(lb, "_active", None)
+    monkeypatch.setattr(lb.Background, "_watch", lambda self: None)
+    monkeypatch.setattr(lb.sys, "platform", "win32")
+    monkeypatch.setattr(launcher_tray, "listen_for_activation", lambda *args: events.append("listen"))
+    monkeypatch.setattr(atexit, "register", finalizers.append)
+    monkeypatch.setitem(sys.modules, "webview", types.ModuleType("webview"))
+    monkeypatch.setattr(launcher.os, "_exit", leave)
+    for name in ("_headless", "_external_ui", "_external_host_update", "_external_seed_bundle", "_launch_argv",
+                 "_launch_intent"):
+        monkeypatch.setattr(launcher, name, getattr(launcher, name))
+    for name, value in (("IS_WINDOWS", True), ("_headless", False), ("_detect_headless", lambda: None),
+                        ("_shutdown_event", threading.Event()), ("Background", owner),
+                        ("_prepare_windows_webview_runtime", lambda: events.append("runtime") or (True, "")),
+                        ("acquire_pid_lock", lambda: events.append("lock") or True),
+                        ("release_pid_lock", lambda: events.append("release")),
+                        ("automatic_launch_allowed", lambda *args: events.append("allowed") or True),
+                        ("stop_agent", lambda: events.append("stop agent")),
+                        ("_kill_orphaned_children", lambda: events.append("reap")), ("check_git", check_git)):
+        monkeypatch.setattr(launcher, name, value)
+    with pytest.raises(Exited if quit_during_boot else Continued):
+        launcher.main([])
+    background = owners[0]
+    if quit_during_boot:
+        assert events[-5:] == ["stop agent", "reap", "remove icon", "release", ("exit", 0)]
+    else:
+        background.window = Window()
+        background.run()
+        assert events.count("icon") == 1, "webview's later callback reuses the early icon"
+        finalizers[0]()  # startup return/exception cleanup removes the icon before releasing the lock
+        assert events[-2:] == ["remove icon", "release"]
+
+
+@pytest.mark.parametrize("value", ["false", ""])  # background off, or not decided yet
+def test_windows_keeps_its_one_icon_for_the_whole_run_and_background_decides_only_the_close(
+        settings, monkeypatch, make, value):
+    """Owner decision 1A: the icon carrying the notifications comes up with the window whatever the background
+    choice, and turning background off never removes it; the choice still decides what a close does. An icon
+    that carries no notifications (macOS) keeps coming up only for background, as before."""
+    class OneTick(threading.Event):
+        def wait(self, timeout=None):
+            return True  # one poll iteration, then stop
+
+    choose(settings, value)
+    plain, _window = make()
+    plain.run()
+    assert not plain.indicator.ready.is_set(), "no background, no item: unchanged where notifications go elsewhere"
+    background, window = make(indicator=NotifyingIndicator)
+    background.run()
+    assert background.indicator.ready.is_set() and not background.indicator.hidden
+    background.shutdown.set()
+    background._poller.join(timeout=5)
+    background.shutdown = OneTick()
+    background._poll()
+    assert background.indicator.ready.is_set() and not any(event[0] == "dispose" for event in background.events
+                                                           if isinstance(event, tuple))
+    outcome = close(background, window)
+    if value == "false":
+        assert outcome is None and background.events[-1] == "exit", "background off: closing quits, icon or not"
+    else:
+        assert outcome is False and window.visible, "undecided: the one question, the window stays meanwhile"
 
 
 READY = {"supervisor_ready": True, "supervisor_error": None, "works_complete": True}

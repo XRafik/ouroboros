@@ -4,6 +4,8 @@ The owner's choice is ``OUROBOROS_DESKTOP_KEEP_RUNNING`` (``desktop_autostart``)
 when the window closes. A close hides the window only while a platform indicator is
 live (``launcher_tray`` on Windows, ``launcher_tray_macos`` on macOS); otherwise it quits
 as before, and a window hidden on purpose is shown again if its indicator goes away.
+Windows keeps its one icon for the whole desktop run, because system notifications are
+balloons on it (owner decision 1A); macOS shows its item only while background is on.
 Until the owner decides, the first close asks once and stores the answer; dismissing
 the question quits. A quit request (the indicator's Quit, Cmd+Q, sign-out, shutdown)
 and Panic never reach the question and are never cancelled. An alert never raises a
@@ -51,8 +53,7 @@ INDICATOR_WAIT_SEC = 3.0
 PERSISTENT_WEBVIEW_STORAGE = True
 _SHELL_VERSION = read_version()  # the loaded code; a later in-place Update is not a new shell
 STATUS_POLL_SEC = 15.0
-_active = None  # the started indicator, for the exit and Panic paths
-_notifier = None  # the system-notification adapter, for the same paths (Windows' icons outlive a process)
+_active = None  # the started indicator, for the exit and Panic paths (a Windows icon outlives its process)
 
 
 def indicator_class():
@@ -142,24 +143,38 @@ def activate_running_instance(lock_path) -> bool:
 
 
 def request_tray_cleanup() -> None:
-    """Panic: start removing the icons without waiting for them."""
-    for owner in (_active, _notifier):
-        if owner is not None:
-            try:
-                owner.stop(wait=0)
-            except Exception:
-                log.warning("Icon cleanup request failed; Panic continues.", exc_info=True)
+    """Panic: start removing the icon without waiting for it."""
+    if _active is not None:
+        try:
+            _active.stop(wait=0)
+        except Exception:
+            log.warning("Icon cleanup request failed; Panic continues.", exc_info=True)
 
 
 def stop_tray_before_exit(release_lock, *, wait: float = 0.5) -> None:
-    """Remove the icons before an ordinary exit (bounded each); Panic passes ``wait=0``."""
-    for owner in (_active, _notifier):
-        if owner is not None:
-            try:
-                owner.stop(wait=wait)
-            except Exception:
-                log.warning("Icon cleanup failed before process exit.", exc_info=True)
+    """Remove the icon before an ordinary exit (bounded); Panic passes ``wait=0``."""
+    if _active is not None:
+        try:
+            _active.stop(wait=wait)
+        except Exception:
+            log.warning("Icon cleanup failed before process exit.", exc_info=True)
     release_lock()
+
+
+def restore_tray_after_handoff() -> None:
+    """A definite spawn refusal, with the PID lock retaken: restore the same shell's indicator.
+
+    Removal can precede pump exit; never start a second pump while the stopped one still owns it.
+    If restoration fails, show a hidden window (or let cold startup create its visible window).
+    """
+    if _active is None or _active.background.shutdown.is_set():
+        return
+    indicator, background = _active, _active.background
+    if indicator._idle.wait(INDICATOR_WAIT_SEC) and background._indicator_up():
+        return
+    log.warning("The launcher continues without its indicator; showing the window.")
+    if background.window is not None:
+        indicator._show_or_exit(background.window)
 
 
 class Indicator:
@@ -168,6 +183,7 @@ class Indicator:
     live, and a window hidden on purpose comes back if the icon goes away."""
 
     decides_natively = False  # Windows: the form's FormClosing handler sees the close reason
+    carries_notifications = False  # Windows: notifications are balloons on this icon, up for the whole run
 
     def __init__(self, background: "Background") -> None:
         self.background = background
@@ -320,8 +336,7 @@ class Background:
         self.indicator = cls(self) if cls is not None else None
         self.appearance = NativeAppearance()  # the window's caption tint follows its page (Windows)
         self.chrome = WindowChrome()  # the main window's title bar follows its document (macOS)
-        global _notifier
-        self.notifications = _notifier = native_notifier(self.open_notification)
+        self.notifications = native_notifier(self.open_notification, self.indicator)
         self._asking = threading.Lock()
         self._poller = None
         # An open request (a second launch) can arrive during the boot, before the window exists: it is
@@ -347,6 +362,8 @@ class Background:
                 signal.signal(signal.SIGURG, lambda *_: self.show_window())
         except Exception:
             log.warning("A second launch cannot show this window on this host.", exc_info=True)
+        if self.indicator is not None and self.indicator.carries_notifications:
+            self._indicator_up()  # Windows: after the PID lock/runtime preparation, before long bootstrap
         return self
 
     def start_hidden(self, intent: str) -> bool:
@@ -373,8 +390,9 @@ class Background:
         return window
 
     def run(self) -> None:
-        """``webview.start(func=...)``: bring the icon up when background is on."""
-        if self.indicator is None or (keep_running_choice() != "true" and not self.indicator.hidden):
+        """``webview.start(func=...)``: keep Windows' early icon; start other indicators for background."""
+        if self.indicator is None or (not self.indicator.carries_notifications and keep_running_choice() != "true"
+                                      and not self.indicator.hidden):
             return
         self._indicator_up()  # the state poller starts only once the icon is visible
         if self.indicator.hidden:
@@ -405,7 +423,7 @@ class Background:
         self.exit_launcher()
 
     def request_panic(self) -> None:
-        """The indicator's Panic: the server's own emergency stop over HTTP, like Android's notification."""
+        """Use the server's emergency stop; before it serves, latch Panic and stop this launcher."""
         def post() -> None:
             try:
                 request = urllib.request.Request(
@@ -414,10 +432,27 @@ class Background:
                 with urllib.request.urlopen(request, timeout=10):
                     pass
             except Exception:
-                log.error("Panic could not reach the server; showing the window.", exc_info=True)
-                self.show_window()
+                # Fence later server admission before persistence: a long bootstrap must
+                # not consume this stop as if it were a fresh explicit owner launch.
+                self.shutdown.set()
+                self.quit.set()
+                request_tray_cleanup()
+                try:
+                    from ouroboros.config import DATA_DIR
+                    from ouroboros.server_control import _bounded, _persist_panic_controls, _write_panic_flag
 
-        threading.Thread(target=post, name="ouroboros-indicator-panic", daemon=True).start()
+                    # Reuse the existing marker and bounded writers. A failed/stalled
+                    # disk cannot prevent the exit; the next boot reconciles a kept flag.
+                    flag = _bounded(lambda: _write_panic_flag(DATA_DIR), 2.0)
+                    controls = _bounded(lambda: _persist_panic_controls(DATA_DIR), 2.0)
+                    log.error("Panic could not reach the server; stopping the launcher. "
+                              "Stop flag persisted=%s; controls persisted=%s", flag, controls)
+                finally:
+                    self.exit_launcher()
+
+        # If main returns at a shutdown fence, keep the bounded persistence/exit
+        # owner alive until it finishes; a daemon could lose the stop marker.
+        threading.Thread(target=post, name="ouroboros-indicator-panic", daemon=False).start()
 
     def show_window(self) -> None:
         """Open the window: the icon or its Open, a banner, the Dock, a second launch.
@@ -510,10 +545,10 @@ class Background:
 
     def _poll(self) -> None:
         while self.indicator.ready.is_set() and not self.shutdown.is_set():
-            if keep_running_choice() != "true" and not self.indicator.hidden:
+            if not self.indicator.carries_notifications and keep_running_choice() != "true" and not self.indicator.hidden:
                 self.indicator.stop()  # the owner turned background off: no icon while the window is visible
                 return
-            self.indicator.set_status(status_line(self.read_port()))
+            self.indicator.set_status("Ouroboros: starting" if self.window is None else status_line(self.read_port()))
             if self.shutdown.wait(STATUS_POLL_SEC):
                 return
 

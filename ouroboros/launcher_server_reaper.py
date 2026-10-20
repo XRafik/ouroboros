@@ -82,9 +82,9 @@ def _candidate_commands() -> "Optional[dict]":
     the real filter. ``-u <uid>``: other accounts run their own legitimate installs and are
     unsignallable anyway. ``-ww``: BSD ps truncates otherwise and the matcher needs exact argv."""
     try:
-        out = subprocess.run(
+        out = subprocess.run(  # POSIX-only here; the launcher's spawns ask for no window anyway
             ["ps", "-ww", "-u", str(os.getuid()), "-o", "pid=,command="],
-            capture_output=True, text=True, timeout=5,
+            **_pl.merge_hidden_kwargs({"capture_output": True, "text": True, "timeout": 5}),
         )
     except Exception:
         return None
