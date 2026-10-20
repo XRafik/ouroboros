@@ -12,7 +12,8 @@ test('answer folds in a feed whose width still moves wait until the width holds'
     const listeners = new Map(), frames = [];
     globalThis.window.addEventListener = (type, fn) => listeners.set(type, [...(listeners.get(type) || []), fn]);
     globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
-    const fire = (type) => { for (const fn of listeners.get(type) || []) fn(); frames.splice(0).forEach((fn) => fn()); };
+    const frame = () => frames.splice(0).forEach((fn) => fn());
+    const fire = (type) => { for (const fn of listeners.get(type) || []) fn(); frame(); frame(); };
     try {
         const first = new ElementStub('div', globalThis.document);
         first.className = 'chat-bubble';
@@ -35,7 +36,10 @@ test('answer folds in a feed whose width still moves wait until the width holds'
         const rows = [answer('at rest', () => false), answer('moving', () => moving)];
         globalThis.document.querySelectorAll = (selector) => (selector === '.chat-bubble.project-answer' ? rows : []);
 
-        fire('resize');
+        for (const fn of listeners.get('resize')) fn();
+        frame();
+        assert.deepEqual(measured, [], 'not in the frame of the change: a new width wakes sleeping rows after its frame callbacks');
+        frame();
         assert.deepEqual(measured, ['at rest', 'mark at rest'], 'a resize measures only the answers in a feed at rest');
         assert.equal(rows[1].classes.has('is-folded'), false);
 

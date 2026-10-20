@@ -66,11 +66,12 @@ function afterLayout(work) {
 }
 // A feed whose width is still moving lays out only the rows near the screen (chat_reading_position.js marks it
 // [data-resizing]); measuring a row it skips would lay that row out again, on every frame of the move. Its rows are
-// measured once the width holds.
+// measured once the width holds. They are measured a frame after the change: a new width wakes the rows that sleep
+// in the observers of the frame it is laid out in, after that frame's animation callbacks.
 function refreshFoldsSoon() {
     if (queued) return;
     queued = true;
-    afterLayout(() => {
+    afterLayout(() => afterLayout(() => {
         queued = false;
         // A sleeping row ([data-laid], chat_row_sleep.js) keeps the fold it was measured with at this width: a row that
         // changes wakes, a new width wakes every row, and a feed that is not shown puts none to sleep. Measuring it
@@ -78,7 +79,7 @@ function refreshFoldsSoon() {
         const due = [...document.querySelectorAll('.chat-bubble.project-answer')]
             .filter((bubble) => !bubble.closest('[data-resizing], [data-laid]'));
         due.map(measureFold).filter(Boolean).forEach(applyFold);
-    });
+    }));
 }
 function watchFolds() {
     if (watching || typeof window === 'undefined') return;
