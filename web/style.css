@@ -3687,7 +3687,7 @@ html[data-layout="stack"] #primary-sidebar {
        drag (--drawer-settle, drawer_drag.js). */
     transform: translateX(-16%);
     opacity: 0.5;
-    transition: transform var(--drawer-settle, 280ms) cubic-bezier(0.32, 0.72, 0, 1),
+    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet),
         opacity var(--drawer-settle, 280ms) ease;
     padding-bottom: calc(var(--space-3) + var(--inset-bottom));
     touch-action: pan-y;  /* a sideways finger is the drawer's (drawer_drag.js); up and down scroll the list */
@@ -3742,13 +3742,8 @@ html[data-layout="stack"] body .nav-drawer-backdrop.dragging {
     transition: none;
 }
 /* The room (Main, or a Project open over it) is the card: opaque, so the drawer under it never shows through, and
-   pushed aside from its left edge. A Project card keeps that edge while it closes too: with the origin only on
-   `.open`, a card still at scale(.96) pivoted about its centre and jumped 8px the frame it lost the class. */
-html[data-layout="stack"] #content,
-html[data-layout="stack"] .project-panel {
-    transform-origin: 0 50%;
-}
-html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel.open) {
+   pushed aside from its left edge (each room's own stack rule: transform-origin 0 50%). */
+html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel) {
     transform: translateX(var(--drawer-w)) scale(0.96);
     border-radius: var(--room-card-radius);
     box-shadow: var(--room-card-shadow);
@@ -3792,18 +3787,83 @@ html[data-layout="stack"] body .room-veil.dragging {
     html[data-layout="stack"] :is(#primary-sidebar, #primary-sidebar.open, .nav-drawer-backdrop, #content,
         .project-panel, .room-veil) { transition: none; }
 }
+/* A place chosen in the open drawer changes inside the card (shell_motion.js; owner 20.10, 4A). The page that leaves
+   stays displayed for the beat, out of the flow, while its words fade; a Project room that leaves lies over the
+   arriving one inside the panel. The Project panel is the card whether arriving or leaving while the drawer is painted
+   open (above), so it never rises over the drawer. */
+#content > .page[data-leaving] {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+.chat-instance-panel[data-leaving] {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+}
+/* The chosen place's pill: the chosen row's own fill (and its left mark) under the drawer's rows, sliding from the old
+   row to the tapped one during the beat, turning from a place's fill into a Project's veil on the way; the rows' own
+   fills step aside meanwhile and take the place back in one frame. */
+html[data-layout="stack"] #primary-sidebar > .shell-pill {
+    position: absolute;
+    z-index: 0;
+    pointer-events: none;
+    transform-origin: 0 50%;
+    will-change: transform, opacity;
+}
+html[data-layout="stack"] .shell-pill > i {
+    position: absolute;
+    inset: 0;
+}
+html[data-layout="stack"] .shell-pill > .shell-pill-place {
+    background: var(--tone-crimson);
+    border-radius: var(--radius-inner);
+}
+html[data-layout="stack"] .shell-pill > .shell-pill-place::before {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 17px;
+    border-radius: 0 3px 3px 0;
+    background: var(--place-mark);
+}
+html[data-layout="stack"] .shell-pill > .shell-pill-project {
+    background: var(--project-08);
+    border-radius: var(--radius-sm);
+}
+html[data-layout="stack"] #primary-sidebar.shell-sliding :is(.nav-row.active, .nav-project-row.active),
+html[data-layout="stack"] #primary-sidebar.shell-sliding .sidebar-head {
+    background: transparent;
+}
+html[data-layout="stack"] #primary-sidebar.shell-sliding .nav-row.active::before { opacity: 0; }
+html[data-layout="stack"] #primary-sidebar.shell-handoff :is(.nav-row, .nav-project-row) { transition: none; }
+/* A tap on a drawer row answers with its colour at once (a press is colour, never a sink): without a hover the rows
+   had only iOS's grey flash. */
+.nav-row,
+.nav-section-toggle {
+    -webkit-tap-highlight-color: transparent;
+}
+.nav-row:not(.active):active,
+.nav-section-toggle:active {
+    background: var(--tone-quiet-hover);
+}
 html[data-layout="stack"] .unread-badge {
     min-width: 14px;
     height: 14px;
 }
 html[data-layout="stack"] #content {
+    transform-origin: 0 50%;
     grid-column: 1;
     padding-left: 0;
     padding-bottom: var(--inset-bottom);
     z-index: var(--z-room);
     background: var(--bg-primary);
-    transition: transform var(--drawer-settle, 280ms) cubic-bezier(0.32, 0.72, 0, 1),
-        border-radius var(--drawer-settle, 280ms) cubic-bezier(0.32, 0.72, 0, 1),
+    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet),
+        border-radius var(--drawer-settle, 280ms) var(--ease-sheet),
         box-shadow var(--drawer-settle, 280ms) ease;
 }
 /* The stack layout's header is one row of at most 56px at normal scale: `☰ · title · status … Panic · ⋯`
@@ -7735,6 +7795,7 @@ body.keyboard-open .chat-instance-panel .chat-input-area {
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    position: relative;  /* a Project room that leaves lies over the arriving one (shell_motion.js) */
 }
 
 .project-panel-backdrop {
@@ -7842,10 +7903,13 @@ html[data-layout="stack"] .project-panel {
     border-left: none;
     /* A full-screen room must occlude Main, not show its text through glass. */
     background: var(--bg-primary);
+    /* Pushed aside from its left edge, open or not: with the origin only on .open, a Project card closing at
+       scale(.96) pivoted about its centre and jumped 8px the frame it lost the class. */
+    transform-origin: 0 50%;
     transform: translateY(14px);
     /* It rises on the sheet curve, and moves as the room card with the drawer (above) on the same one. */
-    transition: transform var(--drawer-settle, 280ms) cubic-bezier(0.32, 0.72, 0, 1), opacity 180ms ease,
-        border-radius var(--drawer-settle, 280ms) cubic-bezier(0.32, 0.72, 0, 1),
+    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet), opacity 180ms ease,
+        border-radius var(--drawer-settle, 280ms) var(--ease-sheet),
         box-shadow var(--drawer-settle, 280ms) ease;
 }
 

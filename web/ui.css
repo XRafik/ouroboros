@@ -216,6 +216,8 @@
     /* A press on a solid fill under white ink (the primary action, the chosen tab) deepens instead. */
     --press-solid: brightness(0.9);
     --motion-tone: background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, filter 0.12s ease;
+    /* The one curve anything that moves rides: the iOS sheet curve (DESIGN §10 "Motion"; shell_motion.js reads it). */
+    --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
     --widget-fault-status-max-width: min(240px, 35vw);
     /* App shell: persistent desktop sidebar + optional project detail pane. */
     --sidebar-width: 280px;

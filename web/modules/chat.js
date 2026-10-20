@@ -352,8 +352,10 @@ export function createChatInstance({
     // One derived physical coverage/status for the mounted reading window.
     let historyWindow = null;
     let _hasNewActivity = false;
+    // A Project room app.js retired is leaving the screen (it fades out inside the room card): not shown, not read.
+    let leaving = false;
     const isInstanceVisible = () =>
-        Boolean(messagesDiv) && messagesDiv.offsetParent !== null && !document.hidden;
+        !leaving && Boolean(messagesDiv) && messagesDiv.offsetParent !== null && !document.hidden;
     const LIVE_CARD_CAP = 200;
     const liveCardBound = createLiveCardBound(LIVE_CARD_CAP);
     const liveCardRecords = new Map();
@@ -2618,7 +2620,7 @@ export function createChatInstance({
             return lastHistorySyncSucceeded;
         },
         // A destroyed page reports hidden===false, hence the lifecycle flag.
-        isShown: () => !destroyed && !page.hidden,
+        isShown: () => !destroyed && !leaving && !page.hidden,
         // A place still being restored is not where the reader is.
         isReadingLatest: latest => !destroyed && !reading.pending && !replies.revealing && isInstanceVisible() && isAtNewestMessage(latest, {
             ...newestFacts, atBottom: () => isNearBottom() && !historyPager.getState().canNewer,
@@ -3512,6 +3514,10 @@ export function createChatInstance({
         // modal a file card opened (reader, file dialog) closes and its read
         // stops; staged attachments and uploads are untouched.
         closeTransient: () => { reading.cancel(); roomWork?.leave(); chatMedia.closeTransient(); },
+        // app.js retires a room that is leaving the screen and keeps it whole for its exit: its paint receipt, its
+        // reading and its transients stop at once, it is neither shown nor read; `stay` is a reopen meanwhile.
+        leave: () => { leaving = true; readReceipt.cancel(); reading.cancel(); roomWork?.leave(); chatMedia.closeTransient(); },
+        stay: () => { leaving = false; },
         // Full teardown (P3): release every resource this instance acquired —
         // ws subscriptions, window/document listeners, the ResizeObserver, all
         // timers — then drop the buffered collections and remove the DOM last.

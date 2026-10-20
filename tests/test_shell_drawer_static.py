@@ -44,7 +44,8 @@ def test_drawer_is_a_layer_with_one_close_control_where_the_menu_button_was():
     composer = css.split('html[data-layout="stack"] .chat-toolbar-row > .composer-menu {', 1)[1].split("}", 1)[0]
     assert "height: var(--composer-control-height);" in composer, "as tall as the capsules beside it"
     # The closed drawer is inert in the stack layout; the scrim stays live under the modal layer.
-    assert "primarySidebar.inert = isStackLayout() && !drawerOpen;" in app_js
+    assert "const sidebarInert = isStackLayout() && !drawerOpen;" in app_js
+    assert "if (primarySidebar && primarySidebar.inert !== sidebarInert) primarySidebar.inert = sidebarInert;" in app_js
     assert "live: [navDrawerBackdrop].filter(Boolean)" in app_js
     # The keyboard is released before the drawer opens, as before.
     assert "if (nextOpen) releaseMobileKeyboardForDrawer();" in app_js
@@ -62,16 +63,17 @@ def test_the_room_is_the_card_the_drawer_pushes_aside():
     assert "z-index: var(--z-sidebar);" in drawer and "transform: translateX(-16%);" in drawer, "under the room, a step to the left"
     room = css.split('html[data-layout="stack"] #content {', 1)[1].split("}", 1)[0]
     assert "z-index: var(--z-room);" in room and "background: var(--bg-primary);" in room, "the opaque card over the drawer"
-    card = css.split('html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel.open) {', 1)[1].split("}", 1)[0]
+    card = css.split('html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel) {', 1)[1].split("}", 1)[0]
     assert "transform: translateX(var(--drawer-w)) scale(0.96);" in card and "border-radius: var(--room-card-radius);" in card
-    # The card is pushed aside from its left edge whether or not a Project panel is still `.open`: a closing Project
-    # card pivoting about its centre jumped 8px the frame it lost the class (owner 20.10, 4A).
-    origin = css.split('html[data-layout="stack"] .project-panel {\n    transform-origin: 0 50%;', 1)
-    assert len(origin) == 2 and 'html[data-layout="stack"] #content,' in origin[0][-80:], "one origin rule for both cards"
+    # Both cards are pushed aside from their left edge, a Project panel whether or not it is still `.open`: a closing
+    # Project card pivoting about its centre jumped 8px the frame it lost the class (owner 20.10, 4A).
+    for card_rule in ('html[data-layout="stack"] #content {', 'html[data-layout="stack"] .project-panel {'):
+        assert "transform-origin: 0 50%;" in css.split(card_rule, 1)[1].split("}", 1)[0], card_rule
+    assert "transform-origin" not in css.split('html[data-layout="stack"] .project-panel.open {', 1)[1].split("}", 1)[0]
     dragged = css.split('html[data-layout="stack"] body :is(#content, .project-panel.open).dragging {', 1)[1].split("}", 1)[0]
     assert "var(--drawer-p, 0) * var(--drawer-w)" in dragged, "the card follows the finger by the drawer's number"
     # As specific as the open card's and the open veil's rules, and after them: a finger on the open drawer moves both.
-    for opened, held in (('body.nav-drawer-open :is(#content, .project-panel.open) {',
+    for opened, held in (('body.nav-drawer-open :is(#content, .project-panel) {',
                           'body :is(#content, .project-panel.open).dragging {'),
                          ('body.nav-drawer-open .room-veil {', 'body .room-veil.dragging {')):
         assert css.index(f'html[data-layout="stack"] {opened}') < css.index(f'html[data-layout="stack"] {held}'), held
