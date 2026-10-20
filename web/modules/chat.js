@@ -1482,15 +1482,10 @@ export function createChatInstance({
 
     // Returning to the Chat page reopens the room at its newest message; a window
     // shown again keeps the same reading intent (data readiness positions it);
-    // hidden, it ends an unread opening still owed. WebKit drops the offset of a
-    // page that was not displayed, so its first frame would paint the oldest loaded
-    // messages: with the present loaded, the newest edge is set in this task, before
-    // that frame, and showLatest confirms it.
+    // hidden, it ends an unread opening still owed.
     const handlePageShown = (event) => {
-        if (event?.detail?.page === 'chat') {
-            if (!historyPager.getState().away && !historyWindow?.horizonGap) reading.jumpToNewest();
-            void showLatest();
-        } else if (event?.type !== 'visibilitychange') return;
+        if (event?.detail?.page === 'chat') void showLatest();
+        else if (event?.type !== 'visibilitychange') return;
         else if (document.hidden) reading.land(() => 0, reading.arriving);
         else reading.request();
     };
