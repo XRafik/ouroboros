@@ -65,6 +65,9 @@ D19 = "Frozen contracts (ABI)"
 D20 = "Presence"
 
 [modules]
+"ouroboros/panic_source.py" = "D18"
+"ouroboros/platform_peer.py" = "D18"
+"ouroboros/schedule_continuation.py" = "D01"
 "ouroboros/chat_references.py" = "D11"
 "ouroboros/gateway/reference_contracts.py" = "D19"
 "ouroboros/owner_relay.py" = "D01"
