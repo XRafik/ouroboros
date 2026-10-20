@@ -42,9 +42,9 @@ function makeWin() {
     const history = { calls: [], pushState(state, title) { this.calls.push(['push', state, title]); }, back() { this.calls.push(['back']); } };
     const win = {
         history, listeners,
-        addEventListener(type, fn) { listeners.set(type, fn); },
-        removeEventListener(type) { listeners.delete(type); },
-        fire(type, event = {}) { listeners.get(type)?.(event); },
+        addEventListener(type, fn) { if (!listeners.has(type)) listeners.set(type, new Set()); listeners.get(type).add(fn); },
+        removeEventListener(type, fn) { listeners.get(type)?.delete(fn); if (!listeners.get(type)?.size) listeners.delete(type); },
+        fire(type, event = {}) { for (const fn of [...(listeners.get(type) || [])]) fn(event); },
         KeyboardEvent: class {
             constructor(type, init) { Object.assign(this, { type, defaultPrevented: false }, init); }
             preventDefault() { this.defaultPrevented = true; }
@@ -215,6 +215,179 @@ test('a sync that keeps the same modal picture writes no inert; only what change
     assert.deepEqual(toast, [], 'what the page inerted is never written');
     assert.equal(w.toast.inert, true);
     w.layers.destroy();
+});
+
+test('a batch settles once: one snapshot, one history entry, focus once; a replaced drawer leaves the room inert throughout', async () => {
+    const w = world();
+    const seen = [];
+    w.layers.onChange((snapshot) => seen.push(snapshot.ids.join(',')));
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    await tick();
+    const content = countInertWrites(w.content);
+    w.layers.batch(() => {
+        w.layers.remove('drawer');
+        w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} });
+    });
+    assert.deepEqual(seen, ['drawer', 'project'], 'one snapshot for the replacement: Telegram\'s Back never blinks');
+    assert.deepEqual(content, [], 'the room under the drawer and then the Project was never released');
+    assert.equal(w.doc.activeElement, w.panel, 'focus once, into the layer the batch opened');
+    await tick();
+    assert.deepEqual(w.win.history.calls.map((c) => c[0]), ['push'], 'one history entry throughout');
+    // A batch that throws still settles what it changed, and the error reaches its caller.
+    assert.throws(() => w.layers.batch(() => { w.layers.remove('project'); throw new Error('owner failed'); }), /owner failed/);
+    assert.equal(seen.at(-1), '');
+    assert.deepEqual(content, [false]);
+    w.layers.destroy();
+});
+
+test('with inertAfter the stack, history, Back and a live focus change at once; inert and the focus it frees, after the motion', async () => {
+    const w = world();
+    const opener = w.node('button', w.content);
+    opener.focus();
+    const seen = [];
+    w.layers.onChange((snapshot) => seen.push(snapshot.size));
+    let opened;
+    w.layers.batch(() => w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} }),
+        { inertAfter: new Promise((resolve) => { opened = resolve; }) });
+    assert.deepEqual(seen, [1], 'Telegram\'s Back shows from the first frame');
+    assert.equal(w.layers.has('drawer'), true, 'Escape and Back find the drawer at once');
+    assert.equal(w.doc.activeElement, w.sidebar, 'the drawer is live: focus goes in at once');
+    assert.equal(w.content.inert, false, 'the room is not written while the drawer moves');
+    await tick();
+    assert.deepEqual(w.win.history.calls.map((c) => c[0]), ['push']);
+    opened();
+    await tick();
+    assert.equal(w.content.inert, true, 'the room is inert once the drawer has settled');
+    // Closing: the opener sits in the room the pending difference releases, so focus returns after the motion.
+    let closed;
+    w.layers.batch(() => w.layers.remove('drawer'), { inertAfter: new Promise((resolve) => { closed = resolve; }) });
+    assert.deepEqual(seen, [1, 0]);
+    assert.equal(w.content.inert, true, 'still inert while the card glides home');
+    w.sidebar.inert = true;  // the owner made the closed drawer inert at once; its focus is lost
+    w.doc.activeElement = w.doc.body;
+    closed();
+    await tick();
+    assert.equal(w.content.inert, false);
+    assert.equal(w.doc.activeElement, opener, 'and focus is back on the opener');
+    w.layers.destroy();
+});
+
+test('Tab while the inert difference waits applies it first, so focus never walks into the covered room', async () => {
+    const w = world();
+    let opened;
+    w.layers.batch(() => w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} }),
+        { inertAfter: new Promise((resolve) => { opened = resolve; }) });
+    assert.equal(w.content.inert, false, 'the room is not written while the drawer moves');
+    w.win.fire('keydown', { key: 'a' });
+    assert.equal(w.content.inert, false, 'other keys leave it to the motion');
+    w.win.fire('keydown', { key: 'Tab' });
+    assert.equal(w.content.inert, true, 'Tab applies it before the focus moves');
+    const content = countInertWrites(w.content);
+    opened();
+    await tick();
+    assert.deepEqual(content, [], 'the motion\'s end finds it applied and writes nothing again');
+    w.win.fire('keydown', { key: 'Tab' });
+    assert.deepEqual(content, [], 'nothing is pending any more');
+    w.layers.destroy();
+    assert.equal(w.win.listeners.size, 0);
+});
+
+test('a commit that moves no focus keeps the focus a superseded commit still owes; one that moves its own replaces it', async () => {
+    const w = world();
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    const row = w.node('button', w.sidebar);
+    row.focus();  // the Project's row, tapped in the drawer
+    let beat;
+    w.layers.batch(() => {
+        w.layers.remove('drawer');
+        w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} });
+    }, { inertAfter: new Promise((resolve) => { beat = resolve; }) });
+    assert.equal(w.doc.activeElement, row, 'the panel lies in the room the drawer made inert: its focus waits');
+    w.sidebar.inert = true;  // the owner made the closed drawer inert at once; the row's focus is lost
+    w.doc.activeElement = w.doc.body;
+    // The paint at the end of the beat commits the same stack again, for the close that follows.
+    let close;
+    w.layers.batch(() => w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} }),
+        { inertAfter: new Promise((resolve) => { close = resolve; }) });
+    beat();
+    await tick();
+    assert.equal(w.doc.activeElement, w.doc.body, 'the superseded commit places nothing');
+    close();
+    await tick();
+    assert.equal(w.panel.inert, false);
+    assert.equal(w.doc.activeElement, w.panel, 'the focus it owed lands once the motion has ended');
+    w.layers.destroy();
+    // The other direction: a later commit that moves focus itself wins over the owed one.
+    const v = world();
+    const menuButton = v.node('button', v.content);
+    menuButton.focus();
+    v.layers.push({ id: 'drawer', el: v.sidebar, modal: true, onClose() {} });
+    v.node('button', v.sidebar).focus();
+    v.layers.batch(() => {
+        v.layers.remove('drawer');
+        v.layers.push({ id: 'project', el: v.panel, modal: true, onClose() {} });
+    }, { inertAfter: new Promise(() => {}) });
+    v.doc.activeElement = v.doc.body;
+    v.layers.batch(() => v.layers.remove('project'));  // closed before its motion ended
+    assert.equal(v.doc.activeElement, menuButton, 'focus goes back to the ☰, the closed Project is never focused');
+    v.layers.destroy();
+});
+
+test('a layer that replaces another in one commit returns focus where the replaced one would have', () => {
+    const w = world();
+    const menuButton = w.node('button', w.content);
+    menuButton.focus();
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    const row = w.node('button', w.sidebar);
+    row.focus();  // the Project's row, tapped in the drawer
+    w.layers.batch(() => {
+        w.layers.remove('drawer');
+        w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} });
+    });
+    assert.equal(w.doc.activeElement, w.panel);
+    w.sidebar.inert = true;  // the closed drawer, as the owner leaves it
+    w.layers.remove('project');
+    assert.equal(w.doc.activeElement, menuButton, 'back on the room\'s ☰, not lost in the closed drawer');
+    // An ordinary push keeps the focused control as its opener.
+    const other = w.node('button', w.content);
+    other.focus();
+    w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} });
+    w.layers.remove('project');
+    assert.equal(w.doc.activeElement, other);
+    w.layers.destroy();
+});
+
+test('a later commit supersedes a pending inert difference; one without inertAfter applies now; destroy drops it', async () => {
+    const w = world();
+    let first;
+    w.layers.batch(() => w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} }),
+        { inertAfter: new Promise((resolve) => { first = resolve; }) });
+    let second;
+    w.layers.batch(() => w.layers.remove('drawer'), { inertAfter: new Promise((resolve) => { second = resolve; }) });
+    first();
+    await tick();
+    assert.equal(w.content.inert, false, 'the open that was overtaken writes nothing');
+    second();
+    await tick();
+    assert.equal(w.content.inert, false);
+    // A pending difference, then a commit with nothing to wait for: applied now, the pending one retired.
+    let late;
+    w.layers.batch(() => w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} }),
+        { inertAfter: new Promise((resolve) => { late = resolve; }) });
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    assert.equal(w.content.inert, true, 'applied at once');
+    w.layers.batch(() => w.layers.remove('drawer'), { inertAfter: new Promise(() => {}) });
+    w.layers.destroy();
+    late();
+    await tick();
+    assert.equal(w.content.inert, false, 'destroy released it and the late promise applies nothing');
+    // A rejected promise counts as the motion's end.
+    const v = world();
+    v.layers.batch(() => v.layers.push({ id: 'drawer', el: v.sidebar, modal: true, onClose() {} }),
+        { inertAfter: Promise.reject(new Error('motion gone')) });
+    await tick();
+    assert.equal(v.content.inert, true);
+    v.layers.destroy();
 });
 
 test('what is opened over the shell beside it (a dialog, a menu, a toast) stays live under a modal layer', () => {
