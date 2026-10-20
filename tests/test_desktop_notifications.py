@@ -878,6 +878,7 @@ def test_launcher_handoff_removes_the_live_icon_before_unlock_and_restores_only_
     from ouroboros import platform_layer
     from tests.test_launcher_source_handoff import context, Exited
 
+    monkeypatch.setattr("ouroboros.launcher_bootstrap.source_launcher_importable", lambda *a, **kw: True)
     events = []
     monkeypatch.setattr(lb, "_active", None)
     monkeypatch.setattr(lb.Background, "_watch", lambda self: None)

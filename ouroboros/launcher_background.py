@@ -35,7 +35,7 @@ import sys
 import threading
 import urllib.request
 
-from ouroboros.config import read_version
+from ouroboros.config import PANIC_EXIT_CODE, read_version
 from ouroboros.desktop_autostart import BACKGROUND_ENV, keep_running_choice, set_keep_running
 from ouroboros.desktop_notifications import UNAVAILABLE, capability, native_notifier, platform_name, refused
 from ouroboros.launcher_appearance import NativeAppearance
@@ -457,7 +457,8 @@ class Background:
                 if proc is not None:
                     from ouroboros.runtime_limits import LAUNCHER_STOP_GRACE_SEC
 
-                    proc.wait(timeout=LAUNCHER_STOP_GRACE_SEC)  # POST 200 precedes the server's actual Panic
+                    if proc.wait(timeout=LAUNCHER_STOP_GRACE_SEC) != PANIC_EXIT_CODE:
+                        raise RuntimeError("The captured server exited without completing Panic")
             except Exception:
                 from ouroboros.config import DATA_DIR
                 from ouroboros.launcher_bootstrap import stop_bootstrap_commands

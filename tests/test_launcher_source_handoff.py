@@ -284,9 +284,11 @@ def test_cancelled_handoff_keeps_panic_alive_even_if_the_lock_was_taken(hand_ove
 # --------------------------------------------------------------------------------- cold start ---
 
 
-def test_import_broken_frozen_successor_keeps_the_shell(hand_over, monkeypatch):
+@pytest.mark.parametrize("windows", [False, True])
+@pytest.mark.parametrize("frozen", [False, True])
+def test_import_broken_successor_keeps_frozen_or_seed_shell(hand_over, monkeypatch, windows, frozen):
     monkeypatch.setattr(bootstrap_module, "source_launcher_importable", lambda *a, **kw: False)
-    hand_over([], windows=True, frozen=True)
+    hand_over([], windows=windows, frozen=frozen)
     assert hand_over.calls == [], "probe refusal precedes icon removal, unlock and process replacement"
 
 

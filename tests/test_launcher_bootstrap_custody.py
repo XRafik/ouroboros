@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,3 +89,18 @@ raise RuntimeError('Panic never exited')
     time.sleep(3.2)
     assert not late.exists() and not grand_late.exists(), 'bootstrap work survived the launcher Panic'
     assert (tmp_path / 'data/state/panic_stop.flag').read_text() == 'panic'
+
+
+def test_interactive_installer_keeps_ordinary_terminal_and_only_panic_requests_its_stop(monkeypatch):
+    calls, stopped = [], threading.Event()
+    proc = SimpleNamespace(pid=41)
+    monkeypatch.setattr(boot, '_BOOTSTRAP_COMMANDS', [])
+    monkeypatch.setattr(boot.subprocess, 'Popen', lambda command, **kw: calls.append((command, kw)) or proc)
+    monkeypatch.setattr('ouroboros.platform_layer.request_process_tree_kill',
+                        lambda child, **kw: calls.append(('stop', child, kw)) or {'requested': True})
+    owner = boot.spawn_bootstrap_command(['installer'], stopped, interactive=True)
+    assert owner['container'] is None and owner['proc'] is proc
+    assert calls == [(['installer'], {})], 'do not create a new session or kill-on-close Job for OS installers'
+    assert boot.stop_bootstrap_commands(include_interactive=False) == []
+    assert boot.stop_bootstrap_commands() == [{'requested': True}]
+    assert calls[-1] == ('stop', proc, {'job_handle': None})

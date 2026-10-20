@@ -31,30 +31,36 @@ DEFAULT_MANAGED_REMOTE_STABLE_BRANCH = "ouroboros-stable"
 _BOOTSTRAP_COMMANDS = []  # live invocation owners only; never a scan of historical work
 
 
-def stop_bootstrap_commands() -> list[dict]:
+def stop_bootstrap_commands(*, include_interactive=True) -> list[dict]:
     """Request captured bootstrap children before early tray Panic hard-exits."""
     from ouroboros.platform_layer import request_process_tree_kill
 
-    return [request_process_tree_kill(owner["proc"], job_handle=owner["container"]._job)
-            for owner in list(_BOOTSTRAP_COMMANDS) if owner["proc"] is not None]
+    return [request_process_tree_kill(owner["proc"], job_handle=getattr(owner["container"], "_job", None))
+            for owner in list(_BOOTSTRAP_COMMANDS) if owner["proc"] is not None
+            and (include_interactive or owner["container"] is not None)]
 
 
-def spawn_bootstrap_command(command, shutdown, **kwargs):
+def spawn_bootstrap_command(command, shutdown, *, interactive=False, **kwargs):
     """Capture a bootstrap command in the existing Job/lifeline owner before exposing its handle."""
     from ouroboros.process_containment import ProcessContainer
+    from ouroboros.platform_layer import merge_hidden_kwargs
 
     if shutdown.is_set():
         raise InterruptedError("Launcher shutdown stopped bootstrap admission")
-    owner = {"proc": None, "container": ProcessContainer(lifeline=True)}
+    # Interactive OS installers keep their terminal and may finish after an
+    # ordinary setup-window close; Panic still has their captured Popen to stop.
+    owner = {"proc": None, "container": None if interactive else ProcessContainer(lifeline=True)}
     _BOOTSTRAP_COMMANDS.append(owner)
     try:
-        owner["proc"] = owner["container"].spawn(command, **kwargs)
+        owner["proc"] = (subprocess.Popen(command, **merge_hidden_kwargs(kwargs)) if interactive
+                         else owner["container"].spawn(command, **kwargs))
         if shutdown.is_set():
             stop_bootstrap_commands()
         return owner
     except BaseException:
-        owner["container"].reap()
-        owner["container"].close()
+        if owner["container"] is not None:
+            owner["container"].reap()
+            owner["container"].close()
         _BOOTSTRAP_COMMANDS.remove(owner)
         raise
 
@@ -859,8 +865,9 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
 
     entry = macos_source_entry(context.bundle_dir) if macos else None
     frozen = getattr(sys, "frozen", False)
-    if (entry is not None or frozen) and not source_launcher_importable(
-            context, desktop=desktop, python=find_embedded_python(context.bundle_dir, macos=macos),
+    if not source_launcher_importable(
+            context, desktop=desktop, python=(find_embedded_python(context.bundle_dir, macos=macos)
+                if entry is not None or frozen else context.embedded_python),
             require_macos_entry=entry is not None):
         return  # old/rollback source or a missing dependency must not lose the working shell
     handoff = source_handoff_argv(argv, keep_runtime_venv=entry is not None)
@@ -870,9 +877,7 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
     context.log.info("Loading managed source launcher through %s", command[0])
     # The source shell needs the dependencies bootstrap installed in the userbase,
     # too. Do not export PYTHONHOME or change any child's process/bundle identity.
-    env = {**os.environ, LAUNCHER_HANDOFF_ENV: "1"}
-    if entry is not None:
-        env = embedded_python_env(context.data_dir, env)
+    env = embedded_python_env(context.data_dir, {**os.environ, LAUNCHER_HANDOFF_ENV: "1"})
     if cancelled():
         return
     before_release()

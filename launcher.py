@@ -183,7 +183,7 @@ def _hidden_popen(command, *, bootstrap=False, **kwargs):
     if bootstrap:
         from ouroboros.launcher_bootstrap import spawn_bootstrap_command
 
-        return spawn_bootstrap_command(command, _shutdown_event, **merge_hidden_kwargs(kwargs))["proc"]
+        return spawn_bootstrap_command(command, _shutdown_event, interactive=True, **merge_hidden_kwargs(kwargs))["proc"]
     return subprocess.Popen(command, **merge_hidden_kwargs(kwargs))
 
 
@@ -1136,14 +1136,9 @@ def main(argv=()):
         if options.launch_intent == "automatic" or (not _headless and activate_running_instance(PID_FILE)):
             return  # a sign-in start stays quiet; a manual launch showed the running window
         if _headless:
-            # The lock loss usually races the FIRST launcher's bootstrap
-            # (repeated Open clicks): the port file may be absent (unlinked
-            # pre-start) or stale from an older run on another port. Poll
-            # briefly for a healthy server, re-reading the file between
-            # probes, so Open during bootstrap lands on the live UI; on
-            # timeout fall back to the last-read port (best-effort notice;
-            # the bound is soft — a probe straddling the deadline may run
-            # its own urlopen timeout, a couple of seconds of overshoot).
+            # A second Open may race bootstrap's absent/stale port. Re-read
+            # between health probes; a final probe can overshoot this soft
+            # deadline by its own urlopen timeout. The last port is best-effort.
             port = _read_port_file()
             deadline = time.time() + 10.0
             while time.time() < deadline and not _wait_for_server(port, timeout=1.0):
@@ -1183,14 +1178,17 @@ def main(argv=()):
     remember_loaded_checkout(REPO_DIR, bundle_dir=_bundle_dir() if getattr(sys, "frozen", False) or pathlib.Path(
         __file__).resolve() != (REPO_DIR / "launcher.py").resolve() else None)
 
+    git_window = None
     def _on_closing() -> None:
         log.info("Window closing — graceful shutdown.")
         _shutdown_event.set()
         from ouroboros.launcher_bootstrap import stop_bootstrap_commands
-        stop_bootstrap_commands()
+        stop_bootstrap_commands(include_interactive=False)
         if background is not None and background.panic.is_set():
             return  # Panic owns persistence and hard exit, never ordinary teardown over it
         if _agent_proc is None and _webview_window is None:
+            if git_window is not None:
+                git_window.destroy()
             return  # boot Quit lets main return to its atexit owner, without stale companion cleanup
         stop_agent()
         _kill_orphaned_children()
@@ -1256,7 +1254,8 @@ def main(argv=()):
                         except FileNotFoundError:
                             continue
                 for _ in range(300):
-                    time.sleep(3)
+                    if _shutdown_event.wait(3):
+                        return "stopped"
                     if shutil.which("git"):
                         return "installed"
                 return "timeout"
@@ -1290,6 +1289,8 @@ def main(argv=()):
             height=300,
         )
         webview.start(func=_git_page, args=[git_window], private_mode=False)
+        if _shutdown_event.is_set():
+            return
         if not check_git():
             sys.exit(1)
 

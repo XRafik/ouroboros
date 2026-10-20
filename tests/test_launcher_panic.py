@@ -8,6 +8,7 @@ import pytest
 
 from ouroboros import launcher_background as background
 from ouroboros import launcher_readiness as readiness
+from tests.test_launcher_background import settings as settings  # explicit shared pytest fixture
 
 
 def disarm_emergency_owners(monkeypatch, events):
@@ -170,3 +171,131 @@ def test_local_early_panic_requests_the_captured_child_stop_before_persistence(
     bg.request_panic()
     assert exited.wait(5)
     assert events[0] == (("job stop", job) if has_job else ("child stop", proc))
+
+
+def test_window_close_after_panic_post_keeps_the_captured_server_owner_until_flag(settings, monkeypatch):
+    """A 200 only queues Panic: closing the window cannot unload the server's Job before its flag."""
+    import atexit
+    import launcher
+    import sys, types
+    from tests.test_launcher_background import Answer
+
+    class Booted(Exception):
+        pass
+
+    owners, events = [], []
+    accepted, waiting, finish = threading.Event(), threading.Event(), threading.Event()
+    flag = settings.parent / "state" / "panic_stop.flag"
+    monkeypatch.setattr(launcher, "DATA_DIR", settings.parent)
+    for name in ("_external_host_update", "_external_host_result", "_external_seed_bundle", "_launch_argv", "_launch_intent"):
+        monkeypatch.setattr(launcher, name, getattr(launcher, name))
+    original_background = background.Background
+
+    def owner(*args, **kwargs):
+        bg = original_background(*args, **kwargs)
+        owners.append(bg)
+        return bg
+
+    def server_wait(timeout):
+        waiting.set()
+        assert finish.wait(timeout), "test server was not allowed to persist its flag"
+        assert flag.read_text() == "panic"
+        events.append("captured server exited")
+        return 99
+
+    proc = SimpleNamespace(pid=41, wait=server_wait, poll=lambda: None)
+    monkeypatch.setattr(background, "indicator_class", lambda: None)
+    monkeypatch.setattr(background.Background, "listen", lambda *args: None)
+    monkeypatch.setattr(atexit, "register", lambda *args: None)
+    monkeypatch.setattr(atexit, "unregister", lambda *args: None)
+    monkeypatch.setitem(sys.modules, "webview", types.ModuleType("webview"))
+    for name, value in (("IS_WINDOWS", False), ("_headless", False), ("_external_ui", False),
+                        ("_detect_headless", lambda: None), ("_shutdown_event", threading.Event()),
+                        ("_agent_proc", proc), ("_agent_job", object()), ("_webview_window", None),
+                        ("acquire_pid_lock", lambda: True), ("automatic_launch_allowed", lambda *a: True),
+                        ("Background", owner), ("check_git", lambda: (_ for _ in ()).throw(Booted())),
+                        ("stop_agent", lambda: events.append("ordinary stop")),
+                        ("_kill_orphaned_children", lambda: events.append("ordinary reap"))):
+        monkeypatch.setattr(launcher, name, value)
+    with pytest.raises(Booted):
+        launcher.main([])
+    bg = owners[0]
+    bg.panic_port = lambda: 1
+    monkeypatch.setattr(background.urllib.request, "urlopen", lambda *a, **kw: (accepted.set(), Answer(b""))[1])
+    bg.request_panic()
+    try:
+        assert accepted.wait(2)
+        assert not flag.exists()
+        assert bg.closing() is None  # real launcher's _on_closing: no ordinary teardown over Panic
+        assert waiting.wait(2), "POST 200 must not end the non-daemon Panic owner"
+        thread = next(t for t in threading.enumerate() if t.name == "ouroboros-indicator-panic")
+        assert thread.is_alive() and thread.daemon is False
+        assert events == [] and thread.is_alive()
+        monkeypatch.setattr(launcher, "_agent_proc", SimpleNamespace(wait=lambda **kw: pytest.fail("wrong child")))
+        flag.parent.mkdir(exist_ok=True)
+        flag.write_text("panic")
+    finally:
+        finish.set()
+        thread = next((t for t in threading.enumerate() if t.name == "ouroboros-indicator-panic"), None)
+        if thread is not None:
+            thread.join(timeout=3)
+    assert events == ["captured server exited"]
+
+
+
+@pytest.mark.parametrize('code', [0, 1, 42, 99])
+def test_panic_post_requires_observed_panic_exit_not_merely_any_exit(stopped_world, monkeypatch, tmp_path, code):
+    from contextlib import nullcontext
+    bg, _, exited = stopped_world
+    waited = threading.Event()
+    bg.panic_port = lambda: 1
+    bg.panic_child = lambda: (SimpleNamespace(poll=lambda: code,
+        wait=lambda **kw: (waited.set(), code)[1]), None)
+    monkeypatch.setattr(background.urllib.request, 'urlopen', lambda *a, **kw: nullcontext())
+    bg.request_panic()
+    assert waited.wait(2)
+    if code != 99:
+        assert exited.wait(3)
+        assert (tmp_path / 'state/panic_stop.flag').read_text() == 'panic'
+    else:
+        assert not exited.is_set() and not (tmp_path / 'state/panic_stop.flag').exists()
+
+
+def test_tray_quit_closes_the_active_git_setup_loop(settings, monkeypatch):
+    import atexit
+    import sys
+    import types
+    import launcher
+    owners, events = [], []
+    original = background.Background
+
+    def owner(*args, **kwargs):
+        bg = original(*args, **kwargs)
+        owners.append(bg)
+        return bg
+
+    window = SimpleNamespace(destroy=lambda: events.append('setup destroyed'))
+    webview = types.ModuleType('webview')
+    webview.create_window = lambda *a, **kw: window
+
+    def run_setup(**kwargs):
+        owners[0].request_quit()
+        assert events == ['setup destroyed'], 'Quit must end the setup window, not just its icon'
+
+    webview.start = run_setup
+    monkeypatch.setitem(sys.modules, 'webview', webview)
+    monkeypatch.setattr(background, 'indicator_class', lambda: None)
+    monkeypatch.setattr(background.Background, 'listen', lambda *args: None)
+    monkeypatch.setattr(atexit, 'register', lambda *args: None)
+    monkeypatch.setattr(atexit, 'unregister', lambda *args: None)
+    for name in ('_external_host_update', '_external_host_result', '_external_seed_bundle', '_launch_argv', '_launch_intent'):
+        monkeypatch.setattr(launcher, name, getattr(launcher, name))
+    for name, value in (('IS_WINDOWS', False), ('_headless', False), ('_external_ui', False),
+                        ('_detect_headless', lambda: None), ('_shutdown_event', threading.Event()),
+                        ('_agent_proc', None), ('_agent_job', None), ('_webview_window', None),
+                        ('DATA_DIR', settings.parent), ('acquire_pid_lock', lambda: True),
+                        ('automatic_launch_allowed', lambda *a: True), ('Background', owner),
+                        ('check_git', lambda: False), ('stop_agent', lambda: events.append('ordinary stop'))):
+        monkeypatch.setattr(launcher, name, value)
+    launcher.main([])
+    assert events == ['setup destroyed'] and owners[0].shutdown.is_set()
