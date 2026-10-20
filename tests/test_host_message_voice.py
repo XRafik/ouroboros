@@ -203,6 +203,7 @@ HOST_ROW_CLASSES = {
     "task_scheduled": ("card_row", 1),
     "task_start_unconfirmed": ("not_started", 1),
     "terminal_incident": ("no_mind", 2),
+    "ui_hold": ("runtime_state", 1),
     "worker_failure": ("no_mind", 2),
     "worker_readiness_notice": ("runtime_state", 2),
 }

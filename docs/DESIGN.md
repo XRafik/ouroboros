@@ -1523,8 +1523,11 @@ its plain words (the text Telegram gets) with one status line — `Loading the c
 card is no longer available.`, `This skill is off.` — never an empty box. A press on a card's control is the owner's:
 it says `Sending…`, then `Sent ✓` or the honest failure, and a control meant once locks after it counted. A frame in
 a message (an app, a skill's widget) is at least 120 px and at most 70 % of the window, with `Expand` / `Collapse`
-beyond; at most three run at once, started near the view, and a far one rests as its words with `Open`. What an app
-hands back lands as one line in the owner's draft: nothing in a card ever sends. Copy takes the plain words, Reply
+beyond; at most three run at once, started near the view, and a far one rests as its words with `Open`. A running
+frame has `Close`, which leaves it as its words with `Open` on this device until the owner opens it again; a frame
+held after a start the page did not outlive rests the same way with its one line (Skills in the page). An app's
+script error, unhandled rejection or policy refusal shows on the status line (`App error: …`). What an app hands
+back lands as one line in the owner's draft: nothing in a card ever sends. Copy takes the plain words, Reply
 and the row menu work as on any message, and a card that grows while the room follows its newest message keeps it
 in view.
 
@@ -1662,13 +1665,26 @@ capsule, lists what folds; with no room even for it (a phone's row, which ☰
 leads), each chip is listed in "+" under its skill's name. A skill's trusted page module works
 only through its small context (its provider, a notice, words into the draft)
 and never draws into the composer or the feed. A module that fails is off for
-this page with one notice naming it; the rest of the page keeps working. A
-start that did not finish (the page froze or crashed while page modules
-started) skips them all next time and says so, with Start with plugins;
-`?plugins=off` starts without them on purpose and offers Restart with plugins.
-Main's More menu offers Restart without plugins on every surface, the macOS
-app's Help menu Start without plugins; a page that a module froze is left
-through that menu or by reopening it, which then starts without them.
+this page with one notice naming it; the rest of the page keeps working.
+
+**A start the page did not outlive is not repeated by itself.** A page
+module, a skill's module or route frame and an app card are code the core did
+not write; on WebKit (the macOS app, iPhone, Telegram on iOS), Android WebView
+and Firefox they share the page's one thread, so one that loops or blows up at
+its start takes the whole page with it, and no menu inside that page can be
+pressed. The host writes each start to a ledger on this device before the code
+runs and clears it once the page outlived the start; whatever the next open finds
+there is not started by itself. A held card rests as its words with Open, a held
+widget as its facade with Start, both with the one line `Held back: the page
+stopped while this was starting last time.`; held page modules are named in one
+notice with Start it. The owner's press starts it (an app without the state it
+saved, which may be the cause), and a new revision of the code starts as usual.
+Code that stops the page later than a second after its start is not held; Close,
+Stop or the skill's switch stops it. The way out of a page that froze is the
+surface's own: quit or close it and open it again. Opened with `?hold=all`, a page holds every such item for that
+load (`Held back: this page was opened with everything held.`), each released by
+its own control. Ouroboros reads the fact in one System row in the chat that
+owns the item.
 
 ### Voice controls
 
@@ -1970,6 +1986,10 @@ widget's content belongs to its author.
   the column count changes only where a card is painted; a running widget
   keeps its frame and its state. Keyboard focus keeps the card's original
   position until the window reloads.
+- **Stop holds until Start.** A framed card the owner stopped rests as its
+  facade with Start on this device across reloads, until Start or a launch
+  policy of Auto or Keep running starts it. A card whose last start the page
+  did not outlive rests the same way, with its one line (Skills in the page).
 - **One arrangement per installation.** Order and widths are owner UI state
   stored on the server, the same for every window and device of the
   installation; when two windows arrange at once the last change wins. A
