@@ -140,20 +140,15 @@ print(json.dumps({
     child_env = {"HOME": str(fake_home), "USERPROFILE": str(fake_home)}
     if os.name == "nt" and os.environ.get("SystemRoot"):
         child_env["SystemRoot"] = os.environ["SystemRoot"]
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-c", code],
-            cwd=repo,
-            env=child_env,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as exc:
-        raise AssertionError(
-            f"scrubbed child failed (exit {exc.returncode}); "
-            f"stderr tail: {(exc.stderr or '')[-2000:]!r}"
-        ) from exc
+    proc = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=repo,
+        env=child_env,
+        capture_output=True,
+        text=True,
+    )
+    # A bare exit 1 from a CI runner is undiagnosable: name the child's own words.
+    assert proc.returncode == 0, f"scrubbed child exited {proc.returncode}; stderr tail: {proc.stderr[-2000:]!r}"
 
     payload = json.loads(proc.stdout.strip().splitlines()[-1])
     assert payload["pytest_loaded"] is False
