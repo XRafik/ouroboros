@@ -810,6 +810,20 @@ test('a routing click posts the routing decision id with a STABLE request id', a
     } finally { fx.restore(); }
 });
 
+test('a destination another click is still routing is marked, and named `Your choice` only once it is recorded', async () => {
+    const fx = fixture({ fetchImpl: async () => ({ ok: false, status: 409, json: async () => ({ state: 'pending', answered_index: 1 }) }) });
+    try {
+        const bubble = routingBubble('cm-7');
+        fx.decision.renderRoutingDecision(bubble, ROUTING_ANNOTATION);
+        const card = bubble.querySelector('.chat-routing-card');
+        card.querySelectorAll('.chat-quiz-option')[0].click();
+        await turn();
+        assert.equal(card.dataset.state, 'pending');
+        assert.ok(card.querySelectorAll('.chat-quiz-option')[1].classList.contains('chosen'), 'the destination being routed');
+        assert.deepEqual(chosenParts(card), [null, null], 'not yet the owner\'s recorded choice');
+    } finally { fx.restore(); }
+});
+
 test('a superseded routing card keeps the head\'s disabled ink', async () => {
     const fx = fixture({ fetchImpl: async () => ({ ok: false, status: 409, json: async () => ({ state: 'superseded' }) }) });
     try {
