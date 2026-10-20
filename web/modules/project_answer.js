@@ -30,10 +30,16 @@ export function appendProjectRow(addMessage, msg, text, opts) {
 // Chat is not the visible page has no layout box (clientHeight 0): it is left alone and
 // measured when Chat is shown; a resize re-measures, because the width decides the height.
 export function refreshProjectAnswerFold(bubble) {
-    if (!bubble?.classList.contains('project-answer')) return;
+    const seen = measureFold(bubble);
+    if (seen) applyFold(seen);
+}
+function measureFold(bubble) {
+    if (!bubble?.classList.contains('project-answer')) return null;
     const message = bubble.querySelector('.message');
-    if (!message || !message.clientHeight) return;
-    const folded = message.scrollHeight > message.clientHeight + 1;
+    if (!message || !message.clientHeight) return null;
+    return { bubble, message, folded: message.scrollHeight > message.clientHeight + 1 };
+}
+function applyFold({ bubble, message, folded }) {
     bubble.classList.toggle('is-folded', folded);
     syncFold(bubble, message, folded);
 }
@@ -66,9 +72,12 @@ function refreshFoldsSoon() {
     queued = true;
     afterLayout(() => {
         queued = false;
-        document.querySelectorAll('.chat-bubble.project-answer').forEach((bubble) => {
-            if (!bubble.closest('[data-resizing]')) refreshProjectAnswerFold(bubble);
-        });
+        // A sleeping row ([data-laid], chat_row_sleep.js) keeps the fold it was measured with at this width: a row that
+        // changes wakes, a new width wakes every row, and a feed that is not shown puts none to sleep. Measuring it
+        // would lay it out alone. The rest are measured together, then marked together: one layout serves them all.
+        const due = [...document.querySelectorAll('.chat-bubble.project-answer')]
+            .filter((bubble) => !bubble.closest('[data-resizing], [data-laid]'));
+        due.map(measureFold).filter(Boolean).forEach(applyFold);
     });
 }
 function watchFolds() {

@@ -3813,6 +3813,16 @@ html[data-layout="stack"] body .room-veil.dragging {
     inset: 0;
     pointer-events: none;
 }
+/* Main's words fade under a cover of its own background (shell_motion.js `fade`): the page is its stacking context,
+   so the cover lies over everything in it. */
+html[data-layout="stack"] #page-chat { isolation: isolate; }
+html[data-layout="stack"] #page-chat > .shell-cover {
+    position: absolute;
+    inset: 0;
+    z-index: 2147483647;
+    background: var(--bg-primary);
+    pointer-events: none;
+}
 /* The chosen place's pill: the chosen row's own fill (and its left mark) under the drawer's rows, sliding from the old
    row to the tapped one during the beat, turning from a place's fill into a Project's veil on the way; the rows' own
    fills step aside meanwhile and take the place back in one frame. */

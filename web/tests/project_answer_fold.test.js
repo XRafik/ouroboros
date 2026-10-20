@@ -22,25 +22,36 @@ test('answer folds in a feed whose width still moves wait until the width holds'
         frames.splice(0).forEach((fn) => fn());
         // Two answers on the page: one in a feed at rest, one in a feed whose width is moving.
         const measured = [];
-        const answer = (id, moving) => {
+        const answer = (id, moving, asleep = () => false) => {
             const classes = new Set(['chat-bubble', 'project-answer']);
             const message = { clientHeight: 100, get scrollHeight() { measured.push(id); return 300; }, querySelectorAll: () => [] };
-            return { classList: { contains: (name) => classes.has(name), toggle: (name, on) => (on ? classes.add(name) : classes.delete(name)) },
+            const holds = { '[data-resizing]': moving, '[data-laid]': asleep };
+            return { classList: { contains: (name) => classes.has(name),
+                toggle: (name, on) => { measured.push(`mark ${id}`); return on ? classes.add(name) : classes.delete(name); } },
                 querySelector: (selector) => (selector === '.message' ? message : null),
-                closest: (selector) => (selector === '[data-resizing]' && moving() ? {} : null), classes };
+                closest: (selector) => (selector.split(',').some((part) => holds[part.trim()]?.()) ? {} : null), classes };
         };
         let moving = true;
         const rows = [answer('at rest', () => false), answer('moving', () => moving)];
         globalThis.document.querySelectorAll = (selector) => (selector === '.chat-bubble.project-answer' ? rows : []);
 
         fire('resize');
-        assert.deepEqual(measured, ['at rest'], 'a resize measures only the answers in a feed at rest');
+        assert.deepEqual(measured, ['at rest', 'mark at rest'], 'a resize measures only the answers in a feed at rest');
         assert.equal(rows[1].classes.has('is-folded'), false);
 
         moving = false;
+        measured.length = 0;
         fire('ouro:feed-width-settled');
-        assert.deepEqual(measured, ['at rest', 'at rest', 'moving'], 'once the width holds every answer is measured');
+        assert.deepEqual(measured, ['at rest', 'moving', 'mark at rest', 'mark moving'],
+            'once the width holds every answer is measured, all of them before any is marked');
         assert.equal(rows[1].classes.has('is-folded'), true, 'and the one whose text overflows is folded');
+
+        // A row asleep (chat_row_sleep.js) keeps the fold it was measured with at this width: measuring it would lay
+        // it out alone. Main shown again measures only the rows awake.
+        rows.push(answer('asleep', () => false, () => true));
+        measured.length = 0;
+        fire('ouro:page-shown');
+        assert.deepEqual(measured, ['at rest', 'moving', 'mark at rest', 'mark moving']);
     } finally {
         restoreDom(prior);
     }

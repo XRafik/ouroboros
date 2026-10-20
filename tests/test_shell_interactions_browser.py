@@ -267,6 +267,55 @@ def test_a_project_opened_from_the_phone_drawer_takes_focus(shell_ui, tmp_path, 
     assert facts['layers'] == ['project'] and facts['inside_panel'] is True, facts
 
 
+# Every frame of a place picked in the drawer: Main's own opacity, the cover over its words, and the other room's.
+BEAT = """([other, ms]) => { window.__beat = new Promise((resolve) => {
+    const samples = [], t0 = performance.now(), main = document.getElementById('page-chat');
+    const read = () => {
+        const cover = main.querySelector(':scope > .shell-cover'), room = document.querySelector(other);
+        samples.push({ main: getComputedStyle(main).opacity, cover: cover ? Number(getComputedStyle(cover).opacity) : null,
+            other: room ? Number(getComputedStyle(room).opacity) : null });
+        if (performance.now() - t0 < ms) requestAnimationFrame(read); else resolve(samples);
+    };
+    requestAnimationFrame(read);
+}); }"""
+
+
+def test_main_s_words_fade_under_a_cover_and_the_rooms_over_it_fade_themselves(shell_ui, tmp_path):
+    """Animating the opacity of Main's page restyles every row of a long history in WebKit (R4: ~190-335 ms at 34 k
+    elements), so its words fade under a cover of the room's own background inside it; Main's opacity never moves.
+    The Project panel and a page lying over Main fade by their own opacity: the room under them must show through."""
+    page = seed_page(shell_ui, 390, 844)
+    facts = {'engine': shell_ui['engine']}
+    try:
+        boot(page, shell_ui)
+        open_drawer(page)
+        page.evaluate(BEAT, ['#project-panel', 700])
+        page.locator('#nav-projects-list [data-project-id]').first.click()
+        facts['to_project'] = page.evaluate('window.__beat')
+        rest(page)
+        facts['covers_after_project'] = page.evaluate("document.querySelectorAll('.shell-cover').length")
+        open_drawer(page)
+        page.locator('#primary-sidebar [data-nav-page="settings"]').click()
+        rest(page)
+        open_drawer(page)
+        page.evaluate(BEAT, ['#page-settings', 700])
+        page.locator('#primary-sidebar [data-nav-page="chat"]').click()
+        facts['to_main'] = page.evaluate('window.__beat')
+        rest(page)
+        facts['covers_after_main'] = page.evaluate("document.querySelectorAll('.shell-cover').length")
+    finally:
+        evidence(tmp_path, f'shell-cover-{shell_ui["engine"]}', facts)
+        page.close()
+    for step in ('to_project', 'to_main'):
+        assert {s['main'] for s in facts[step]} == {'1'}, (f'{step}: Main\'s own opacity never moves', facts)
+        assert any(s['other'] is not None and s['other'] < 0.95 for s in facts[step]), (f'{step}: the other room fades itself', facts)
+    leaving = [s['cover'] for s in facts['to_project'] if s['cover'] is not None]
+    assert leaving and min(leaving) < 0.9 and max(leaving) > 0.99, ('leaving, the cover rises over Main\'s words', facts)
+    arriving = [s['cover'] for s in facts['to_main'] if s['cover'] is not None]
+    assert arriving and max(arriving) > 0.9 and min(arriving) < 0.05, ('arriving, the cover lifts off Main\'s words', facts)
+    assert facts['covers_after_project'] == 0 and facts['covers_after_main'] == 0, ('the beat takes its cover away', facts)
+
+
 def swipe(page, start, end, steps=12):
     cdp = page.context.new_cdp_session(page)
     try:

@@ -63,7 +63,7 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
     // ---- one beat at a time: what it animates, adds and marks, so the next navigation or its end undoes it all
     function newBeat() {
         finish(false);   // the caller paints: a handover starts inside the owner's own paint
-        const b = { anims: [], nodes: [], classes: [], marks: [], timer: 0, holding: false, onHold: null };
+        const b = { anims: [], nodes: [], covers: [], classes: [], marks: [], timer: 0, holding: false, onHold: null };
         b.animate = (el, frames, timing) => {
             if (!animatable(el)) return null;
             const anim = el.animate(frames, timing);
@@ -82,6 +82,7 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
         if (b.timer) win.clearTimeout(b.timer);
         for (const anim of b.anims) { try { anim.cancel(); } catch { /* gone */ } }
         b.nodes.forEach((node) => node.remove());
+        b.covers.forEach((node) => node.remove());
         for (const [el, name] of b.classes) el.classList.remove(name);
         b.marks.forEach((el) => el.removeAttribute('data-leaving'));
         if (b.holding) {
@@ -159,6 +160,20 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
         win.requestAnimationFrame(() => sidebar.classList.remove('shell-handoff'));
     }
 
+    // A room's words fade. Main lies under every other room, so its words fade under a cover of the room's own
+    // background inside it (the keyframes inverted) instead of by the page's opacity: animating the opacity of a room
+    // of thousands of elements restyles all of them in WebKit. A room that lies over another fades itself, as the one
+    // under it must show through.
+    function fade(b, el, frames, timing) {
+        if (!el || el.id !== 'page-chat') { b.animate(el, frames, timing); return; }
+        const cover = doc.createElement('div');
+        cover.className = 'shell-cover';
+        cover.setAttribute('aria-hidden', 'true');
+        el.append(cover);
+        b.covers.push(cover);
+        b.animate(cover, frames.map((f) => ({ opacity: 1 - f.opacity })), timing);
+    }
+
     /** A place chosen in the open drawer. `leaving`: what holds the old room's words (a page, the Project panel, a
      * retired Project instance); `arriving`: the new room's element, `breathe`: what of it takes the breath (the
      * room itself, or the panel's content where the panel is the card); the rows the pill slides between. */
@@ -166,7 +181,7 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
         if (disposed || !isStack()) return;
         const b = newBeat();
         if (reducedMotion(win)) {
-            b.animate(arriving, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.reducedIn, easing: 'ease-out', fill: 'backwards' });
+            fade(b, arriving, [{ opacity: 0 }, { opacity: 1 }], { duration: MOTION.reducedIn, easing: 'ease-out', fill: 'backwards' });
             return;
         }
         b.holding = true;
@@ -174,10 +189,10 @@ export function createShellMotion({ doc = globalThis.document, win = globalThis.
         for (const el of leaving) {
             // A page that lost .active stays displayed for the beat.
             if (el?.classList?.contains('page') && !el.classList.contains('active')) b.mark(el);
-            b.animate(el, [{ opacity: 1 }, { opacity: 0 }], { duration: MOTION.out, easing: 'ease-in', fill: 'forwards' });
+            fade(b, el, [{ opacity: 1 }, { opacity: 0 }], { duration: MOTION.out, easing: 'ease-in', fill: 'forwards' });
         }
         const timing = { delay: MOTION.inDelay, duration: MOTION.in, fill: 'both' };
-        b.animate(arriving, [{ opacity: 0 }, { opacity: 1 }], { ...timing, easing: 'ease' });
+        fade(b, arriving, [{ opacity: 0 }, { opacity: 1 }], { ...timing, easing: 'ease' });
         for (const el of breathe) {
             b.animate(el, [{ transform: `scale(${MOTION.breath})` }, { transform: 'none' }], { ...timing, easing: ease() });
         }
