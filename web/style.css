@@ -3891,13 +3891,16 @@ html[data-layout="stack"] .chat-page-note {
 /* The field (DESIGN "The composer field"): one floating object holding a staged reply's strip and the text row. Its
    corner is the sheet radius, half its one-line height, and never grows with the words: one line is a capsule, a
    paragraph a card with the same corner, never an oval. No border: its edge and its focus ring are shadows, so the
-   one-line field is exactly the row's height. */
+   one-line field is exactly the row's height. A transparent outline inside the edge is its edge where shadows are
+   not drawn (Windows High Contrast paints it in the system colour), wider while the field holds the focus. */
 .chat-field {
     order: 2;
     display: flex;
     flex-direction: column;
     min-width: 0;
     border-radius: var(--radius-sheet);
+    outline: 1px solid transparent;
+    outline-offset: -1px;
     background: rgba(var(--composer-rgb), 0.68);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -3906,6 +3909,8 @@ html[data-layout="stack"] .chat-page-note {
 }
 
 .chat-field:focus-within {
+    outline-width: 2px;
+    outline-offset: -2px;
     background: rgba(var(--composer-rgb), 0.86);
     box-shadow: inset 0 1px 0 rgba(var(--neutral-rgb), 0.04), 0 0 0 1px var(--focus-accent-border), 0 0 0 4px var(--accent-10);
 }
@@ -9383,7 +9388,7 @@ body.keyboard-open .project-panel {
 }
 
 /* === The quote panel (docs/DESIGN.md "Replies"): one component (chat_reply_quote.js) inside a bubble and
-   above the composer. The bar and the author name wear the QUOTED author's ink, the panel one tint of that same
+   as the composer field's first line. The bar and the author name wear the QUOTED author's ink, the panel one tint of that same
    ink on the quote glass; no literal colours. A reply shows one ellipsized line and is a button that jumps to
    the quoted message; a relay shows the owner's complete words, clamped to six lines, `Show all` in its head. */
 .chat-quote {
@@ -9513,7 +9518,8 @@ body.keyboard-open .project-panel {
     margin: var(--space-2) var(--space-2) 0;
     padding-inline-end: var(--space-2);
     border-radius: calc(var(--radius-sheet) - var(--space-2));
-    background: linear-gradient(var(--quote-tint), var(--quote-tint)), var(--quote-glass);
+    /* The quote's tint on the field itself: the field is already the glass, and fills never stack. */
+    background: var(--quote-tint);
     animation: chat-quote-in 0.16s ease-out;
 }
 .chat-field > .chat-quote--composer + .chat-text-row { padding-top: var(--space-1); }

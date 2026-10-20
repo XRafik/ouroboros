@@ -192,7 +192,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         event.preventDefault();
         cancel();
     }
-    // One listener on the composer wrap: Esc from the field and from the strip's own buttons lands here.
+    // One listener on the field (the text row's parent): Esc from the words and from the strip's own buttons lands here.
     const keyHost = textRow.parentElement || input;
     keyHost?.addEventListener('keydown', onKeydown);
 

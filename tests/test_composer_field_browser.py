@@ -4,8 +4,8 @@ In WebKit and Chromium, on a phone and a desk: the field is one object whose cor
 with the words, so a one-line field is a capsule and a paragraph a card with the same corner; "+" and Send ride on the
 words' last line, never their middle; the text row inside the field has no surface of its own; a staged reply is the
 field's first line, a concentric panel inside it. An accepted Send lifts a copy of the new bubble from the draft to its
-place in the feed and leaves the bubble shown; asked for reduced motion, nothing flies. Uses the static-server/API
-fixture.
+place in the feed and leaves the bubble shown, landing on the bubble even when a phone's tap on Send takes the keyboard
+down under the flight; asked for reduced motion, nothing flies. Uses the static-server/API fixture.
 """
 from __future__ import annotations
 
@@ -70,6 +70,23 @@ FLIGHT = """() => new Promise((resolve) => {
 })"""
 
 
+# Every frame from now until the flight's copy is gone: where the copy and the newest sent row stand.
+TRACK = """() => { const t = window.__flight = { samples: [], seen: false, done: false };
+    const step = () => {
+        const copy = document.querySelector('.chat-send-flight');
+        const rows = document.querySelectorAll('#chat-messages .chat-bubble.user');
+        const row = rows[rows.length - 1];
+        if (copy && row) {
+            t.seen = true;
+            t.samples.push({ copy: copy.getBoundingClientRect().top, row: row.getBoundingClientRect().top });
+        } else if (t.seen) { t.done = true; return; }
+        requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    setTimeout(() => { t.done = true; }, 3000);
+}"""
+
+
 def _open(ui, width, reply=False):
     page = seed_page(ui, width, 844 if width < 720 else 900)
     if reply:
@@ -110,6 +127,9 @@ def test_a_staged_reply_is_the_fields_first_line(shell_ui, tmp_path, width):
     facts = {'engine': shell_ui['engine'], 'width': width}
     try:
         page.wait_for_selector('#page-chat .chat-quote--composer', state='attached')
+        # The strip slides in (chat-quote-in, 160 ms): measure where it rests.
+        page.evaluate("""() => Promise.all(document.querySelector('#page-chat .chat-quote--composer')
+            .getAnimations().map((a) => a.finished))""")
         settle(page)
         facts['reply'] = page.evaluate(FACTS)
     finally:
@@ -147,3 +167,40 @@ def test_an_accepted_send_rises_from_the_draft_into_the_feed(shell_ui, tmp_path,
         assert len(flight['seen']) >= 2, ('a copy of the bubble flew', flight)
         assert abs(flight['seen'][0] - flight['fieldTop']) <= 2, ('it starts where the draft stood', flight)
         assert flight['seen'][-1] < flight['seen'][0] - 20, ('and rises toward the bubble\'s place', flight)
+
+
+def test_a_tap_on_send_with_the_keyboard_up_lands_on_the_bubble(shell_ui, tmp_path):
+    """A phone's tap on Send takes the focus off the field, so the keyboard goes down during the flight and the feed's
+    newest end moves under it; the copy follows the bubble and lands on it (it used to land where the bubble first was,
+    300 px off, and the bubble faded in elsewhere)."""
+    page = _open(shell_ui, 390)
+    facts = {'engine': shell_ui['engine']}
+    try:
+        # A room with history: its newest row stands at the feed's end, right above the composer.
+        page.evaluate("""() => { const f = document.querySelector('#chat-messages');
+            for (let i = 0; i < 30; i += 1) { const r = document.createElement('div'); r.style.minHeight = '90px';
+                r.textContent = 'row ' + i; f.prepend(r); }
+            f.scrollTop = f.scrollHeight; }""")
+        page.locator('#chat-input').fill('Проверка полёта с клавиатурой: черновик в две строки на телефоне')
+        page.locator('#chat-input').focus()
+        page.set_viewport_size({'width': 390, 'height': 500})  # the keyboard comes up
+        page.wait_for_function("() => document.body.classList.contains('keyboard-open')", timeout=3000)
+        page.evaluate(TRACK)
+        page.tap('#page-chat #chat-send')
+        page.wait_for_timeout(150)
+        page.set_viewport_size({'width': 390, 'height': 844})  # and goes down under the flight
+        page.wait_for_function('() => window.__flight.done', timeout=5000)
+        facts['flight'] = page.evaluate('() => window.__flight')
+        facts['after'] = page.evaluate("""() => { const rows = document.querySelectorAll('#chat-messages .chat-bubble.user');
+            const row = rows[rows.length - 1];
+            return { copies: document.querySelectorAll('.chat-send-flight').length,
+                     opacity: row ? getComputedStyle(row).opacity : null }; }""")
+    finally:
+        evidence(tmp_path, f'composer-send-flight-keyboard-{shell_ui["engine"]}', facts)
+        page.close()
+    samples = facts['flight']['samples']
+    assert samples, ('a copy flew', facts)
+    moved = max(s['row'] for s in samples) - min(s['row'] for s in samples)
+    assert moved > 40, ('setup: the bubble moved under the flight as the keyboard went down', facts)
+    assert abs(samples[-1]['copy'] - samples[-1]['row']) <= 3, ('the copy lands on the bubble where it is now', samples[-1])
+    assert facts['after'] == {'copies': 0, 'opacity': '1'}, ('no copy left; the bubble shows', facts)

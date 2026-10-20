@@ -468,8 +468,11 @@ the focus ring, drawn as shadows, so a border never adds to its height (owner 20
 where the draft stood, its words on the draft's, to the bubble's place in 340 ms on the
 iOS sheet curve: its box moves and resizes, never a scale, while the field's surface,
 corner and shadow turn into the bubble's, and its sender line grows in; the bubble
-shows as the copy lands. Reduced motion, a hidden page or a bubble outside the feed's
-view: it simply appears (`web/modules/send_flight.js`; owner 20.10, 2A).
+shows as the copy lands. A bubble that moves under the flight (a phone's keyboard going
+down after a tap on Send) is followed to its place; a room that goes away (the drawer
+over it, a closed Project) ends the flight at once. Reduced motion, a hidden page or a
+bubble outside the feed's view: it simply appears (`web/modules/send_flight.js`; owner
+20.10, 2A).
 
 ### `.muted`
 
