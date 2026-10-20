@@ -218,7 +218,8 @@ function readState(storage, key) {
 /**
  * Run one app inside `host`: `{cardId, title, sha256, html, fit, onSubmit(line), onLeave(), onFault(text), fresh}`;
  * `fit` is the frame's inline size policy (`createInlineFit`). The app's saved state (keyed by card and app bytes, so a
- * replaced app starts fresh) is handed back at mount unless `fresh`. No policy stops a frame from navigating itself,
+ * replaced app starts fresh) is handed back at mount unless `fresh`, which forgets it, so no later mount of this card
+ * hands it back either. No policy stops a frame from navigating itself,
  * so a second document loading in the frame (the app left for a page) removes the frame at once and calls `onLeave`.
  * Returns the disposer.
  */
@@ -230,6 +231,7 @@ export function mountCardApp(host, { cardId, title, sha256, html, fit, onSubmit,
     iframe.className = 'widgets-frame chat-card-frame';
     iframe.setAttribute('sandbox', CARD_APP_SANDBOX);
     iframe.setAttribute('title', title || 'Card');
+    if (fresh) { try { storage?.removeItem(key); } catch { /* blocked: nothing was kept to forget */ } }
     iframe.srcdoc = cardAppSrcdoc(html, { nonce, saved: fresh ? null : readState(storage, key) });
     host.replaceChildren(iframe);
     const handle = createCardAppBridge({

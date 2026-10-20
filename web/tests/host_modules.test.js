@@ -60,7 +60,8 @@ async function setup({ items = [], modules = {}, href = 'http://127.0.0.1:8765/#
     const ledgerAtImport = [];
     const notices = [];
     const drafts = [];
-    const holds = createHolds({ win, now: () => clock.now });
+    // The ledger's own page-lifetime listener sits on a window of its own: the runtime's listeners are counted below.
+    const holds = createHolds({ win: { location: win.location, localStorage: local, sessionStorage: session }, now: () => clock.now });
     const runtime = createHostModules({ store, win, doc, holds, mountTimeoutMs: 40, settleMs: 10,
         draft: { insert: (text) => { drafts.push(text); return true; } },
         notice: (text, tone, options = {}) => notices.push({ text, tone, ...options }),
@@ -204,7 +205,7 @@ test('each start stands in the ledger before its import and goes a second after 
     const h = await setup({ items: [one, two], modules: {
         [one.render.url]: { mount: () => ({ dispose() {} }) }, [two.render.url]: new Error('HTTP 404') } });
     assert.equal(h.ledgerAtImport.length, 2);
-    assert.deepEqual(h.ledgerAtImport[0]['module:one:x'], { reason: 'start', rev: 'r1', at: 1_000_000 },
+    assert.deepEqual(h.ledgerAtImport[0]['module:one:x'], { reason: 'start', rev: 'r1', at: 1_000_000, n: 1 },
         'written before the module\'s first byte runs');
     await tick(30);
     assert.deepEqual(ledger(h.local), {}, 'a start that mounted or failed with the page alive leaves nothing');

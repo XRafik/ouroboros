@@ -3,7 +3,8 @@
 // wrote. On WebKit, Android WebView and Firefox same-site frames it shares the page's one thread, so a start that
 // loops or blows up takes the whole page with it, and the next open would run it again. Before the host hands such
 // code its first turn it writes the item's key here; it removes the key once the start settled and the host's own
-// timer ran a second after it (`starting` → `settle`). A key the next page finds is a hold: the host does not start
+// timer ran a second after it (`starting` → `settle`), or once the page hides: a page whose thread runs its
+// `pagehide` outlived what it started. A key the next page finds is a hold: the host does not start
 // that item by itself; it rests behind its own Open / Start / Start it with one line saying why, until the owner
 // presses it or the item's code changes (a new revision). The same record keeps the owner's Stop on a Widgets card
 // and Close on a card in a message, so they survive a reload on this device. The page that opens with `?hold=all`
@@ -40,6 +41,15 @@ export function holdAllRequested(href) {
     try { return new URL(href).searchParams.get(HOLD_ALL_PARAM) === 'all'; } catch { return false; }
 }
 
+/** One load: the flag leaves the address once read, so a reload or the reconnect refresh starts as usual. */
+function forgetHoldAll(win) {
+    try {
+        const url = new URL(win.location.href);
+        url.searchParams.delete(HOLD_ALL_PARAM);
+        win.history?.replaceState?.(win.history.state, '', url.toString());
+    } catch { /* the address keeps it: the next load holds everything again */ }
+}
+
 /**
  * The ledger over one window's storage. `reason(key, rev)` says why the host must not start an item by itself:
  * `'owner'` (Stop / Close), `'start'` (its last start with this revision did not settle), `'all'` (`?hold=all`)
@@ -56,8 +66,10 @@ export function createHolds({ win = globalThis.window, now = () => Date.now() } 
         } catch { return {}; }
     };
     const write = (entries) => {
-        const kept = Object.entries(entries).sort((a, b) => (Number(b[1]?.at) || 0) - (Number(a[1]?.at) || 0))
-            .slice(0, MAX_ENTRIES);
+        // Each reason keeps its newest MAX_ENTRIES: a start passing through never pushes out an owner's Stop / Close.
+        const byAge = Object.entries(entries).sort((a, b) => (Number(b[1]?.at) || 0) - (Number(a[1]?.at) || 0));
+        const kept = ['owner', 'start'].flatMap((reason) => byAge.filter(([, entry]) => entry?.reason === reason)
+            .slice(0, MAX_ENTRIES));
         try { store?.setItem(HOLDS_KEY, JSON.stringify({ v: 1, entries: Object.fromEntries(kept) })); } catch { /* full or refused */ }
     };
     const update = (change) => { const entries = read(); change(entries); write(entries); };
@@ -75,7 +87,11 @@ export function createHolds({ win = globalThis.window, now = () => Date.now() } 
         } else if (entry?.reason === 'owner') owners.add(key);
     }
     const holdAll = holdAllRequested(String(win?.location?.href || ''));
+    if (holdAll) forgetHoldAll(win);
     const released = new Set();
+    const pending = new Set();
+    let starts = 0;
+    win?.addEventListener?.('pagehide', () => { for (const settle of [...pending]) settle(); });
     return {
         reason(key, rev = '') {
             if (owners.has(key)) return 'owner';
@@ -84,17 +100,23 @@ export function createHolds({ win = globalThis.window, now = () => Date.now() } 
             return holdAll ? 'all' : '';
         },
         starting(key, rev = '') {
-            const entry = { reason: 'start', rev: String(rev ?? ''), at: now() };
+            starts += 1;
+            const entry = { reason: 'start', rev: String(rev ?? ''), at: now(), n: starts };
             update((entries) => { if (entries[key]?.reason !== 'owner') entries[key] = entry; });
             let settled = false;
-            return () => {
+            const settle = () => {
                 if (settled) return;
                 settled = true;
+                pending.delete(settle);
                 update((entries) => {
                     const held = entries[key];
-                    if (held?.reason === 'start' && held.at === entry.at && held.rev === entry.rev) delete entries[key];
+                    if (held?.reason === 'start' && held.at === entry.at && held.n === entry.n && held.rev === entry.rev) {
+                        delete entries[key];
+                    }
                 });
             };
+            pending.add(settle);
+            return settle;
         },
         stop(key) {
             owners.add(key);

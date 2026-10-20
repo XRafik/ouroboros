@@ -154,20 +154,22 @@ export function createHostModules({ store, draft = null, win = globalThis.window
         });
     }
 
-    // One notice for the modules this page holds back (the ledger's reason), each named once per revision.
+    // One notice per reason for the modules this page holds back, each named once per revision.
     function announce(held) {
         const unnamed = held.filter((item) => !announced.has(`${item.key}@${item.revision}`));
-        if (!unnamed.length) return;
         unnamed.forEach((item) => announced.add(`${item.key}@${item.revision}`));
-        const names = [...new Set(unnamed.map((item) => item.skill_label || item.skill))].join(', ');
-        const afterStop = unnamed.some((item) => holds.reason(moduleHoldKey(item), item.revision) === 'start');
-        const text = afterStop
-            ? fmt('{names} did not start: the page stopped while it was starting last time.', { names })
-            : fmt('{names} did not start: this page was opened with everything held.', { names });
-        notice(text, 'warn', { ttl: 0, action: { label: tr('holds.start_it', 'Start it'), run() {
-            unnamed.forEach((item) => holds.release(moduleHoldKey(item)));
-            sync();
-        } } });
+        for (const reason of ['start', 'all']) {
+            const group = unnamed.filter((item) => holds.reason(moduleHoldKey(item), item.revision) === reason);
+            if (!group.length) continue;
+            const names = [...new Set(group.map((item) => item.skill_label || item.skill))].join(', ');
+            const text = reason === 'start'
+                ? fmt('{names} did not start: the page stopped while it was starting last time.', { names })
+                : fmt('{names} did not start: this page was opened with everything held.', { names });
+            notice(text, 'warn', { ttl: 0, action: { label: tr('holds.start_it', 'Start it'), run() {
+                group.forEach((item) => holds.release(moduleHoldKey(item)));
+                sync();
+            } } });
+        }
     }
 
     function sync() {

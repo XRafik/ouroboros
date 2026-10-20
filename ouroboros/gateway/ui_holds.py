@@ -2,12 +2,12 @@
 
 The start ledger lives in the page (``web/modules/holds.js``): before a skill's page module, a skill's
 module or route frame, or an app card Ouroboros wrote gets its first turn, the page writes the item's
-key; a key the next page finds means the page did not outlive that start (it froze, crashed or was
-closed within the settle second). That page holds the item and posts the keys it found, once. The host
-names them in one System row (``system_type: "ui_hold"``) in the chat that owns them, the card's own chat
-or Main for a skill's page code and widgets, so the owner reads it on every surface and Ouroboros reads
-it in its next turn's context: a fact, never a reaction. A ``key@rev`` is named once per server process,
-so another tab or device that finds the same hold adds no row.
+key; a key the next page finds means the page did not outlive that start (it froze, crashed, or the
+app quit before the start settled). That page holds the item and posts the keys it found, once. The host
+names them in one System row (``system_type: "ui_hold"``) in the chat that owns them, the room the card
+was published in or the owner's chat for a skill's page code and widgets, so the owner reads it on every
+surface and Ouroboros reads it in its next turn's context: a fact, never a reaction. A ``key@rev`` is named
+once per server process, so another tab or device that finds the same hold adds no row.
 """
 
 from __future__ import annotations
@@ -35,6 +35,14 @@ class _ChatUnavailable(RuntimeError):
     """No chat writer serves this data root (no running supervisor): nothing was written."""
 
 
+class _NotConfirmed(RuntimeError):
+    """A row's write was not confirmed; ``named`` holds the markers of the rows written before it."""
+
+    def __init__(self, named: List[str]):
+        super().__init__("a hold row was not confirmed")
+        self.named = named
+
+
 def _surface_words(surface: Any) -> str:
     facts = surface if isinstance(surface, dict) else {}
     if facts.get("pywebview") is True:
@@ -53,7 +61,7 @@ def _item(root: pathlib.Path, key: str) -> Tuple[str, Optional[int]]:
         record = load_card(root, rest)
         if record is None:
             return "", None
-        chat_id = record.get("chat_id")
+        chat_id = record.get("publication_chat_id", record.get("chat_id"))
         return f"the card «{record.get('title') or rest}»", chat_id if isinstance(chat_id, int) else None
     if kind == "widget":
         skill, _, tab = rest.partition(":")
@@ -61,35 +69,48 @@ def _item(root: pathlib.Path, key: str) -> Tuple[str, Optional[int]]:
     return f"the page code of {rest.partition(':')[0]}", None
 
 
-def _name_holds(root: pathlib.Path, groups: Dict[Optional[int], List[str]], surface: str) -> int:
+def _name_holds(root: pathlib.Path, groups: Dict[Optional[int], List[Tuple[str, str]]], surface: str) -> List[str]:
+    """One confirmed row per chat; the markers it named, in order."""
     from supervisor import message_bus
     from supervisor.schedule_notes import owner_chat_id
 
     data_root = message_bus.DATA_DIR
     if data_root is None or pathlib.Path(data_root).resolve() != root.resolve() or message_bus.try_get_bridge() is None:
         raise _ChatUnavailable("no chat writer serves this data root")
+    named: List[str] = []
     for chat_id, items in groups.items():
-        names = ", ".join(items)
+        names = ", ".join(words for words, _marker in items)
         verb = "was" if len(items) == 1 else "were"
-        message_bus.send_with_budget(
-            chat_id if chat_id is not None else owner_chat_id(root),
-            f"Held back on {surface}: the page stopped while {names} {verb} starting, so there it waits for the "
-            "owner to start it again instead of starting by itself.",
-            role="system", system_type="ui_hold",
-        )
-    return sum(len(items) for items in groups.values())
+        try:
+            message_bus.send_with_budget(
+                chat_id if chat_id is not None else owner_chat_id(root),
+                f"In {surface}, the page stopped while {names} {verb} starting.",
+                role="system", system_type="ui_hold", require_write=True, ensure_record_boundary=True,
+            )
+        except Exception as exc:
+            raise _NotConfirmed(named) from exc
+        named.extend(marker for _words, marker in items)
+    return named
+
+
+def _remember(markers: List[str]) -> None:
+    for marker in markers:
+        _NAMED[marker] = None
+    while len(_NAMED) > _NAMED_MAX:
+        _NAMED.popitem(last=False)
 
 
 async def api_ui_holds_post(request: Request) -> JSONResponse:
     """``{"holds": [{"key", "rev"}], "surface": {"pywebview", "telegram"}}`` → ``200 {ok, named}``.
 
-    ``400`` a body that is not this shape; ``503`` no chat writer: nothing was named."""
+    ``400`` a body that is not this shape; ``503`` ``chat_unavailable`` (nothing was named) or ``not_confirmed``
+    (a row may be missing: the next page reports it again)."""
     body = await request_json_or(request, None)
     holds = body.get("holds") if isinstance(body, dict) else None
     if not isinstance(holds, list) or len(holds) > MAX_REPORTED_HOLDS:
         return json_error(f"holds must be a list of at most {MAX_REPORTED_HOLDS} items", 400)
     root = request_drive_root(request)
-    groups: Dict[Optional[int], List[str]] = {}
+    groups: Dict[Optional[int], List[Tuple[str, str]]] = {}
     fresh: List[str] = []
     for hold in holds:
         key = hold.get("key") if isinstance(hold, dict) else None
@@ -100,7 +121,7 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
             continue
         words, chat_id = _item(root, key)
         if words:
-            groups.setdefault(chat_id, []).append(words)
+            groups.setdefault(chat_id, []).append((words, marker))
             fresh.append(marker)
     if not groups:
         return JSONResponse({"ok": True, "named": 0})
@@ -108,11 +129,13 @@ async def api_ui_holds_post(request: Request) -> JSONResponse:
         named = await run_sync_to_completion(_name_holds, root, groups, _surface_words(body.get("surface")))
     except _ChatUnavailable as exc:
         return json_error(str(exc), 503, reason_code="chat_unavailable")
-    for marker in fresh:
-        _NAMED[marker] = None
-    while len(_NAMED) > _NAMED_MAX:
-        _NAMED.popitem(last=False)
-    return JSONResponse({"ok": True, "named": named})
+    except _NotConfirmed as exc:
+        log.warning("A ui_hold row was not confirmed", exc_info=exc.__cause__)
+        _remember(exc.named)
+        return json_error(str(exc), 503, reason_code="not_confirmed")
+    _remember(named)
+    return JSONResponse({"ok": True, "named": len(named)})
+
 
 
 __all__ = ["MAX_REPORTED_HOLDS", "api_ui_holds_post"]

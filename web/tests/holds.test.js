@@ -1,7 +1,8 @@
 // The start ledger (holds.js): a start is written before the code's first turn and leaves with its settle; what the
 // previous page left becomes this page's holds, read once and bound to the revision; the owner's Stop / Close stays
 // until released; `?hold=all` holds everything for one load; the retired boot marker is cleared; storage that
-// refuses a write falls back to the session; the report names the found holds once with the raw surface facts.
+// refuses a write falls back to the session; a page that hides settles its starts; the report names the found holds
+// once with the raw surface facts.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHolds, HELD_LINES, HOLDS_KEY, reportFoundHolds, settleAfterFrameLoad } from '../modules/holds.js';
@@ -18,6 +19,7 @@ function storage({ refuse = false } = {}) {
 function page({ href = 'http://127.0.0.1:8765/#chat', local = storage(), session = storage(), now = 5 } = {}) {
     const listeners = new Map();
     const win = { location: { href }, localStorage: local, sessionStorage: session,
+        history: { state: null, replaceState(_state, _title, url) { win.location.href = url; } },
         addEventListener: (type, fn) => listeners.set(type, fn), emit: (type) => listeners.get(type)?.() };
     return { win, local, session, holds: createHolds({ win, now: () => now }) };
 }
@@ -27,11 +29,23 @@ const entries = (store) => JSON.parse(store.map.get(HOLDS_KEY) || 'null')?.entri
 test('a start stands from before its first turn until its settle; this page never reads its own start back', () => {
     const { holds, local } = page();
     const settle = holds.starting('app:card_1', 'sha-a');
-    assert.deepEqual(entries(local), { 'app:card_1': { reason: 'start', rev: 'sha-a', at: 5 } });
+    assert.deepEqual(entries(local), { 'app:card_1': { reason: 'start', rev: 'sha-a', at: 5, n: 1 } });
     assert.equal(holds.reason('app:card_1', 'sha-a'), '', 'read once: a start in flight is not this page\'s hold');
     settle();
     settle();
     assert.deepEqual(entries(local), {}, 'settle removes it, once');
+    const twin = holds.starting('app:card_2', 'v');
+    const other = holds.starting('app:card_2', 'v');
+    twin();
+    assert.equal(entries(local)['app:card_2']?.n, 3, 'a settle clears only its own start, even within one millisecond');
+    other();
+});
+
+test('a page that hides outlived what it started: its starts settle, so a reload holds nothing', () => {
+    const first = page();
+    first.holds.starting('widget:kotokulator:calculator', '7');
+    first.win.emit('pagehide');
+    assert.equal(page({ local: first.local }).holds.reason('widget:kotokulator:calculator', '7'), '');
 });
 
 test('the next page holds what the previous one did not outlive, for that revision only, until released', () => {
@@ -63,8 +77,9 @@ test('the owner\'s Stop and Close stay until released, on this page and the next
     assert.equal(page({ local: next.local }).holds.reason('board:kotokulator:calculator'), '');
 });
 
-test('?hold=all holds every key for that load until each is released', () => {
-    const { holds } = page({ href: 'http://127.0.0.1:8765/?hold=all#chat' });
+test('?hold=all holds every key for that load until each is released, and leaves the address', () => {
+    const { holds, win } = page({ href: 'http://127.0.0.1:8765/?hold=all#chat' });
+    assert.equal(win.location.href, 'http://127.0.0.1:8765/#chat', 'a reload of this address starts as usual');
     assert.equal(holds.reason('module:device_voice:tts', 'r1'), 'all');
     assert.equal(holds.reason('app:card_9', 'x'), 'all');
     holds.release('app:card_9');
@@ -73,7 +88,7 @@ test('?hold=all holds every key for that load until each is released', () => {
     assert.deepEqual(Object.keys(HELD_LINES).sort(), ['all', 'start']);
 });
 
-test('the ledger keeps its newest 64 entries, clears the retired boot marker and falls back to the session', () => {
+test('the ledger keeps its newest 64 entries of each reason, clears the retired boot marker and falls back to the session', () => {
     const local = storage();
     local.setItem('ouroboros.hostModules.boot', JSON.stringify({ at: 1, keys: ['x'] }));
     let at = 0;
@@ -83,6 +98,10 @@ test('the ledger keeps its newest 64 entries, clears the retired boot marker and
     const kept = Object.keys(entries(local));
     assert.equal(kept.length, 64);
     assert.ok(kept.includes('app:card_69') && !kept.includes('app:card_0'), 'the oldest go first');
+    const owned = page();
+    for (let index = 0; index < 64; index += 1) owned.holds.stop(`card:card_${index}`);
+    owned.holds.starting('app:unrelated', 'r1')();
+    assert.equal(page({ local: owned.local }).holds.reason('card:card_0'), 'owner', 'a passing start never pushes out a Close');
     const refused = page({ local: storage({ refuse: true }) });
     refused.holds.starting('app:card_1', 'v');
     assert.deepEqual(Object.keys(entries(refused.session)), ['app:card_1']);

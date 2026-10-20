@@ -483,7 +483,7 @@ test('an app\'s start stands in the ledger until its frame loaded and a second p
         assert.equal(bubble.querySelector('[data-card-close]'), null, 'no Close before a frame runs');
         bubble.querySelector('[data-card-open]').click();
         await flush();
-        assert.deepEqual(ledgerEntries(store)['app:card_l1'], { reason: 'start', rev: 'f00d', at: ledgerEntries(store)['app:card_l1'].at },
+        assert.deepEqual(ledgerEntries(store)['app:card_l1'], { reason: 'start', rev: 'f00d', at: ledgerEntries(store)['app:card_l1'].at, n: 1 },
             'written before the app\'s first byte runs');
         assert.equal(bubble.querySelector('[data-card-close]').textContent, 'Close');
         loadFrame(bubble.querySelector('iframe'));
@@ -529,8 +529,10 @@ test('an app the page did not outlive rests as its words with the reason; Open s
         await flush();
         const frame = bubble.querySelector('iframe');
         assert.match(frame.srcdoc, /let saved = null;/, 'the state it saved may be what stopped the page');
+        assert.equal(dom.storage.getItem('ouro_card_state:card_h1:beef'), null, 'and is forgotten: no later mount hands it back');
         assert.equal(bubble.querySelector('.chat-card-status').hidden, true);
         cards.destroy();
+        dom.storage.setItem('ouro_card_state:card_h1:beef', '{"display":"7"}');
         const unheld = feed({ holds: ledgerOn(ledgerStore()) });
         const plain = unheld.buildCard(appIdentity('card_h1'));
         await flush();

@@ -138,7 +138,7 @@ A frame that has already gone away is removed at once.
 
 The owner's choice in `widget_start_mode` overrides `start`. Stop always wins: the builtin host keeps the owner's Stop on that device across reloads until Start or a change to `auto` / `retain`. Installing or enabling a skill never starts a widget: only showing the widgets view does. A frame never outlives the page that hosts it.
 
-On WebKit, Android WebView and Firefox a frame shares the page's thread, so a start that loops or blows up takes the page with it. The builtin host writes each frame's start to a local ledger before the frame gets its document and clears it one second after the frame's first `load`; a card whose last start with this revision the page did not outlive is not started by itself on any view (its facade, one line, Start). A page opened with `?hold=all` holds every frame for that load.
+On WebKit, Android WebView and Firefox a frame shares the page's thread, so a start that loops or blows up takes the page with it. The builtin host writes each frame's start to a local ledger before the frame gets its document and clears it one second after the frame's first `load`, or when the page hides (its thread outlived the start); a card whose last start with this revision the page did not outlive is not started by itself on any view (its facade, one line, Start). A page opened with `?hold=all` holds every frame for that load.
 
 ## 8. Other widget kinds
 

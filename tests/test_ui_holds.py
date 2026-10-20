@@ -1,6 +1,6 @@
 """``POST /api/ui/holds``: the holds a page found when it opened become one System row per owning chat.
 
-A held app card is named in its own chat, a skill's widget and page code in Main; a ``key@rev`` named once adds no
+A held app card is named in the chat it was published in, a skill's widget and page code in Main; a ``key@rev`` named once adds no
 row when another tab or device reports it again; a body of the wrong shape answers 400 and writes nothing; with no
 chat writer serving this data root nothing is written and the answer is 503.
 """
@@ -53,14 +53,23 @@ def test_the_found_holds_are_named_once_in_the_chats_that_own_them(tmp_path, cli
     by_chat = {chat_id: (text, kw) for chat_id, text, kw in rows}
     assert set(by_chat) == {7, 1}, "the card in its own chat, the skill's items in Main"
     card_text, card_kw = by_chat[7]
-    assert card_text.startswith("Held back on the desktop app: the page stopped while the card «Котокулятор» was starting")
-    assert card_kw == {"role": "system", "system_type": "ui_hold"}
+    assert card_text == "In the desktop app, the page stopped while the card «Котокулятор» was starting."
+    assert card_kw == {"role": "system", "system_type": "ui_hold", "require_write": True, "ensure_record_boundary": True}
     assert "the calculator widget of kotokulator, the page code of device_voice were starting" in by_chat[1][0]
     again = client.post("/api/ui/holds", json=body)
     assert again.json() == {"ok": True, "named": 0} and len(rows) == 2, "another tab finding the same holds adds no row"
     newer = client.post("/api/ui/holds", json={"holds": [{"key": "widget:kotokulator:calculator", "rev": "8"}]})
     assert newer.json()["named"] == 1, "a new revision that stops the page again is a new fact"
-    assert rows[-1][1].startswith("Held back on a browser:")
+    assert rows[-1][1].startswith("In a browser, the page stopped")
+
+
+def test_a_card_published_in_another_room_is_named_there(tmp_path, client, rows):
+    from ouroboros.card_store import record_publication
+
+    card = _app_card(tmp_path, chat_id=7)
+    record_publication(tmp_path, card["card_id"], 42)
+    client.post("/api/ui/holds", json={"holds": [{"key": f"app:{card['card_id']}", "rev": card["app"]["sha256"]}]})
+    assert [chat_id for chat_id, _text, _kw in rows] == [42], "the room the card was published in, not its origin"
 
 
 def test_a_hold_whose_card_is_gone_names_nothing(tmp_path, client, rows):
@@ -78,6 +87,18 @@ def test_a_hold_whose_card_is_gone_names_nothing(tmp_path, client, rows):
 def test_a_body_of_the_wrong_shape_is_refused_and_writes_nothing(client, rows, body):
     response = client.post("/api/ui/holds", json=body)
     assert response.status_code == 400 and rows == []
+
+
+def test_a_row_whose_write_is_not_confirmed_is_reported_again(tmp_path, client, rows, monkeypatch):
+    from supervisor import message_bus
+
+    def refuse(chat_id, text, **kw):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(message_bus, "send_with_budget", refuse)
+    response = client.post("/api/ui/holds", json={"holds": [{"key": "module:device_voice:tts", "rev": "r1"}]})
+    assert response.status_code == 503 and response.json()["reason_code"] == "not_confirmed"
+    assert ui_holds._NAMED == {}, "the page keeps it unreported, and the next report names it"
 
 
 def test_without_a_chat_writer_nothing_is_written(tmp_path, client, monkeypatch):
