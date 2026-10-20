@@ -436,8 +436,9 @@ def _snapshot_facts(handle: Any) -> Dict[str, Any]:
         if len(nested) > _NESTED_REPOSITORIES_SHOWN:
             facts["nested_repositories_excluded_count"] = len(nested)
         facts["nested_repositories_note"] = (
-            "Untracked Git repositories inside the write root (paths relative to it) are not in this "
-            "snapshot: the run can neither read nor change them. A child whose workspace is one of them can.")
+            "Untracked Git repositories (paths relative to the snapshot's repository root) are not in this snapshot: "
+            "the run neither works in them nor captures changes there. A child whose workspace is one of them can."
+            + (" The full list is in this snapshot's baseline manifest." if len(nested) > _NESTED_REPOSITORIES_SHOWN else ""))
     return facts
 
 

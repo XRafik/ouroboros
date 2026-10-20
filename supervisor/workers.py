@@ -1728,14 +1728,12 @@ def _settle_cancelled_pending_row(
         }
     try:
         from supervisor.cancel_publication import queued_address
-
         stored = write_task_result(
             DRIVE_ROOT, task_id, status_cancelled,
             strict_existing_dict=True,
             result=("Cancelled before this continuation started." if int(task.get("_attempt") or 1) > 1
                     else "Cancelled before start."), **cost_fields,
             **intent_outcome_fields(intent),
-            # Its first row: the queue address, so an early publication reaches its room.
             _field_projector=lambda existing, patch: {**queued_address(task, existing), **patch},
         ) or {}
         stored_status = str(stored.get("status") or "").strip()

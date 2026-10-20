@@ -250,8 +250,8 @@ def bind_continuation(ctx: Any, drive: Any, run_id: str, *, actor: Dict[str, Any
             or _ACCESS_RANK[this_access] > _ACCESS_RANK[entry.access]):
         return {}, REFUSAL_AUTHORITY_WIDENED, (
             f"Run {rid} ran with access {entry.access or 'unrecorded'!r}; this start derives "
-            f"{this_access or 'unrecorded'!r}. A continuation may keep or lower native access, never widen it; "
-            "omit access to keep the run's own.")
+            f"{this_access or 'unrecorded'!r}. A continuation may keep or lower native access, never widen it"
+            + ("; omit access to keep the run's own." if entry.access in _ACCESS_RANK else "."))
     if this_access != "readonly" and (not entry.target_root or entry.target_root != str(target_root or "")):
         return {}, REFUSAL_TARGET_MISMATCH, (
             f"Run {rid} wrote for {entry.target_root or 'an unrecorded target'}; this task's present target is "

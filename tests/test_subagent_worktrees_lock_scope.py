@@ -546,7 +546,7 @@ def test_an_empty_snapshot_names_the_nested_repository_it_left_out(tmp_path):
     reused = AdoptedSnapshot("snap1", handle.baseline_sha, handle.path, "run-first", handle.excluded_untracked)
     facts = _snapshot_facts(reused)
     assert set(facts) == {"reused_from_run", "nested_repositories_excluded", "nested_repositories_note"}
-    assert facts["nested_repositories_excluded"] == ["claudexor/"] and "neither read nor change" in facts["nested_repositories_note"]
+    assert facts["nested_repositories_excluded"] == ["claudexor/"] and "captures changes there" in facts["nested_repositories_note"]
     assert _snapshot_facts(AdoptedSnapshot("s", "b", "/p", "run-x")) == {"reused_from_run": "run-x"}
     # Only nested repositories are named, the first twenty with the total beside them.
     from types import SimpleNamespace
@@ -558,3 +558,4 @@ def test_an_empty_snapshot_names_the_nested_repository_it_left_out(tmp_path):
     facts = _snapshot_facts(many)
     assert facts["nested_repositories_excluded"] == [f"repo{n:02d}/" for n in range(20)]
     assert facts["nested_repositories_excluded_count"] == 25 and facts["entries"] == 3
+    assert "baseline manifest" in facts["nested_repositories_note"]

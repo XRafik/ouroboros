@@ -1345,8 +1345,8 @@ def get_tools() -> List[ToolEntry]:
                 "prompt": {"type": "string", "description":
                     "Direct start: a complete standalone task (why the work exists, decisions, material paths); "
                     "the session has none of my memory. The host appends my human's originating words verbatim. "
-                    "The run starts in my write root (a private snapshot of a Git tree); a path named here does not "
-                    "move it: for another repository, schedule a child whose workspace is that repository. "
+                    "The run starts in my write root; a path named here does not move it: for another "
+                    "repository, schedule a child whose workspace is that repository. "
                     "Configured-session retry/replacement: optional advisory coordination only; "
                     "the host supplies the canonical work order."},
                 "subagent_id": {"type": "string", "description":

@@ -14,7 +14,8 @@ import json
 
 import pytest
 
-from ouroboros import delegate_continuation as continuation, delegate_custody as custody
+from ouroboros import delegate_continuation as continuation
+from ouroboros import delegate_custody as custody
 from tests._delegated_transport_shared import (  # noqa: F401 -- autouse transport fixture
     _delegating_ctx,
     _owned_gateway_uses_each_test_transport,
@@ -85,7 +86,7 @@ def test_a_read_only_run_continues_read_only_without_naming_access(tmp_path, mon
     request, refused = _start(tmp_path, monkeypatch, run_id="run-wide", captured="full", access="workspace_write",
                               continue_from="run-read")
     assert request is None and refused["reason"] == continuation.REFUSAL_AUTHORITY_WIDENED
-    assert refused["definitely_unrun"] is True
+    assert refused["definitely_unrun"] is True and refused["detail"].endswith("omit access to keep the run's own.")
     # Omission keeps the run's own access: the start that used to refuse itself now runs.
     request, payload = _start(tmp_path, monkeypatch, run_id="run-next", captured="full", continue_from="run-read")
     assert payload["status"] == "started", payload
@@ -148,6 +149,16 @@ def test_retry_of_replays_its_recorded_body_without_consulting_the_continued_run
     ctx = _delegating_ctx(tmp_path, acting=True, task_id=TASK)
     payload = json.loads(subagent_runtime.exact_start(ctx, "", {"retry_of": "no-such-invocation"}).text)
     assert payload["status"] == "refused" and payload["reason"] == "unknown_invocation"
+
+
+def test_an_unrecorded_access_inherits_nothing_and_is_not_told_to_omit_it(tmp_path):
+    from tests.test_delegate_continuation import _gate, _seed
+
+    _seed(tmp_path, "run-legacy", access="", mode="")
+    ctx = _delegating_ctx(tmp_path, acting=True, task_id="t-a")
+    assert continuation.inherited_access(ctx, "run-legacy") is None
+    _facts, code, detail = _gate(tmp_path, "run-legacy")
+    assert code == continuation.REFUSAL_AUTHORITY_WIDENED and "omit access" not in detail
 
 
 def test_unknown_custody_inherits_nothing_and_the_floor_still_answers(tmp_path, monkeypatch):
