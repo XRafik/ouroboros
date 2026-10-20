@@ -7,7 +7,8 @@
 // namespaces its ids and shows in its feed what was sent.
 import { bindComposerFileTargets, cleanupUploadedAttachments } from './chat_media.js';
 import { composerText, createComposerAttachments } from './chat_attachments.js';
-import { loadChatInputHistory, saveChatInputHistory } from './chat_activity.js';
+import { loadChatInputHistory, saveChatInputHistory, sendPanic } from './chat_activity.js';
+import { isPanicFrame } from './panic.js';
 import { clientSurfaceField } from './client_surface.js';
 import { apiClient, apiFetch } from './api_client.js';
 import { bindEnterSubmit, bindMenu } from './ui_interactions.js';
@@ -165,10 +166,11 @@ export function createPlusMenu({ button, hostItems = [] }) {
  * resolves a namespaced id; `page` is the room (the drop target and the capsules' docking box); `ws` the shared
  * socket; `replies` the room's reply controller, whose reference rides the frame; `storeKey(base)` the room's
  * sessionStorage key. `refreshState()` re-reads the room's settings after a capsule saves, `onLayout()` re-measures
- * the room's dock, and `onSent({ text, frame, result, views })` shows an accepted send in the feed.
+ * the room's dock, `onSent({ text, frame, result, views })` shows an accepted send in the feed, and `readingBack()`
+ * says whether the owner's own gesture took the room off its newest row (the phone fold reads it: composer_fold.js).
  */
 export function createComposer({ page, byId, ws, replies, chatSessionId, isMain, chatId, projectId, storeKey,
-    refreshState, onLayout, onSent }) {
+    refreshState, onLayout, onSent, readingBack }) {
     const input = byId('input');
     const sendBtn = byId('send');
     const plusBtn = byId('plus');
@@ -247,12 +249,32 @@ export function createComposer({ page, byId, ws, replies, chatSessionId, isMain,
     }
 
     async function sendMessage(planMode = false) {
+        let text = input.value.trim();
+        if (isPanicFrame({ type: 'chat', content: text })) {
+            // Emergency input precedes settings saves, uploads and their disabled Send state.
+            const frame = { type: 'chat', content: text, ...clientSurfaceField() };
+            const sentDraft = input.value;
+            sendPanic({ ws, frame, onAccepted: () => {
+                // Only the accepted command text is consumed. Replies, files and
+                // any newer edit belong to the next message.
+                if (input.value !== sentDraft) return;
+                if (!destroyed) {
+                    input.value = inputDraft = '';
+                    inputHistoryIndex = inputHistory.length;
+                    resizeChatInput();
+                }
+                try {
+                    if (sessionStorage.getItem(storeKey(CHAT_DRAFT_KEY)) === sentDraft) clearInputDraft();
+                } catch {}
+            } });
+            return;
+        }
         if (sendBtn.disabled) return;  // guard against Enter re-entry during async upload
         if (ownerControls.hasPendingSave()) {  // both room settings land before the next message
             setSendBusy(true, 'Saving');
             try { if (!(await ownerControls.pendingSave())) return; } finally { setSendBusy(false); }
         }
-        let text = input.value.trim();
+        text = input.value.trim();
         const hasAttachments = attachments.count > 0;
         let uploadedAttachments = [];
         if (!text && !hasAttachments) return;
@@ -332,7 +354,7 @@ export function createComposer({ page, byId, ws, replies, chatSessionId, isMain,
 
     // Each composer owns its room's Context and Effort settings.
     const ownerControls = createComposerOwnerControls({ row: page.querySelector('.chat-toolbar-row'), box: page, byId, apiFetch, showToast,
-        projectId, saveEffortRange: apiClient.ownerEffortRange, refreshState, onLayout });
+        projectId, saveEffortRange: apiClient.ownerEffortRange, refreshState, onLayout, readingBack });
 
     // Rooms outside the bounded sidebar still read their settings.
     async function refreshProjectCognition() {
@@ -347,7 +369,8 @@ export function createComposer({ page, byId, ws, replies, chatSessionId, isMain,
 
     // Do not pass MouseEvent as planMode.
     sendBtn.addEventListener('click', () => sendMessage(swarmArmed()));
-    bindEnterSubmit(input, sendBtn);
+    // The send path admits Panic even while an ordinary upload/save disables Send.
+    bindEnterSubmit(input, sendBtn, () => sendMessage(swarmArmed()));
     input.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowUp' && !e.shiftKey) {
             restoreInputHistory(-1);

@@ -112,7 +112,7 @@ import {
     chatMediaMessageKey,
     chatThreadAccepts,
     clearStickyCardState,
-    confirmAndSendPanic,
+    sendPanic,
     confirmAndSendRestart,
     computeHydratedDirectActivities,
     documentMessageKey,
@@ -142,7 +142,6 @@ import {
     reconcileHydratedDirectActivities,
     reconnectBannerText,
     senderLabel,
-    shouldFirePanic,
     taskCostMeta,
     taskCostProjection,
     unconfirmedForegroundCardIds,
@@ -164,7 +163,7 @@ export {
     chatMediaMessageKey,
     clearStickyCardState,
     clearTransientRoutingAnnotations,
-    confirmAndSendPanic,
+    sendPanic,
     computeHydratedDirectActivities,
     headerBudgetPresentation,
     insertTimelineNode,
@@ -179,7 +178,6 @@ export {
     reconcileHydratedDirectActivities,
     taskCostMeta,
     taskCostProjection,
-    shouldFirePanic,
 };
 
 // Host placement: custody warns; settled reviews show results.
@@ -2655,7 +2653,8 @@ export function createChatInstance({
 
     // The composer (composer.js): its field, Swarm, the room's capsules, attachments and the send path.
     composer = createComposer({ page, byId, ws, replies, chatSessionId, isMain, chatId, projectId, storeKey,
-        refreshState: refreshHeaderControlState, onLayout: () => updateMessagesPadding(), onSent: showSent });
+        refreshState: refreshHeaderControlState, onLayout: () => updateMessagesPadding(), onSent: showSent,
+        readingBack: () => !reading.stick && reading.ownMove });
 
     // A send the composer made, shown in the feed: the bubble, its doubt until the host's saved echo, `Sending...`.
     function showSent({ text, frame, result, views }) {
@@ -2813,15 +2812,7 @@ export function createChatInstance({
             await confirmAndSendRestart({ openConfirmDialog, ws });
             return;
         }
-        if (command === 'panic') {
-            // CRITICAL CONTROL: the whole confirm-and-send flow lives in the
-            // node-tested confirmAndSendPanic (dialog options + strict
-            // shouldFirePanic gate + the exact /panic command); this handler
-            // only injects the real deps. Manual check on release: click
-            // Panic → dialog → "Kill all workers" sends /panic;
-            // Cancel/Escape/backdrop send nothing.
-            await confirmAndSendPanic({ openConfirmDialog, ws });
-        }
+        if (command === 'panic') sendPanic({ ws });
     });
 
     // Native <details> needs outside-click/Escape dismissal; destroy removes
