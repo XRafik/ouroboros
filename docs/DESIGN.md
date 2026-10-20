@@ -371,7 +371,7 @@ and pending state decide what is sent; a message is sent once. Shift+Enter
 breaks the line; Ctrl, Cmd or Alt with Enter send like Enter. Enter sends
 nothing when it commits an input-method composition or the field is empty,
 disabled, read-only or settled, and once when held; a rejected answer keeps
-its draft. The composer grows with its text or placeholder to one cap, then
+its draft. A message field grows with its text or placeholder to one cap, then
 scrolls. Touch keyboards are asked for a Send label; support varies. Every
 other multiline field — file editors, JSON, settings and widget forms — keeps
 Enter as a line break.
@@ -836,11 +836,13 @@ this Project" came to be drawn six ways. The rule is therefore about intents.
   everywhere else: under a mirrored answer or a System lifecycle row (in the
   shared `createSystemMessageActions` row, token spacing, wrapping, focus-ring
   clearance), at the end of the owner's routed message's one receipt line
-  ("Passed on to «work» in", "Started as a task in"), and in a question head,
-  where the Project is named before the options. The whole capsule is the
+  ("Passed on to «work» in", "Started as a task in"), and in a Main question
+  copy's voice line beside `Ouroboros`, at that line's 28px height and meta size
+  (`.ui-hit-area` keeps a finger's target; under a finger the line leaves the
+  head's × its column, so neither takes the other's). The whole capsule is the
   target, with one fill whose hover and press deepen the whole capsule; no
   border, ring or hairline, and no width that depends on where it sits. Long
-  names: two lines in the strip, ellipsis in the capsule, no smaller type;
+  names: two lines in the strip, ellipsis in the capsule, never smaller type;
   accessible names stay whole.
 - A **command** is a button: it changes or confirms something, or goes to a
   place that is not such a reference (`Load older messages`, `Open widgets`).
@@ -1388,8 +1390,11 @@ answer, and the answer arrives as their own message in that chat. After
 settlement, status and the owner's recorded answer keep both forms readable.
 Anatomy, top to bottom:
 
-1. **Head** — neutral `Question` chip (`--type-meta`, neutral pair) and a status
-   as a 7 px status mark + text, the mark amber while the task waits for the answer. The lifecycle word family is closed and leads with the one
+1. **Head** — one 28px row in every room: neutral `Question` chip (`--type-meta`,
+   neutral pair), the status beside it as a 7 px status mark + text, amber while
+   the task waits for the answer. The row never wraps (a narrow card's long status
+   takes two lines in place). The voice line above names who asks and a Main copy's
+   Project. The lifecycle word family is closed and leads with the one
    word that answers "is there an unanswered question for me?":
    `Waiting for your answer` needs positive wait evidence (the task's live wait
    record, or the original required flag before any record exists); a resumed
@@ -1403,8 +1408,9 @@ Anatomy, top to bottom:
    Pressing immediately shows `Sending…` and the brand-marked choice, keeping the
    full form and focus, the head's mark neutral until the answer is confirmed; inert controls use subdued ink and submitted fields become
    read-only. No success before canonical confirmation. `Not confirmed` means unknown,
-   not failed: only then show Check status, Retry same answer and Forget unconfirmed
-   local answer. Recovery first reads exact-quiz truth; explicit retry sends identical
+   not failed: only then, under the answer, show Forget unconfirmed local answer
+   (quiet, first), Check status and Retry same answer. Recovery first reads exact-quiz
+   truth; explicit retry sends identical
    bytes. Forget cannot cancel or retract a server answer; answered-with-delivery-owed
    remains recorded.
    While the card takes an answer the head ends with one quiet × (`Close question
@@ -1417,11 +1423,11 @@ Anatomy, top to bottom:
    paragraphs, lists, checklists, tables and code keep the shared rich-content
    gutter, rhythm and bounded code scrolling. The card never infers a title from
    the first line or rewrites authored Markdown to fit, and the question has no
-   quiz-specific length cap. Directly under it, a muted plain-text host line
-   (`.chat-quiz-host-facts`, `--type-meta`, `--text-meta`) states what only the
-   host knows: the asking task, how its run started and when the owner last
-   wrote in this chat, unknown facts said as unknown; without `host_facts` the
-   line is absent.
+   quiz-specific length cap. After the bubble's time (`15:18 · Asked by …`) a muted
+   plain-text host sentence (`.chat-quiz-host-facts`, `--text-meta`) states what only
+   the host knows: the asking task, how its run started and when the owner last
+   wrote in this chat, unknown facts said as unknown; without `host_facts` it is
+   absent until a delivery carries it.
 3. **Stake** — optional one-liner (`At stake: …`), `--type-meta`, `--text-meta`.
 4. **Options** — zero to six real owner actions: elevated cards (the capsule surface
    on the rest shadow with the object radius; a choice, never a field), the label in
@@ -1429,9 +1435,11 @@ Anatomy, top to bottom:
    the card. Hover and press change the card's colour. After settlement they lie flat
    in `--text-disabled`; the chosen option takes the ok pair, its detail the meta ink. Options are capped by the shared Python↔JS constant
    (`MAX_QUIZ_OPTIONS`); with none, the free answer is the whole answer.
-5. **Free answer** — while the card is open, a compact always-visible field
-   (`Your answer or comment…`, the field's hairline) with a `Send my answer`
-   crimson capsule, enabled and standing only once something is typed; it is a message field, so Enter sends and
+5. **Free answer** — while the card is open, one always-visible frame (the field's
+   hairline and focus idiom) holds the words, named `Your answer`, and at its trailing
+   bottom edge the `Send my answer` crimson capsule at the composer's height, enabled
+   and standing only once something is typed; a narrow card gives Send its own line in
+   the frame. It is a message field: its words grow to one cap, then scroll; Enter sends and
    Shift+Enter breaks the line (§3 "Controls and editable choices"). No option
    ever has to be the least wrong one: the text rides with an option click as
    the owner's remark, or goes alone as the owner's own answer. It uses the
@@ -1441,7 +1449,8 @@ Anatomy, top to bottom:
    Origin-local drafts and frozen attempts persist across closure only with a
    persistent browser profile (older private WebViews erase them: Appearance above).
    Restore reads, never resends; storage failure warns to keep/copy words.
-   **Clear local draft** removes unsent words, not submitted answers. Canonical
+   Emptying the field releases its draft and a refusal note about it, never a sent
+   or unconfirmed answer; nothing else clears drafts. Canonical
    settlement clears the copy; winning bytes appear literally as `Owner's answer: …`
    under the options, beside the highlighted choice or as the whole answer if none,
    retaining line breaks (`--type-body`/`--text-primary`).
@@ -1454,10 +1463,10 @@ Anatomy, top to bottom:
 
 Inside a bubble the card adds no box: the bubble is its object. Its × is a quiet
 control, without a body until hover. The card uses tokens for every
-type size and colour, including pill radius and option gap. Every focusable element shares the 2px `--focus-accent-border` ring
-with 2px offset. Component min/max widths keep local literals, as elsewhere in chat.
+type size and colour, including pill radius and option gap. Every focusable control shares the 2px `--focus-accent-border` ring
+with 2px offset; the answer's frame wears the field idiom instead (§3 Focus). Component min/max widths keep local literals, as elsewhere in chat.
 
-**Project question mirror.** Main is the list of what needs the owner; nothing waits in a section of its own. A Project question's Main copy is the Project's own `buildQuizCard` card, whole as anatomized above, in an assistant bubble at its ask time in the feed; the Project reference beside `Question` opens the exact original, and answers, materials and recovery controls work in Main. It uses the shared ring and `--project` tints; names ellipsize (full titles) before status; narrow heads wrap. History, live pointers and the census share one task/quiz card and lifecycle wording; the canonical current questions only confirm or settle copies the feed holds, never mount them, and an incomplete read withholds only what its typed gaps name. Optional, resumed and terminal-author questions stay answerable until answered or closed; no display/history cap drops them. Replaced questions stay read-only. The owner closes from the card; a model closes its own or a host-proven continued task line's question, or a finished task's, always with its own reason. Closure records a reason, never an answer/approval. A late answer left delivery-unknown by a restart offers Remove from pending (no resend, never marked delivered). Publication destination stays fixed across Project conversion; current room membership controls display. Explicit materials use registered task artifacts and the existing reader.
+**Project question mirror.** Main is the list of what needs the owner; nothing waits in a section of its own. A Project question's Main copy is the Project's own `buildQuizCard` card, whole as anatomized above, in an assistant bubble at its ask time in the feed; the Project reference in its voice line opens the exact original, and answers, materials and recovery controls work in Main. It uses the shared ring and `--project` tints; names ellipsize (full titles); the head stays the room's own row. History, live pointers and the census share one task/quiz card and lifecycle wording; the canonical current questions only confirm or settle copies the feed holds, never mount them, and an incomplete read withholds only what its typed gaps name. Optional, resumed and terminal-author questions stay answerable until answered or closed; no display/history cap drops them. Replaced questions stay read-only. The owner closes from the card; a model closes its own or a host-proven continued task line's question, or a finished task's, always with its own reason. Closure records a reason, never an answer/approval. A late answer left delivery-unknown by a restart offers Remove from pending (no resend, never marked delivered). Publication destination stays fixed across Project conversion; current room membership controls display. Explicit materials use registered task artifacts and the existing reader.
 
 A task that cannot continue without the owner is one System message in the feed, stamped when first seen: the task, one sentence, its own controls (revision-bound model access, Resume/Stop, children's included; activity counts each work once, its helpers within it). Sign-in, unobservable automatic access, disabled automatic continuation, budget pauses and Resume-only holds qualify; viable automatic account/quota recovery, queues, self-waking sleep, background scope verification and own Pause stay quiet. Deduplicate the same quiz/wait identity, not all waits on a task; the message leaves when a complete census drops the row. Missing action evidence stays unavailable; visibility never authorizes login, budget changes or automatic Resume.
 
@@ -2490,16 +2499,23 @@ it) and returns focus to its opener on close. The shell draws one close glyph an
 one More glyph (`web/modules/page_icons.js`).
 
 **Page header.** One component (`web/modules/page_header.js`) draws every page's
-header and the Project panel's, as one row that never wraps. No decorative icon.
-On docked, a page the column already names shows no title; status, actions and
-tabs remain, and a header with nothing to show draws no bar. A Project shows its
-name. In the stack layout the row is at most 56 px: ☰, the place's name, its
-status, then Panic and ⋯; the name wins over the status word, which a short row
-drops whole, keeping its mark. Whenever the bar itself is narrow, on a phone or in a narrow window,
+header and the Project panel's, as one row except the narrow toolbar below. No decorative icon.
+On docked, a page the column already names shows no title: its tabs or Files'
+location take that place and its actions the end, on Main's line, so the bar has
+two ends as Main's does; tabs or a location that do not fit scroll inside it (a
+location rests at the folder you are in, no folder wider than the bar's start),
+and in the macOS window its empty parts still move the window. A header with nothing to show draws
+no bar (Widgets keeps the plain band). A Project shows its name. In the stack
+layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
+⋯, with the page's tabs, or Files' location and its actions, under it
+(`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
+drops whole, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
+content column is too narrow, including while the sidebar is resized; the toolbar wraps in its
+own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's
 width. While a mode it holds is on (Evolve, Consciousness), ⋯ takes its tone,
-with no corner dot. Tabs sit under the row and a history note hangs under the bar, neither
-inside it; a page has no caption line, its sidebar row and its tabs name it.
+with no corner dot. A history note hangs under the bar, never inside it; a page
+has no caption line, its sidebar row and its tabs name it.
 
 **Doors and containers.** An object whose only job is to take you somewhere is a
 door: the whole object is the target and one state layer covers all of it (a file
@@ -2514,9 +2530,10 @@ applies only where a pointer can hover (`@media (hover: hover)`).
 (`--touch-target-min`); a control whose look is smaller keeps its look and gains
 the invisible hit area of the one `.ui-hit-area` recipe in `web/ui.css`, which a
 link inside a sentence takes too so the sentence keeps its lines. Nothing that
-acts is hidden until hover there (a Project row's menu is reached by its long press). No page scrolls sideways at any width; only
-code, tables and tab strips scroll sideways, inside themselves, with a fade where
-content hides. Text wraps before it widens a column.
+acts is hidden until hover there (a Project row's menu is reached by its long press).
+No page scrolls sideways at any width; only code, tables, tab strips and a bar's
+Files location scroll sideways, inside themselves, with a fade where content
+hides. Text wraps before it widens a column.
 
 **Telegram.** Inside the Telegram Mini App the page tells Telegram it is ready,
 fills the screen, turns off Telegram's swipe-down so lists scroll, shows
@@ -2528,7 +2545,7 @@ System appearance, and respects Telegram's safe areas
 Enforcement: `tests/test_design_system_gate_browser.py` visits every registered
 page and every Settings tab in WebKit and Chromium at 360, 390, a Telegram-like
 390 × 780, 719, 720, 721, 1280 and short windows (no page scrolls sideways, coarse
-targets reach 44 px, header bars stay one row, one scroller per sidebar, Projects
+targets reach 44 px, default-width bars stay one row, one scroller per sidebar, Projects
 scroll by touch); `tests/test_shell_layout_static.py`,
 `tests/test_shell_header_static.py`, `tests/test_shell_drawer_static.py`,
 `tests/test_shell_tokens_static.py`, `tests/test_pages_registry_static.py` and
