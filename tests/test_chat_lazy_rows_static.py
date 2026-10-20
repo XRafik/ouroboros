@@ -54,7 +54,10 @@ def test_feed_rows_remember_their_size_and_are_lazy_only_while_the_width_moves_o
 
 
 def test_only_the_row_sleep_owner_marks_a_row_laid_out():
-    """[data-laid] says the row was laid out at the feed's width with its pictures: one owner decides it."""
-    setters = sorted(path.name for path in (REPO / "web").rglob("*.js")
-                     if "tests" not in path.parts and "data-laid" in path.read_text(encoding="utf-8"))
-    assert setters == ["chat_row_sleep.js"], setters
+    """[data-laid] says the row was laid out at the feed's width with its pictures: one owner decides it. Others may
+    read it (project_answer.js keeps a sleeping answer's fold), never write it."""
+    named = {path.name: path.read_text(encoding="utf-8") for path in (REPO / "web").rglob("*.js")
+             if "tests" not in path.parts and "data-laid" in path.read_text(encoding="utf-8")}
+    assert "chat_row_sleep.js" in named, sorted(named)
+    writes = re.compile(r"(?:set|remove|toggle)Attribute\(\s*['\"]data-laid|dataset\.laid")
+    assert [name for name, text in named.items() if name != "chat_row_sleep.js" and writes.search(text)] == [], sorted(named)
