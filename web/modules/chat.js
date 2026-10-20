@@ -22,6 +22,7 @@ import { createHostStart } from './host_starting_status.js';
 import { createModelWaitController, isModelWaitReference } from './model_wait.js';
 import { syncSettledItems } from './settled_card.js';
 import { createChatReadingPosition } from './chat_reading_position.js';
+import { createRowSleep } from './chat_row_sleep.js';
 import { createChatHistoryPager, historyCoverage, historyIslandAtEdge } from './chat_history.js';
 import { createProjectReadReceipt, isAtNewestMessage, newestMessageOffset } from './project_read_state.js';
 import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, historyStamps, stampHistoryNode, compareHistoryPosition } from './chat_history_replay.js';
@@ -626,6 +627,7 @@ export function createChatInstance({
         // A settled place is where the reader is (the read receipt).
         changed: () => { syncLoadOlderControl(); updateScrollButton(); readReceipt.note({ discrete: true }); },
     });
+    const rowSleep = createRowSleep({ feed: messagesDiv });  // far rows skipped once laid out (style.css)
 
     function withStableViewport(mutate, options) { return reading.mutate(mutate, options); }
     // Turned back into history, or on the way to a place: not following the newest message.
@@ -3526,6 +3528,7 @@ export function createChatInstance({
             composer.destroy();
             replies.destroy();
             rowMenu.destroy();
+            rowSleep.destroy();
             unconfirmed.release();
             emptyWelcome?.dispose();
             readReceipt.cancel();
