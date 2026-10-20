@@ -9233,7 +9233,7 @@ body.keyboard-open .project-panel {
    capsule surface on the rest shadow like every pressable thing, the object radius because an answer can be a
    paragraph; hover and press change its colour. Once the question settles the other cards lie flat and the chosen
    one takes the chosen-answer tone (ui.css: the owner's sapphire keeping its lift on dark, the green tone flat on
-   white). */
+   white) and names itself `Your choice`. */
 .chat-quiz-options {
     display: flex;
     flex-direction: column;
@@ -9295,14 +9295,21 @@ body.keyboard-open .project-panel {
 }
 .chat-quiz-option:disabled .chat-quiz-option-detail { color: var(--text-disabled); }
 .chat-quiz-option.chosen .chat-quiz-option-detail { color: var(--tone-chosen-answer-detail); }
-/* The asker's recommendation: a word of its own beside the option's label, in the chosen answer's ink on that card. */
-.chat-quiz-option-recommended {
+/* A small word beside an option's label: the asker's recommendation, and on the owner's chosen answer `Your choice`
+   (question_presentation.paintChosenAnswer), drawn where the theme shows it (--chosen-answer-cue-display) and in the
+   answer's accessible name in every theme. On the chosen card both take its ink. */
+.chat-quiz-option-recommended,
+.chat-quiz-option-chosen-cue {
     margin-left: var(--space-2, 8px);
     font-size: var(--type-meta);
     font-weight: 600;
-    color: var(--tone-recommended);
 }
+.chat-quiz-option-recommended { color: var(--tone-recommended); }
+.chat-quiz-option-chosen-cue { display: var(--chosen-answer-cue-display); color: var(--tone-chosen-answer-ink); }
 .chat-quiz-option.chosen .chat-quiz-option-recommended { color: var(--tone-chosen-answer-ink); }
+.chat-quiz-option-chosen-name {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 /* Free answer: the owner's own words when no offered option fits, in one frame that holds its Send as the composer
    holds its own. The frame wears the field's hairline and, while the words have focus, the field focus idiom; a card
    too narrow for both gives Send its own line inside the frame, at its end. */
