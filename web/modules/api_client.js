@@ -444,6 +444,8 @@ export const apiClient = {
     saveUiLanguage: (payload) => jsonPost('/api/ui/i18n/language', typeof payload === 'string' ? { language: payload } : payload),
     /** @param {import('./ui_i18n_types.js').UiI18nMissingRequest} payload */
     reportI18nMissing: (payload) => jsonPost('/api/ui/i18n/missing', payload),
+    /** The holds this page found (holds.js). @param {import('./client_contract_types.js').UiHoldsRequest} payload */
+    reportUiHolds: (payload) => jsonPost('/api/ui/holds', payload),
     importI18n: (memoryDocument) => jsonPost('/api/ui/i18n/import', memoryDocument),
     exportI18nUrl: (language = '') => `/api/ui/i18n/export${language ? `?language=${encodeURIComponent(language)}` : ''}`,
     regenerateI18n: (payload = {}) => jsonPost('/api/ui/i18n/regenerate', payload),
