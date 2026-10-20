@@ -617,9 +617,11 @@ export function createChatInstance({
 
     const { captureVisibleTimelineAnchor, restoreVisibleTimelineAnchor, serializeTimelineAnchor, anchorOwnersReady } =
         createTimelineAnchors({ messagesDiv, liveCardRecords });
+    const rowSleep = createRowSleep({ feed: messagesDiv });  // far rows skipped once laid out (style.css)
     const reading = createChatReadingPosition({
         feed: messagesDiv, alive: () => !destroyed,
-        afterWrite: () => roomWork?.update(), activity: () => { _hasNewActivity = true; },
+        // A row asleep that the write changed is laid out before the place is restored (chat_row_sleep.js).
+        afterWrite: () => { rowSleep.flush(); roomWork?.update(); }, activity: () => { _hasNewActivity = true; },
         updateButton: updateScrollButton,
         visible: () => !destroyed && isInstanceVisible(),
         ready: () => historyLoaded && anchorOwnersReady(reading.target?.historyAnchor, reviewHydrator.ready),
@@ -627,7 +629,6 @@ export function createChatInstance({
         // A settled place is where the reader is (the read receipt).
         changed: () => { syncLoadOlderControl(); updateScrollButton(); readReceipt.note({ discrete: true }); },
     });
-    const rowSleep = createRowSleep({ feed: messagesDiv });  // far rows skipped once laid out (style.css)
 
     function withStableViewport(mutate, options) { return reading.mutate(mutate, options); }
     // Turned back into history, or on the way to a place: not following the newest message.

@@ -6,9 +6,10 @@ import { createRowSleep } from '../modules/chat_row_sleep.js';
 // A feed of rows, its observers and its frames, by hand: a test fires what the browser would.
 function stand() {
     const frames = [];
-    const observers = { changes: null, size: null };
+    const observers = { changes: null, root: null, size: null };
     const fonts = new Map();
-    const doc = { fonts: { addEventListener: (type, fn) => fonts.set(type, fn), removeEventListener: (type) => fonts.delete(type) } };
+    const doc = { fonts: { addEventListener: (type, fn) => fonts.set(type, fn), removeEventListener: (type) => fonts.delete(type) },
+        documentElement: { nodeType: 1 } };
     const element = (tag = 'div') => {
         const attrs = new Map();
         const node = {
@@ -39,8 +40,12 @@ function stand() {
     const win = {
         requestAnimationFrame: (fn) => { frames.push(fn); return frames.length; },
         MutationObserver: class {
-            constructor(callback) { this.callback = callback; observers.changes = this; this.connected = false; }
-            observe(target, options) { this.target = target; this.options = options; this.connected = true; }
+            constructor(callback) { this.callback = callback; this.connected = false; this.pending = []; }
+            observe(target, options) {
+                this.target = target; this.options = options; this.connected = true;
+                if (target === doc.documentElement) observers.root = this; else observers.changes = this;
+            }
+            takeRecords() { return this.pending.splice(0); }
             disconnect() { this.connected = false; }
         },
         ResizeObserver: class {
@@ -76,7 +81,7 @@ test('rows sleep only once laid out at a shown feed\'s width, two frames after t
     assert.equal(row.hasAttribute('data-laid'), true);
     assert.equal(s.frames.length, 0, 'nothing due: no frame is asked for');
     sleep.destroy();
-    assert.equal(s.observers.changes.connected || s.observers.size.connected, false);
+    assert.equal(s.observers.changes.connected || s.observers.size.connected || s.observers.root.connected, false);
     assert.equal(s.fonts.size, 0);
 });
 
@@ -158,4 +163,34 @@ test('a row added while the feed is hidden sleeps only after the feed is shown',
     s.show(390);
     s.run(2);
     assert.equal(row.hasAttribute('data-laid'), true);
+});
+
+test('a write settles the rows it changed at once: the reader\'s place is measured with their new size', () => {
+    const s = stand();
+    const row = s.element(), text = s.element('p');
+    row.append(text);
+    s.feed.append(row);
+    const sleep = createRowSleep({ feed: s.feed, win: s.win });
+    s.show(390);
+    s.run(2);
+    assert.equal(row.hasAttribute('data-laid'), true);
+    s.observers.changes.pending.push({ target: text, addedNodes: [] });  // written, its record not delivered yet
+    assert.equal(row.hasAttribute('data-laid'), true, 'until the observer\'s microtask, the row would keep its old size');
+    sleep.flush();
+    assert.equal(row.hasAttribute('data-laid'), false, 'flushed inside the write: laid out before the place is restored');
+    assert.equal(s.observers.changes.pending.length, 0);
+});
+
+test('another theme, layout or language wakes every row; their own changes stay theirs', () => {
+    const s = stand();
+    s.feed.append(s.element(), s.element());
+    createRowSleep({ feed: s.feed, win: s.win });
+    s.show(390);
+    s.run(2);
+    assert.deepEqual(s.laid(), [true, true]);
+    assert.deepEqual(s.observers.root.options.attributeFilter, ['data-theme', 'data-layout', 'lang', 'dir']);
+    s.observers.root.callback([{ target: s.doc.documentElement, attributeName: 'data-theme' }]);
+    assert.deepEqual(s.laid(), [false, false], 'the dark theme\'s recorded answer has a line the light one has not');
+    s.run(2);
+    assert.deepEqual(s.laid(), [true, true], 'laid out in the new theme, they sleep again');
 });

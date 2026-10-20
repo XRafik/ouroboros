@@ -6,7 +6,10 @@
 //
 // A row sleeps a moment after it arrived, after it last changed, and after every picture in it has arrived (a picture
 // still loading has no size yet, so its row stays awake until it loads or fails). A row that changes wakes at once and
-// is laid out like any other row. A new width or new fonts wake every row; they sleep again once the width has held.
+// is laid out like any other row; inside the reading owner's write (chat_reading_position.js `mutate`) the owner
+// settles it before it restores the passage (`flush`), so the place it restores is measured with the row's new size.
+// A new width, new fonts, another theme, layout or language wake every row (a row's size can depend on any of them:
+// the dark theme's recorded answer has a line the light one has not); they sleep again once the width has held.
 // A feed that is not shown lays nothing out: its rows wait until it is.
 
 const MARK = 'data-laid';
@@ -16,6 +19,8 @@ const HELD_FRAMES = 12;     // a width that held this long has stopped moving (c
 // What changes a row's size besides its text and children: its classes, a part hidden or opened, an inline size,
 // a picture's source.
 const RESIZING = ['class', 'hidden', 'open', 'style', 'src'];
+// What on the page's root restyles every row: the theme, the layout, the language and its direction.
+const RESTYLING = ['data-theme', 'data-layout', 'lang', 'dir'];
 
 export function createRowSleep({ feed, win = globalThis.window } = {}) {
     if (!feed || typeof win?.requestAnimationFrame !== 'function' || typeof win.MutationObserver !== 'function') {
@@ -78,7 +83,7 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
         else ticking = false;
     }
 
-    const changes = new win.MutationObserver((records) => {
+    const settle = (records) => {
         for (const record of records) {
             if (record.target === feed) {
                 for (const node of record.addedNodes) if (node.nodeType === 1) queue(node, ADDED_FRAMES);
@@ -87,9 +92,12 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
             const row = rowOf(record.target);
             if (row) wake(row);
         }
-    });
+    };
+    const changes = new win.MutationObserver(settle);
     changes.observe(feed, { childList: true, subtree: true, characterData: true, attributes: true,
         attributeFilter: RESIZING });
+    const restyled = doc?.documentElement ? new win.MutationObserver(() => wakeAll()) : null;
+    restyled?.observe(doc.documentElement, { attributes: true, attributeFilter: RESTYLING });
 
     // A new width wakes every row: each is laid out again at it. A hidden feed reads 0 and keeps its rows as they are;
     // shown again at its width, the rows that arrived meanwhile (never laid out) sleep once they have been.
@@ -108,10 +116,14 @@ export function createRowSleep({ feed, win = globalThis.window } = {}) {
     for (const row of feed.children) queue(row, ADDED_FRAMES);
 
     return {
+        // The changes written so far wake their rows now, not at the next microtask: a reader's place measured right
+        // after a write sees every changed row at its new size.
+        flush() { if (!destroyed) settle(changes.takeRecords()); },
         destroy() {
             if (destroyed) return;
             destroyed = true;
             changes.disconnect();
+            restyled?.disconnect();
             resized?.disconnect();
             doc?.fonts?.removeEventListener?.('loadingdone', fontsLoaded);
             due.clear();
