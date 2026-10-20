@@ -2860,8 +2860,11 @@ export function createChatInstance({
 
     let headerControlInterval = null;
     if (asPanel) {
-        // Late panels missed socket open; seed from the socket and latest snapshot.
-        hostStart.read(stateSnapshots.latest?.());
+        // Late panels missed socket open; seed from the socket and latest snapshot, its works included: a working
+        // Project opened from its row said Online until its own first read (owner 20.10).
+        const latest = stateSnapshots.latest?.();
+        hostStart.read(latest);
+        workState = reconcileWorkState(workState, latest, chatId, ws.isConnected?.() !== false);
         const seed = deriveChatStatus();
         if (ws.isConnected?.()) setStatus(seed);
     } else headerControlInterval = setInterval(refreshHeaderControlState, 3000);
