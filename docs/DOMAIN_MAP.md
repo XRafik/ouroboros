@@ -18,7 +18,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D08 | Supervisor: queue, workers, events & runtime control | 69 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 37 | 0 |
-| D11 | Gateway, server & Web UI | 98 | 0 |
+| D11 | Gateway, server & Web UI | 99 | 0 |
 | D12 | Settings & configuration | 21 | 0 |
 | D13 | Safety, guards & runtime mode | 9 | 0 |
 | D14 | Skills & extensions | 72 | 0 |
@@ -28,7 +28,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D18 | Launcher, packaging, platform & shared substrate | 30 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 13 | 0 |
-| **total** | | **824** | **0** |
+| **total** | | **825** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -763,6 +763,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/gateway/task_model_wait.py`
 - `ouroboros/gateway/task_pause.py`
 - `ouroboros/gateway/tasks.py`
+- `ouroboros/gateway/ui_holds.py`
 - `ouroboros/gateway/ui_i18n.py`
 - `ouroboros/gateway/ui_i18n_contracts.py`
 - `ouroboros/gateway/ui_preferences.py`

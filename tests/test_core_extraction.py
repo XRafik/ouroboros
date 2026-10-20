@@ -162,8 +162,9 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # search_code's lead says it searches a declared resource root and its `path` description says
     # "relative to the selected root"; send_video drops its example and "(preferred)". No parameter
     # changed type, default or required status; the other eight entries and every handler owner are identical.
+    # Also preserves the incoming show_card Worker guidance.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "d01ff512bd1541c8f4018eb29cc069dbe61e0434a521555f01a1a530483d7cf9"
+        "b26a1db3e0197635e5033be47e7a1a1dc24e5994e58c1745826179f7278a6a01"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)
