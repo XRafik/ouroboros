@@ -1722,6 +1722,16 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     content-visibility: auto;
 }
 
+/* On a phone the room is the card the drawer pushes aside: moving the card repainted the whole scrolled feed into it
+   on the motion's first frame (about 200 ms on a long history in WebKit: the drawer "stuck" as it started). The feed
+   keeps its own compositing layer in the stack layout, so the card moves a feed already painted; kept at rest too,
+   because dropping it as the card starts home repaints the feed again. A fixed element inside the feed would take
+   the feed as its containing block, so the menus a row opens are moved to <body> before they show
+   (chat_row_menu.js, chat_media.js, task_control_menu.js, read_aloud.js). */
+html[data-layout="stack"] :is(#chat-messages, .chat-messages) {
+    will-change: transform;
+}
+
 /* An actual flex item keeps the overlay reserve inside scrollable overflow in
    WKWebView, including short histories. The column gap supplies the final 8px. */
 #chat-messages::after,
