@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { NodeStub, countPropertyWrites, fixture, turn, WS_MSG } from './chat_decision_fixture.js';
+import { NodeStub, countPropertyWrites, fixture, frameBubble, turn, WS_MSG } from './chat_decision_fixture.js';
 // The head's shared status mark (web/modules/status_mark.js): [shape, hue, hidden].
 const markOf = (card) => { const mark = card.querySelector('.chat-quiz-mark'); return [mark.dataset.shape, mark.dataset.hue, mark.hidden]; };
 test('targeted detail preserves normalized option details, single-flight, and the existing answer form', async () => {
@@ -971,49 +971,54 @@ test('a late answer says where it went', async () => {
     }
 });
 
-test('the host facts line sits under the question when the card carries it and is absent otherwise', () => {
-    const fx = fixture();
+test('the host facts ride the bubble time line after the time; a later, richer delivery fills them in place', () => {
+    const fx = fixture({ frameNode: frameBubble });
     const facts = 'Asked by task t-1, started by your message of 2026-09-25 00:21 UTC; '
         + 'your last message in this chat: 2026-09-25 00:21 UTC (47 minutes before this question).';
+    const line = (bubble) => bubble.querySelector('.chat-quiz-host-facts');
     try {
-        const card = fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-facts', host_facts: facts });
-        const line = card.querySelector('.chat-quiz-host-facts');
-        assert.equal(line.textContent, facts);
-        // Plain text directly under the question, never through the markdown pipeline.
-        assert.equal(line.innerHTML, undefined);
-        const question = card.querySelector('.chat-quiz-question');
-        assert.equal(question.nextElementSibling, line);
+        const bubble = fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-facts', host_facts: facts });
+        assert.deepEqual([line(bubble).textContent, line(bubble).hidden], [facts, false]);
+        // Plain text, never through the markdown pipeline, on the time line and not in the card (owner 19.10, A).
+        assert.equal(line(bubble).innerHTML, undefined);
+        const foot = bubble.querySelector('.chat-bubble-foot');
+        assert.deepEqual(foot.children.map((node) => node.className), ['msg-time', 'chat-quiz-host-facts']);
+        assert.equal(bubble.querySelector('.chat-quiz-card').querySelector('.chat-quiz-host-facts'), null);
         // A stored history row nests the quiz; the sentence rides the nested block.
         const replay = fx.decision.buildQuizCard({ task_id: 't-1', text: WS_MSG.question,
             quiz: { ...WS_MSG, quiz_id: 'qz-facts-replay', host_facts: facts } });
-        assert.equal(replay.querySelector('.chat-quiz-host-facts').textContent, facts);
+        assert.equal(line(replay).textContent, facts);
+        // Without the sentence the line is absent: an empty, hidden node waiting on the time line.
         const bare = fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-bare' });
-        assert.equal(bare.querySelector('.chat-quiz-host-facts'), null);
         const empty = fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-empty', host_facts: '' });
-        assert.equal(empty.querySelector('.chat-quiz-host-facts'), null);
-        // A later, richer delivery of an already rendered card adds the line once.
+        for (const node of [bare, empty]) assert.deepEqual([line(node).textContent, line(node).hidden], ['', true]);
+        // A later, richer delivery of an already rendered card fills that line once, in place; a different later
+        // sentence never replaces it.
+        const waiting = line(bare);
         assert.equal(fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-bare', host_facts: facts }), null);
         assert.equal(bare.querySelectorAll('.chat-quiz-host-facts').length, 1);
-        assert.equal(bare.querySelector('.chat-quiz-question').nextElementSibling.textContent, facts);
-        fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-bare', host_facts: facts });
-        assert.equal(bare.querySelectorAll('.chat-quiz-host-facts').length, 1);
+        assert.deepEqual([line(bare), waiting.textContent, waiting.hidden], [waiting, facts, false]);
+        fx.decision.buildQuizCard({ ...WS_MSG, quiz_id: 'qz-bare', host_facts: 'Another sentence.' });
+        assert.deepEqual([bare.querySelectorAll('.chat-quiz-host-facts').length, waiting.textContent], [1, facts]);
     } finally { fx.restore(); }
 });
 
 test('a Main mirror of a Project question carries the host facts line from its pointer row', () => {
     const column = new NodeStub();
-    const fx = fixture({ isMain: true,
-        frameNode: (_msg, card) => { const bubble = new NodeStub(); bubble.append(card); return bubble; },
+    const fx = fixture({ isMain: true, frameNode: frameBubble,
         insertMessageNode: (node) => { column.append(node); return true; } });
     const row = { role: 'system', system_type: 'project_question_pointer', task_id: 't-9', quiz_id: 'qz-9',
         project_id: 'p1', project_chat_id: 23, project_name: 'Storage', ts: '2026-09-25T00:00:00+00:00',
         quiz_state: 'open', question: 'Merge now?', options: ['Yes', 'No'] };
     try {
         assert.ok(fx.decision.appendQuestionPointer({ ...row, host_facts: 'Asked by task t-9, origin unknown.' }));
-        const card = column.children[0].children[0];
-        assert.equal(card.querySelector('.chat-quiz-host-facts').textContent, 'Asked by task t-9, origin unknown.');
+        const line = column.children[0].querySelector('.chat-quiz-host-facts');
+        assert.deepEqual([line.textContent, line.hidden], ['Asked by task t-9, origin unknown.', false]);
         assert.ok(fx.decision.appendQuestionPointer({ ...row, task_id: 't-10' }));
-        assert.equal(column.children[1].children[0].querySelector('.chat-quiz-host-facts'), null);
+        assert.equal(column.children[1].querySelector('.chat-quiz-host-facts').hidden, true);
+        // The census row (narrower) never blanks it; the history row with the sentence fills the bare one.
+        fx.decision.appendQuestionPointer({ ...row, task_id: 't-10', host_facts: 'Asked by task t-10.' });
+        assert.equal(column.children[1].querySelector('.chat-quiz-host-facts').textContent, 'Asked by task t-10.');
     } finally { fx.restore(); }
 });
 

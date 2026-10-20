@@ -10,6 +10,7 @@ import json
 
 import pytest
 
+from ouroboros.launcher_window_chrome import DOCUMENT_SCRIPT
 from tests import test_subscription_setup_browser as setup_browser
 from tests.test_design_system_gate_browser import PROJECTS, save_evidence, seed_page, settle, sidebar_metrics
 from tests._work_projection_shared import work_fields
@@ -476,45 +477,84 @@ def test_copy_and_reply_sit_side_by_side_on_one_line(shell_ui, tmp_path, width):
         assert max(c['bottom'] for c in row) - min(c['bottom'] for c in row) <= 0.5, facts
 
 
-TITLE_BAND = """band => {
-    // launcher_window_chrome.py's own press filter: a plain press off any control moves the window.
-    const CONTROLS = 'a[href], button, input, select, textarea, summary, label, iframe, video, audio, '
-        + '[contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"]), [draggable="true"], '
-        + '[role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], '
-        + '[role="radio"], [role="switch"], [role="slider"], [role="textbox"]';
+TITLE_BAND = """({band, allowed}) => {
+    // Exercise the launcher's real CONTROLS/cursor exclusion, not a copied predicate.
     const left = document.getElementById('primary-sidebar').getBoundingClientRect().right;
-    const caught = {};
+    const controls = new Set(), unexpected = [];
+    let empty = null, drags = 0;
     for (let y = 4; y < band; y += 6) {
         for (let x = left + 4; x < innerWidth - 8; x += 12) {
             const t = document.elementFromPoint(x, y);
-            const control = t?.closest(CONTROLS);
-            if (control) caught[control.tagName.toLowerCase() + '.' + [...control.classList].slice(0, 2).join('.')] = y;
+            const control = t?.closest(allowed);
+            window.__chromeMessages.length = 0;
+            const press = new MouseEvent('mousedown', {bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 1});
+            t.dispatchEvent(press);
+            const messages = window.__chromeMessages.map(m => m.type);
+            if (control) {
+                controls.add(control.id || control.textContent.trim());
+                if (messages.length || press.defaultPrevented) unexpected.push({x, y, messages, control: control.outerHTML});
+            } else if (messages.join() === 'drag' && press.defaultPrevented) {
+                drags++;
+                empty ||= {x, y};
+            } else unexpected.push({x, y, messages, target: t.outerHTML.slice(0, 200)});
         }
     }
     const tab = document.querySelector('.page.active .app-tab');
-    return {caught, firstTabTop: tab ? Math.round(tab.getBoundingClientRect().top) : null};
+    const header = document.querySelector('.page.active .app-page-header');
+    return {controls: [...controls], unexpected, empty, drags, height: header.getBoundingClientRect().height,
+        firstTabTop: tab ? Math.round(tab.getBoundingClientRect().top) : null};
 }"""
 
 
-@pytest.mark.parametrize('page_name', ['dashboard', 'settings'])
+@pytest.mark.parametrize('page_name', ['dashboard', 'settings', 'skills', 'files', 'widgets'])
 def test_the_desktop_title_band_over_a_page_moves_the_window(shell_ui, tmp_path, page_name):
-    """macOS desktop window: the transparent title bar's band over a page holds no control, its tabs start below."""
+    """Composition A: only intended navigation/actions occupy the band; plain space still requests native drag."""
     page = seed_page(shell_ui, 1280, 860)
+    # The production document-start script and its messages, with only the native bridge replaced by a recorder.
+    # AppKit's window movement itself is covered separately; no owner window is used here.
+    page.add_init_script("""window.__chromeMessages = [];
+        window.webkit = {messageHandlers: {ouroborosWindowChrome: {postMessage: m => window.__chromeMessages.push(m)}}};
+    """ + DOCUMENT_SCRIPT)
     facts = {'engine': shell_ui['engine'], 'page': page_name}
     try:
         boot(page, shell_ui)
-        # What launcher_window_chrome.py writes into the document once the integrated title bar is applied.
-        page.evaluate("""() => { const root = document.documentElement; root.dataset.windowChrome = 'integrated';
-            root.style.setProperty('--window-chrome-top', '52px'); root.style.setProperty('--window-chrome-start', '78px'); }""")
+        page.evaluate("window.__ouroWindowChrome({doc: performance.timeOrigin, top: 52, start: 78})")
         page.locator(f'[data-nav-page="{page_name}"]').click()
         page.locator(f'#page-{page_name}').wait_for(state='visible')
         settle(page)
-        facts['band'] = page.evaluate(TITLE_BAND, 52)
+        allowed = ('.app-page-lead .app-tab, .app-page-lead .files-crumb, '
+                   '.app-page-toolbar :is(#skills-refresh, #skills-update-all, #files-refresh, '
+                   '#files-new-file, #files-new-dir, #files-paste)')
+        facts['band'] = page.evaluate(TITLE_BAND, {'band': 52, 'allowed': allowed})
+        band = facts['band']
+        assert band['height'] == 52 and band['drags'] > 0 and not band['unexpected'], facts
+        if page_name == 'widgets':
+            assert band['controls'] == [] and band['firstTabTop'] is None, facts
+        else:
+            assert band['controls'], facts
+            if page_name != 'files':
+                assert 0 <= band['firstTabTop'] < 52, facts
+        # Real pointer presses on empty band: one drag, then the Mac's double-click request.
+        page.evaluate('window.__chromeMessages.length = 0')
+        page.mouse.click(**band['empty'])
+        assert page.evaluate('window.__chromeMessages.map(m => m.type)') == ['drag']
+        page.evaluate('window.__chromeMessages.length = 0')
+        page.mouse.dblclick(**band['empty'])
+        assert page.evaluate('window.__chromeMessages.map(m => m.type)') == ['drag', 'double-click']
+        # Controls keep their normal behaviour and never send a native-window request.
+        page.evaluate('window.__chromeMessages.length = 0')
+        if page_name == 'files':
+            page.locator('#files-new-file').click()
+            page.locator('#page-files .files-editor').wait_for()
+        elif page_name != 'widgets':
+            tab = page.locator(f'#page-{page_name} .app-page-lead .app-tab').nth(1)
+            tab.click()
+            assert tab.get_attribute('aria-selected') == 'true'
+        assert page.evaluate('window.__chromeMessages.map(m => m.type)') == []
     finally:
+        setup_browser.capture(page, f'shell-title-band-{page_name}-{shell_ui["engine"]}')
         evidence(tmp_path, f'shell-title-band-{page_name}-{shell_ui["engine"]}', facts)
         page.close()
-    assert facts['band']['caught'] == {}, facts
-    assert facts['band']['firstTabTop'] is not None and facts['band']['firstTabTop'] >= 52, facts
 
 
 def live_state(project_ids, pins=()):
