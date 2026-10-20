@@ -47,6 +47,12 @@ export class NodeStub {
         node.parentNode = parent;
         parent.children.splice(parent.children.indexOf(this), 0, node);
     }
+    after(node) {
+        const parent = this.parentNode;
+        if (!parent) return;
+        node.parentNode = parent;
+        parent.children.splice(parent.children.indexOf(this) + 1, 0, node);
+    }
     replaceWith(node) {
         const parent = this.parentNode;
         if (!parent) return;
@@ -89,6 +95,20 @@ export class NodeStub {
     }
     querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
     querySelectorAll(selector) { return this.collect(selector.replace(/^\./, '')); }
+}
+
+// The bubble chat_media.bubbleFrameNode builds around a card, in its order: the sender line, the card, the time line;
+// a `voice` part joins the sender in one voice line, a `foot` part the time in one foot line.
+export function frameBubble(_msg, card, { voice = [], foot = [] } = {}) {
+    const node = (className, text = '') => { const el = new NodeStub(); el.className = className; el.textContent = text; return el; };
+    const line = (className, anchor, parts) => {
+        if (!parts.length) return anchor;
+        const wrap = node(className); wrap.append(anchor, ...parts); return wrap;
+    };
+    const bubble = new NodeStub();
+    bubble.append(line('chat-bubble-voice', node('sender', 'Ouroboros'), voice), card,
+        line('chat-bubble-foot', node('msg-time', '10:00'), foot));
+    return bubble;
 }
 
 export function countPropertyWrites(target, key) {

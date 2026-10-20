@@ -20,7 +20,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 
 - `web/ui.css` ← shared values and field/button/status/popup classes of both first-party documents; `style.css` keeps shell composition (DESIGN §8).
 - `theme_palette.js` ← `--chart-*` tokens into mounted Chart options, as canvas cannot inherit CSS; updates keep data and caller-authored option groups.
-- `page_header.js` / `page_icons.js` ← headers, tab strips (`bindTabStrip`), `renderSegmentedField` (writes `--segment-count`) and the icon set; `settings_controls.bindEffortSegments` keeps an empty (inherit) choice as a real value.
+- `page_header.js` / `page_icons.js` ← headers (`bindPageHeader` places tabs/path/actions), `bindTabStrip`, `renderSegmentedField` (`--segment-count`), icons; `settings_controls.bindEffortSegments` preserves empty inheritance.
 - `ui_interactions.js` ← `bindDialogFocus`, `bindMenu`, `bindPopoverPosition`, `bindEnterSubmit`; every binding returns teardown.
 - `status_mark.js` ← every status mark; `row_menu_gesture.js` ← a Project row menu's long press (DESIGN §10).
 - `scroll_fade.js` ← `bindScrollFade`: edge attributes from actually hidden content.
