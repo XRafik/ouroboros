@@ -181,7 +181,9 @@ def test_living_cards_render_press_submit_and_keep(direct_server_with_data, engi
                     app_card = page.locator(f'.chat-card[data-card-id="{ids["app"]}"]')
                     app_card.locator("[data-card-open]").wait_for(timeout=10_000)
                     assert app_card.locator("iframe").count() == 0
-                    app_card.scroll_into_view_if_needed()
+                    # The reader brings it back (the page's own scroll; Playwright's WebKit helper does not reach into a far
+                    # row the browser skips: chat_row_sleep.js).
+                    app_card.evaluate("card => card.scrollIntoView({ block: 'center' })")
                     app_card.locator("iframe.chat-card-frame").wait_for(timeout=10_000)
 
                     # The app's submit fills the owner's draft; nothing is sent.
