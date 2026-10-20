@@ -371,13 +371,16 @@ unregistered and the owner sees one notice naming the skill. It stays off
 until the page reloads or the skill's revision changes; the other modules and
 the page keep working.
 
-Recovery never depends on the modules. While modules start, the host keeps a
-boot marker in the page's storage; a page that finds one (the last start froze
-or crashed, however long ago) starts without page modules and offers Start
-with plugins, which alone clears it. Opening the page with `?plugins=off` does the same
-on purpose; Main's More menu (Restart without plugins) and the macOS app's
-Help menu (Start without plugins) reload it that way. Declarative contributions
-stay available in both cases.
+Recovery never depends on the modules. A module runs on the page's own thread,
+so one that loops or blows up in its start takes the page with it. Before the
+import the host writes the module's start to the page's start ledger
+(`web/modules/holds.js`, this device's storage) and clears it a second after
+`mount` settled; a module whose last start with this revision the page did not
+outlive is not imported again by itself: one notice names it with Start it, and
+the skill's next revision starts as usual. A page opened with `?hold=all` holds
+every module (and every widget and app frame) for that load. Declarative
+contributions stay available in both cases. A hang that begins later than that
+second is not held; the Skills switch turns the skill's code off live.
 
 ## Lifecycle: install → review → enable → execute
 
@@ -1577,7 +1580,17 @@ Rules every module author follows:
   card's mode from the card; that choice is stored in
   `ui_preferences.widget_start_mode` (`"<skill>:<tab_id>"` → mode) and
   overrides your declaration. Stop is always available and wins over every
-  mode; do not build your own keep-alive or restart logic against it.
+  mode, on that device across reloads until Start or a change to Auto / Keep
+  running; do not build your own keep-alive or restart logic against it.
+- **A start the page did not outlive is not repeated by itself.** On WebKit
+  (the macOS app, iPhone, Telegram on iOS), Android WebView and Firefox your
+  frame shares the page's thread: a top-level loop or a synchronous blow-up
+  freezes the whole page. The host records each frame's start before it runs
+  and clears it a second after the frame loaded; a card whose last start with
+  this revision the page did not outlive rests as its facade with Start and one
+  line, and your next revision starts as usual. Keep heavy computation in a
+  `blob:` Worker (the module CSP allows `worker-src blob:`), never in a long
+  synchronous loop.
 - **The view is disposable — durable state lives in the skill.** Treat the
   frame like an editor tab (VS Code's `getState`/`setState` model): autosave
   through your own `/api/extensions/<skill>/...` routes while running, and
