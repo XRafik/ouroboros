@@ -697,6 +697,18 @@ def _rebind_runtime_roots_between_tests():
 
 
 @pytest.fixture(autouse=True)
+def _launcher_no_real_network(request):
+    from tests.launcher_network_guard import deny_real_network, launcher_unit_module
+
+    if not launcher_unit_module(request.node.path.name):
+        yield
+        return
+    with deny_real_network() as attempts:
+        yield
+    assert not attempts, f"Launcher test tried real network I/O, even if caught: {attempts}"
+
+
+@pytest.fixture(autouse=True)
 def _isolate_restart_generation(monkeypatch):
     """Panic and parent observation belong to one process generation, not later tests;
     so do a returning stop's named queue and the launch/schedule process memory."""

@@ -2168,7 +2168,7 @@ engineering rules; no second policy list may exist.
 never *look, I am still working*. It exists so the owner can leave the window
 and still be reached by a question or a finished task.
 
-**Startup & background.** Settings → Behavior owns host lifecycle choices, separate from the client-local Appearance controls. Sign-in startup is off until the owner opts in and always names the computer running Ouroboros, even in a remote client. OS registration is the truth: another copy, an OS-disabled entry and an unavailable app build stay visible, never a saved-settings guess. Automatic startup preserves Panic stops and saved pauses; an explicit owner start releases Panic. The second control, *keep Ouroboros running in the background when the window is closed*, is also off until chosen and lives in the host's settings. Until the owner decides, the first close of the desktop window asks once — Ouroboros will keep working in the background (tasks, schedules, Telegram): keep it running, or quit? — and the answer becomes that checkbox; dismissing the question quits. macOS labels its buttons Keep running and Quit; Windows keeps standard OK and Cancel, with a line saying OK keeps it running and Cancel quits. While it is on, closing hides the window behind a live indicator (the Windows notification-area icon; the macOS menu-bar item and Dock) whose menu shows the server's real state (work only from confirmed phases; starting, an error, unconfirmed activity or no answer said as such) and offers Open, Panic and Quit; if no indicator appears the close quits, so a hidden process always has a visible way back. Quit, Cmd+Q and signing out always quit, unasked. A sign-in start stays hidden only when both checkboxes are on and the indicator actually appeared; opening the app while it starts shows the window; there is no third "start minimized" setting. Linux shows the background control as not yet available; closing quits there. Android keeps its existing automatic boot entry by default, under the same Panic-preservation contract. The card is last on Behavior: set once; on a browser or Docker host it only explains itself. A control the host cannot offer says why as a plain note in meta ink (no warning dot); two controls with the same reason say it once, after both; a state the owner can change (another copy, an entry the OS turned off) is a warning, a failed read or write an error. Notes and statuses start at the checkbox label's text, a status dot hanging under the checkbox.
+**Startup & background.** Behavior owns host lifecycle choices; Appearance is client-local. Sign-in startup is opt-in and names the host computer, also in remote clients. OS registration is truth, never a saved-settings guess: another copy, OS-disabled entry and unavailable build remain visible. Automatic startup preserves Panic and saved pauses; an explicit owner start releases Panic. *Keep Ouroboros running in the background when the window is closed* is also opt-in, stored on the host. First close asks once whether to keep tasks, schedules and Telegram running; its answer sets the checkbox, dismissal quits. macOS uses Keep running/Quit; Windows uses standard OK/Cancel and explains which keeps running. Closing with background on hides only behind a live indicator, so a hidden process always has a visible way back; otherwise it quits. Windows keeps one icon even with background/notifications off: after runtime and PID-lock/automatic-start checks, before Git/bootstrap. macOS shows its menu-bar item and Dock while background is on. The menu names starting, confirmed work, errors, unconfirmed activity or no answer; it offers Open, Panic and Quit. Early Panic stops installation work, including the retained daemon, and persists the stop marker; failed stops/writes are disclosed. Quit, Cmd+Q and sign-out quit unasked. Automatic start hides only with both checkboxes on and a live indicator; opening during boot shows the window. There is no separate start-minimized setting. Linux says background is unavailable and closes to quit. Android retains automatic boot by default with Panic preservation. This card is last on Behavior; browser/Docker hosts explain it without offering unsupported controls. Unavailable controls explain why in meta ink, without a warning dot; duplicate reasons appear once after both. Changeable states (another copy, OS-disabled entry) use warning; failed reads/writes use error. Notes align with checkbox text, status dots hang beneath the checkbox.
 
 **Telegram completion messages are separate from these client alerts.** The
 existing completion toggle Off suppresses every additional terminal line, failures
@@ -2260,14 +2260,15 @@ promise that anyone saw a banner: its notification settings, Focus and Do Not
 Disturb still decide. macOS uses `UNUserNotificationCenter`, whose one permission
 question is asked only from the owner's gesture — switching notifications on, or
 Test — never by an alert, which falls back while the question is unasked; Windows
-shows a notification-area balloon, which Windows 10/11 present as a system
-notification, on an icon of its own per notification so that each click opens
-its own source; Linux uses the freedesktop notification service when
+shows a balloon on Ouroboros's one notification-area icon, presented as a system
+notification on Windows 10/11; a source handoff can change the window/taskbar
+identity to Python. Handoff removes the old icon before its successor starts;
+a gap or Explorer ghost after a crash remains possible; Linux uses the freedesktop notification service when
 the desktop runs one. Not yet allowed, denied, unavailable or failed is a typed
 answer, never silence (an error the system returns instead of asking is that
 error, not a denial): that alert falls back to the browser banner or the in-app
 toast. One the system took without answering in time may still appear, so
-nothing else is shown for it and its click still opens its source. In-app
+nothing else is shown; its click opens the newest accepted source on that icon. In-app
 updates do not replace the desktop app, so an app built before this capability
 falls back and Settings says that system notifications need the current app.
 Android's host keeps its own channel for its own service; its page has no system
@@ -2306,10 +2307,11 @@ the conversation. Project identity comes from the full registry, including rooms
 outside the sidebar. An unavailable destination leaves the view in place and says
 so. A Main-transport notice opens Main, including Telegram; numeric addresses
 never imply a Project. A system notification first opens the window, hidden or not,
-then the same source. No reply is composed from the banner. The one exception is
-the fallback banner the desktop indicator shows while the window is hidden in
-background mode (Windows, when no system notification was shown): its click
-opens the window as it was left and does not navigate.
+then the same source. No reply is composed from the banner. Windows names no balloon
+in a click (owner decision: one icon), so any balloon click, an older entry in
+Windows' list included, opens the newest balloon's source; when that is the
+fallback banner the indicator shows for a hidden window (no system
+notification shown), the click opens the window as it was left, no navigation.
 
 **Content is private by default.** Only the kind of event is shown until the
 owner turns message text on, because a banner can appear on a shared screen.
@@ -2356,10 +2358,11 @@ notifications need the current app.
   first observed frame is its terminal — it would notify once.
 - An event that happens while the socket is down never rings: reconnect replays
   history, and history is deliberately silent.
-- A Windows balloon stays in Windows' notification list only while its icon is
-  in the notification area: until it is clicked, until a fourth retires the
-  oldest of three, or until the app quits. One that timed out or was dismissed
-  keeps its icon; nothing is shown again.
+- On Windows a click opens the newest balloon's source whichever entry was
+  clicked, and a balloon stays in Windows' list at most until the app quits;
+  nothing is shown again. An exit removes the icon within a bounded wait: a
+  shell that does not confirm in time can leave it until the pointer passes,
+  and an updated launcher's own icon can briefly appear beside it.
 - An alert the system took without confirming in time can stay unseen: it is
   not repeated in the app, and Settings says so. On Linux its click cannot open
   the source, because the server's id for it never came back.
