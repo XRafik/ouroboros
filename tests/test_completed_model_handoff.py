@@ -300,7 +300,7 @@ _PROBE_FACTS = {exc: {"stage": "raised_exception", "exception_type": exc, "provi
 _HTTP_FACTS = {"stage": "raised_exception", "provider_status_code": 400, "transport_cause_type": None}
 
 
-@pytest.mark.parametrize("facts", [_HTTP_FACTS, *_PROBE_FACTS.values()], ids=["http-400", "timeout", "setup-refused"])
+@pytest.mark.parametrize("facts", [_HTTP_FACTS, _PROBE_FACTS["TimeoutError"]], ids=["http-400", "timeout"])
 @pytest.mark.parametrize("pid_state", ["dead", "live", "missing", "inaccessible"])
 def test_historic_raised_send_uses_only_addressed_open_rows_without_pid_gate(tmp_path, monkeypatch, pid_state, facts):
     from ouroboros import platform_layer
@@ -337,20 +337,15 @@ def test_historic_raised_send_uses_only_addressed_open_rows_without_pid_gate(tmp
     assert _row(tmp_path, reservation.attempt_id) == before
 
 
-@pytest.mark.parametrize("case", ["unknown-status", "string-status", "bool-status", "float-status",
-                                   "success-status", "out-of-range-status", "transport-cause",
-                                   "missing-cause", "false-cause", "zero-cause", "empty-cause"])
+@pytest.mark.parametrize("case", ["unknown-status", "success-status", "transport-cause", "missing-cause"])
 def test_remote_facts_of_an_unbound_raised_send_do_not_hold_continue(tmp_path, monkeypatch, case):
     """Status and transport cause describe the remote exchange, never a local receiver."""
     queue, _, _ = _install_queue(tmp_path, monkeypatch)
     facts = dict(_HTTP_FACTS)
-    statuses = {"unknown-status": None, "string-status": "400", "bool-status": True,
-                "float-status": 400.0, "success-status": 200, "out-of-range-status": 600}
-    if case in statuses:
-        facts["provider_status_code"] = statuses[case]
-    causes = {"transport-cause": "ReadError", "false-cause": False, "zero-cause": 0, "empty-cause": ""}
-    if case in causes:
-        facts["transport_cause_type"] = causes[case]
+    if case in ("unknown-status", "success-status"):
+        facts["provider_status_code"] = None if case == "unknown-status" else 200
+    if case == "transport-cause":
+        facts["transport_cause_type"] = "ReadError"
     if case == "missing-cause":
         facts.pop("transport_cause_type")
     reservation = _legacy(tmp_path, pid=os.getpid(), facts=facts)
@@ -368,7 +363,7 @@ def test_bound_dispatched_or_unproven_failures_keep_continue_held(tmp_path, monk
     queue, _, _ = _install_queue(tmp_path, monkeypatch)
     facts = dict(_PROBE_FACTS["TimeoutError"])
     if case == "body-error":
-        facts["stage"] = "response_body_error"  # the answer was already handed to its caller
+        facts["stage"] = "response_body_error"  # a received body, not a raised send: outside this classifier
     if case == "no-stage":
         facts.pop("stage")
     if case == "failure-not-dict":

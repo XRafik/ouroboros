@@ -132,19 +132,19 @@ def owner_ended(pid: Any, birth: Any) -> bool:
 
 
 def ended_unbound_model_request(attempt: Dict[str, Any]) -> bool:
-    """An unbound attempt whose own send already raised is not a live writer.
+    """An unbound attempt whose answer path already ended is not a live writer.
 
     The ``raised_exception`` failure is retained once the one path that could
     hand this attempt's answer to its caller ended without one: by
-    ``usage_accounting._terminalize_failed_attempt`` after the send call raised
-    (an abandoned sender's late settlement included), or by the Responses
-    search leg after its request or stream raised or closed incomplete. No
-    receiver was bound, so nothing local can still take that answer; a
-    detached I/O thread may only retain evidence. A missing HTTP status or a
-    transport cause describes the remote exchange, whose outcome and money stay
-    unresolved with their late-receipt right; nothing is retried. Bound or
-    partially bound receivers, still-dispatched rows and rows without the
-    retained fact stay held. No writes.
+    ``usage_accounting._terminalize_failed_attempt`` after the send raised or
+    could not start (an abandoned sender's late settlement included), or by
+    the Responses search leg after its request or stream raised or closed
+    incomplete. No receiver was bound, so nothing local can still take that
+    answer; a detached I/O thread may only retain evidence. A missing HTTP
+    status or a transport cause describes the remote exchange, whose outcome
+    and money stay unresolved with their late-receipt right; nothing is
+    retried. Bound or partially bound receivers, still-dispatched rows and
+    rows without the retained fact stay held. No writes.
     """
     if (attempt.get("state") != "unresolved" or attempt.get("local_answer_consumer_id")
             or attempt.get("local_answer_owner_birth")
