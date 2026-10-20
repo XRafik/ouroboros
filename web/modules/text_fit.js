@@ -6,13 +6,21 @@
 // a width. One ResizeObserver serves every fitted element; a width change re-fits on the next frame (a fit changes the
 // element's own size, so a fit inside the observer's callback could loop in one frame: WebKit reports that as an
 // error), a height change does not, and an element removed from the page leaves the observer (no element is kept
-// alive by it). Elements fitted together are fitted in lockstep: every element's probe of a round is written before
+// alive by it). That frame's re-fit is heard (`onRefit`): a room places its reader again once its lines changed size
+// (Main shown again had laid out its newest message before its lines were fitted at their width). Elements fitted together are fitted in lockstep: every element's probe of a round is written before
 // any is read, so a batch costs a few layouts of the page however many lines it holds (fitted one by one, every probe
 // laid out the whole page: a long Main whose hundred work lines changed behind a page froze for seconds on return).
 const fits = new WeakMap();  // element -> { text, lines, width, onFit }
 let observer = null;
 const widened = new Set();  // elements whose width changed, fitted on the next frame
 let frame = 0;
+const refitted = new Set();  // who hears a frame's re-fit
+
+/** `listener(elements)` hears the elements each frame re-fitted after their width changed; returns its disposer. */
+export function onRefit(listener) {
+    refitted.add(listener);
+    return () => refitted.delete(listener);
+}
 
 const TAIL = /[\s.,;:!?…—–-]+$/u;
 
@@ -110,6 +118,7 @@ export function fitText(el, text, lines, onFit = null) {
                 const due = [...widened];
                 widened.clear();
                 refit(due);
+                for (const listener of refitted) listener(due);
             });
         });
     }

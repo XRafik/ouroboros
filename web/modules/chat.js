@@ -23,6 +23,7 @@ import { createModelWaitController, isModelWaitReference } from './model_wait.js
 import { syncSettledItems } from './settled_card.js';
 import { createChatReadingPosition } from './chat_reading_position.js';
 import { createRowSleep } from './chat_row_sleep.js';
+import { onRefit } from './text_fit.js';
 import { createChatHistoryPager, historyCoverage, historyIslandAtEdge } from './chat_history.js';
 import { createProjectReadReceipt, isAtNewestMessage, newestMessageOffset } from './project_read_state.js';
 import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, historyStamps, stampHistoryNode, compareHistoryPosition } from './chat_history_replay.js';
@@ -620,6 +621,9 @@ export function createChatInstance({
     // Far rows skipped once laid out (style.css); after a restyle every row's size may change at once, and the reading
     // owner places the passage again.
     const rowSleep = createRowSleep({ feed: messagesDiv, onRestyle: () => reading.reflow() });
+    // A fitted line re-fits on the frame after its width changed (text_fit.js): a reader at the newest message is placed
+    // there again once the room's lines have their size (Main shown again laid out its newest message before).
+    const offRefit = onRefit((els) => { if (reading.stick && els.some((el) => messagesDiv.contains(el))) reading.reflow(); });
     const reading = createChatReadingPosition({
         feed: messagesDiv, alive: () => !destroyed,
         // A row asleep that the write changed is laid out before the place is restored (chat_row_sleep.js).
@@ -3551,6 +3555,7 @@ export function createChatInstance({
             replies.destroy();
             rowMenu.destroy();
             rowSleep.destroy();
+            offRefit();
             unconfirmed.release();
             emptyWelcome?.dispose();
             readReceipt.cancel();

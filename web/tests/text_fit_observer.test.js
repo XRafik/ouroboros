@@ -63,6 +63,45 @@ test('a width change re-fits on the next frame, never inside the observer, so th
     }
 });
 
+test('the frame that re-fits tells its listeners which elements it fitted; a disposed listener hears nothing', async () => {
+    const env = installDom();
+    const frames = [];
+    let report = null;
+    const prior = { raf: globalThis.requestAnimationFrame, ro: globalThis.ResizeObserver, style: globalThis.getComputedStyle };
+    globalThis.requestAnimationFrame = (fn) => { frames.push(fn); return frames.length; };
+    globalThis.getComputedStyle = () => ({ lineHeight: '20px', fontSize: '14px', whiteSpace: 'normal' });
+    globalThis.ResizeObserver = class {
+        constructor(callback) { report = callback; }
+        observe() {}
+        unobserve() {}
+    };
+    try {
+        const { fitText, onRefit } = await import(`../modules/text_fit.js?heard=${Date.now()}`);
+        const el = document.createElement('div');
+        env.mount.append(el);
+        fitText(el, 'words that would be fitted', 1);
+        const heard = [];
+        const off = onRefit((els) => heard.push(els));
+        let width = 120;
+        Object.defineProperty(el, 'clientWidth', { configurable: true, get: () => width });
+        Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => 20 });
+        report([{ target: el }]);
+        assert.deepEqual(heard, [], 'nothing is heard inside the observer\'s callback');
+        frames.splice(0).forEach((fn) => fn());
+        assert.deepEqual(heard, [[el]], 'the frame that fitted it says which elements it fitted');
+        off();
+        width = 140;
+        report([{ target: el }]);
+        frames.splice(0).forEach((fn) => fn());
+        assert.equal(heard.length, 1, 'a disposed listener hears nothing');
+    } finally {
+        globalThis.requestAnimationFrame = prior.raf;
+        globalThis.ResizeObserver = prior.ro;
+        globalThis.getComputedStyle = prior.style;
+        restoreDom(env.prior);
+    }
+});
+
 // A page whose layout is counted: writing a text dirties it, the first read after a write lays it out (once for every
 // element, as a document does). A line holds `width / 10` characters of 20 px.
 function countedPage() {
