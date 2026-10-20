@@ -175,7 +175,8 @@ def hand_over(tmp_path, monkeypatch):
     """``exec_source_launcher`` with every effect recorded in ``calls``; ``os._exit`` raises ``Exited``."""
     calls = []
 
-    def run(argv, *, windows, frozen=False, acquired=True, spawn_error=None, console_clients=0):
+    def run(argv, *, windows, frozen=False, acquired=True, spawn_error=None, console_clients=0,
+            cancelled=lambda: False):
         def popen(args, **kwargs):
             if spawn_error:
                 calls.append("refused")
@@ -207,7 +208,7 @@ def hand_over(tmp_path, monkeypatch):
             ctx, argv, release_lock=lambda: calls.append("release"),
             acquire_lock=lambda: calls.append("acquire") or acquired,
             before_release=lambda: calls.append("remove icon"), on_failure=lambda: calls.append("restore shell"),
-            desktop="--no-ui" not in argv, macos=False)
+            desktop="--no-ui" not in argv, macos=False, cancelled=cancelled)
         return ctx
 
     run.calls = calls
@@ -259,6 +260,26 @@ def test_posix_replaces_the_process_image_with_the_marked_environment(hand_over)
     assert env[MARK] == "1"
 
 
+@pytest.mark.parametrize("windows", [True, False])
+@pytest.mark.parametrize("when", ["before teardown", "after unlock"])
+def test_cancelled_handoff_never_starts_a_successor(hand_over, windows, when):
+    cancelled = lambda: when == "before teardown" or "release" in hand_over.calls
+    try:
+        hand_over([], windows=windows, cancelled=cancelled)
+    except (Handover, Exited):
+        pass
+    assert hand_over.calls == ([] if when == "before teardown" else [
+        "remove icon", "release", "acquire", "restore shell"]), "a stop cannot spawn/exec over its Panic owner"
+
+
+def test_cancelled_handoff_keeps_panic_alive_even_if_the_lock_was_taken(hand_over):
+    try:
+        hand_over([], windows=True, acquired=False, cancelled=lambda: "release" in hand_over.calls)
+    except Exited:
+        pass
+    assert hand_over.calls == ["remove icon", "release", "acquire"], "never hard-exit over pending Panic persistence"
+
+
 # --------------------------------------------------------------------------------- cold start ---
 
 @pytest.fixture
@@ -277,8 +298,9 @@ def boot(monkeypatch):
 
     def run(repo, argv, *, frozen_bundle=None, macos=False, launcher_file=None, open_pending=False, stop_at=None):
         class Listener:
-            def __init__(self, exit_launcher, read_port, shutdown_event):
+            def __init__(self, exit_launcher, read_port, shutdown_event, **kwargs):
                 self._open_pending = open_pending
+                self.panic = threading.Event()
 
             def listen(self, lock_path):
                 if stop_at == "listen":

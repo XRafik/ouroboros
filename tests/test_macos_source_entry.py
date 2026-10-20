@@ -40,6 +40,8 @@ class FrozenContinues(BaseException):
 def launch(monkeypatch, tmp_path):
     import launcher
 
+    monkeypatch.setattr(platform, "IS_WINDOWS", False)  # select POSIX Python paths even on a Windows host
+    monkeypatch.setattr(launcher, "_shutdown_event", threading.Event())
     seed = tmp_path / "Ouroboros app.app" / "Contents" / "Frameworks"
     seed.mkdir(parents=True)
     entry = seed.parent / "MacOS" / "ouroboros-shell"
@@ -64,7 +66,6 @@ def launch(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
     monkeypatch.setattr(launcher.sys, "_MEIPASS", str(seed), raising=False)
     monkeypatch.setattr(launcher, "__file__", str(repo / "launcher.py"))
-    monkeypatch.setattr(platform, "IS_WINDOWS", False)  # exercise POSIX exec on every test host
     monkeypatch.setattr(boot, "_LOADED_CHECKOUT_SHA", "")
     monkeypatch.setattr(boot, "checkout_sha", lambda root: "updated-generation")
     monkeypatch.setattr(atexit, "register", lambda *a: None)
@@ -75,9 +76,9 @@ def launch(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher, "stop_tray_before_exit", lambda release: (calls.append("teardown"), release()))
     monkeypatch.setattr(launcher, "restore_tray_after_handoff", lambda: calls.append("restore"))
     monkeypatch.setattr(launcher, "check_git", lambda: calls.append("git") or True)
-    background = types.SimpleNamespace(_open_pending=False)
+    background = types.SimpleNamespace(_open_pending=False, panic=threading.Event())
     background.listen = lambda path: calls.append("listen") or background
-    monkeypatch.setattr(launcher, "Background", lambda *args: background)
+    monkeypatch.setattr(launcher, "Background", lambda *args, **kwargs: background)
     monkeypatch.setattr(launcher, "bootstrap_repo", lambda: calls.append("bootstrap") or True)
     monkeypatch.setattr(boot, "source_launcher_importable", lambda *a, **kw: calls.append("probe") or True)
     monkeypatch.setattr(launcher, "launcher_sources_changed", lambda *a, **kw: True)
@@ -108,6 +109,31 @@ def test_cold_changed_helpers_handoff_after_bootstrap_before_server_or_window(la
     assert stopped.value.env["PYTHONUSERBASE"] == str(l.module.DATA_DIR / "state/python-userbase")
     assert "PYTHONHOME" not in stopped.value.env and "CFProcessPath" not in stopped.value.env
     assert boot._LOADED_CHECKOUT_SHA == "bundle-generation", "frozen helpers are never labelled updated-generation"
+
+
+def test_panic_during_cold_change_detection_cannot_replace_the_launcher(launch, monkeypatch):
+    def changed(*a, **kw):
+        launch.module._shutdown_event.set()
+        return True
+
+    monkeypatch.setattr(launch.module, "launcher_sources_changed", changed)
+    try:
+        launch.module.main([])
+    except (Handoff, FrozenContinues):
+        pass
+    assert "exec" not in launch.calls and "frozen-server-boundary" not in launch.calls, \
+        "Panic during the change check must fence both successor and local server"
+
+
+def test_macos_fixture_on_a_simulated_windows_host(request, monkeypatch):
+    import launcher  # import before simulating the host; no Windows native API is available here
+
+    monkeypatch.setattr(platform, "IS_WINDOWS", True)
+    l = request.getfixturevalue("launch")
+    assert l.python == l.seed / "python-standalone/bin/python3", "the fixture must create macOS Python on Windows too"
+    with pytest.raises(Handoff) as stopped:
+        launcher.main([])
+    assert stopped.value.executable == str(l.entry)
 
 
 @pytest.mark.parametrize("reason", ["same-generation", "server-only", "imports-broken", "legacy-bundle", "source"])
@@ -224,7 +250,7 @@ def test_signed_entry_exec_refusal_restores_only_after_reacquiring_the_lock(laun
     assert env["PYTHONUSERBASE"] == str(l.module.DATA_DIR / "state/python-userbase")
 
 
-def _lifecycle(l, monkeypatch, *, returncode=42, landed=lambda: None):
+def _lifecycle(l, monkeypatch, *, returncode=42, landed=lambda: None, waited=lambda: None):
     """The real lifecycle loop with its process, port and sync boundaries replaced; a second start stops it.
     ``landed`` is what the server lands before it exits ``returncode``."""
     module = l.module
@@ -234,7 +260,7 @@ def _lifecycle(l, monkeypatch, *, returncode=42, landed=lambda: None):
     monkeypatch.setattr(module, "_pre_generation_cleanup", lambda: [])
     monkeypatch.setattr(module, "_clear_port_file", lambda: True)
     monkeypatch.setattr(module, "update_external_host", lambda *a: {})
-    monkeypatch.setattr(module, "_await_generation_endpoint", lambda *a, **kw: 8765)
+    monkeypatch.setattr(module, "_await_generation_endpoint", lambda *a, **kw: 1)
     monkeypatch.setattr(module, "_update_server_process_record_port", lambda *a: None)
     monkeypatch.setattr(module, "_wait_for_server", lambda *a, **kw: True)
     monkeypatch.setattr(module, "_cleanup_recorded_server_group_for_pid", lambda *a: None)
@@ -249,12 +275,12 @@ def _lifecycle(l, monkeypatch, *, returncode=42, landed=lambda: None):
             raise FrozenContinues()
         l.calls.append("server")
         landed()
-        return types.SimpleNamespace(pid=4242, returncode=returncode, wait=lambda: None)
+        return types.SimpleNamespace(pid=4242, returncode=returncode, wait=waited)
 
     monkeypatch.setattr(module, "start_agent", start)
 
 
-@pytest.mark.parametrize("mode", ["helper-change", "server-only", "source", "legacy", "panic"])
+@pytest.mark.parametrize("mode", ["helper-change", "server-only", "source", "legacy", "panic", "tray-panic"])
 def test_lifecycle_restart_and_panic_keep_the_existing_owners(launch, monkeypatch, mode):
     l = launch
     module = l.module
@@ -265,8 +291,10 @@ def test_lifecycle_restart_and_panic_keep_the_existing_owners(launch, monkeypatc
     elif mode == "legacy":
         l.entry.unlink()
     monkeypatch.setattr(module, "launcher_sources_changed", lambda *a, **kw: mode != "server-only")
-    _lifecycle(l, monkeypatch, returncode=module.PANIC_EXIT_CODE if mode == "panic" else 42)
-    if mode == "panic":
+    panic = mode in {"panic", "tray-panic"}
+    _lifecycle(l, monkeypatch, returncode=module.PANIC_EXIT_CODE if panic else 42,
+               waited=lambda: module._shutdown_event.set() if mode == "tray-panic" else None)
+    if panic:
         monkeypatch.setitem(sys.modules, "ouroboros.process_scope",
                             types.SimpleNamespace(complete_pending_panic_sweep=lambda *a, **kw: None))
         monkeypatch.setattr(module, "request_tray_cleanup", lambda: l.calls.append("tray"))
@@ -286,6 +314,27 @@ def test_lifecycle_restart_and_panic_keep_the_existing_owners(launch, monkeypatc
             module.agent_lifecycle_loop()
         assert stopped.value.executable == str(l.python if mode == "legacy" else l.entry)
         assert l.calls[:3] == ["server", "sync", "deps"] and l.calls[-2:] == ["release", "exec"]
+
+
+@pytest.mark.parametrize("stop_at", ["sleep", "sync", "deps", "change-check"])
+def test_panic_during_exit_42_cannot_handoff(launch, monkeypatch, stop_at):
+    l = launch
+    _lifecycle(l, monkeypatch, returncode=42)
+
+    def stop(*a, **kw):
+        l.module._shutdown_event.set()
+        return True
+
+    target, name = {
+        "sleep": (l.module.time, "sleep"), "sync": (l.module, "_sync_existing_repo_from_bundle"),
+        "deps": (l.module, "_install_deps"), "change-check": (l.module, "launcher_sources_changed"),
+    }[stop_at]
+    monkeypatch.setattr(target, name, stop)
+    try:
+        l.module.agent_lifecycle_loop()
+    except (Handoff, FrozenContinues):
+        pass
+    assert "exec" not in l.calls and l.calls.count("server") == 1, "Panic must outlive an in-flight exit-42 handoff"
 
 
 def test_other_frozen_platforms_report_the_seed_as_loaded_source(launch, monkeypatch):

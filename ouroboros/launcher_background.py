@@ -325,12 +325,14 @@ class Indicator:
 class Background:
     """The desktop window's close policy, its indicator (None where there is none) and the way back."""
 
-    def __init__(self, exit_launcher, read_port, shutdown_event) -> None:
+    def __init__(self, exit_launcher, read_port, shutdown_event, *, panic_port=lambda: None) -> None:
         cls = indicator_class()
         self.exit_launcher = exit_launcher  # stop the agent, clean up, os._exit
         self.read_port = read_port
+        self.panic_port = panic_port  # only this generation's measured binding, never the default port
         self.shutdown = shutdown_event
         self.quit = threading.Event()  # a quit request: never asked, never cancelled
+        self.panic = threading.Event()
         self.window = None
         self.native_ready = False
         self.indicator = cls(self) if cls is not None else None
@@ -419,40 +421,42 @@ class Background:
 
     def request_quit(self) -> None:
         """The indicator's Quit: a plain exit; no Panic flag, sign-in startup untouched."""
+        self.shutdown.set()
         self.quit.set()
         self.exit_launcher()
 
     def request_panic(self) -> None:
-        """Use the server's emergency stop; before it serves, latch Panic and stop this launcher."""
+        """Fence startup synchronously; send only to our live server, else use local Panic."""
+        if self.panic.is_set():
+            return
+        self.panic.set()
+        self.shutdown.set()
+        self.quit.set()
+        request_tray_cleanup()
+
         def post() -> None:
             try:
+                port = self.panic_port()
+                if port is None:
+                    raise ConnectionError("No live owned server binding")
                 request = urllib.request.Request(
-                    f"http://127.0.0.1:{self.read_port()}/api/command", method="POST",
+                    f"http://127.0.0.1:{port}/api/command", method="POST",
                     data=json.dumps({"cmd": "/panic"}).encode("utf-8"), headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(request, timeout=10):
                     pass
             except Exception:
-                # Fence later server admission before persistence: a long bootstrap must
-                # not consume this stop as if it were a fresh explicit owner launch.
-                self.shutdown.set()
-                self.quit.set()
-                request_tray_cleanup()
-                try:
-                    from ouroboros.config import DATA_DIR
-                    from ouroboros.server_control import _bounded, _persist_panic_controls, _write_panic_flag
+                from ouroboros.config import DATA_DIR
+                from ouroboros.server_control import execute_panic_stop
 
-                    # Reuse the existing marker and bounded writers. A failed/stalled
-                    # disk cannot prevent the exit; the next boot reconciles a kept flag.
-                    flag = _bounded(lambda: _write_panic_flag(DATA_DIR), 2.0)
-                    controls = _bounded(lambda: _persist_panic_controls(DATA_DIR), 2.0)
-                    log.error("Panic could not reach the server; stopping the launcher. "
-                              "Stop flag persisted=%s; controls persisted=%s", flag, controls)
-                finally:
-                    self.exit_launcher()
+                log.error("Panic cannot reach an owned server; using installation emergency stop.")
+                execute_panic_stop(None, None, data_dir=DATA_DIR, panic_exit_code=99, log=log)
 
         # If main returns at a shutdown fence, keep the bounded persistence/exit
         # owner alive until it finishes; a daemon could lose the stop marker.
-        threading.Thread(target=post, name="ouroboros-indicator-panic", daemon=False).start()
+        try:
+            threading.Thread(target=post, name="ouroboros-indicator-panic", daemon=False).start()
+        except RuntimeError:
+            post()  # thread admission failure must not turn the emergency gesture into a no-op
 
     def show_window(self) -> None:
         """Open the window: the icon or its Open, a banner, the Dock, a second launch.

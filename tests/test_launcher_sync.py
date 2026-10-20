@@ -400,7 +400,7 @@ def test_recorded_server_cleanup_ignores_unrelated_pid(monkeypatch, tmp_path):
             "pgid": 22222,
             "server_path": str(server_py.resolve()),
             "repo_dir": str(repo_dir.resolve()),
-            "port": 8765,
+            "port": 1,
         }),
         encoding="utf-8",
     )
@@ -436,7 +436,7 @@ def test_recorded_server_cleanup_kills_verified_process_group(monkeypatch, tmp_p
             "pgid": 33333,
             "server_path": str(server_py.resolve()),
             "repo_dir": str(repo_dir.resolve()),
-            "port": 8765,
+            "port": 1,
         }),
         encoding="utf-8",
     )
@@ -478,7 +478,7 @@ def test_recorded_server_cleanup_ignores_mismatched_process_group(monkeypatch, t
             "pgid": 55555,
             "server_path": str(server_py.resolve()),
             "repo_dir": str(repo_dir.resolve()),
-            "port": 8765,
+            "port": 1,
         }),
         encoding="utf-8",
     )
@@ -512,8 +512,8 @@ def test_update_server_process_record_port_records_actual_port(monkeypatch, tmp_
             "pgid": 123,
             "server_path": "/tmp/server.py",
             "repo_dir": "/tmp/repo",
-            "requested_port": 8765,
-            "port": 8765,
+            "requested_port": 1,
+            "port": 1,
         }),
         encoding="utf-8",
     )
@@ -522,7 +522,7 @@ def test_update_server_process_record_port_records_actual_port(monkeypatch, tmp_
     launcher._update_server_process_record_port(123, 8769)
 
     record = json.loads(record_path.read_text(encoding="utf-8"))
-    assert record["requested_port"] == 8765
+    assert record["requested_port"] == 1
     assert record["port"] == 8769
     assert record["port_updated_at"]
 
@@ -571,7 +571,7 @@ def test_start_agent_windows_assigns_job_before_resume_and_records(monkeypatch, 
     monkeypatch.setattr(launcher, "assign_pid_to_job", lambda job, pid: calls.append(("assign", (job, pid))) or True)
     monkeypatch.setattr(launcher, "resume_process", lambda pid: calls.append(("resume", pid)) or True)
 
-    proc = launcher.start_agent(port=8765)
+    proc = launcher.start_agent(port=1)
 
     assert proc.pid == 54321
     env = next(value for key, value in calls if key == "popen_env")
@@ -586,7 +586,7 @@ def test_start_agent_windows_assigns_job_before_resume_and_records(monkeypatch, 
     ]
     record = json.loads((data_dir / "state" / "server_process.json").read_text(encoding="utf-8"))
     assert record["pid"] == 54321
-    assert record["port"] == 8765
+    assert record["port"] == 1
 
 
 def test_launcher_reexports_the_windows_runtime_leaf():
@@ -720,7 +720,7 @@ def test_exit_42_hands_over_only_when_a_module_the_launcher_loaded_changed(tmp_p
     monkeypatch.setattr(launcher, '_pre_generation_cleanup', lambda: [])
     monkeypatch.setattr(launcher, 'update_external_host', lambda *a: calls.append('native') or {})
     monkeypatch.setattr(launcher, 'start_agent', start_agent)
-    monkeypatch.setattr(launcher, '_await_generation_endpoint', lambda *a, **kw: 8765)
+    monkeypatch.setattr(launcher, '_await_generation_endpoint', lambda *a, **kw: 1)
     monkeypatch.setattr(launcher, '_update_server_process_record_port', lambda *a: None)
     monkeypatch.setattr(launcher, '_wait_for_server', lambda *a, **kw: True)
     monkeypatch.setattr(launcher, '_cleanup_recorded_server_group_for_pid', lambda *a: None)

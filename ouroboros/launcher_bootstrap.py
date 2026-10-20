@@ -768,7 +768,7 @@ LAUNCHER_HANDOFF_ENV = "OUROBOROS_LAUNCHER_HANDOFF"
 
 def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_lock: Callable[[], None],
                          acquire_lock: Callable[[], bool], before_release: Callable[[], None],
-                         on_failure: Callable[[], None], desktop: bool, macos: bool) -> None:
+                         on_failure: Callable[[], None], desktop: bool, macos: bool, cancelled=lambda: False) -> None:
     """Hand off to compatible managed source; keep the shell on probe or spawn refusal.
 
     macOS selects its signed entry and probes imports/protocol with plain Python before
@@ -796,9 +796,15 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
     env = {**os.environ, LAUNCHER_HANDOFF_ENV: "1"}
     if entry is not None:
         env = embedded_python_env(context.data_dir, env)
+    if cancelled():
+        return
     before_release()
     release_lock()
     try:
+        if cancelled():
+            if acquire_lock():
+                on_failure()
+            return  # the Panic owner must finish even if another launcher took the lock
         if not IS_WINDOWS:
             os.execve(command[0], command, env)  # returns only by raising
         subprocess.Popen(command, env=env, close_fds=True, **inherited_console_kwargs())
@@ -807,6 +813,8 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
         if acquire_lock():
             on_failure()
             return
+        if cancelled():
+            return  # a failed spawn cannot hard-exit over Panic's pending stop/writes
         context.log.error("Another launcher took the single-instance lock meanwhile; this one exits")
         os._exit(1)
     os._exit(0)  # no atexit release over the successor's PID lock

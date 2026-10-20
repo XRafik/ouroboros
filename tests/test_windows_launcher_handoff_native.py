@@ -1,7 +1,8 @@
 """Native Windows proof of the launcher handoff and of its one notification-area icon.
 
 Windows only; nothing here is proven by the stand-ins in ``test_launcher_source_handoff.py`` or
-``test_desktop_notifications.py``. The handoff and manual CLI cases run on any Windows host, CI included: ``pythonw.exe``
+``test_desktop_notifications.py``. Every case requires ``OUROBOROS_WINDOWS_DESKTOP_QA=1``:
+the terminal and legacy controls deliberately open visible consoles. ``pythonw.exe``
 (a GUI-subsystem interpreter without a console, like the packaged app) hands over through the real
 ``launcher_bootstrap.exec_source_launcher``; a launcher started in a console of its own (a terminal run) hands
 over through it too; and ``pythonw.exe`` starts an older app's successor the way its C runtime's exec did (a
@@ -9,8 +10,9 @@ plain start from a console-less parent, which Windows gives a visible console) r
 from launcher.py with an explicit PyInstaller archive descriptor pointing at pythonw's real GUI image.
 A manual source run with seed argv is the negative control. Their oracle is the requirement, no console window anyone can see, plus the terminal run's
 console reaching its successor; whether a windowless successor reports console clients is recorded in the JUnit
-properties as evidence, never assumed. The icon case needs an interactive desktop session, pythonnet and
-``OUROBOROS_WINDOWS_DESKTOP_QA=1``; it hands one silent balloon to the icon it creates and removes it. No case
+properties as evidence, never assumed. Use the base interpreter (and its adjacent pythonw), since a venv
+redirector adds a second console client and changes PID identity. The icon case also needs pythonnet;
+it hands one silent balloon to the icon it creates and removes it. No case
 clicks a balloon, counts the shell's icons or runs Panic: those stay manual Windows qualification.
 """
 from __future__ import annotations
@@ -27,10 +29,13 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = [pytest.mark.serial, pytest.mark.skipif(sys.platform != "win32", reason="native Windows consoles")]
+pytestmark = [pytest.mark.serial, pytest.mark.skipif(sys.platform != "win32", reason="native Windows consoles"),
+              pytest.mark.skipif(os.environ.get("OUROBOROS_WINDOWS_DESKTOP_QA") != "1",
+                                 reason="interactive desktop probes require OUROBOROS_WINDOWS_DESKTOP_QA=1")]
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
-PYTHONW = pathlib.Path(sys.executable).with_name("pythonw.exe")
+PYTHON = getattr(sys, "_base_executable", sys.executable)
+PYTHONW = pathlib.Path(PYTHON).with_name("pythonw.exe")
 
 PROBE = r'''
 import ctypes, json, os, pathlib, sys
@@ -83,6 +88,17 @@ def await_receipt(path: pathlib.Path, timeout: float = 60.0) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+@pytest.fixture(autouse=True)
+def base_interpreter_identity():
+    """A redirector cannot witness sole-client or unchanged-PID assertions."""
+    child = subprocess.Popen([PYTHON, "-c", "import os; print(os.getpid())"], stdout=subprocess.PIPE,
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+    stdout, _ = child.communicate(timeout=20)
+    assert child.returncode == 0
+    if int(stdout.strip()) != child.pid:
+        pytest.skip("the base interpreter is also a redirector; direct native PID identity is unavailable")
+
+
 @pytest.fixture
 def console_less_parent():
     if not PYTHONW.exists():
@@ -100,7 +116,7 @@ def hand_over(tmp_path, command, **popen):
     receipt = out / "successor.json"
     env = {**os.environ, "PYTHONPATH": str(REPO), "NATIVE_RECEIPT": str(receipt)}
     env.pop("OUROBOROS_LAUNCHER_HANDOFF", None)
-    parent = subprocess.Popen([*command, str(tmp_path / "handing.py"), str(out), str(repo), sys.executable], env=env,
+    parent = subprocess.Popen([*command, str(tmp_path / "handing.py"), str(out), str(repo), PYTHON], env=env,
                               **popen)
     assert parent.wait(timeout=60) == 0, "the launcher leaves through os._exit(0) once its successor exists"
     facts = await_receipt(receipt)
@@ -124,7 +140,7 @@ def test_native_handoff_from_a_console_less_launcher_opens_no_console_window(tmp
 def test_native_terminal_run_keeps_its_console_for_the_successor(tmp_path, record_property):
     """The intentional CLI contract: a launcher attached to a console (here one of its own, as a terminal gives)
     hands over into that same console instead of a hidden one."""
-    handing, facts = hand_over(tmp_path, [sys.executable], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    handing, facts = hand_over(tmp_path, [PYTHON], creationflags=subprocess.CREATE_NEW_CONSOLE)
     record_property("handing_console", json.dumps(handing))
     record_property("successor_console", json.dumps(facts))
     assert handing["console_clients"] >= 1 and handing["console_window"], "precondition: an attached console"
@@ -150,7 +166,7 @@ def test_native_older_apps_successor_leaves_the_console_window_its_handoff_opene
     env = {**os.environ, "NATIVE_RECEIPT": str(receipt), "_PYI_ARCHIVE_FILE": str(PYTHONW),
            "NATIVE_INITIAL": str(tmp_path / "initial.json")}
     env.pop("OUROBOROS_LAUNCHER_HANDOFF", None)
-    subprocess.run([console_less_parent, str(tmp_path / "old_app.py"), sys.executable, str(successor), seed,
+    subprocess.run([console_less_parent, str(tmp_path / "old_app.py"), PYTHON, str(successor), seed,
                     str(first)], env=env, timeout=60, check=True)
     started = await_receipt(first)
     initial = await_receipt(tmp_path / "initial.json")
@@ -175,7 +191,7 @@ def test_native_manual_source_cli_with_seed_argument_keeps_its_console(tmp_path,
     env = {**os.environ, "NATIVE_RECEIPT": str(receipt)}
     for key in ("_PYI_ARCHIVE_FILE", "OUROBOROS_LAUNCHER_HANDOFF"):
         env.pop(key, None)
-    child = subprocess.Popen([sys.executable, str(entry), "--seed-bundle", str(PYTHONW.parent / "_internal")],
+    child = subprocess.Popen([PYTHON, str(entry), "--seed-bundle", str(PYTHONW.parent / "_internal")],
                              env=env, creationflags=subprocess.CREATE_NEW_CONSOLE)
     assert child.wait(timeout=60) == 0
     facts = await_receipt(receipt)

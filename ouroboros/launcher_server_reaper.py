@@ -29,6 +29,7 @@ state files that the single-instance lock exists to protect, with or without thi
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import pathlib
@@ -57,6 +58,40 @@ REAP_PASSES = 3
 _SETTLE_SEC = 0.05
 # How long a signalled pid gets to actually die before it is counted a survivor.
 _CONFIRM_DEADLINE_SEC = 1.0
+
+
+def kill_runtime_orphans(data_dir, cleanup_recorded_server, *, reason: str, log) -> None:
+    """Final cleanup shared by close/Panic, separate from the startup stray sweep.
+
+    Journal the trigger here: stop_agent usually consumed the server row already.
+    Main/Host Service listeners die with their server; companion PIDs/ports remain
+    the disclosed legacy exception. Boot-time Quit never calls this cleanup.
+    """
+    log.info("Tearing down runtime orphans (%s)", reason)
+    cleanup_recorded_server(reason)
+    try:
+        companions = json.loads((data_dir / "state" / "extension_companions.json").read_text(encoding="utf-8"))
+        if isinstance(companions, dict):
+            for item in companions.values():
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    _pl.force_kill_pid(int(item.get("pid") or 0))
+                except (TypeError, ValueError, ProcessLookupError, PermissionError, OSError):
+                    pass
+                for companion_port in item.get("ports") or []:
+                    try:
+                        _pl.kill_process_on_port(int(companion_port))
+                    except (TypeError, ValueError, OSError):
+                        pass
+    except Exception:
+        pass
+    for child in __import__("multiprocessing").active_children():
+        try:
+            _pl.force_kill_pid(child.pid)
+            log.info("Killed orphaned child pid=%d", child.pid)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
 
 
 def _path_forms(base, leaf: str = "") -> Set[str]:

@@ -191,7 +191,8 @@ def _bundle_dir() -> pathlib.Path:
 def _exec_source_launcher() -> None:
     exec_source_launcher(_bootstrap_context(), _launch_argv, release_lock=release_pid_lock,
                          acquire_lock=acquire_pid_lock, before_release=lambda: stop_tray_before_exit(lambda: None),
-                         on_failure=restore_tray_after_handoff, desktop=not _external_ui, macos=IS_MACOS)
+                         on_failure=restore_tray_after_handoff, desktop=not _external_ui, macos=IS_MACOS,
+                         cancelled=_shutdown_event.is_set)
 
 
 def _shell_facts() -> dict:
@@ -651,39 +652,10 @@ def _await_generation_endpoint(proc, *, port_file_cleared: bool, abort_event=Non
 
 
 def _kill_orphaned_children(reason: str = "window_close") -> None:
-    """Final safety net: the recorded server, companions and multiprocessing children.
+    """Shared close/Panic final cleanup (not the startup stray sweep)."""
+    from ouroboros.launcher_server_reaper import kill_runtime_orphans
 
-    Module-level so both the window-close handler (_on_closing, main thread) and
-    the panic-stop branch (agent_lifecycle_loop, supervisor thread) tear down the
-    exact same way. ``reason`` names the actual trigger, journalled HERE because
-    stop_agent() usually consumed the recorded-process row already. No port is swept: the main and
-    Host Service listeners end with their server; companion PIDs/ports stay the disclosed exception.
-    """
-    log.info("Tearing down runtime orphans (%s)", reason)
-    _cleanup_recorded_server_process(reason)
-    try:
-        companions = json.loads((DATA_DIR / "state" / "extension_companions.json").read_text(encoding="utf-8"))
-        if isinstance(companions, dict):
-            for item in companions.values():
-                if not isinstance(item, dict):
-                    continue
-                try:
-                    force_kill_pid(int(item.get("pid") or 0))
-                except (TypeError, ValueError, ProcessLookupError, PermissionError, OSError):
-                    pass
-                for companion_port in item.get("ports") or []:
-                    try:
-                        kill_process_on_port(int(companion_port))
-                    except (TypeError, ValueError, OSError):
-                        pass
-    except Exception:
-        pass
-    for child in __import__("multiprocessing").active_children():
-        try:
-            force_kill_pid(child.pid)
-            log.info("Killed orphaned child pid=%d", child.pid)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
+    kill_runtime_orphans(DATA_DIR, _cleanup_recorded_server_process, reason=reason, log=log)
 
 
 def agent_lifecycle_loop(port: int = AGENT_SERVER_PORT) -> None:
@@ -751,7 +723,7 @@ def agent_lifecycle_loop(port: int = AGENT_SERVER_PORT) -> None:
                 close_job(_agent_job)
                 _agent_job = None
 
-        if _shutdown_event.is_set():
+        if _shutdown_event.is_set() and exit_code != PANIC_EXIT_CODE:
             break
 
         if exit_code == PANIC_EXIT_CODE:
@@ -778,6 +750,9 @@ def agent_lifecycle_loop(port: int = AGENT_SERVER_PORT) -> None:
             os._exit(0)
 
         time.sleep(2)
+
+        if _shutdown_event.is_set():
+            break
 
         if _agent_restart_requested.is_set():
             # Launcher-requested recycle (first-run configuration): deliberate,
@@ -1205,17 +1180,28 @@ def main(argv=()):
     def _on_closing() -> None:
         log.info("Window closing — graceful shutdown.")
         _shutdown_event.set()
+        if background is not None and background.panic.is_set():
+            return  # Panic owns persistence and hard exit, never ordinary teardown over it
+        if _agent_proc is None and _webview_window is None:
+            return  # boot Quit lets main return to its atexit owner, without stale companion cleanup
         stop_agent()
         _kill_orphaned_children()
         stop_tray_before_exit(release_pid_lock)
         os._exit(0)
 
     # Listen before the long boot: a manual second launch meanwhile is kept and opens the window once it exists.
-    background = None if _headless else Background(_on_closing, _read_port_file, _shutdown_event).listen(PID_FILE)
+    from ouroboros.launcher_readiness import owned_server_port
+    background = None if _headless else Background(_on_closing, _read_port_file, _shutdown_event,
+        panic_port=lambda: owned_server_port(_agent_proc, _generation_port, DATA_DIR))
+    if background is not None:
+        background.listen(PID_FILE)
     if _shutdown_event.is_set():
         return  # Early Panic owns persistence and exit; bootstrap must not start beside it.
 
-    if not check_git():
+    git_found = check_git()
+    if _shutdown_event.is_set():
+        return
+    if not git_found:
         log.warning("Git not found.")
         if _headless:
             # No headless sudo flows: print the platform hint and stop.
@@ -1296,6 +1282,8 @@ def main(argv=()):
         if not check_git():
             sys.exit(1)
 
+    if _shutdown_event.is_set():
+        return
     if options.runtime_venv is not None:  # under the PID lock, before bootstrap and world generation
         try:
             _runtime_venv = prepare_runtime_venv(options.runtime_venv, run=_hidden_run, log=log,
@@ -1336,6 +1324,9 @@ def main(argv=()):
         if background is not None and background._open_pending:
             _launch_argv += ["--launch-intent", "owner"]
         _exec_source_launcher()
+
+    if _shutdown_event.is_set():
+        return
 
     # D-8: decide here, PRESENT after the gateway is healthy. Everything above
     # (single-instance lock, Git, managed-repo bootstrap/seed validation) is a

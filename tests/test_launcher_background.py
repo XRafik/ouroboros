@@ -102,7 +102,7 @@ class Answer:
 
 @pytest.fixture(autouse=True)
 def no_real_server(monkeypatch):
-    """No test here may reach a real server (the live install listens on 8765): HTTP is refused
+    """No test here may reach a real server: HTTP is refused
     unless a test answers it, and sign-in startup reads "on" unless a test asks the real reader."""
     def refused(*_args, **_kwargs):
         raise OSError("no server in these tests")
@@ -139,7 +139,7 @@ def make(monkeypatch):
 
     def factory(*, indicator=FakeIndicator, answer=None):
         monkeypatch.setattr(lb, "indicator_class", lambda: indicator)
-        background = lb.Background(lambda: background.events.append("exit"), lambda: 8765, threading.Event())
+        background = lb.Background(lambda: background.events.append("exit"), lambda: 1, threading.Event())
         background.events = []
         created.append(background.shutdown)
         window = Window(answer)
@@ -287,7 +287,7 @@ def test_tray_quit_is_a_plain_exit_without_panic(settings, monkeypatch, tmp_path
     monkeypatch.setattr(lb.urllib.request, "urlopen", no_http)
     background, window = make()
     background.request_quit()
-    assert background.quit.is_set() and background.events == ["exit"]
+    assert background.shutdown.is_set() and background.quit.is_set() and background.events == ["exit"]
     assert not (tmp_path / "state" / "panic_stop.flag").exists()
 
 
@@ -307,11 +307,12 @@ def test_tray_panic_leaves_the_running_servers_emergency_stop_in_charge(settings
 
     monkeypatch.setattr(lb.urllib.request, "urlopen", urlopen)
     background, window = make()
+    background.panic_port = lambda: 1
     background.request_panic()
     wait_for(lambda: len(sent) == 1)
-    assert sent[0] == ("http://127.0.0.1:8765/api/command", "POST", {"cmd": "/panic"})
+    assert sent[0] == ("http://127.0.0.1:1/api/command", "POST", {"cmd": "/panic"})
     assert background.events == [] and window.calls == []
-    assert not background.shutdown.is_set()
+    assert background.shutdown.is_set() and background.quit.is_set()
     assert not (settings.parent / "state" / "panic_stop.flag").exists()
 
 
@@ -319,12 +320,15 @@ def test_tray_panic_leaves_the_running_servers_emergency_stop_in_charge(settings
 def test_early_tray_panic_latches_stop_and_exits_even_when_persistence_fails(settings, monkeypatch, make, failed_writer):
     from ouroboros import server_control
     from ouroboros.launcher_bootstrap import automatic_launch_allowed
+    from tests.test_launcher_panic import disarm_emergency_owners
 
     background, window = make()
     background.window = None  # early icon: no server and no pywebview window yet
+    disarm_emergency_owners(monkeypatch, background.events)
     writes, write_flag = [], server_control._write_panic_flag
-    exit_threads, original_exit = [], background.exit_launcher
-    background.exit_launcher = lambda: (exit_threads.append(threading.current_thread().daemon), original_exit())
+    exit_threads = []
+    monkeypatch.setattr(server_control.os, "_exit", lambda code: (
+        exit_threads.append(threading.current_thread().daemon), background.events.append("exit")))
 
     def persist(kind, root):
         assert background.shutdown.is_set() and background.quit.is_set(), "fence before I/O"
@@ -371,7 +375,7 @@ def test_a_quiet_start_needs_sign_in_startup_on_as_the_os_reports_it(settings, m
     monkeypatch.setattr(lb, "signin_startup_on", SIGN_IN)
     assert background.start_hidden("owner") is False and asked == [], "a manual launch never asks and is shown"
     assert background.start_hidden("automatic") is hidden
-    assert asked == ["http://127.0.0.1:8765/api/desktop/autostart"]  # the server's own autostart_status()
+    assert asked == ["http://127.0.0.1:1/api/desktop/autostart"]  # the server's own autostart_status()
     assert background.indicator.hidden is hidden
 
 
@@ -576,7 +580,7 @@ class NotifyingIndicator(FakeIndicator):
     carries_notifications = True  # Windows: system notifications are balloons on this icon
 
 
-@pytest.mark.parametrize("quit_during_boot", [False, True])
+@pytest.mark.parametrize("quit_during_boot", [False, True, "listen"])
 def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
         settings, monkeypatch, quit_during_boot):
     import atexit
@@ -598,8 +602,8 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
 
     original_background = lb.Background
 
-    def owner(*args):
-        background = original_background(*args)
+    def owner(*args, **kwargs):
+        background = original_background(*args, **kwargs)
         owners.append(background)
         return background
 
@@ -611,6 +615,7 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
         assert background._open_pending, "Open before the window exists is kept"
         if quit_during_boot:
             background.request_quit()  # callback must already exist, even before Git/bootstrap
+            return True
         raise Continued()
 
     def leave(code):
@@ -621,7 +626,12 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
     monkeypatch.setattr(lb, "_active", None)
     monkeypatch.setattr(lb.Background, "_watch", lambda self: None)
     monkeypatch.setattr(lb.sys, "platform", "win32")
-    monkeypatch.setattr(launcher_tray, "listen_for_activation", lambda *args: events.append("listen"))
+    def listen(*args):
+        events.append("listen")
+        if quit_during_boot == "listen":
+            owners[0].request_quit()  # the exit closure must already know its Background owner
+
+    monkeypatch.setattr(launcher_tray, "listen_for_activation", listen)
     monkeypatch.setattr(atexit, "register", finalizers.append)
     monkeypatch.setitem(sys.modules, "webview", types.ModuleType("webview"))
     monkeypatch.setattr(launcher.os, "_exit", leave)
@@ -637,11 +647,17 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
                         ("stop_agent", lambda: events.append("stop agent")),
                         ("_kill_orphaned_children", lambda: events.append("reap")), ("check_git", check_git)):
         monkeypatch.setattr(launcher, name, value)
-    with pytest.raises(Exited if quit_during_boot else Continued):
+    if quit_during_boot:
         launcher.main([])
+    else:
+        with pytest.raises(Continued):
+            launcher.main([])
     background = owners[0]
     if quit_during_boot:
-        assert events[-5:] == ["stop agent", "reap", "remove icon", "release", ("exit", 0)]
+        assert background.shutdown.is_set()
+        assert "stop agent" not in events and "reap" not in events, "boot Quit cannot kill stale companion PIDs"
+        finalizers[0]()
+        assert events[-2:] == ["remove icon", "release"]
     else:
         background.window = Window()
         background.run()
@@ -725,13 +741,13 @@ def work(activity, transition="none", turn=False):
 ])
 def test_the_state_line_reads_the_servers_own_activity(monkeypatch, body, line):
     def urlopen(url, timeout):
-        assert url == "http://127.0.0.1:8765/api/state"
+        assert url == "http://127.0.0.1:1/api/state"
         if isinstance(body, Exception):
             raise body
         return Answer(body if isinstance(body, bytes) else json.dumps(body).encode())
 
     monkeypatch.setattr(lb.urllib.request, "urlopen", urlopen)
-    assert lb.status_line(8765) == line
+    assert lb.status_line(1) == line
 
 
 def test_windows_form_closing_decides_with_the_close_reason(settings, monkeypatch, make):
@@ -861,7 +877,7 @@ def test_an_open_request_before_the_window_exists_is_kept_and_cancels_the_quiet_
     """A manual second launch while the first copy still boots (review r1): kept, never dropped."""
     monkeypatch.setattr(lb, "indicator_class", lambda: FakeIndicator)
     choose(settings, "true")
-    background = lb.Background(lambda: None, lambda: 8765, threading.Event())
+    background = lb.Background(lambda: None, lambda: 1, threading.Event())
     background.show_window()  # the listener's call during bootstrap: there is no window yet
     assert background.start_hidden("automatic") is False, "the owner asked for the window"
     window = Window()
@@ -873,7 +889,7 @@ def test_an_open_request_before_the_window_exists_is_kept_and_cancels_the_quiet_
     background.show_window()  # once shown, a request acts at once
     assert window.calls == ["show", "show"]
 
-    background = lb.Background(lambda: None, lambda: 8765, threading.Event())
+    background = lb.Background(lambda: None, lambda: 1, threading.Event())
     assert background.start_hidden("automatic") is True  # no request yet: a quiet start
     window = Window()
     background.attach(window)
@@ -893,7 +909,7 @@ def test_a_real_sigurg_during_the_boot_opens_the_window_once_it_exists(settings,
     choose(settings, "true")
     previous = signal.getsignal(signal.SIGURG)
     try:
-        background = lb.Background(lambda: None, lambda: 8765, threading.Event()).listen(tmp_path / "ouroboros.pid")
+        background = lb.Background(lambda: None, lambda: 1, threading.Event()).listen(tmp_path / "ouroboros.pid")
         signal.raise_signal(signal.SIGURG)  # a second launch while bootstrap and the server start run
         assert background.start_hidden("automatic") is False
         window = Window()
@@ -917,7 +933,7 @@ def test_the_launcher_listens_for_a_second_launch_before_its_long_boot(monkeypat
     order = []
 
     class Recorder:
-        def __init__(self, exit_launcher, read_port, shutdown_event):
+        def __init__(self, exit_launcher, read_port, shutdown_event, **kwargs):
             order.append("background")
 
         def listen(self, lock_path):
