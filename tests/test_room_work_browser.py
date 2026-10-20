@@ -368,6 +368,9 @@ def open_project(page, project):
     page.wait_for_selector(f"#panel-pchat-{project['id']}", state="attached")
     page.wait_for_function("() => !document.getElementById('project-panel').hidden")
     page.wait_for_selector("#project-panel .project-panel-bar .rw-trigger", state="attached")
+    # Docked the panel comes in from the window's edge once its room has painted: geometry is read where it rests.
+    page.wait_for_function("() => { const panel = document.getElementById('project-panel'); return panel.classList.contains('open')"
+                           " && !panel.getAnimations().some((a) => a.playState === 'running'); }")
     settle_frames(page)
 
 
