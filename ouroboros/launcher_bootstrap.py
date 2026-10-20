@@ -49,7 +49,11 @@ def spawn_bootstrap_command(command, shutdown, *, interactive=False, **kwargs):
         raise InterruptedError("Launcher shutdown stopped bootstrap admission")
     # Interactive OS installers keep their terminal and may finish after an
     # ordinary setup-window close; Panic still has their captured Popen to stop.
-    owner = {"proc": None, "container": None if interactive else ProcessContainer(lifeline=True)}
+    # Frozen sys.executable is the app bootloader, not a Python CLI for the
+    # lifeline guardian. Keep group/token (Windows: Job) custody and Panic stops;
+    # frozen POSIX has no guardian for an abrupt launcher death during bootstrap.
+    owner = {"proc": None, "container": None if interactive else
+             ProcessContainer(lifeline=not getattr(sys, "frozen", False))}
     _BOOTSTRAP_COMMANDS.append(owner)
     try:
         owner["proc"] = (subprocess.Popen(command, **merge_hidden_kwargs(kwargs)) if interactive

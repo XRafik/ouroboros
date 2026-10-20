@@ -37,8 +37,9 @@ _POSIX_ONLY = pytest.mark.skipif(
 # explicitly justifying it here.
 _POPEN_ALLOWLIST = {
     "launcher.py",                        # custody host process (pre-runtime)
-    # The launcher's Windows handoff (exec_source_launcher): its one Popen is the next
-    # launcher, a custody host itself, and this launcher exits right after it starts.
+    # exec_source_launcher spawns the next custody host and exits. Interactive OS
+    # installers keep Popen roots in launcher_bootstrap's live Panic stop list;
+    # unlike contained commands, they may outlive an ordinary setup-window close.
     "ouroboros/launcher_bootstrap.py",
     # The same one-shot launcher replacement, before package imports/adoption can wait.
     "ouroboros/launcher_windows_runtime.py",

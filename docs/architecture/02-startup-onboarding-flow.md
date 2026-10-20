@@ -4,7 +4,7 @@ Startup orders launcher checks, gateway onboarding and an atomic save of setting
 
 ### Boot order
 
-The launcher prepares UI (Linux: browser), takes the PID lock, checks automatic intent, then starts activation/Windows tray before Git, `--runtime-venv` and seed bootstrap. Noninteractive commands use Job/lifeline custody, reaped on completion or Quit/Panic; OS installers retain their terminal and ordinary-exit behavior, with captured roots for Panic. Its lifecycle thread (exit 42, crash fuse: §1) probes `/api/health` while the child lives (`launcher_readiness.py`); exit before serving fails startup. Readiness allows onboarding, then shell/browser.
+UI preparation (Linux: browser), PID lock and automatic-intent check precede activation/Windows tray and Git/venv/seed bootstrap. `launcher_bootstrap` reaps noninteractive commands on completion or Quit/Panic: Jobs on Windows, lifelines on source POSIX, group/token custody without an abrupt-death guardian on frozen POSIX. OS installers keep terminal semantics and captured roots; shutdown during another bootstrap command also requests their stop. The lifecycle thread (exit 42, crash fuse: §1) probes `/api/health` while its child lives (`launcher_readiness.py`); exit before serving fails startup. Readiness permits onboarding, then shell/browser.
 
 Before serving, the lifespan admits the data root, applies settings/UI/runtime-mode baseline, starts the WebSocket heartbeat and opens the store's import window (`store_switch.start`). Data-, extension- and child-dependent work runs in the lifespan-owned boot coordinator (`server_liveness.start_boot_coordinator`; steps: `server_boot.py`), ending with store and supervisor publication outcomes. `/api/health` answers 200 as soon as the socket serves and carries the `boot` document (`gateway/health_contracts.py`: `phase` starting → serving → ready | failed, `dialogue_ready`, `tasks_ready`, steps, jobs), which `/api/state` repeats for the chat header. A fail-soft step (an extension that did not load) is reported failed and the boot goes on; an unpublished store or a failed supervisor init fails the phase with its cause.
 
@@ -44,7 +44,7 @@ Readiness and defaulting are separate. A Main, Light or Fallbacks slot neither t
 
 ### Packaged seed and managed checkout
 
-Immutable seeds (§8) retain VERSION/bundle/manifest on Android/container hosts; validation checks fields/bundle SHA-256, Git proves source existence and HEAD.
+The seed (§8), a clean named checkout, is never rebuilt/relabelled. Android/container hosts retain VERSION/bundle/manifest; validation checks fields/bundle SHA-256; Git proves source/HEAD.
 
 `ensure_managed_repo()` clones temporarily, verifies the SHA, configures branches/remotes and moves to `repo/`. Existing tips/owner edits survive: changed manifests refresh metadata/`managed`, never replace/archive the tree. Restart fetches nothing; `supervisor/git_ops.checkout_and_reset` applies approved official SHAs. Optional `origin` is personal persistence, not update authority.
 
