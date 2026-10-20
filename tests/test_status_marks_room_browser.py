@@ -35,7 +35,8 @@ MARK = """(selector) => {
     return {
         shown: Boolean(mark) && !mark.hidden && getComputedStyle(mark).display !== 'none',
         shape: mark?.dataset.shape || '', hue: mark?.dataset.hue || '', count: place?.querySelectorAll('.status-mark').length || 0,
-        sizes: parts.map((part) => { const box = part.getBoundingClientRect(); return `${Math.round(box.width)}x${Math.round(box.height)}`; }),
+        // The laid-out size: a moving dot's wave scales it for a moment, which is not its size.
+        sizes: parts.map((part) => `${part.offsetWidth}x${part.offsetHeight}`),
         motion: parts.map((part) => getComputedStyle(part).animationName),
         color: mark ? color(mark) : '', ink: word ? color(word) : '', word: (word?.textContent || '').trim(),
         tokens: Object.fromEntries(['--mark-owner', '--green', '--red', '--text-meta', '--text-secondary', '--accent-light',

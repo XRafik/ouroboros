@@ -12,7 +12,7 @@ import pytest
 
 from ouroboros.launcher_window_chrome import DOCUMENT_SCRIPT
 from tests import test_subscription_setup_browser as setup_browser
-from tests.test_design_system_gate_browser import PROJECTS, save_evidence, seed_page, settle, sidebar_metrics
+from tests.test_design_system_gate_browser import PROJECTS, rest, save_evidence, seed_page, settle, sidebar_metrics
 from tests._work_projection_shared import work_fields
 
 subscription_ui = setup_browser.subscription_ui
@@ -256,7 +256,8 @@ def test_a_project_opened_from_the_phone_drawer_takes_focus(shell_ui, tmp_path, 
         page.wait_for_timeout(250)
         press(page.locator('#nav-projects-list [data-project-id]').first)
         page.wait_for_function("() => window.__ouroLayers.top() === 'project'")
-        page.wait_for_timeout(400)
+        # The panel lay in the room the drawer made inert: focus goes in once the card has come home.
+        rest(page)
         facts['focus'] = page.evaluate(WHO)
         facts['inside_panel'] = page.evaluate("document.getElementById('project-panel').contains(document.activeElement)")
         facts['layers'] = ids(page)

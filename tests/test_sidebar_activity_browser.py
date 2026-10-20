@@ -14,6 +14,7 @@ import pytest
 
 from tests import test_subscription_setup_browser as setup_browser
 from tests._work_projection_shared import work_fields
+from tests.test_design_system_gate_browser import rest
 
 subscription_ui = setup_browser.subscription_ui
 pytestmark = [pytest.mark.ui_browser, pytest.mark.serial]
@@ -388,6 +389,8 @@ def test_sidebar_activity_census_and_navigation(subscription_ui, width, theme, r
     assert empty.get_attribute('aria-current') == 'page'
     assert page.locator('#project-panel-title').inner_text() == 'Empty room'
     if width < 700:
+        # The drawer stays painted for one beat while the room changes inside the card, then closes (owner 4A).
+        rest(page)
         assert not page.locator('#primary-sidebar').evaluate("el=>el.classList.contains('open')")
     page.locator('#project-panel-close').click()
     page.locator('#project-panel').wait_for(state='hidden')
@@ -413,7 +416,15 @@ RAIL = """() => {
             active: row.classList.contains('active'), row: rect(row), label: rect(label),
             ellipsized: label.scrollWidth > label.clientWidth, marker: rect(mark),
             drawn: style.display !== 'none' && style.visibility !== 'hidden', opacity: style.opacity,
-            dots: dots.map((dot) => rect(dot).left - rect(mark).left),
+            // Where each dot lies in the column: a moving dot's wave lifts and scales it for a moment, so its place
+            // is read with the wave suspended (restoring it restarts the wave in the page's one phase).
+            dots: dots.map((dot) => {
+                const wave = dot.style.animation;
+                dot.style.animation = 'none';
+                const left = rect(dot).left - rect(mark).left;
+                dot.style.animation = wave;
+                return left;
+            }),
             // A hollow ring (unconfirmed) draws its ink in its border.
             dotColor: (({ backgroundColor: fill, borderTopColor: ring }) => (fill === 'rgba(0, 0, 0, 0)' ? ring : fill))(
                 getComputedStyle(mark.firstElementChild)), rowColor: getComputedStyle(row).color,

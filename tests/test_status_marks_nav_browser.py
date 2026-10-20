@@ -15,7 +15,7 @@ import pytest
 
 from tests import test_subscription_setup_browser as setup_browser
 from tests._work_projection_shared import work_fields
-from tests.test_design_system_gate_browser import PROJECTS, save_evidence, seed_page, settle
+from tests.test_design_system_gate_browser import PROJECTS, rest, save_evidence, seed_page, settle
 
 subscription_ui = setup_browser.subscription_ui
 pytestmark = [pytest.mark.ui_browser, pytest.mark.serial]
@@ -134,7 +134,7 @@ def test_the_menu_button_says_what_waits_behind_it_in_both_places(nav_ui, tmp_pa
         page.locator('#page-chat [data-mobile-nav-toggle]').click()
         page.locator('#primary-sidebar [data-nav-page="files"]').click()
         page.locator('#page-files.active').wait_for()
-        settle(page)
+        rest(page)  # the card has come home: its ☰ is measured at its own size, not mid-glide
         facts['header_owner'] = toggle(header)
         # Main's own new messages (its room revision past the shared cursor), away from Main, light the ☰ too.
         sync(snapshot(main_revision=1))
