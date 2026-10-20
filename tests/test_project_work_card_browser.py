@@ -29,8 +29,6 @@ window.chat=createChatInstance({ws,state:{activePage:'chat',projectChatIds:new S
     mountEl:document.getElementById('content'),stateSnapshots:{begin:()=>({generation:1,requestedAt:Date.now()}),
     gate(){return Promise.resolve(this.begin());},isCurrent:()=>true,
     apply(request,data){window.chat?.hydrateStateSnapshot(data);}}});
-document.getElementById('reconnect-overlay').hidden=true;
-document.getElementById('reconnect-overlay').style.display='none';
 window.addEventListener('ouro:open-project',event=>{window.openedProject=event.detail;});
 </script>"""
 

@@ -278,7 +278,6 @@ export class WS {
 
     _scheduleReconnect() {
         if (this._reconnectTimer) return;
-        document.getElementById('reconnect-overlay')?.classList.add('visible');
         this._scheduleUiRecovery('socket-disconnect', 15000);
         const delay = this.reconnectDelay;
         this._reconnectTimer = setTimeout(() => {
@@ -383,7 +382,6 @@ export class WS {
             // per-instance "seen an open before" flag as false on the next real
             // reconnect and skip the full rebuild; previouslyConnected cannot.
             this.emit('open', { previouslyConnected });
-            document.getElementById('reconnect-overlay')?.classList.remove('visible');
             this._refreshStateAfterOpen(previouslyConnected);
             this._flushPendingMessages();
         };
