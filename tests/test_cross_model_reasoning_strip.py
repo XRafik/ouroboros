@@ -7,6 +7,8 @@ which 400'd with "Invalid `signature` in `thinking` block" — and the old recov
 keyed on an error-STRING allowlist that did not contain that phrase, so it never
 fired. These guards lock in the structural fix."""
 
+import pytest
+
 
 def _thinking_history():
     return [
@@ -292,3 +294,72 @@ def test_default_still_strips_reasoning_details():
         _split_reasoning_history(), "minimax/MiniMax-M3", "anthropic/claude-sonnet-4.6",
     )
     assert LLMClient._has_replayed_reasoning_metadata(cross) is False
+
+
+def _signed_turn_kwargs(client, target):
+    history = [
+        {"role": "user", "content": "q"},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}],
+         "reasoning_details": [{"type": "reasoning.text", "text": "t", "signature": "s",
+                                "format": "anthropic-claude-v1", "index": 0}]},
+        {"role": "tool", "tool_call_id": "call-1", "content": "ok"},
+    ]
+    return client._build_remote_kwargs(target, history, "high", 128, "auto", None, None, skip_capability_fetch=True)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("refusals", [0, 1, 2])
+def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission(monkeypatch, asynchronous, refusals):
+    """The omission fact describes the send the provider answered: the stripped retry
+    after a 400 notes it, an untouched success notes nothing, and a ladder that ends
+    in an exception leaves no fact behind for a later call."""
+    import asyncio
+    from ouroboros.llm import LLMClient
+    from ouroboros.reasoning_artifacts import note_replay_omission, pop_replay_omission
+
+    class _BadReq(Exception):
+        status_code = 400
+
+    class _Resp:
+        def model_dump(self):
+            return {"id": "gen-1", "provider": "P", "usage": {"prompt_tokens": 1},
+                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    client = LLMClient()
+    monkeypatch.setattr(client, "_get_supported_parameters", lambda _m: None)
+    target = client._resolve_remote_target("anthropic/claude-opus-5.5")
+    sent = []
+
+    def create(**candidate):
+        sent.append(candidate["messages"])
+        if len(sent) <= refusals:
+            raise _BadReq("Error code: 400 - Invalid `signature` in `thinking` block")
+        return _Resp()
+
+    async def create_async(**candidate):
+        return create(**candidate)
+
+    def observe(outcome):  # the fact lives in the caller's context: read it there
+        return outcome, pop_replay_omission()
+
+    async def run_async():
+        note_replay_omission(True)  # residue of an earlier call must not survive the ladder's entry
+        try:
+            return observe(await client._create_chat_completion_with_retries_async(
+                create_async, _signed_turn_kwargs(client, target), target))
+        except _BadReq as error:
+            return observe(error)
+
+    def run_sync():
+        note_replay_omission(True)
+        try:
+            return observe(client._create_chat_completion_with_retries(create, _signed_turn_kwargs(client, target), target))
+        except _BadReq as error:
+            return observe(error)
+
+    outcome, omitted = asyncio.run(run_async()) if asynchronous else run_sync()
+    assert isinstance(outcome, _BadReq) is (refusals == 2)
+    assert omitted is (refusals == 1)
+    if refusals < 2:
+        assert LLMClient._has_replayed_reasoning_metadata(sent[-1]) is (refusals == 0)

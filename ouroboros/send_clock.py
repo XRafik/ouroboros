@@ -19,7 +19,8 @@ and its applied actions. Rejoining one idempotent invocation retains its bytes.
 The line of the send whose response came back becomes canonical history,
 appended just before the answer (``main_send_scope``), so the next request
 extends the last one byte for byte (OpenAI-family caches reuse only an exact
-prefix, #906) and a replay shows what the model actually read. A line no
+prefix, #906) and a replay shows what the model actually read; the same scope
+keeps a recovery send's omission of replayed reasoning in every loop. A line no
 response consumed is never kept. A priced lookahead (the forced final) carries
 a line of its own sample, so it is advice only: equal width is not equal
 tokens. The final admission reads the FRESH request — its clock-free digest
@@ -32,8 +33,11 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import datetime as _dt
+import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 # Task types whose loop is not an acting Main mind (the ingress responder and
 # host summarizer/review passes); delegated children are excluded by role.
@@ -136,12 +140,23 @@ def main_send_scope(policy: Optional[SendClockPolicy],
 
     The consumed line is appended to ``canonical`` (the loop's transcript) before
     the caller appends the answer, so the canonical history is exactly what the
-    model read and a prefix of the next request. A raised send replays nothing.
-    Without a policy the scope suspends any outer clock and changes nothing.
+    model read and a prefix of the next request. For the same reason every loop's
+    ``canonical`` adopts a recovery send's omission of replayed reasoning
+    (``reasoning_artifacts.pop_replay_omission``): a thinking block is bound to the
+    prefix it was produced on, so restoring the omitted blocks would get the next
+    request refused again. A raised send replays nothing. Without a policy the
+    scope suspends any outer clock and adds no line.
     """
+    from ouroboros.reasoning_artifacts import pop_replay_omission
+
     clock = MainSendClock(policy)
     with clock.bound():
         yield clock
+    if pop_replay_omission() and isinstance(canonical, list):
+        from ouroboros.llm import LLMClient
+
+        canonical[:] = LLMClient._strip_openrouter_roundtrip_metadata(canonical, keep_reasoning_content=True)
+        log.warning("The answered recovery send omitted the replayed reasoning; the transcript adopts the omission")
     note = clock.consumed_note() if policy is not None else None
     if note and isinstance(canonical, list):
         from ouroboros.context_budget import bound_host_row
