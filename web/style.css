@@ -3663,13 +3663,13 @@ html[data-layout="stack"] .nav-drawer-backdrop {
        while it goes it is not a target. */
     opacity: 0;
     pointer-events: none;
-    transition: opacity var(--drawer-settle, 280ms) ease;
+    transition: opacity var(--drawer-settle, var(--motion-close)) ease;
     touch-action: pan-y pinch-zoom;  /* a sideways finger on the scrim drags the drawer closed (drawer_drag.js) */
 }
 html[data-layout="stack"] body.nav-drawer-open .nav-drawer-backdrop {
     opacity: 1;
     pointer-events: auto;
-    transition-duration: var(--drawer-settle, 340ms);
+    transition-duration: var(--drawer-settle, var(--motion-open));
 }
 @starting-style {
     html[data-layout="stack"] body.nav-drawer-open .nav-drawer-backdrop { opacity: 0; }
@@ -3687,8 +3687,8 @@ html[data-layout="stack"] #primary-sidebar {
        drag (--drawer-settle, drawer_drag.js). */
     transform: translateX(-16%);
     opacity: 0.5;
-    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet),
-        opacity var(--drawer-settle, 280ms) ease;
+    transition: transform var(--drawer-settle, var(--motion-close)) var(--ease-sheet),
+        opacity var(--drawer-settle, var(--motion-close)) ease;
     padding-bottom: calc(var(--space-3) + var(--inset-bottom));
     touch-action: pan-y;  /* a sideways finger is the drawer's (drawer_drag.js); up and down scroll the list */
 }
@@ -3722,7 +3722,7 @@ html[data-layout="stack"] #primary-sidebar.open {
     transform: none;
     opacity: 1;
     box-shadow: -64px 0 0 var(--surface-side);
-    transition-duration: var(--drawer-settle, 340ms);
+    transition-duration: var(--drawer-settle, var(--motion-open));
 }
 /* Under a finger (drawer_drag.js) everything that moves follows one number, --drawer-p (0 closed … 1 open), with no
    transition: the drawer comes up from under the room, the room slides as the card, its veil fades its words.
@@ -3748,7 +3748,7 @@ html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel) {
     border-radius: var(--room-card-radius);
     box-shadow: var(--room-card-shadow);
     overflow: hidden;
-    transition-duration: var(--drawer-settle, 340ms);
+    transition-duration: var(--drawer-settle, var(--motion-open));
 }
 /* Under a finger. `body` makes it as specific as the open card's rule above, so a finger that takes the open drawer
    back, or pulls it past open, moves the card too; the veil's rule below likewise. */
@@ -3773,11 +3773,11 @@ html[data-layout="stack"] .room-veil {
     pointer-events: none;
     background: var(--bg-primary);
     opacity: 0;
-    transition: opacity var(--drawer-settle, 280ms) ease;
+    transition: opacity var(--drawer-settle, var(--motion-close)) ease;
 }
 html[data-layout="stack"] body.nav-drawer-open .room-veil {
     opacity: 0.42;
-    transition-duration: var(--drawer-settle, 340ms);
+    transition-duration: var(--drawer-settle, var(--motion-open));
 }
 html[data-layout="stack"] body .room-veil.dragging {
     opacity: calc(0.42 * min(var(--drawer-p, 0), 1));
@@ -3862,9 +3862,9 @@ html[data-layout="stack"] #content {
     padding-bottom: var(--inset-bottom);
     z-index: var(--z-room);
     background: var(--bg-primary);
-    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet),
-        border-radius var(--drawer-settle, 280ms) var(--ease-sheet),
-        box-shadow var(--drawer-settle, 280ms) ease;
+    transition: transform var(--drawer-settle, var(--motion-close)) var(--ease-sheet),
+        border-radius var(--drawer-settle, var(--motion-close)) var(--ease-sheet),
+        box-shadow var(--drawer-settle, var(--motion-close)) ease;
 }
 /* The stack layout's header is one row of at most 56px at normal scale: `☰ · title · status … Panic · ⋯`
    (owner Q4=A). Nothing wraps: the title ellipsizes, Restart and the budget are inside ⋯ (chat.js places them). */
@@ -7164,14 +7164,14 @@ html[data-layout="stack"] .chat-toolbar-row {
    data-fold holds from the fold until the row is back, so all of it runs back on the same curve. */
 html[data-layout="stack"] .chat-input-wrap[data-fold] .chat-toolbar-row {
     max-height: var(--fold-row-h);
-    transition: max-height 300ms cubic-bezier(0.32, 0.72, 0, 1), margin-bottom 300ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: max-height 300ms var(--ease-sheet), margin-bottom 300ms var(--ease-sheet);
 }
 html[data-layout="stack"] .chat-input-wrap[data-folded] .chat-toolbar-row {
     max-height: 0;
     margin-bottom: calc(-1 * var(--space-2));
 }
 html[data-layout="stack"] .chat-input-wrap[data-fold] .chat-toolbar-row > .composer-menu {
-    transition: transform 300ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: transform 300ms var(--ease-sheet);
 }
 html[data-layout="stack"] .chat-input-wrap[data-folded] .chat-toolbar-row > .composer-menu {
     transform: translateY(var(--fold-menu-dy, 0px));
@@ -7187,7 +7187,7 @@ html[data-layout="stack"] .chat-input-wrap[data-fold]:not([data-folded]) .chat-t
     transition: opacity 160ms ease 140ms, visibility 0s;
 }
 html[data-layout="stack"] .chat-input-wrap[data-fold] .chat-text-row {
-    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s, margin-inline-start 300ms cubic-bezier(0.32, 0.72, 0, 1);
+    transition: border-color 0.2s, box-shadow 0.2s, background 0.2s, margin-inline-start 300ms var(--ease-sheet);
 }
 html[data-layout="stack"] .chat-input-wrap[data-folded] .chat-text-row {
     margin-inline-start: calc(var(--composer-control-height) + 6px + var(--space-2));
@@ -7863,6 +7863,21 @@ html[data-layout="docked"] .project-panel {
 }
 html[data-layout="docked"] .project-panel {
     max-width: 100%;
+    /* It comes in from the window's right edge with its room in it and goes back there whole, opaque all the way, on
+       the drawer's curve; only its scrim fades (owner 20.10, Q2 A). #app clips what lies past the edge. */
+    transform: translateX(100%);
+    opacity: 1;
+    transition: transform var(--motion-close) var(--ease-sheet);
+}
+html[data-layout="docked"] .project-panel.open {
+    transform: none;
+    transition-duration: var(--motion-open);
+}
+html[data-layout="docked"] .project-panel-backdrop {
+    transition: opacity var(--motion-close) ease;
+}
+html[data-layout="docked"] .project-panel-backdrop.open {
+    transition-duration: var(--motion-fade);
 }
 
 /* The stack layout: the project thread is a full-width layer over the room. It has no outside to tap and dims nothing:
@@ -7883,9 +7898,9 @@ html[data-layout="stack"] .project-panel {
     transform-origin: 0 50%;
     transform: translateY(14px);
     /* It rises on the sheet curve, and moves as the room card with the drawer (above) on the same one. */
-    transition: transform var(--drawer-settle, 280ms) var(--ease-sheet), opacity 180ms ease,
-        border-radius var(--drawer-settle, 280ms) var(--ease-sheet),
-        box-shadow var(--drawer-settle, 280ms) ease;
+    transition: transform var(--drawer-settle, var(--motion-close)) var(--ease-sheet), opacity var(--motion-fade) ease,
+        border-radius var(--drawer-settle, var(--motion-close)) var(--ease-sheet),
+        box-shadow var(--drawer-settle, var(--motion-close)) ease;
 }
 
 html[data-layout="stack"] .project-panel.open {
@@ -7905,6 +7920,13 @@ body.keyboard-open .project-panel {
     .chat-scroll-bottom-btn {
         transition: none;
     }
+    /* Docked, the panel appears where it stands with a short fade instead of travelling. */
+    html[data-layout="docked"] .project-panel {
+        transform: none;
+        opacity: 0;
+        transition: opacity var(--motion-fade) ease;
+    }
+    html[data-layout="docked"] .project-panel.open { opacity: 1; }
     .chat-load-older[aria-busy="true"] .chat-load-older-btn {
         animation: none;
     }
@@ -9830,7 +9852,7 @@ body.keyboard-open .project-panel {
 :root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-press="lift"] {
     transform: scale(1.012);
     box-shadow: var(--elev-float), 0 0 0 100vmax var(--row-lift-dim);
-    transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.24s ease-out;
+    transition: transform 0.24s var(--ease-sheet), box-shadow 0.24s ease-out;
 }
 :is(.chat-bubble, .chat-live-card)[data-row-swipe] {
     position: relative;
@@ -9838,7 +9860,7 @@ body.keyboard-open .project-panel {
 }
 /* The swipe's own motion wins over a closed menu's lift still on its way back: 1:1 under the finger, its curve home. */
 :root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-swipe="drag"] { transition: none; }
-:root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-swipe="settle"] { transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
+:root[data-theme] :is(.chat-bubble, .chat-live-card)[data-row-swipe="settle"] { transition: transform 0.22s var(--ease-sheet); }
 /* The reply mark at the room's right side: it fills as the row nears the reply point and takes the accent there. */
 .chat-row-reply-mark {
     position: fixed;

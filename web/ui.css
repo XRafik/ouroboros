@@ -218,6 +218,10 @@
     --motion-tone: background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, filter 0.12s ease;
     /* The one curve anything that moves rides: the iOS sheet curve (DESIGN §10 "Motion"; shell_motion.js reads it). */
     --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+    /* How long it runs: a surface coming in, a surface going out, a fade (a finger's release sets its own speed). */
+    --motion-open: 340ms;
+    --motion-close: 280ms;
+    --motion-fade: 180ms;
     --widget-fault-status-max-width: min(240px, 35vw);
     /* App shell: persistent desktop sidebar + optional project detail pane. */
     --sidebar-width: 280px;

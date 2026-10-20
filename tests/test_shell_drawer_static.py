@@ -86,3 +86,26 @@ def test_the_room_is_the_card_the_drawer_pushes_aside():
     assert "var(--drawer-p, 0)" in veil, "the veil fades the words by the same number"
     # The finger moves the rooms and their veils with the drawer (drawer_drag.js `also`).
     assert "also: movingRooms," in app_js and "veil.className = 'room-veil';" in app_js
+
+
+def test_motion_rides_one_curve_and_three_durations_and_the_docked_panel_slides_from_the_edge():
+    """DESIGN §10 "Motion": one curve and a few durations in ui.css; the drawer and the room card read them, a finger's
+    release still sets its own (--drawer-settle). Docked, the Project panel comes in from the window's right edge and
+    goes back there opaque on that curve (owner 20.10, Q2 A); with reduced motion it fades where it stands."""
+    ui = _read("web/ui.css")
+    css = _read("web/style.css")
+    for token in ("--ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);", "--motion-open: 340ms;", "--motion-close: 280ms;",
+                  "--motion-fade: 180ms;"):
+        assert token in ui, token
+    assert "var(--drawer-settle, 280ms)" not in css and "var(--drawer-settle, 340ms)" not in css
+    assert "cubic-bezier(0.32, 0.72, 0, 1)" not in css, "the curve is read from its token"
+    docked = css.split('html[data-layout="docked"] .project-panel {\n    max-width: 100%;', 1)[1].split("}", 1)[0]
+    assert "transform: translateX(100%);" in docked and "opacity: 1;" in docked
+    assert "transition: transform var(--motion-close) var(--ease-sheet);" in docked
+    opened = css.split('html[data-layout="docked"] .project-panel.open {', 1)[1].split("}", 1)[0]
+    assert "transform: none;" in opened and "transition-duration: var(--motion-open);" in opened
+    reduced = css.split("@media (prefers-reduced-motion: reduce) {\n    .project-panel,", 1)[1].split("\n}\n", 1)[0]
+    assert "transition: opacity var(--motion-fade) ease;" in reduced and "transform: none;" in reduced
+    app_js = _read("web/app.js")
+    assert "afterMotion(projectPanel, { property }).done" in app_js, "the close waits for whichever motion runs"
+    assert "PANEL_ARRIVAL_BOUND_MS = 300" in app_js and "hasPaintedHistory" in app_js.split("function arrivePanel", 1)[1]

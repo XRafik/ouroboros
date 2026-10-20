@@ -35,7 +35,7 @@ import { renderNavRows, renderProjectsHeader } from './modules/pages.js';
 import { renderPageHeader } from './modules/page_header.js';
 import { isStackLayout, onLayoutChange } from './modules/layout.js';
 import { createLayerStack } from './modules/layers.js';
-import { afterMotion } from './modules/motion.js';
+import { afterMotion, reducedMotion } from './modules/motion.js';
 import { createShellMotion } from './modules/shell_motion.js';
 import { createTelegramHost } from './modules/host_telegram.js';
 import { DRAWER_DRAG, bindDrawerDrag } from './modules/drawer_drag.js';
@@ -290,9 +290,8 @@ function syncDrawerScrim(painted, settled) {
     });
 }
 
-// What a place chosen in the open drawer hands over inside the room card (shell_motion.js): the room that leaves and
-// the one that arrives (a page, the Project panel, or a Project room inside it), what of it takes the breath (the
-// panel's content, the panel being the card), and the drawer rows the chosen place's pill slides between.
+// What a place picked in the open drawer hands over inside the room card (shell_motion.js): the leaving and arriving
+// rooms (a page, the Project panel, a Project room in it), what of it takes the breath, the rows the pill slides between.
 function handoverBetween(from, to) {
     const room = (scene, other) => (scene.project
         ? (other.project ? (retiring.get(scene.project) || projectInstances.get(scene.project))?.page : projectPanel)
@@ -349,16 +348,15 @@ function syncNavigationState() {
             panelExits += 1;
             projectPanel.hidden = false;
             if (projectPanelBackdrop) projectPanelBackdrop.hidden = false;
-            requestAnimationFrame(() => {
-                projectPanel.classList.add('open');
-                projectPanelBackdrop?.classList.add('open');
-            });
+            requestAnimationFrame(() => projectPanelBackdrop?.classList.add('open'));
+            arrivePanel(activeProjectId, performance.now());
         } else if (!projectPanel.hidden) {
-            // The panel leaves with its room in it and is hidden once its own fade has run (motion.js).
+            // The panel leaves with its room in it and is hidden once its own motion has run (motion.js): docked it
+            // slides home, on a phone or with reduced motion it fades.
             const closing = ++panelExits;
             projectPanel.classList.remove('open');
             projectPanelBackdrop?.classList.remove('open');
-            exit = afterMotion(projectPanel, { property: 'opacity' }).done.then(() => {
+            exit = Promise.all(['transform', 'opacity'].map((property) => afterMotion(projectPanel, { property }).done)).then(() => {
                 if (closing !== panelExits || navState.activeProjectId) return;
                 projectPanel.hidden = true;
                 if (projectPanelBackdrop) projectPanelBackdrop.hidden = true;
@@ -369,10 +367,9 @@ function syncNavigationState() {
     // A Project room that was left is put away once the motion that shows it leaving has run.
     const leftNow = [...retiring];
     if (leftNow.length) Promise.all([settled, exit]).then(() => leftNow.forEach(([pid, inst]) => settleRetired(pid, inst)));
-    // One commit for both layers (layers.js): the drawer, a modal layer whose scrim stays live, and the Project
-    // panel's layer, modal only where it covers the room (stack), after the panel's unhide so focus can go into it.
-    // History, Telegram's Back and a live focus change at once; on a phone the covered room's inert waits for the
-    // room card's motion, the one expensive write (the whole room restyles).
+    // One commit for both layers (layers.js), after the panel's unhide so focus can go into it: the drawer, and the
+    // Project panel's layer, modal only where it covers the room; on a phone only the covered room's inert (the whole
+    // room restyles) waits for the card's motion.
     layers.batch(() => {
         if (drawerOpen) {
             layers.push({ id: 'drawer', el: primarySidebar, modal: true, live: [navDrawerBackdrop].filter(Boolean),
@@ -393,6 +390,18 @@ function syncNavigationState() {
     }
     shownProjectId = activeProjectId;
     paintNavToggles();  // a room's composer mounted since the last paint carries its ☰ too
+}
+
+// Docked, the panel comes in from the window's edge with its room in it (owner 20.10, Q2 A): it starts once the room
+// has painted, or at a slow read's bound, when it comes in with its loading row (a read seen to take seconds).
+const PANEL_ARRIVAL_BOUND_MS = 300;
+function arrivePanel(pid, since) {
+    requestAnimationFrame(() => {
+        if (navState.activeProjectId !== pid || projectPanel.classList.contains('open')) return;
+        const waits = !isStackLayout() && !reducedMotion() && !projectInstances.get(pid)?.hasPaintedHistory?.();
+        if (waits && performance.now() - since < PANEL_ARRIVAL_BOUND_MS) arrivePanel(pid, since);
+        else projectPanel.classList.add('open');
+    });
 }
 
 // Keys scroll what is being read: an opened Project gives the focus to its room's feed (focusable, out of the tab
@@ -581,9 +590,9 @@ function destroyProjectInstance(pid) {
     projectPaintRequests.delete(pid);
 }
 
-// A Project room that is left keeps its real content while it leaves (DESIGN §10 "Motion"): it is retired — out of
-// the live instances, its reads and reading stopped (chat.js leave), inert — and put away once its exit has run, as
-// destroyProjectInstance does (a room holding unsendable work stays, hidden). Reopened meanwhile, it is the same room.
+// A Project room that is left keeps its content while it leaves (DESIGN §10 "Motion"): retired (out of the live
+// instances, not read: chat.js leave; inert), then put away once its exit has run, as destroyProjectInstance does
+// (a room holding unsendable work stays, hidden). Reopened meanwhile, it is the same room.
 const retiring = new Map();  // pid → the instance leaving the screen
 function setLeaving(inst, leaving) {
     inst.page.inert = leaving;
