@@ -2737,6 +2737,24 @@ export function createChatInstance({
     }
     scrollBottomBtn?.addEventListener('click', showLatest);
 
+    // The composer's height once its reply strip has finished moving (chat_reply.js `data-motion`): opening, the strip
+    // counts at its full height (`--reply-h`) and the wrap's gap; leaving, not at all. The reserve then moves once per
+    // motion, not on every frame of it: each write restyles the whole room (~90 ms a write on a 34k-element Main in
+    // WebKit, where four in a row made the strip's close stutter).
+    function composerHeightAtRest() {
+        const strips = inputArea.querySelectorAll('.chat-quote--composer[data-motion]');
+        if (!strips.length) return inputArea.offsetHeight || 0;
+        // Mid-motion heights are fractional: whole pixels would differ by one from frame to frame and write again.
+        let height = inputArea.getBoundingClientRect().height;
+        for (const strip of strips) {
+            const gap = parseFloat(getComputedStyle(strip.parentElement).rowGap) || 0;
+            const now = strip.getBoundingClientRect().height + (parseFloat(getComputedStyle(strip).marginBottom) || 0) + gap;
+            const end = strip.dataset.motion === 'open' ? (parseFloat(strip.style.getPropertyValue('--reply-h')) || 0) + gap : 0;
+            height += end - now;
+        }
+        return height;
+    }
+
     function updateMessagesPadding(preserveStickiness = true) {
         // A room not displayed (Main behind a page) measures its bars as 0: it keeps the reserves it was laid out
         // with, or it would come back with its newest message under the composer.
@@ -2759,7 +2777,7 @@ export function createChatInstance({
                 }
             }
             if (inputArea && messagesDiv) {
-                const reserve = Math.max(92, Math.ceil(inputArea.offsetHeight || 0) + 16);
+                const reserve = Math.max(92, Math.ceil(composerHeightAtRest()) + 16);
                 const value = `${reserve}px`;
                 if (page.style.getPropertyValue('--chat-input-reserve') !== value) {
                     page.style.setProperty('--chat-input-reserve', value);
