@@ -720,8 +720,8 @@ def test_ui_smoke_phase3_declarative_widgets_and_settings(direct_server_with_dat
                 callout = card.locator('.widget-callout')
                 assert metric.get_attribute("data-tone") == "ok"
                 assert callout.get_attribute("data-tone") == "warn"
-                assert metric.evaluate("element => getComputedStyle(element).borderLeftColor") == "rgb(131, 228, 153)"
-                assert callout.evaluate("element => getComputedStyle(element).borderLeftColor") == "rgb(247, 203, 88)"
+                assert metric.evaluate("e => getComputedStyle(e).borderLeftColor") == "rgb(131, 228, 153)"
+                assert callout.evaluate("e => getComputedStyle(e).borderLeftColor") == "rgb(247, 203, 88)"
 
                 emitted = page.evaluate(
                     """async (skill) => {
