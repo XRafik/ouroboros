@@ -1527,6 +1527,9 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
 }
+@media (prefers-reduced-motion: reduce) {
+    .status-badge.thinking { animation: none; }
+}
 
 /* History navigation at the top edge of the rendered window. */
 .chat-load-older {
@@ -7037,6 +7040,9 @@ button.skills-mark { cursor: pointer; min-height: 0; }
 @keyframes widget-refresh-pulse {
     0%, 100% { opacity: 0.2; }
     50% { opacity: 0.7; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .widget-status[data-state="refreshing"]::after { animation: none; }
 }
 
 .widget-tab-list {
