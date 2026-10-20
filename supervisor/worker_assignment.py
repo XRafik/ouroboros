@@ -693,17 +693,13 @@ def _choose_candidate(queue, remaining, unresolved_invalid_id_set, refused_this_
         for i, candidate in enumerate(_pool().PENDING):
             from supervisor.events_budget import budget_resume_dispatch_allowed
 
-            pause = candidate.get("_budget_pause")
-            if (isinstance(pause, dict) and pause.get("exact_continuation")
-                    and not isinstance(candidate.get("_budget_pause_resume"), dict)):
-                # This row already waits on its saved pause. An old selected
-                # hold is history, not a zero-dispatch selection to re-arm.
-                # Exact Resume owns source/grant validation; genuine unselected
-                # holds remain untouched and nothing dispatches here.
-                continue
             resume_allowed = budget_resume_dispatch_allowed(queue, candidate)
+            # A row its own exact pause or hold keeps queued is not repaired: the selection a paused
+            # row still carries from its earlier dispatch is no stale zero-dispatch choice, and
+            # re-holding it would replace the Pause's projected reason with that old hold's.
             if (resume_allowed is False and not candidate.get("_owner_hold")
-                    and not candidate.get("_project_admission_restore_hold") and not candidate.get(_LAUNCH_CLAIM)):
+                    and not candidate.get("_project_admission_restore_hold") and not candidate.get(_LAUNCH_CLAIM)
+                    and not isinstance(candidate.get("_budget_pause"), dict) and budget_hold_fact(candidate) is None):
                 if isinstance(candidate.get("_budget_pause_resume"), dict):
                     from supervisor.budget_resume import revoke_exact_budget_resume
 

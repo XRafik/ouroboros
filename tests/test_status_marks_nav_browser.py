@@ -134,6 +134,7 @@ def test_the_menu_button_says_what_waits_behind_it_in_both_places(nav_ui, tmp_pa
         page.locator('#page-chat [data-mobile-nav-toggle]').click()
         page.locator('#primary-sidebar [data-nav-page="files"]').click()
         page.locator('#page-files.active').wait_for()
+        setup_browser.wait_drawer_closed(page)  # the room slides back over the drawer before its ☰ is measured
         settle(page)
         facts['header_owner'] = toggle(header)
         # Main's own new messages (its room revision past the shared cursor), away from Main, light the ☰ too.
@@ -499,6 +500,7 @@ def test_a_long_press_opens_a_rows_menu_on_touch_where_the_dots_take_no_column(c
         # It opens the menu by the keyboard and stays drawn under it while the focus is in the menu.
         page.keyboard.press('Enter')
         page.locator(MENU).wait_for()
+        expect()(kebab).to_have_attribute('aria-expanded', 'true')  # the menu can paint a frame before its trigger says so
         facts['kebab_under_menu'] = {**kebab.evaluate(drawn), 'expanded': kebab.get_attribute('aria-expanded'),
                                      'focus': page.evaluate("() => document.activeElement.dataset.prm || ''")}
     finally:
