@@ -688,6 +688,7 @@ def start_icon(forms):
     background.show_window = lambda: background.opened.append("window")
     background.open_notification = lambda token: background.opened.append(token)
     tray = launcher_tray.WindowsTray(background)
+    background._indicator_up = lambda: tray.start()
     assert tray.start()
     wait_for(tray.ready.is_set)
     return tray
@@ -704,6 +705,17 @@ def icon(forms, monkeypatch):
 def left_click(icon):
     for handler in icon.MouseClick.handlers:
         handler(icon, SimpleNamespace(Button="left"))
+
+
+def test_setup_window_exit_reopens_the_single_tray_owner(icon, forms):
+    from System.Windows.Forms import Application
+
+    first = icon._icon
+    forms.post(first.sta, Application.ExitThread)  # pywebview's setup window ends the shared loops
+    wait_for(lambda: len(forms.icons) == 2 and icon.ready.is_set())
+    assert first.disposed and not first.Visible
+    assert sum(bool(item.Visible) for item in forms.icons) == 1
+    assert icon._icon is forms.icons[-1]
 
 
 def test_windows_a_balloon_counts_only_once_the_shell_accepted_it(forms, icon):

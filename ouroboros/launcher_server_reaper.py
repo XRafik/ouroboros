@@ -1,4 +1,7 @@
-"""Launcher-owned reaping of same-install stray `server.py` processes.
+"""Launcher process cleanup: startup stray discovery and final recorded-owner teardown.
+
+``kill_runtime_orphans`` is the close/Panic finalizer for recorded server and
+companions. The discovery sweep described below runs only at startup.
 
 A launcher that holds the single-instance pid lock is, by that lock, the only actor entitled to run
 a managed server against this data directory — so any OTHER process running THIS install's

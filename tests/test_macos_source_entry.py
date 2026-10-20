@@ -376,7 +376,7 @@ def test_cold_open_counts_packaged_helpers_the_frozen_launcher_has_not_imported_
             l.module.main([])
         assert stopped.value.executable == str(l.entry if macos else l.python)
         assert l.calls[-3:] == ["teardown", "release", "exec"], "before any server or normal window"
-        assert ("probe" in l.calls) is macos
+        assert "probe" in l.calls, "every packaged platform probes imports before losing the frozen recovery shell"
     else:
         with pytest.raises(FrozenContinues):
             l.module.main([])

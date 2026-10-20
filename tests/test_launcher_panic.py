@@ -148,3 +148,25 @@ def test_early_panic_stops_retained_daemon_custody_and_its_work(stopped_world, m
     assert written == [{"daemon": False, "work": False}], "request retained roots before persistence, not during async settlement"
     assert "retained custody stopped" in events and "census" in events and "ordinary exit" not in events
     assert (tmp_path / "state/panic_stop.flag").read_text() == "panic"
+
+
+@pytest.mark.parametrize("has_job", [False, True])
+def test_local_early_panic_requests_the_captured_child_stop_before_persistence(
+        stopped_world, monkeypatch, has_job):
+    from ouroboros import platform_layer, server_control
+
+    bg, events, exited = stopped_world
+    proc, job = SimpleNamespace(pid=41, poll=lambda: None), object() if has_job else None
+    bg.panic_child = lambda: (proc, job)
+    monkeypatch.setattr(platform_layer, "terminate_job", lambda value: events.append(("job stop", value)))
+    monkeypatch.setattr(platform_layer, "kill_process_tree", lambda value: events.append(("child stop", value)))
+    write_flag = server_control._write_panic_flag
+
+    def persist(root):
+        assert events[0] == (("job stop", job) if has_job else ("child stop", proc))
+        write_flag(root)
+
+    monkeypatch.setattr(server_control, "_write_panic_flag", persist)
+    bg.request_panic()
+    assert exited.wait(5)
+    assert events[0] == (("job stop", job) if has_job else ("child stop", proc))

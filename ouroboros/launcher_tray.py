@@ -322,6 +322,7 @@ class WindowsTray(Indicator):
         def pump():
             timer = None
             owned_icon = None
+            window_loop_ended = False
             self._sta_id = threading.get_ident()
             try:
                 menu = ContextMenuStrip()
@@ -386,6 +387,7 @@ class WindowsTray(Indicator):
                 timer.Start()
                 icon.Visible = True
                 Application.Run(context)
+                window_loop_ended = not self._stop.is_set() and not background.shutdown.is_set()
             except Exception:
                 log.warning("Tray pump failed; window close will quit.", exc_info=True)
             finally:
@@ -406,6 +408,11 @@ class WindowsTray(Indicator):
                         log.warning("Tray icon asset cleanup failed.", exc_info=True)
                 _drain(self._balloons, lambda *fields: False)  # never shown now: their callers fall back at once
                 self._stopped()
+                if window_loop_ended:
+                    # pywebview's setup window calls Application.Exit(), ending
+                    # other WinForms loops too. The launcher still owns one icon.
+                    threading.Thread(target=background._indicator_up, name="ouroboros-tray-reopen",
+                                     daemon=True).start()
 
         thread = Thread(ThreadStart(pump))
         thread.SetApartmentState(ApartmentState.STA)

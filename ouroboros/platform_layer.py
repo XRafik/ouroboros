@@ -559,12 +559,13 @@ def pid_lock_acquire(path: str) -> bool:
 def pid_lock_release(path: str) -> None:
     """Release the PID lock."""
     global _lock_fd
-    if _lock_fd is not None:
-        with contextlib.suppress(Exception):
-            file_unlock(_lock_fd.fileno())
-        with contextlib.suppress(Exception):
-            _lock_fd.close()
-        _lock_fd = None
+    if _lock_fd is None:
+        return  # already released, or another launcher owns the new PID file
+    with contextlib.suppress(Exception):
+        file_unlock(_lock_fd.fileno())
+    with contextlib.suppress(Exception):
+        _lock_fd.close()
+    _lock_fd = None
     with contextlib.suppress(Exception):
         os.unlink(path)
 

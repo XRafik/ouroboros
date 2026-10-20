@@ -351,6 +351,69 @@ def test_early_tray_panic_latches_stop_and_exits_even_when_persistence_fails(set
         assert not automatic_launch_allowed("automatic", settings.parent, lb.log)
 
 
+def test_window_close_after_panic_post_keeps_the_captured_server_owner_until_flag(settings, monkeypatch):
+    """A 200 only queues Panic: closing the window cannot unload the server's Job before its flag."""
+    import atexit
+    import launcher
+
+    class Booted(Exception):
+        pass
+
+    owners, events = [], []
+    accepted, waiting, finish = threading.Event(), threading.Event(), threading.Event()
+    flag = settings.parent / "state" / "panic_stop.flag"
+    original_background = lb.Background
+
+    def owner(*args, **kwargs):
+        bg = original_background(*args, **kwargs)
+        owners.append(bg)
+        return bg
+
+    def server_wait(timeout):
+        waiting.set()
+        assert finish.wait(timeout), "test server was not allowed to persist its flag"
+        assert flag.read_text() == "panic"
+        events.append("captured server exited")
+
+    proc = SimpleNamespace(pid=41, wait=server_wait, poll=lambda: None)
+    monkeypatch.setattr(lb, "indicator_class", lambda: None)
+    monkeypatch.setattr(lb.Background, "listen", lambda *args: None)
+    monkeypatch.setattr(atexit, "register", lambda *args: None)
+    monkeypatch.setattr(atexit, "unregister", lambda *args: None)
+    monkeypatch.setitem(sys.modules, "webview", types.ModuleType("webview"))
+    for name, value in (("IS_WINDOWS", False), ("_headless", False), ("_external_ui", False),
+                        ("_detect_headless", lambda: None), ("_shutdown_event", threading.Event()),
+                        ("_agent_proc", proc), ("_agent_job", object()), ("_webview_window", None),
+                        ("acquire_pid_lock", lambda: True), ("automatic_launch_allowed", lambda *a: True),
+                        ("Background", owner), ("check_git", lambda: (_ for _ in ()).throw(Booted())),
+                        ("stop_agent", lambda: events.append("ordinary stop")),
+                        ("_kill_orphaned_children", lambda: events.append("ordinary reap"))):
+        monkeypatch.setattr(launcher, name, value)
+    with pytest.raises(Booted):
+        launcher.main([])
+    bg = owners[0]
+    bg.panic_port = lambda: 1
+    monkeypatch.setattr(lb.urllib.request, "urlopen", lambda *a, **kw: (accepted.set(), Answer(b""))[1])
+    bg.request_panic()
+    try:
+        assert accepted.wait(2)
+        assert not flag.exists()
+        assert bg.closing() is None  # real launcher's _on_closing: no ordinary teardown over Panic
+        assert waiting.wait(2), "POST 200 must not end the non-daemon Panic owner"
+        thread = next(t for t in threading.enumerate() if t.name == "ouroboros-indicator-panic")
+        assert thread.is_alive() and thread.daemon is False
+        assert events == [] and thread.is_alive()
+        monkeypatch.setattr(launcher, "_agent_proc", SimpleNamespace(wait=lambda **kw: pytest.fail("wrong child")))
+        flag.parent.mkdir(exist_ok=True)
+        flag.write_text("panic")
+    finally:
+        finish.set()
+        thread = next((t for t in threading.enumerate() if t.name == "ouroboros-indicator-panic"), None)
+        if thread is not None:
+            thread.join(timeout=3)
+    assert events == ["captured server exited"]
+
+
 @pytest.mark.parametrize("answer,hidden", [
     ({"state": "on"}, True),
     ({"state": "off"}, False),
@@ -580,7 +643,7 @@ class NotifyingIndicator(FakeIndicator):
     carries_notifications = True  # Windows: system notifications are balloons on this icon
 
 
-@pytest.mark.parametrize("quit_during_boot", [False, True, "listen"])
+@pytest.mark.parametrize("quit_during_boot", [False, True, "listen", "settings"])
 def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
         settings, monkeypatch, quit_during_boot):
     import atexit
@@ -613,6 +676,8 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
         assert events == ["runtime", "lock", "allowed", "listen", "icon"]
         background.show_window()
         assert background._open_pending, "Open before the window exists is kept"
+        if quit_during_boot == "settings":
+            return True
         if quit_during_boot:
             background.request_quit()  # callback must already exist, even before Git/bootstrap
             return True
@@ -632,6 +697,11 @@ def test_main_owns_one_windows_icon_before_bootstrap_and_early_quit_is_callable(
             owners[0].request_quit()  # the exit closure must already know its Background owner
 
     monkeypatch.setattr(launcher_tray, "listen_for_activation", listen)
+    if quit_during_boot == "settings":
+        monkeypatch.setattr(launcher, "bootstrap_repo", lambda: True)
+        monkeypatch.setattr(launcher, "launcher_sources_changed", lambda *a, **kw: False)
+        monkeypatch.setattr(launcher, "_prepare_first_run_settings",
+                            lambda: (owners[0].request_quit(), ({}, False))[1])
     monkeypatch.setattr(atexit, "register", finalizers.append)
     monkeypatch.setitem(sys.modules, "webview", types.ModuleType("webview"))
     monkeypatch.setattr(launcher.os, "_exit", leave)

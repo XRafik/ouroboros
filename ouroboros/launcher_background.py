@@ -325,11 +325,13 @@ class Indicator:
 class Background:
     """The desktop window's close policy, its indicator (None where there is none) and the way back."""
 
-    def __init__(self, exit_launcher, read_port, shutdown_event, *, panic_port=lambda: None) -> None:
+    def __init__(self, exit_launcher, read_port, shutdown_event, *, panic_port=lambda: None,
+                 panic_child=lambda: (None, None)) -> None:
         cls = indicator_class()
         self.exit_launcher = exit_launcher  # stop the agent, clean up, os._exit
         self.read_port = read_port
         self.panic_port = panic_port  # only this generation's measured binding, never the default port
+        self.panic_child = panic_child  # snapshot of this launcher's Popen and optional Job, not a PID scan
         self.shutdown = shutdown_event
         self.quit = threading.Event()  # a quit request: never asked, never cancelled
         self.panic = threading.Event()
@@ -430,6 +432,7 @@ class Background:
         if self.panic.is_set():
             return
         self.panic.set()
+        proc, job = self.panic_child()
         self.shutdown.set()
         self.quit.set()
         request_tray_cleanup()
@@ -444,12 +447,23 @@ class Background:
                     data=json.dumps({"cmd": "/panic"}).encode("utf-8"), headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(request, timeout=10):
                     pass
+                if proc is not None:
+                    from ouroboros.runtime_limits import LAUNCHER_STOP_GRACE_SEC
+
+                    proc.wait(timeout=LAUNCHER_STOP_GRACE_SEC)  # POST 200 precedes the server's actual Panic
             except Exception:
                 from ouroboros.config import DATA_DIR
                 from ouroboros.launcher_bootstrap import stop_bootstrap_commands
                 from ouroboros.server_control import execute_panic_stop
 
                 log.error("Panic cannot reach an owned server; using installation emergency stop.")
+                try:
+                    if proc is not None and proc.poll() is None:
+                        from ouroboros.platform_layer import kill_process_tree, terminate_job
+
+                        terminate_job(job) if job is not None else kill_process_tree(proc)
+                except Exception:
+                    log.exception("Captured server stop request failed; installation Panic continues.")
                 try:
                     log.error("Bootstrap stop requests: %s", stop_bootstrap_commands())
                 finally:

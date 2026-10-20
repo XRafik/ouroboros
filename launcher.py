@@ -101,7 +101,6 @@ from ouroboros.platform_layer import (
     install_shutdown_signal_handlers,
     kill_pid_tree,
     kill_process_group_id,
-    kill_process_on_port,
     kill_process_tree,
     merge_hidden_kwargs,
     open_path_external,
@@ -1175,7 +1174,8 @@ def main(argv=()):
         return
 
     import atexit
-    atexit.register(lambda: stop_tray_before_exit(release_pid_lock))
+    finalizer = lambda: stop_tray_before_exit(release_pid_lock)
+    atexit.register(finalizer)
 
     if not automatic_launch_allowed(options.launch_intent, DATA_DIR, log):
         return
@@ -1200,9 +1200,12 @@ def main(argv=()):
     # Listen before the long boot: a manual second launch meanwhile is kept and opens the window once it exists.
     from ouroboros.launcher_readiness import owned_server_port
     background = None if _headless else Background(_on_closing, _read_port_file, _shutdown_event,
-        panic_port=lambda: owned_server_port(_agent_proc, _generation_port, DATA_DIR))
+        panic_port=lambda: owned_server_port(_agent_proc, _generation_port, DATA_DIR),
+        panic_child=lambda: (_agent_proc, _agent_job))
     if background is not None:
         background.listen(PID_FILE)
+        atexit.unregister(finalizer)  # after CLR's unload registration: dispose the icon while CLR still lives
+        atexit.register(finalizer)
     if _shutdown_event.is_set():
         return  # Early Panic owns persistence and exit; bootstrap must not start beside it.
 
@@ -1336,17 +1339,17 @@ def main(argv=()):
     if _shutdown_event.is_set():
         return
 
-    # D-8: decide here, PRESENT after the gateway is healthy. Everything above
-    # (single-instance lock, Git, managed-repo bootstrap/seed validation) is a
-    # precondition of the server itself and deliberately still precedes it.
+    # Decide setup here; present only after the gateway serves. Lock/Git/bootstrap precede the server.
     onboarding_settings, onboarding_required = _prepare_first_run_settings()
+    if _shutdown_event.is_set():
+        return
 
     global _webview_window
     port = _requested_server_port()  # the lifecycle loop clears the previous generation first
 
     # Headless: handlers BEFORE the lifecycle thread spawns server.py — a
     # SIGTERM while the server still boots must reach our teardown.
-    _abort = None
+    _abort = _shutdown_event
     if _headless:
         install_shutdown_signal_handlers(_headless_signal_handler)
         _abort = _shutdown_event
@@ -1369,13 +1372,13 @@ def main(argv=()):
                 "(the blocking onboarding overlay and Settings remain available)."
             )
         if onboarding["restart_required"] and not _shutdown_event.is_set():
-            # The completion changed something this process pinned at boot (its
-            # runtime-mode baseline). The launcher owns the process, so it
-            # recycles it instead of leaving the owner with a restart nag.
+            # Recycle the owned server to adopt boot-pinned settings instead of leaving a restart nag.
             _request_agent_restart()
             server_ready, actual_port = _await_server_ready(port, _abort, lifecycle_thread)
 
-    if (_headless or options.launch_intent == "automatic") and _shutdown_event.is_set():
+    if _shutdown_event.is_set():
+        if background is not None and background.panic.is_set():
+            return  # the non-daemon Panic owner, not a startup-failure window, owns exit
         # Shutdown during startup: same teardown the keep-alive loop performs
         # (an aborted wait, or an automatic start meeting Panic, is no startup failure).
         log.info("Shutdown requested during startup; tearing down.")

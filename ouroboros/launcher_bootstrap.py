@@ -859,9 +859,9 @@ def exec_source_launcher(context: BootstrapContext, argv: list[str], *, release_
 
     entry = macos_source_entry(context.bundle_dir) if macos else None
     frozen = getattr(sys, "frozen", False)
-    if entry is not None and not source_launcher_importable(
+    if (entry is not None or frozen) and not source_launcher_importable(
             context, desktop=desktop, python=find_embedded_python(context.bundle_dir, macos=macos),
-            require_macos_entry=True):
+            require_macos_entry=entry is not None):
         return  # old/rollback source or a missing dependency must not lose the working shell
     handoff = source_handoff_argv(argv, keep_runtime_venv=entry is not None)
     if frozen:

@@ -2254,7 +2254,7 @@ the desktop runs one. Not yet allowed, denied, unavailable or failed is a typed
 answer, never silence (an error the system returns instead of asking is that
 error, not a denial): that alert falls back to the browser banner or the in-app
 toast. One the system took without answering in time may still appear, so
-nothing else is shown for it and its click still opens its source. In-app
+nothing else is shown; its click opens the newest accepted source on that icon. In-app
 updates do not replace the desktop app, so an app built before this capability
 falls back and Settings says that system notifications need the current app.
 Android's host keeps its own channel for its own service; its page has no system

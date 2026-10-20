@@ -174,6 +174,7 @@ def context(tmp_path):
 def hand_over(tmp_path, monkeypatch):
     """``exec_source_launcher`` with every effect recorded in ``calls``; ``os._exit`` raises ``Exited``."""
     calls = []
+    monkeypatch.setattr(bootstrap_module, "source_launcher_importable", lambda *a, **kw: True)
 
     def run(argv, *, windows, frozen=False, acquired=True, spawn_error=None, console_clients=0,
             cancelled=lambda: False):
@@ -281,6 +282,20 @@ def test_cancelled_handoff_keeps_panic_alive_even_if_the_lock_was_taken(hand_ove
 
 
 # --------------------------------------------------------------------------------- cold start ---
+
+
+def test_import_broken_frozen_successor_keeps_the_shell(hand_over, monkeypatch):
+    monkeypatch.setattr(bootstrap_module, "source_launcher_importable", lambda *a, **kw: False)
+    hand_over([], windows=True, frozen=True)
+    assert hand_over.calls == [], "probe refusal precedes icon removal, unlock and process replacement"
+
+
+def test_released_pid_lock_never_unlinks_a_new_owners_file(tmp_path, monkeypatch):
+    lock = tmp_path / "successor.pid"
+    lock.write_text("999999")
+    monkeypatch.setattr(platform_layer, "_lock_fd", None)
+    platform_layer.pid_lock_release(str(lock))
+    assert lock.read_text() == "999999"
 
 @pytest.fixture
 def boot(monkeypatch):

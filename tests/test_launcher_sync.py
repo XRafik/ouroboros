@@ -729,6 +729,7 @@ def test_exit_42_hands_over_only_when_a_module_the_launcher_loaded_changed(tmp_p
     monkeypatch.setattr(launcher, 'release_pid_lock', lambda: calls.append('release'))
     monkeypatch.setattr(launcher.time, 'sleep', lambda *a: None)
     monkeypatch.setattr(bootstrap_module.os, 'execve', execve)
+    monkeypatch.setattr(bootstrap_module, 'source_launcher_importable', lambda *a, **kw: True)
     launcher._shutdown_event.clear()
     launcher._agent_restart_requested.clear()
     try:
@@ -746,6 +747,7 @@ def test_exit_42_hands_over_only_when_a_module_the_launcher_loaded_changed(tmp_p
     options = bootstrap_module.parse_launch_options(argv[2:])
     assert options.seed_bundle == seed and argv.count('--seed-bundle') == 1 and options.no_ui is (host != 'frozen')
     if host == 'frozen':  # the successor reconciles against the same immutable seed
+        monkeypatch.setattr(platform_layer, 'IS_WINDOWS', sys.platform == 'win32')  # real Git, no simulated POSIX OS calls
         monkeypatch.setattr(launcher.sys, 'frozen', False)
         monkeypatch.setattr(launcher, '_external_seed_bundle', options.seed_bundle)
         context = launcher._bootstrap_context()
