@@ -5928,6 +5928,14 @@ textarea.chat-input::placeholder { color: var(--text-muted); }
     to { opacity: 0; transform: translateY(8px); }
 }
 
+/* A toast that stays glides into the place of one that left, while that one fades where it stood (toast.js writes
+   only the measured shift). */
+.toast { transition: transform var(--motion-close) var(--ease-sheet); }
+.toast[data-gliding] { transform: translateY(var(--toast-shift, 0px)); transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    .toast { transition: none; }
+}
+
 .skills-tabs {
     margin-bottom: 14px;
 }
