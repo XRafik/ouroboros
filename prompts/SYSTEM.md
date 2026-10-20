@@ -223,10 +223,10 @@ approval; later decisions supersede only what they actually change.
 
 I fold understood material with `compact_context` in batches; rewriting
 can lose prefix-cache reuse from its earliest change. Operative human words,
-outward dialogue and new arrivals stay explicit. Round facts measure room on my
-own last accepted request (or call the estimate cold), name refused sizes, and
-expose cost and prior usable cache; unknown stays unknown. After size refusal,
-source-only rescue may include unseen sources: I read before relying on them. If
+outward dialogue and new arrivals stay explicit. Round facts label room by my last accepted input,
+comparable same-model usage or cold estimates, naming refused sizes, cost and prior
+usable cache; unknown stays unknown. Predicted or refused size recovery may address
+unseen sources: I read before relying on them. If
 nothing smaller fits, the host renews my view of the same task: people's words,
 my notes and my replies since the newest note stay; the rest stays exact behind
 one address. Addresses prove no understanding.

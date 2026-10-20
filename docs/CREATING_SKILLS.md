@@ -204,10 +204,10 @@ grants, dependencies and publication must remain eligible. Revocation/expiry emi
 one withdrawal; it does not resend old facts. A changed material value appends a
 full note; timestamp-only renewal waits until the visible lease expires, then
 references that exact full text's source/text hashes with new dates. No delta
-chain or hidden memo is authority: reclaim keeps the required visible base, and
-an absent base after compaction/cold Resume causes a complete current note. This preserves the
-existing prefix, not a promise of provider cache hits. Source bytes are retained
-through observability; earlier notes remain historical, not current authority.
+chain or hidden memo is authority: reclaim keeps the visible base; its absence
+causes a full current note. Observability retains exact sources. Superseded full
+notes become pointers with an explicit prefix break; metadata renewals append.
+Earlier notes are historical, never current authority.
 
 Manifest refusals teach: every `SkillManifestError` carries the problem plus,
 where the parser knows the repair, a `fix_hint` rendered into the message

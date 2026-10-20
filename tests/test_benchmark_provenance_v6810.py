@@ -615,6 +615,7 @@ _TRUNCATION_DECISIONS: dict[str, tuple[bool, str]] = {
     "provider_unavailable": (True, "loop.py:3185 reroute + fallback exhausted"),
     "children_unabsorbed": (True, "historical forced terminal; retained for old benchmark records, no longer emitted"),
     "llm_api_error": (True, "loop_llm_call.py:630 transport death; never a fair shot"),
+    "context_overflow": (True, "loop_model_call.py: known-window admission exhausted size recovery; host-stopped, not a capability result"),
     # S3 owner graceful stop ("Wrap up"): the owner ended the attempt, so
     # reward 0 is an owner decision, never a fair-shot capability fact (CF-02:
     # reusing finalization_grace would persist the deadline's false reason).
@@ -916,6 +917,17 @@ def test_round_capped_and_deadline_stopped_runs_are_disclosed_as_truncated():
     for code in ("round_limit", "deadline_local", "finalization_grace", "children_unabsorbed"):
         disclosed = runtime_terminal_disclosure({"status": "failed", "reason_code": code})
         assert disclosed["truncated"] is True, code
+
+
+def test_context_admission_terminal_is_truncated_without_claiming_provider_failure():
+    from ouroboros.outcomes import derive_loop_outcome
+
+    usage = {"reason_code": "context_overflow", "_last_llm_error_kind": "context_overflow",
+             "execution_status": "infra_failed"}
+    outcome = derive_loop_outcome("", usage, {})
+    assert outcome["failure"]["kind"] == "runtime"
+    assert runtime_terminal_disclosure(outcome)["truncated"] is True
+    assert runtime_terminal_disclosure({"status": "completed", "reason_code": ""})["truncated"] is False
 
 
 def test_the_two_out_of_tree_mirrors_stay_pinned_to_the_derived_vocabulary():
