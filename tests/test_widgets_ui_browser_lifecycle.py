@@ -638,9 +638,9 @@ def test_ui_smoke_widget_retain_keeps_running_across_pages(direct_server_with_da
     promised) and its bridged ticks still reaching the host while the
     declarative poll issues nothing. A keyboard reorder changes the visible
     position without moving the node or reloading the frame. The page carries
-    no Refresh control: the window reload is the only hard reset, it ends the
-    kept frame with its window, and it forgets an owner Stop (which lives in
-    the page session only). Owner Stop frees the frame and its timers.
+    no Refresh control: the window reload is the only hard reset and it ends the
+    kept frame with its window. Owner Stop frees the frame and its timers and
+    survives the reload on this device until Start (the start ledger).
     Disabling the skill while Widgets is hidden force-stops the kept frame
     before the next visit."""
     pytest.importorskip("playwright.sync_api", reason="Playwright is not installed")
@@ -839,11 +839,15 @@ def test_ui_smoke_widget_retain_keeps_running_across_pages(direct_server_with_da
                 late = [row for row in page.evaluate("window.__hostFetchLog") if "ping?tick=" in row["url"]]
                 assert late == [], late
 
-                # The owner Stop lives in the page session only: a window reload forgets it
-                # and the retain card starts again on the next entry.
+                # The owner Stop survives a window reload on this device: the retain card
+                # rests as its facade until Start, which runs it again.
                 page.reload(wait_until="domcontentloaded", timeout=30_000)
                 page.click('[data-nav-page="widgets"]')
                 page.locator(card("kept")).wait_for(state="visible", timeout=30_000)
+                page.locator(f"{card('kept')} [data-widget-facade]").wait_for(state="visible", timeout=15_000)
+                assert frame_count(page, "kept") == 0
+                assert page.locator(f"{card('kept')} [data-widget-power]").inner_text() == "Start"
+                page.locator(f"{card('kept')} [data-widget-power]").click()
                 wait_frame(page, "kept", True, timeout=15_000)
                 wait_status(page, "kept", "Keeps running", timeout=15_000)
 
