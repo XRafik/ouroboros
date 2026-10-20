@@ -303,8 +303,8 @@ def test_a_null_body_is_a_valid_empty_body_but_a_missing_body_key_never_confirms
     """GitHub answers null for an empty body: that compares as ""; an answer WITHOUT the key is malformed, so a
     requested empty body can never be 'confirmed' by an answer that simply omitted the field."""
     gh = fake(pr=_open_pr(body=None))
-    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, body="")
-    assert len(gh.writes()) == 1 and "Read-back: body confirmed (0 chars)" in text
+    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title", body="")
+    assert len(gh.writes()) == 1 and "body confirmed (0 chars)" in text
 
     def drop_body(args, ctx_, **kwargs):
         res = FakeGitHub.__call__(gh, args, ctx_, **kwargs)
@@ -335,8 +335,28 @@ def test_update_base_requires_its_expected_commit_and_checks_it(fake, ctx):
                                      expected_base_sha=NEW_BASE_SHA)
     assert gh.writes()[-1].args == ["pr", "edit", "7", "--title=T", "--body-file=-", "--base=release"]
     assert "Read-back: title confirmed; body confirmed (1 chars); base release confirmed" in text
-    assert github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, base="release", expected_base_sha=NEW_BASE_SHA).startswith(
-        "⚠️ PR_PRECHECK_FAILED: PR #7 already targets release")
+    assert "already holds the requested values; nothing was changed" in github_pr_write.update_pr(
+        ctx, number=7, expected_head_sha=SHA, base="release", expected_base_sha=NEW_BASE_SHA)
+
+
+def test_update_same_base_still_edits_title_and_body_once(fake, ctx):
+    gh = fake(pr=_open_pr())
+    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title", body="New body",
+                                     base="main", expected_base_sha=BASE_SHA)
+    assert gh.kinds() == ["view", "edit", "view"]
+    assert gh.writes()[0].args == ["pr", "edit", "7", "--title=New title", "--body-file=-"]
+    assert gh.pr["title"] == "New title" and gh.pr["body"] == "New body"
+    assert "Read-back: title confirmed; body confirmed (8 chars)" in text
+    assert (_typed(ctx).status, _typed(ctx).meta["operation_outcome"]) == ("ok", "completed")
+
+
+def test_update_only_unchanged_fields_reports_no_effect(fake, ctx):
+    gh = fake(pr=_open_pr())
+    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="Old title", body="Old body",
+                                     base="main", expected_base_sha=BASE_SHA)
+    assert gh.kinds() == ["view"] and gh.writes() == []
+    assert "nothing was changed" in text
+    assert _typed(ctx).meta["operation_outcome"] == "completed_no_effect"
 
 
 @pytest.mark.parametrize("pr,fragment", [
@@ -374,7 +394,13 @@ def test_update_send_failure_with_nothing_held_stays_unknown_and_everything_held
     assert text.endswith("Read-back: none of the requested values was held at that moment (title is 'Old title', you sent 'New title'); "
                          "a request GitHub is still processing could still land, so read again before resending.")
     assert "operation_outcome" not in _typed(ctx).meta and len(gh.writes()) == 1
-    gh = fake(pr=_open_pr(title="New title"), failing={"edit": TIMEOUT})
+    gh = fake(pr=_open_pr(), failing={"edit": TIMEOUT})
+
+    def late_readback(args, ctx_, **kwargs):
+        if gh.kind(args) == "edit":
+            gh.pr["title"] = "New title"
+        return FakeGitHub.__call__(gh, args, ctx_, **kwargs)
+    github_pr_write._gh_run = late_readback
     text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title")
     assert text.endswith("Read-back: GitHub holds every requested value (title confirmed); do not resend.")
     assert len(gh.writes()) == 1
@@ -558,9 +584,11 @@ def test_registered_writer_runs_under_the_registry_with_the_repo_binding(tmp_pat
     registry = ToolRegistry(repo_dir=ctx.repo_dir, drive_root=ctx.drive_root)
     registry.set_context(ctx)
     result = registry.execute_result("update_github_pr", {"number": 7, "expected_head_sha": SHA, "title": "Via registry",
+                                                          "base": "main", "expected_base_sha": BASE_SHA,
                                                           "repo": "github.example/owner/selected"})
     assert (result.status, result.code, result.meta["operation_outcome"]) == ("ok", "OK", "completed")
     assert all(call.repo == "github.example/owner/selected" for call in gh.calls) and len(gh.writes()) == 1
+    assert gh.writes()[0].args == ["pr", "edit", "7", "--title=Via registry"]
     refused = registry.execute_result("update_github_pr", {"number": 7, "expected_head_sha": SHA, "repo": "github.example/owner/selected"})
     assert (refused.status, refused.code, refused.meta["operation_outcome"]) == ("error", "TOOL_ARG_ERROR", "completed_no_effect")
     assert len(gh.writes()) == 1

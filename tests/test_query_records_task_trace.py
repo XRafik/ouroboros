@@ -1,14 +1,21 @@
 """Physical task-trace pagination, authority, and retained-source proofs."""
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from ouroboros import store, store_import
-from ouroboros.headless import copy_child_task_result, prepare_task_drive, prune_headless_task_drives, retry_child_task_refs
+from ouroboros.headless import (
+    copy_child_task_result,
+    prepare_task_drive,
+    prune_headless_task_drives,
+    retry_child_task_refs,
+)
 from ouroboros.observability import persist_call
 from ouroboros.task_results import STATUS_COMPLETED, write_task_result
 from ouroboros.tools.query_data import _query_records
@@ -82,6 +89,186 @@ def test_physical_pages_split_start_timeout_and_late_settlement_across_rotation(
     assert third["cursor"] is None and third["has_more"] is False
 
 
+def test_log_cursor_integrity_rejects_position_tampering_after_append(tmp_path):
+    task_id = "cursor-integrity"
+    write_task_result(tmp_path, task_id, STATUS_COMPLETED, result="done")
+    events = tmp_path / "logs/events.jsonl"
+    initial = [
+        {"task_id": task_id, "type": "before-1", "ts": "1"},
+        {"task_id": task_id, "type": "before-2", "ts": "2"},
+    ]
+    _write_rows(events, initial)
+    ctx = _ctx(tmp_path)
+
+    _first_result, first = _call(
+        ctx, task_id=task_id, operation="list", stream="events", limit=1,
+    )
+    assert [row["event_type"] for row in first["observations"]] == ["before-1"]
+    assert first["cursor"]["v"] == 3
+    assert re.fullmatch(r"[0-9a-f]{64}", first["cursor"]["integrity"])
+    source = next(row for row in first["cursor"]["sources"] if row["upper"])
+    captured_upper = source["upper"]
+
+    with events.open("a", encoding="utf-8") as stream:
+        stream.write(json.dumps({"task_id": task_id, "type": "after-capture", "ts": "3"}) + "\n")
+    assert events.stat().st_size > captured_upper
+
+    tampered = []
+    changed_upper = copy.deepcopy(first["cursor"])
+    next(row for row in changed_upper["sources"] if row["id"] == source["id"])["upper"] = events.stat().st_size
+    tampered.append(changed_upper)
+    changed_offset = copy.deepcopy(first["cursor"])
+    next(row for row in changed_offset["sources"] if row["id"] == source["id"])["offset"] = 0
+    tampered.append(changed_offset)
+    changed_continuation = copy.deepcopy(first["cursor"])
+    next(row for row in changed_continuation["sources"] if row["id"] == source["id"])["row_continuation"] = True
+    tampered.append(changed_continuation)
+
+    for cursor in tampered:
+        refused, data = _call(
+            ctx, task_id=task_id, operation="list", stream="events", cursor=cursor,
+        )
+        assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+        assert data is None
+        assert "cursor integrity changed" in refused["message"]
+
+    unsigned = copy.deepcopy(first["cursor"])
+    unsigned["v"] = 2
+    unsigned.pop("integrity")
+    refused, data = _call(
+        ctx, task_id=task_id, operation="list", stream="events", cursor=unsigned,
+    )
+    assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+    assert data is None
+
+    _second_result, second = _call(
+        ctx, task_id=task_id, operation="list", stream="events", cursor=first["cursor"],
+    )
+    assert [row["event_type"] for row in second["observations"]] == ["before-2"]
+    assert len(second["observations"]) == 1
+    assert second["coverage"]["source_bound_horizon"] is True
+    assert second["cursor"] is None and second["has_more"] is False
+    assert "after-capture" not in json.dumps(second)
+
+    _fresh_result, fresh = _call(
+        ctx, task_id=task_id, operation="list", stream="events",
+    )
+    assert [row["event_type"] for row in fresh["observations"]] == [
+        "before-1", "before-2", "after-capture",
+    ]
+    assert len(fresh["observations"]) == 3
+
+
+def test_log_cursor_integrity_is_bound_to_task_scope(tmp_path):
+    for task_id in ("scope-left", "scope-right"):
+        write_task_result(tmp_path, task_id, STATUS_COMPLETED, result=task_id)
+    _write_rows(tmp_path / "logs/events.jsonl", [
+        {"task_id": "scope-left", "type": "left-1", "ts": "1"},
+        {"task_id": "scope-right", "type": "right-1", "ts": "2"},
+        {"task_id": "scope-left", "type": "left-2", "ts": "3"},
+        {"task_id": "scope-right", "type": "right-2", "ts": "4"},
+    ])
+    ctx = _ctx(tmp_path)
+    _left_result, left = _call(
+        ctx, task_id="scope-left", operation="list", stream="events", limit=1,
+    )
+    _right_result, right = _call(
+        ctx, task_id="scope-right", operation="list", stream="events", limit=1,
+    )
+    assert [row["event_type"] for row in left["observations"]] == ["left-1"]
+    assert [row["event_type"] for row in right["observations"]] == ["right-1"]
+
+    forged = copy.deepcopy(left["cursor"])
+    forged["task_id"] = "scope-right"
+    forged["view"] = right["cursor"]["view"]
+    refused, data = _call(
+        ctx, task_id="scope-right", operation="list", stream="events", cursor=forged,
+    )
+    assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+    assert data is None
+    assert "cursor integrity changed" in refused["message"]
+
+    _left_next_result, left_next = _call(
+        ctx, task_id="scope-left", operation="list", stream="events", cursor=left["cursor"],
+    )
+    _right_next_result, right_next = _call(
+        ctx, task_id="scope-right", operation="list", stream="events", cursor=right["cursor"],
+    )
+    assert [row["event_type"] for row in left_next["observations"]] == ["left-2"]
+    assert [row["event_type"] for row in right_next["observations"]] == ["right-2"]
+    assert left_next["cursor"] is None and right_next["cursor"] is None
+
+
+def test_log_cursor_expires_with_process_key_but_source_read_identity_survives(tmp_path, monkeypatch):
+    from ouroboros.tools import task_trace
+
+    task_id = "cursor-process-lifetime"
+    retained = []
+    for index in range(2):
+        call = persist_call(
+            tmp_path, task_id=task_id, call_id=f"stable_call_{index}", call_type="tool_call",
+            payload={"result": f"stable-body-{index}"},
+        )
+        retained.append({"manifest_ref": call["manifest_ref"]})
+    write_task_result(
+        tmp_path, task_id, STATUS_COMPLETED, result="done",
+        trace_refs={"tool_call_refs": retained},
+    )
+    ctx = _ctx(tmp_path)
+
+    _first_result, first = _call(
+        ctx, task_id=task_id, operation="list", stream="tools", limit=1,
+    )
+    assert [row["call_id"] for row in first["published_calls"]] == ["stable_call_0"]
+    assert first["cursor"] is not None
+    source_read = copy.deepcopy(first["published_calls"][0]["source_read"])
+    assert first["cursor_contract"] == {
+        "lifetime": "current_runtime_process",
+        "on_expiry": "restart_list_from_fresh_horizon",
+        "restart_list": {
+            "tool": "query_records",
+            "arguments": {
+                "form": "task_trace", "task_id": task_id, "operation": "list",
+                "stream": "tools", "limit": 1,
+            },
+        },
+    }
+    restart_arguments = copy.deepcopy(first["cursor_contract"]["restart_list"]["arguments"])
+    assert "cursor" not in restart_arguments
+
+    old_integrity = first["cursor"]["integrity"]
+    replacement_key = bytes(byte ^ 0xff for byte in task_trace._CURSOR_INTEGRITY_KEY)
+    monkeypatch.setattr(task_trace, "_CURSOR_INTEGRITY_KEY", replacement_key)
+    refused, data = _call(
+        ctx, task_id=task_id, operation="list", stream="tools", limit=1,
+        cursor=first["cursor"],
+    )
+    assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+    assert data is None
+    assert refused["message"] == (
+        "task_trace cursor integrity changed or expired after a task_trace process restart; "
+        "repeat operation=list for the same task/stream without cursor"
+    )
+
+    assert restart_arguments.pop("form") == "task_trace"
+    fresh_result, fresh = _call(ctx, **restart_arguments)
+    assert fresh_result["status"] == "ok"
+    assert [row["call_id"] for row in fresh["published_calls"]] == ["stable_call_0"]
+    assert fresh["cursor"]["integrity"] != old_integrity
+    assert fresh["published_calls"][0]["source_read"] == source_read
+
+    read_arguments = {key: value for key, value in source_read["arguments"].items() if key != "form"}
+    metadata_result, metadata = _call(ctx, **read_arguments)
+    assert metadata_result["status"] == "ok"
+    source_result, source = _call(
+        ctx, **read_arguments, source_start_char=0,
+        source_end_char=metadata["source"]["complete_chars"],
+    )
+    assert source_result["status"] == "ok"
+    assert "stable-body-0" in source["source"]["text"]
+    assert source["source"]["raw_payload_used"] is False
+
+
 def test_events_and_errors_withhold_neighbor_text_and_legacy_attempt_is_unknown(tmp_path):
     task_id = "trace-task"
     write_task_result(tmp_path, task_id, STATUS_COMPLETED, result="done")
@@ -128,6 +315,15 @@ def test_oversized_jsonl_row_advances_only_through_bounded_gap_continuations(tmp
     assert any(gap["reason"] == "oversized_jsonl_row" for gap in first["coverage"]["gaps"])
     assert first["cursor"] is not None
     assert any(row["row_continuation"] for row in first["cursor"]["sources"])
+
+    tampered = copy.deepcopy(first["cursor"])
+    continuation = next(row for row in tampered["sources"] if row["row_continuation"])
+    continuation["row_continuation"] = False
+    refused, data = _call(
+        ctx, task_id=task_id, operation="list", stream="events", cursor=tampered,
+    )
+    assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+    assert data is None
 
     _second_result, second = _call(
         ctx, task_id=task_id, operation="list", stream="events", cursor=first["cursor"],
@@ -251,6 +447,15 @@ def test_published_call_inventory_shares_the_page_limit_and_keeps_a_cursor(tmp_p
     }
     assert first["has_more"] is True and first["cursor"] is not None
 
+    tampered = copy.deepcopy(first["cursor"])
+    tampered["published_calls"]["offset"] = 0
+    refused, data = _call(
+        ctx, task_id=task_id, operation="list", stream="tools", limit=1,
+        cursor=tampered,
+    )
+    assert refused["status"] == "error" and refused["code"] == "invalid_arguments"
+    assert data is None
+
     _result, second = _call(
         ctx, task_id=task_id, operation="list", stream="tools", limit=1,
         cursor=first["cursor"],
@@ -326,10 +531,10 @@ def test_trace_sources_apply_root_resource_and_presence_resource_admission(tmp_p
     assert blob_blocked["status"] == "blocked" and blob_blocked["code"] == "access_denied"
     assert "protected projection bytes" not in json.dumps(blob_blocked)
 
+    import ouroboros.presence_authority as presence
     from ouroboros.presence_authority import build_presence_capability_ceiling, presence_ceiling_payload
     from ouroboros.presence_capabilities import PresenceProfileResolution, PresenceSelection, PresenceToolTarget
     from ouroboros.presence_runtime import ResolvedPresenceRuntime
-    import ouroboros.presence_authority as presence
 
     resolution = PresenceProfileResolution(
         active=(PresenceSelection("1" * 64, PresenceToolTarget("builtin", "query_records")),),

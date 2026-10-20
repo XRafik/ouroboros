@@ -25,16 +25,44 @@ def untrusted_text(value: str) -> str:
     return f"{prefix} {value}" if value else prefix
 
 
+class SchemaLiteralSecret(ValueError):
+    """A literal cannot be redacted without changing the executable schema."""
+
+
+def _literal_copy(value: Any, redact: Callable[[str], str]) -> Any:
+    if isinstance(value, str) and redact(value) != value:
+        raise SchemaLiteralSecret("configured secret in schema literal")
+    if isinstance(value, dict):
+        return {_literal_copy(key, redact): _literal_copy(item, redact) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_literal_copy(item, redact) for item in value]
+    return deepcopy(value)
+
+
+def filter_schema_literals(rows: list, redact: Callable[[str], str]) -> tuple[list, list[str]]:
+    """Withhold only secret-bearing descriptors; never rewrite their literal values."""
+    kept, omissions = [], []
+    for row in rows:
+        try:
+            wrap_schema_text(row.get("input_schema"), redact)
+        except SchemaLiteralSecret:
+            omissions.append("MCP_SCHEMA_LITERAL_SECRET: " + redact(str(row.get("name") or "unnamed")))
+        else:
+            kept.append(row)
+    return kept, omissions
+
+
 def wrap_schema_text(value: Any, redact: Callable[[str], str]) -> Any:
     """Return an independent schema copy; transform annotations, not instance data."""
     if not isinstance(value, dict):
-        return deepcopy(value)
+        return _literal_copy(value, redact)
     out = {}
     for key, item in value.items():
+        _literal_copy(key, redact)
         if key in {"description", "title"} and isinstance(item, str):
             out[key] = untrusted_text(redact(item))
         elif key in _SCHEMA_MAPS and isinstance(item, dict):
-            out[key] = {name: wrap_schema_text(schema, redact) for name, schema in item.items()}
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact) for name, schema in item.items()}
         elif key in _SCHEMA_ARRAYS and isinstance(item, list):
             out[key] = [wrap_schema_text(schema, redact) for schema in item]
         elif key in _SCHEMA_VALUES:
@@ -42,9 +70,9 @@ def wrap_schema_text(value: Any, redact: Callable[[str], str]) -> Any:
                         if key == "items" and isinstance(item, list)
                         else wrap_schema_text(item, redact))
         elif key == "dependencies" and isinstance(item, dict):
-            out[key] = {name: wrap_schema_text(schema, redact) for name, schema in item.items()}
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact) for name, schema in item.items()}
         else:
-            out[key] = deepcopy(item)
+            out[key] = _literal_copy(item, redact)
     return out
 
 

@@ -687,7 +687,7 @@ def _query_records_entry():
                           "description": "Trace recipe: list a stream, read one published call, or read one authored output."},
             "stream": {"type": "string", "enum": ["tools", "authored_outputs", "errors", "events"],
                        "description": "Required only for task_trace operation=list."},
-            "cursor": {"type": "object", "description": "Opaque source-horizon cursor returned by the same task/stream."},
+            "cursor": {"type": "object", "description": "Opaque cursor from the same task/stream. tools/errors/events cursors expire with the issuing runtime process; omit it to capture a fresh horizon after restart. Published source_read recipes remain independent."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
             "call_id": {"type": "string", "description": "read_call only; copy the exact published call or dispatch ID."},
             "manifest_sha256": {"type": "string", "description": "read_call only; complete lowercase 64-character manifest digest."},

@@ -11,11 +11,13 @@ projection; hidden/native reasoning is therefore never recovered by fallback.
 """
 from __future__ import annotations
 
-from bisect import bisect_right
 import hashlib
+import hmac
 import json
-from pathlib import Path
 import re
+import secrets
+from bisect import bisect_right
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 from ouroboros.jsonl_tail import JsonlChainSnapshot
@@ -48,6 +50,12 @@ _CALL_MANIFEST_BYTES = 16 * 1024 * 1024
 _TOOL_CALL_TYPES = ("tool_call", "tool_timeout")
 _DISPATCH_CALL_TYPES = ("tool_dispatch",)
 _AUTHORED_CALL_TYPES = ("llm_response",)
+# Log cursors are integrity-bound continuations for one runtime lifetime, not
+# durable records or authority.  The source horizon remains durable; after a
+# restart callers recapture it by starting without a cursor.  Keeping this key
+# private binds every mutable position without adding a cursor registry,
+# setting, or write-side effect.
+_CURSOR_INTEGRITY_KEY = secrets.token_bytes(32)
 
 
 class TaskTraceArgumentError(ValueError):
@@ -394,6 +402,29 @@ def _published_cursor_state(rows: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
+def _cursor_integrity(cursor: Mapping[str, Any]) -> str:
+    body = {key: value for key, value in cursor.items() if key != "integrity"}
+    return hmac.new(_CURSOR_INTEGRITY_KEY, _canonical(body), hashlib.sha256).hexdigest()
+
+
+def _seal_cursor(cursor: Dict[str, Any]) -> Dict[str, Any]:
+    cursor["integrity"] = _cursor_integrity(cursor)
+    return cursor
+
+
+def _cursor_contract(task_id: str, stream: str, presence_scope: str, limit: int) -> Dict[str, Any]:
+    return {
+        "lifetime": "current_runtime_process",
+        "on_expiry": "restart_list_from_fresh_horizon",
+        "restart_list": {
+            "tool": "query_records",
+            "arguments": _trace_arguments(
+                task_id, "list", presence_scope, stream=stream, limit=limit,
+            ),
+        },
+    }
+
+
 def _fresh_cursor(ctx: Any, task_id: str, stream: str, specs: List[Dict[str, Any]],
                   published_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
     positions = []
@@ -407,7 +438,7 @@ def _fresh_cursor(ctx: Any, task_id: str, stream: str, specs: List[Dict[str, Any
     view = hashlib.sha256(_canonical({"task_id": task_id, "stream": stream,
                                       "sources": [row["id"] for row in positions],
                                       **({"published_calls": calls["view"]} if calls else {})})).hexdigest()
-    return {"v": 2, "task_id": task_id, "stream": stream, "view": view, "sources": positions,
+    return {"v": 3, "task_id": task_id, "stream": stream, "view": view, "sources": positions,
             **({"published_calls": calls} if calls else {})}
 
 
@@ -415,14 +446,21 @@ def _validated_cursor(ctx: Any, value: Any, task_id: str, stream: str, specs: Li
                       published_calls: List[Dict[str, Any]]) -> Dict[str, Any]:
     if value is None:
         return _fresh_cursor(ctx, task_id, stream, specs, published_calls)
-    expected_keys = {"v", "task_id", "stream", "view", "sources"}
+    expected_keys = {"v", "task_id", "stream", "view", "sources", "integrity"}
     if stream == "tools":
         expected_keys.add("published_calls")
     if not isinstance(value, dict) or set(value) != expected_keys:
         raise TaskTraceArgumentError("task_trace cursor must be the exact object returned by this stream")
     version = value.get("v")
-    if version not in {1, 2} or value.get("task_id") != task_id or value.get("stream") != stream:
+    if version != 3 or value.get("task_id") != task_id or value.get("stream") != stream:
         raise TaskTraceArgumentError("task_trace cursor task/stream/version mismatch")
+    integrity = value.get("integrity")
+    if (not isinstance(integrity, str) or not re.fullmatch(r"[0-9a-f]{64}", integrity)
+            or not hmac.compare_digest(integrity, _cursor_integrity(value))):
+        raise TaskTraceArgumentError(
+            "task_trace cursor integrity changed or expired after a task_trace process restart; "
+            "repeat operation=list for the same task/stream without cursor"
+        )
     sources = value.get("sources")
     if not isinstance(sources, list) or len(sources) != len(specs):
         raise TaskTraceArgumentError("task_trace cursor no longer covers the selected physical sources; restart without it")
@@ -437,16 +475,13 @@ def _validated_cursor(ctx: Any, value: Any, task_id: str, stream: str, specs: Li
         raise TaskTraceArgumentError("task_trace cursor view mismatch")
     out = json.loads(json.dumps(value))
     for row in out["sources"]:
-        expected_position = ({"id", "offset", "upper"} if version == 1 else
-                             {"id", "offset", "upper", "row_continuation"})
+        expected_position = {"id", "offset", "upper", "row_continuation"}
         if (set(row) != expected_position or type(row["offset"]) is not int
                 or type(row["upper"]) is not int
-                or (version == 2 and type(row["row_continuation"]) is not bool)):
+                or type(row["row_continuation"]) is not bool):
             raise TaskTraceArgumentError("task_trace cursor source position is invalid")
         if not 0 <= row["offset"] <= row["upper"]:
             raise TaskTraceArgumentError("task_trace cursor source position is outside its captured horizon")
-        row.setdefault("row_continuation", False)
-    out["v"] = 2
     if stream == "tools":
         position = out.get("published_calls")
         if (not isinstance(position, dict) or set(position) != {"offset", "upper", "view"}
@@ -728,8 +763,10 @@ def _list_logs(ctx: Any, record: Mapping[str, Any], roots: List[Tuple[str, Path]
         "logical_grouping": "not_performed",
         "observations": observations,
         "published_calls": call_page,
-        "cursor": held if has_more else None,
+        "cursor": _seal_cursor(held) if has_more else None,
         "has_more": has_more,
+        **({"cursor_contract": _cursor_contract(task_id, stream, presence_scope, limit)}
+           if has_more else {}),
         "coverage": {
             "plane": plane,
             "source_bound_horizon": True,

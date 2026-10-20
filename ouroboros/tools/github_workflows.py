@@ -30,11 +30,18 @@ _READ_TIMEOUT, _LOG_TIMEOUT, _ARTIFACT_TIMEOUT = 30, 120, 180
 _RESULT_MARGIN = 200  # Characters kept free under the result limit.
 _REPO_URL_RE = re.compile(r"^https://([^/]+)/([^/]+)/([^/]+?)(?:/.*)?$")
 _RUN_FIELDS = "databaseId,url,status,conclusion,attempt,headSha,workflowName"
+_RUN_ARTIFACT_FIELDS = "databaseId,url,status,conclusion,headSha,workflowName"
 
 
 def _completed_read(ctx: ToolContext, text: str) -> str:
     return _publish_tool_result(ctx, ToolResult(status="ok", code="OK", text=text,
                                                 meta={"operation_outcome": "completed_no_effect"}))
+
+
+def _incomplete_read(ctx: ToolContext, text: str) -> str:
+    """Acquisition succeeded, but the required exact-byte retention did not."""
+    return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ERROR", text=text,
+                                                meta={"operation_outcome": "incomplete"}))
 
 
 def _repo_from_url(url: object) -> Optional[Tuple[str, str, str]]:
@@ -43,11 +50,12 @@ def _repo_from_url(url: object) -> Optional[Tuple[str, str, str]]:
     return match.groups() if match else None
 
 
-def _resolve_run(ctx: ToolContext, run_id: int, attempt: int, repo: str, fields: str) -> Tuple[Optional[tuple], str]:
-    """``(run, (host, owner, name), attempt)`` as GitHub records it (the chosen attempt, else the latest), or the error.
+def _resolve_run(ctx: ToolContext, run_id: int, attempt: int, repo: str, fields: str,
+                 *, require_attempt: bool = True) -> Tuple[Optional[tuple], str]:
+    """``(run, (host, owner, name), attempt)`` as GitHub records it, or the error.
 
-    The answer must name the run asked for and a positive attempt; a later read pins that attempt explicitly,
-    so a re-run between two reads cannot attach one attempt's label to another's bytes. Nothing is invented."""
+    Log reads require a positive observed attempt and pin their later byte read to it. Artifact listings
+    only require the run identity: GitHub's artifact API is scoped to the run across attempts."""
     args = ["run", "view", str(run_id)] + (["--attempt", str(attempt)] if attempt else []) + ["--json", fields]
     res = _gh_run(args, ctx, timeout=_READ_TIMEOUT, repo=repo)
     if not res.ok:
@@ -56,7 +64,8 @@ def _resolve_run(ctx: ToolContext, run_id: int, attempt: int, repo: str, fields:
     if run is None:
         return None, _refuse(ctx, f"⚠️ TOOL_ERROR: failed to parse the workflow run JSON: {res.text[:500]}", "TOOL_ERROR")
     observed_id, observed_attempt = _whole(run.get("databaseId")), _whole(run.get("attempt"))
-    if observed_id != run_id or observed_attempt is None or observed_attempt < 1 or (attempt and observed_attempt != attempt):
+    if observed_id != run_id or (require_attempt and (observed_attempt is None or observed_attempt < 1
+                                                    or (attempt and observed_attempt != attempt))):
         asked = f"run {run_id}" + (f" attempt {attempt}" if attempt else "")
         return None, _refuse(ctx, f"⚠️ TOOL_ERROR: GitHub's answer for {asked} names run {run.get('databaseId')!r} attempt "
                                   f"{run.get('attempt')!r}; the run was not read.", "TOOL_ERROR")
@@ -147,6 +156,7 @@ def get_run_log(ctx: ToolContext, run_id: object = 0, job_id: object = 0, attemp
     ref = _retain(ctx, source_id=f"gh-run-{run_id}-attempt-{attempt_read}" + (f"-job-{job_id}" if job_id else "")
                   + ("-failed" if failed_only else "") + "-log", data=data, extension="log")
     if isinstance(ref, str):
+        head[2] += f", sha256 {capture.sha256}"
         head.append(f"Retained: NOT retained ({ref}); the lines below are this call's only copy.")
     else:
         head.append(f"Retained: artifact_store/{ref['path']} ({ref['size']} bytes, sha256 {ref['sha256']}); "
@@ -163,7 +173,8 @@ def get_run_log(ctx: ToolContext, run_id: object = 0, job_id: object = 0, attemp
         room -= len(clipped) + 1
         shown.append(clipped)
     shown.reverse()
-    return _completed_read(ctx, "\n".join(head + [counts.format(shown=len(shown)), "---", *shown]))
+    result = "\n".join(head + [counts.format(shown=len(shown)), "---", *shown])
+    return _incomplete_read(ctx, result) if isinstance(ref, str) else _completed_read(ctx, result)
 
 
 def list_run_artifacts(ctx: ToolContext, run_id: object = 0, page: object = 1, repo: str = "") -> str:
@@ -175,10 +186,10 @@ def list_run_artifacts(ctx: ToolContext, run_id: object = 0, page: object = 1, r
     page = page or 1  # An omitted page is the first.
     if page < 1:
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: page starts at 1.", no_effect=True)
-    resolved, error = _resolve_run(ctx, run_id, 0, repo, _RUN_FIELDS)
+    resolved, error = _resolve_run(ctx, run_id, 0, repo, _RUN_ARTIFACT_FIELDS, require_attempt=False)
     if resolved is None:
         return error
-    run, (host, owner, name), attempt_read = resolved
+    run, (host, owner, name), _ = resolved
     # The one literal API path: host, owner and repository come from the URL GitHub returned for the run.
     res = _gh_run(["api", f"repos/{owner}/{name}/actions/runs/{run_id}/artifacts?per_page={_ARTIFACT_PAGE}&page={page}",
                    "--hostname", host], ctx, timeout=_READ_TIMEOUT)
@@ -194,7 +205,7 @@ def list_run_artifacts(ctx: ToolContext, run_id: object = 0, page: object = 1, r
     if total is None or total < len(rows):
         return _refuse(ctx, "⚠️ TOOL_ERROR: artifact page has no valid total_count; completeness is unknown.", "TOOL_ERROR")
     pages = max(1, -(-total // _ARTIFACT_PAGE))
-    head = [f"GitHub Actions artifacts — {owner}/{name} run {run_id} attempt {attempt_read}: {total}; page {page} of {pages}"
+    head = [f"GitHub Actions artifacts — {owner}/{name} run {run_id}: {total}; page {page} of {pages}"
             + f" ({len(rows)} listed" + (f"; page {page + 1} holds the next" if page < pages else "") + ")",
             _run_line(run),
             "Identity is repository + artifact id: the same name may exist in other runs and repositories."]
@@ -306,7 +317,8 @@ def download_artifact(ctx: ToolContext, artifact_id: object = 0, max_bytes: obje
     if len(members) > _ZIP_MEMBERS_SHOWN:
         lines.append(f"  … {len(members) - _ZIP_MEMBERS_SHOWN} more members")
     lines.append("Extract only under your own guards, into an empty directory of your own.")
-    return _completed_read(ctx, "\n".join(lines))
+    result = "\n".join(lines)
+    return _incomplete_read(ctx, result) if isinstance(ref, str) else _completed_read(ctx, result)
 
 
 def tool_entries() -> List[ToolEntry]:

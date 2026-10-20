@@ -374,10 +374,14 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
     if current != head_sha:
         return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
                             "was changed. Re-read the pull request and decide again.", no_effect=True)
+    if base_arg is not None and pr.get("baseRefName") == base_arg:
+        # Supplying the current base does not cancel requested title/body edits.
+        base_arg = None
+    if (base_arg is None and (title is None or title == pr["title"])
+            and (body is None or body == (pr["body"] or ""))):
+        return _ok(ctx, f"PR #{number} already holds the requested values; nothing was changed. {pr['url']}",
+                   outcome="completed_no_effect")
     if base_arg is not None:
-        if pr.get("baseRefName") == base_arg:
-            return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: PR #{number} already targets {base_arg}; nothing was changed. Drop "
-                                "base to change the other fields.", no_effect=True)
         repo_id, error = _resolve_repo(ctx, repo)
         if repo_id is None:
             return error

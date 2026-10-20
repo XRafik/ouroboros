@@ -882,7 +882,7 @@ def _read_file(
     if protected_block:
         return protected_block
     if target.is_dir():  # admitted, but no file here: the read becomes the listing call to make
-        call = f"list_files(root={json.dumps(normalized)}, path={json.dumps(opened)}" + (  # a skill needs its identity
+        call = f"list_files(root={json.dumps(normalized)}, path={json.dumps(str(target))}" + (  # preserve canonical/physical identity
             f", bucket={json.dumps(bucket or binding.source)}, skill_name={json.dumps(skill_name or binding.skill_name)}"
             if normalized == "skill_payload" else "")
         return _publish_tool_result(ctx, ToolResult(status="ok", code="LEGACY_WARNING", text=(

@@ -144,6 +144,18 @@ def test_run_log_job_validates_membership_and_reads_by_job_id(fake, ctx):
     assert text.startswith("GitHub Actions log — owner/selected run 11 attempt 1, job 55 test (failure)\n")
 
 
+def test_run_log_retention_failure_is_typed_incomplete_with_capture_facts(fake, ctx, monkeypatch):
+    gh = fake()
+    monkeypatch.setattr(github_workflows, "_retain", lambda *_a, **_k: "OSError: store unavailable")
+    text = github_workflows.get_run_log(ctx, run_id=11)
+    result = _typed(ctx)
+    assert gh.kinds() == ["run_json", "log"]
+    assert (result.status, result.code, result.meta["operation_outcome"]) == ("error", "TOOL_ERROR", "incomplete")
+    assert "run 11 attempt 1" in text and "Source: gh run view 11 --log --attempt 1" in text
+    assert f"captured {len(LOG)} bytes exactly, sha256 {hashlib.sha256(LOG).hexdigest()}" in text
+    assert "NOT retained (OSError: store unavailable)" in text
+
+
 def test_run_log_refuses_a_job_outside_the_run_before_any_download(fake, ctx):
     gh = fake()
     text = github_workflows.get_run_log(ctx, run_id=11, job_id=99)
@@ -247,7 +259,7 @@ def test_artifact_list_identifies_each_artifact_by_repository_and_id(fake, ctx):
     assert gh.kinds() == ["run_json", "artifacts"]
     assert gh.calls[1].args == ["api", "repos/owner/selected/actions/runs/11/artifacts?per_page=100&page=1", "--hostname", "github.example"]
     assert gh.calls[1].repo is github._GENERIC_TRANSPORT, "the literal API path carries the repository GitHub named"
-    assert text.startswith("GitHub Actions artifacts — owner/selected run 11 attempt 1: 2; page 1 of 1 (2 listed)\n")
+    assert text.startswith("GitHub Actions artifacts — owner/selected run 11: 2; page 1 of 1 (2 listed)\n")
     assert "Identity is repository + artifact id: the same name may exist in other runs and repositories." in text
     assert f"- id 501: dist — 2048 bytes; created 2026-10-20T10:00:00Z; expires 2027-01-18T10:00:00Z; head {SHA}; digest sha256:" in text
     assert "    download_github_artifact(artifact_id=501, max_bytes=2048)" in text
@@ -266,10 +278,30 @@ def test_artifact_list_of_the_same_name_in_two_repositories_gives_two_addresses(
     assert "download_github_artifact(artifact_id=777, max_bytes=2048, repo='github.example/other/thing')" in two
 
 
+def test_artifact_list_is_run_scoped_even_when_latest_attempt_changes(fake, ctx):
+    gh = fake(artifacts=[_DIST])
+    first = github_workflows.list_run_artifacts(ctx, run_id=11)
+    gh.run = {**gh.run, "attempt": 2}
+    second = github_workflows.list_run_artifacts(ctx, run_id=11)
+    assert gh.calls[1].args == gh.calls[3].args
+    assert "owner/selected run 11:" in first and "owner/selected run 11:" in second
+    assert "attempt 1" not in first and "attempt 2" not in second
+    assert "Identity is repository + artifact id" in second
+
+
+def test_artifact_list_needs_run_identity_without_attempt_metadata(fake, ctx):
+    gh = fake(run={"databaseId": 11, "url": f"{BASE}/actions/runs/11", "status": "completed"}, artifacts=[_DIST])
+    text = github_workflows.list_run_artifacts(ctx, run_id=11)
+    assert gh.calls[0].args == ["run", "view", "11", "--json", github_workflows._RUN_ARTIFACT_FIELDS]
+    assert gh.kinds() == ["run_json", "artifacts"]
+    assert "owner/selected run 11: 1" in text and "- id 501: dist" in text
+    assert (_typed(ctx).status, _typed(ctx).meta["operation_outcome"]) == ("ok", "completed_no_effect")
+
+
 def test_artifact_list_pages_explicitly_and_names_the_next_page(fake, ctx):
     """Paired benefit over a raw first page: every remaining record is reachable by an explicit page."""
     gh = fake(artifacts=[_DIST], total=150)
-    assert "run 11 attempt 1: 150; page 1 of 2 (1 listed; page 2 holds the next)" in github_workflows.list_run_artifacts(ctx, run_id=11)
+    assert "run 11: 150; page 1 of 2 (1 listed; page 2 holds the next)" in github_workflows.list_run_artifacts(ctx, run_id=11)
     text = github_workflows.list_run_artifacts(ctx, run_id=11, page=2)
     assert gh.calls[-1].args[1] == "repos/owner/selected/actions/runs/11/artifacts?per_page=100&page=2"
     assert "150; page 2 of 2 (1 listed)" in text and "page 3" not in text
@@ -324,6 +356,18 @@ def test_artifact_download_digest_mismatch_is_stated_not_hidden(fake, ctx):
     fake(artifact={**_DIST, "digest": "sha256:" + "f" * 64}, archive=ARCHIVE)
     text = github_workflows.download_artifact(ctx, artifact_id=501, max_bytes=4096)
     assert "GitHub's digest sha256:" + "f" * 64 + " differs from these bytes" in text
+
+
+def test_artifact_download_retention_failure_is_typed_incomplete_with_archive_facts(fake, ctx, monkeypatch):
+    gh = fake(artifact=_DIST, archive=ARCHIVE)
+    monkeypatch.setattr(github_workflows, "_retain", lambda *_a, **_k: "OSError: store unavailable")
+    text = github_workflows.download_artifact(ctx, artifact_id=501, max_bytes=4096)
+    result = _typed(ctx)
+    assert gh.kinds() == ["repo", "artifact", "zip"]
+    assert (result.status, result.code, result.meta["operation_outcome"]) == ("error", "TOOL_ERROR", "incomplete")
+    assert "owner/selected artifact 501 'dist' (run 11" in text
+    assert f"Archive: {len(ARCHIVE)} bytes, sha256 {hashlib.sha256(ARCHIVE).hexdigest()}" in text
+    assert "NOT retained (OSError: store unavailable)" in text
 
 
 def test_artifact_download_refuses_before_downloading_when_too_large_or_expired(fake, ctx):
@@ -428,6 +472,26 @@ def test_registered_reader_publishes_a_typed_completed_read(tmp_path, monkeypatc
     assert all(call.repo == "github.example/owner/selected" for call in gh.calls)
     refused = registry.execute_result("get_github_run_log", {"run_id": 0, "repo": "github.example/owner/selected"})
     assert (refused.status, refused.code, refused.meta["operation_outcome"]) == ("error", "TOOL_ARG_ERROR", "completed_no_effect")
+
+
+@pytest.mark.parametrize("name,args", [
+    ("get_github_run_log", {"run_id": 11}),
+    ("download_github_artifact", {"artifact_id": 501, "max_bytes": 4096}),
+])
+def test_registered_reader_reports_retention_failure_as_incomplete(tmp_path, monkeypatch, name, args):
+    from ouroboros.tools.registry import ToolRegistry
+
+    monkeypatch.setattr(github, "github_token_from_env_or_settings", lambda: "fixture-token")
+    gh = FakeGh(artifact=_DIST, archive=ARCHIVE)
+    monkeypatch.setattr(github_workflows, "_gh_run", gh)
+    monkeypatch.setattr(github_workflows, "_retain", lambda *_a, **_k: "OSError: store unavailable")
+    ctx, _ = _context(tmp_path, "queued")
+    registry = ToolRegistry(repo_dir=ctx.repo_dir, drive_root=ctx.drive_root)
+    registry.set_context(ctx)
+    result = registry.execute_result(name, args)
+    assert (result.status, result.code, result.meta["operation_outcome"]) == ("error", "TOOL_ERROR", "incomplete")
+    assert "NOT retained (OSError: store unavailable)" in result.text
+    assert gh.kinds() == (["run_json", "log"] if name == "get_github_run_log" else ["repo", "artifact", "zip"])
 
 
 def test_artifact_page_preview_keeps_every_omitted_record_addressable(fake, ctx, monkeypatch):

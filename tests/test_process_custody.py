@@ -52,6 +52,10 @@ _POPEN_ALLOWLIST = {
     "ouroboros/subagent_worktrees.py",
     "ouroboros/preflight_runner.py",      # waited hermetic pytest child
     "ouroboros/tools/shell_process.py",   # bounded foreground commands (waited + tracked)
+    # GitHub's exact-byte capture starts one bounded foreground CLI: a timer
+    # kills it at the deadline, cap overflow kills it, and the call waits in
+    # both the normal path and cleanup before returning.
+    "ouroboros/tools/github.py",
     "ouroboros/tools/skill_exec.py",      # bounded skill run (waited + tracked)
     "ouroboros/tools/skill_preflight.py", # waited preflight child
     "ouroboros/marketplace/isolated_deps.py",  # waited installer child

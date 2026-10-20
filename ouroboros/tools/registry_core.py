@@ -733,6 +733,7 @@ class ToolRegistry:
             if entry.name not in disabled_tools  # declarative tool policy (task_contract.disabled_tools)
             if _presence_tool_allowed(self._ctx, entry.name)
             if entry.name not in unavailable_tools
+            if registry_guards._builtin_network_allowed(self._ctx, entry.name)
             if not local_readonly_subagent or self._readonly_tool_allowed(entry.name)
             if not acting_subagent or entry.name in acting_tool_names_for_context(self._ctx, self._entries)
             for schema in self._schemas_for_entry(entry)
@@ -787,7 +788,7 @@ class ToolRegistry:
                 continue
             if not _presence_tool_allowed(self._ctx, e.name):
                 continue
-            if e.name in unavailable_tools:
+            if e.name in unavailable_tools or not registry_guards._builtin_network_allowed(self._ctx, e.name):
                 continue
             if local_readonly_subagent and not self._readonly_tool_allowed(e.name):
                 continue
@@ -832,6 +833,8 @@ class ToolRegistry:
             return "outside this presence task's positive capability ceiling"
         if requested not in self._entries:
             return None
+        if not registry_guards._builtin_network_allowed(self._ctx, requested):
+            return "resource_blocked (network=false)"
         if _alias_hidden(self._ctx, self._entries[requested]):
             # Mirrors get_schema_by_name: a compat alias is callable but never
             # advertised — discovery answers as for any non-public name.
@@ -864,6 +867,8 @@ class ToolRegistry:
             # as it does for any non-public name.
             return None
         if entry:
+            if not registry_guards._builtin_network_allowed(self._ctx, requested):
+                return None
             available, reason, detail = _builtin_tool_availability(requested, self._ctx)
             if not available:
                 if reason:

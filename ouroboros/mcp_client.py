@@ -36,7 +36,7 @@ from ouroboros.secret_masking import (
     redact_known_values,
 )
 from ouroboros.mcp_headers import mask_headers, validate_headers
-from ouroboros.mcp_schema import redact_metadata, tool_metadata, untrusted_text, wrap_schema_text
+from ouroboros.mcp_schema import filter_schema_literals, redact_metadata, tool_metadata, untrusted_text, wrap_schema_text
 from ouroboros.tools.tool_result import ToolResult
 from ouroboros.platform_layer import IS_WINDOWS
 from ouroboros.config import get_runtime_mode
@@ -1263,6 +1263,7 @@ class MCPManager:
             item for item in tools_raw
             if not (isinstance(item, dict) and item.get("_pagination_truncated"))
         ]
+        tools_raw, literal_omissions = filter_schema_literals(tools_raw, lambda text: _redact_error_text(text, cfg))
         normalized = [
             MCPTool(
                 server_id=cfg.id,
@@ -1293,7 +1294,7 @@ class MCPManager:
                 continue
             seen[tool.prefixed_name] = tool
             deduped.append(tool)
-        omission_notes: List[str] = []
+        omission_notes: List[str] = literal_omissions
         if collisions:
             log.error(
                 "MCP tool name collision on server %s; first descriptor wins: %s",
