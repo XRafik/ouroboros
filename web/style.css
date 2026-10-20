@@ -3732,9 +3732,10 @@ html[data-layout="stack"] body .nav-drawer-backdrop.dragging {
     transition: none;
 }
 /* The room (Main, or a Project open over it) is the card: opaque, so the drawer under it never shows through, and
-   pushed aside from its left edge. */
+   pushed aside from its left edge. A Project card keeps that edge while it closes too: with the origin only on
+   `.open`, a card still at scale(.96) pivoted about its centre and jumped 8px the frame it lost the class. */
 html[data-layout="stack"] #content,
-html[data-layout="stack"] .project-panel.open {
+html[data-layout="stack"] .project-panel {
     transform-origin: 0 50%;
 }
 html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel.open) {

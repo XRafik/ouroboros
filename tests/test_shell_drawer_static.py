@@ -64,6 +64,10 @@ def test_the_room_is_the_card_the_drawer_pushes_aside():
     assert "z-index: var(--z-room);" in room and "background: var(--bg-primary);" in room, "the opaque card over the drawer"
     card = css.split('html[data-layout="stack"] body.nav-drawer-open :is(#content, .project-panel.open) {', 1)[1].split("}", 1)[0]
     assert "transform: translateX(var(--drawer-w)) scale(0.96);" in card and "border-radius: var(--room-card-radius);" in card
+    # The card is pushed aside from its left edge whether or not a Project panel is still `.open`: a closing Project
+    # card pivoting about its centre jumped 8px the frame it lost the class (owner 20.10, 4A).
+    origin = css.split('html[data-layout="stack"] .project-panel {\n    transform-origin: 0 50%;', 1)
+    assert len(origin) == 2 and 'html[data-layout="stack"] #content,' in origin[0][-80:], "one origin rule for both cards"
     dragged = css.split('html[data-layout="stack"] body :is(#content, .project-panel.open).dragging {', 1)[1].split("}", 1)[0]
     assert "var(--drawer-p, 0) * var(--drawer-w)" in dragged, "the card follows the finger by the drawer's number"
     # As specific as the open card's and the open veil's rules, and after them: a finger on the open drawer moves both.

@@ -245,8 +245,9 @@ export function bindDrawerDrag({
         settle(ms);
         paint(false);
         if (open !== gg.startOpen) {
-            setOpen(open);
+            // The latch is felt as the finger leaves, before the state's commit does its work (owner 20.10 3A).
             if (byFinger) onSnap(open);
+            setOpen(open);
         } else if (!open) hideScrimAfter(ms);  // sprang back closed: the scrim fades with it
         suppressUntil = now() + DRAG.clickGuard;
     }

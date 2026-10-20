@@ -52,13 +52,13 @@ function world({ open = false, stack = true, coarse = true, enabled = DRAWER_DRA
     const sidebar = withStyle(fakeEl('sidebar'));
     const scrim = withStyle(fakeEl('scrim'));
     const room = fakeEl('room'); room.parentElement = doc.body;
-    const state = { open, set: [], grabs: 0, snaps: [] };
+    const state = { open, set: [], grabs: 0, snaps: [], order: [] };
     const flags = { field: new Set(), sideways: new Set(), blocked: false, selection: false };
     const env = { stack, coarse, layoutHandlers: new Set() };
     const dispose = bindDrawerDrag({
         sidebar, scrim, isOpen: () => state.open,
-        setOpen: (v) => { state.set.push(v); state.open = v; scrim.hidden = !v; },
-        isStack: () => env.stack, isCoarse: () => env.coarse, onGrab: () => { state.grabs += 1; }, onSnap: (v) => state.snaps.push(v), win, doc, enabled,
+        setOpen: (v) => { state.set.push(v); state.order.push(`set:${v}`); state.open = v; scrim.hidden = !v; },
+        isStack: () => env.stack, isCoarse: () => env.coarse, onGrab: () => { state.grabs += 1; }, onSnap: (v) => { state.snaps.push(v); state.order.push(`snap:${v}`); }, win, doc, enabled,
         onLayout: (fn) => { env.layoutHandlers.add(fn); return () => env.layoutHandlers.delete(fn); },
         isField: (el) => flags.field.has(el), isSideways: (el) => flags.sideways.has(el),
         ...(blockers ? {} : { isBlocked: () => flags.blocked }), hasSelection: () => flags.selection,
@@ -435,6 +435,8 @@ test('a finger that latches the drawer open or closed snaps once (the haptic); a
     w.touch('touchmove', { x: 288 - 110, y: 300, dt: 200 });
     w.touch('touchend', { x: 288 - 110, y: 300, dt: 200 });
     assert.deepEqual(w.state.snaps, [true, false], 'and latched closed');
+    assert.deepEqual(w.state.order, ['snap:true', 'set:true', 'snap:false', 'set:false'],
+        'each latch is felt as the finger leaves, before the state commits');
     w.runTimers();
     w.touch('touchstart', { x: 100, y: 300 });
     w.touch('touchmove', { x: 112, y: 300 });
@@ -442,6 +444,7 @@ test('a finger that latches the drawer open or closed snaps once (the haptic); a
     w.touch('touchcancel', { x: 112 + 200, y: 300 });
     assert.deepEqual(w.state.set.at(-1), true, 'the system took the touch and the drawer opened…');
     assert.deepEqual(w.state.snaps, [true, false], '…but that was not the finger\'s latch');
+    assert.equal(w.state.order.at(-1), 'set:true', 'the system\'s latch commits without a haptic');
     w.dispose();
 });
 

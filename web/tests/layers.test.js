@@ -185,6 +185,38 @@ test('a modal layer makes everything outside it inert; a non-modal one leaves th
     assert.equal(w.content.inert, false, 'destroy releases what it inerted');
 });
 
+// Every write of `inert` restyles the node's whole subtree (the room: ≈130 ms on a long feed in WebKit, owner 20.10 3A).
+function countInertWrites(n) {
+    let value = n.inert;
+    const writes = [];
+    Object.defineProperty(n, 'inert', { configurable: true, get: () => value, set: (v) => { writes.push(v); value = v; } });
+    return writes;
+}
+
+test('a sync that keeps the same modal picture writes no inert; only what changes flips, another owner\'s stays theirs', () => {
+    const w = world();
+    w.toast.inert = true;  // the page's own: never written by the stack
+    const content = countInertWrites(w.content);
+    const panel = countInertWrites(w.panel);
+    const toast = countInertWrites(w.toast);
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    assert.deepEqual([content, panel], [[true], [true]]);
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });  // the owner re-syncs, twice
+    w.layers.push({ id: 'drawer', el: w.sidebar, modal: true, onClose() {} });
+    assert.deepEqual([content, panel], [[true], [true]], 'the same picture writes nothing');
+    // The Project opens over Main while the drawer closes: the room stays inert throughout, the panel turns live.
+    w.layers.push({ id: 'project', el: w.panel, modal: true, onClose() {} });
+    w.layers.remove('drawer');
+    assert.deepEqual(content, [true], 'the room under both never flickered');
+    assert.deepEqual(panel, [true, false]);
+    assert.equal(w.sidebar.inert, true, 'the closed drawer is outside the Project now');
+    w.layers.remove('project');
+    assert.deepEqual(content, [true, false]);
+    assert.deepEqual(toast, [], 'what the page inerted is never written');
+    assert.equal(w.toast.inert, true);
+    w.layers.destroy();
+});
+
 test('what is opened over the shell beside it (a dialog, a menu, a toast) stays live under a modal layer', () => {
     const w = world();
     const reconnect = w.node('div', w.doc.body);  // mounted before the layer opens

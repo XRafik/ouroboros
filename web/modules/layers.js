@@ -37,24 +37,36 @@ export function createLayerStack({ win = globalThis.window, doc = globalThis.doc
         listeners.forEach((fn) => { try { fn(snapshot); } catch (err) { console.error('layers: listener failed', err); } });
     }
 
-    // ---- inert: the topmost modal layer's siblings along its path up to the shell's container, and everything below it
+    // ---- inert: the topmost modal layer's siblings along its path up to the shell's container, and everything below it.
+    // Only what changes is written: flipping `inert` on a room restyles its whole subtree (≈130 ms on a long feed in
+    // WebKit), so a sync that keeps the same modal picture (an owner re-syncing every few seconds, a drawer → Project
+    // replacement) writes nothing. What another owner made inert stays theirs.
     function syncInert() {
-        for (const el of inerted) el.inert = false;
-        inerted.clear();
+        const wanted = new Set();
         const modalIndex = stack.map((layer) => layer.modal).lastIndexOf(true);
-        if (modalIndex < 0 || !doc?.body) return;
-        const modal = stack[modalIndex];
-        const above = new Set(stack.slice(modalIndex + 1).map((layer) => layer.el).filter(Boolean));
-        for (const el of stack.slice(modalIndex).flatMap((layer) => layer.live || [])) above.add(el);
-        const keep = (node) => node === modal.el || [...above].some((el) => el === node || node.contains?.(el) || el.contains?.(node));
-        let node = modal.el;
-        while (node?.parentElement && node.parentElement !== doc.body) {
-            for (const sibling of node.parentElement.children) {
-                if (sibling === node || keep(sibling) || sibling.inert || sibling.tagName === 'SCRIPT') continue;
-                sibling.inert = true;
-                inerted.add(sibling);
+        if (modalIndex >= 0 && doc?.body) {
+            const modal = stack[modalIndex];
+            const above = new Set(stack.slice(modalIndex + 1).map((layer) => layer.el).filter(Boolean));
+            for (const el of stack.slice(modalIndex).flatMap((layer) => layer.live || [])) above.add(el);
+            const keep = (node) => node === modal.el || [...above].some((el) => el === node || node.contains?.(el) || el.contains?.(node));
+            let node = modal.el;
+            while (node?.parentElement && node.parentElement !== doc.body) {
+                for (const sibling of node.parentElement.children) {
+                    if (sibling === node || keep(sibling) || sibling.tagName === 'SCRIPT') continue;
+                    if (sibling.inert && !inerted.has(sibling)) continue;
+                    wanted.add(sibling);
+                }
+                node = node.parentElement;
             }
-            node = node.parentElement;
+        }
+        for (const el of inerted) {
+            if (wanted.has(el)) continue;
+            el.inert = false;
+            inerted.delete(el);
+        }
+        for (const el of wanted) {
+            if (!el.inert) el.inert = true;
+            inerted.add(el);
         }
     }
 
