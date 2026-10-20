@@ -116,9 +116,11 @@ test('the found holds are reported once, with the raw facts of where the page ru
     reportFoundHolds(next.holds, (payload) => posts.push(payload), { win: { pywebview: { api: {} } } });
     await tick();
     assert.deepEqual(posts, [{ holds: [{ key: 'app:card_1', rev: 'sha-a' }], surface: { pywebview: true, telegram: false } }]);
+    const lateFirst = page();
+    lateFirst.holds.starting('app:card_3', 'v');
     const late = [];
     const listeners = {};
-    reportFoundHolds(next.holds, (payload) => late.push(payload),
+    reportFoundHolds(page({ local: lateFirst.local }).holds, (payload) => late.push(payload),
         { win: { addEventListener: (type, fn) => { listeners[type] = fn; } }, wait: 5 });
     assert.equal(late.length, 0, 'the desktop bridge arrives after load: wait for it');
     listeners.pywebviewready();
@@ -128,4 +130,14 @@ test('the found holds are reported once, with the raw facts of where the page ru
     reportFoundHolds(page().holds, (payload) => quiet.push(payload), { win: {}, wait: 1 });
     await tick(5);
     assert.deepEqual(quiet, [], 'nothing held, nothing reported');
+    const after = page({ local: first.local });
+    assert.equal(after.holds.reason('app:card_1', 'sha-a'), 'start', 'a reported hold still holds');
+    assert.deepEqual(after.holds.found(), [], 'and is not reported again by the next page');
+    const failing = page();
+    failing.holds.starting('app:card_2', 'v');
+    const retry = page({ local: failing.local });
+    reportFoundHolds(retry.holds, async () => { throw new Error('offline'); }, { win: { pywebview: { api: {} } } });
+    await tick();
+    assert.deepEqual(page({ local: failing.local }).holds.found(), [{ key: 'app:card_2', rev: 'v' }],
+        'a report that did not land is made again by the next page');
 });

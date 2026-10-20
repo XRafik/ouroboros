@@ -44,7 +44,8 @@ export function holdAllRequested(href) {
  * The ledger over one window's storage. `reason(key, rev)` says why the host must not start an item by itself:
  * `'owner'` (Stop / Close), `'start'` (its last start with this revision did not settle), `'all'` (`?hold=all`)
  * or `''`. `starting(key, rev)` records a start and returns its `settle()`; `stop(key)` and `release(key)` are the
- * owner's presses; `found()` lists the start holds this page found (each `{key, rev}`).
+ * owner's presses; `found()` lists the start holds this page found that no page reported yet (each `{key, rev}`), and
+ * `reported(found)` marks them reported, so a hold the owner leaves in place is named once, not after every restart.
  */
 export function createHolds({ win = globalThis.window, now = () => Date.now() } = {}) {
     const store = pickStore(win);
@@ -65,10 +66,13 @@ export function createHolds({ win = globalThis.window, now = () => Date.now() } 
     }
     const initial = read();
     const prior = new Map();
+    const unreported = new Set();
     const owners = new Set();
     for (const [key, entry] of Object.entries(initial)) {
-        if (entry?.reason === 'start') prior.set(key, String(entry.rev ?? ''));
-        else if (entry?.reason === 'owner') owners.add(key);
+        if (entry?.reason === 'start') {
+            prior.set(key, String(entry.rev ?? ''));
+            if (!entry.reported) unreported.add(key);
+        } else if (entry?.reason === 'owner') owners.add(key);
     }
     const holdAll = holdAllRequested(String(win?.location?.href || ''));
     const released = new Set();
@@ -103,7 +107,15 @@ export function createHolds({ win = globalThis.window, now = () => Date.now() } 
                 if (wasOwner || entries[key]?.reason === 'owner' || prior.has(key)) delete entries[key];
             });
         },
-        found: () => [...prior].filter(([key]) => !released.has(key)).map(([key, rev]) => ({ key, rev })),
+        found: () => [...prior].filter(([key]) => unreported.has(key) && !released.has(key)).map(([key, rev]) => ({ key, rev })),
+        reported(items) {
+            update((entries) => {
+                for (const { key, rev } of items) {
+                    unreported.delete(key);
+                    if (entries[key]?.reason === 'start' && entries[key].rev === rev) entries[key] = { ...entries[key], reported: true };
+                }
+            });
+        },
     };
 }
 
@@ -129,7 +141,8 @@ export function reportFoundHolds(holds, post, { win = globalThis.window, wait = 
         if (sent) return;
         sent = true;
         const surface = { pywebview: Boolean(win?.pywebview?.api), telegram: Boolean(win?.Telegram?.WebApp) };
-        Promise.resolve().then(() => post({ holds: found, surface })).catch(() => { /* a lost report holds nothing back */ });
+        Promise.resolve().then(() => post({ holds: found, surface })).then(() => holds.reported(found))
+            .catch(() => { /* not named: the next page reports it again; a lost report holds nothing back */ });
     };
     if (win?.pywebview?.api) { send(); return; }
     win?.addEventListener?.('pywebviewready', send, { once: true });
