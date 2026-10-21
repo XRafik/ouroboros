@@ -269,6 +269,9 @@ def room_lens(data_dir: pathlib.Path, thread_id: int, project_chat_ids: set, sou
                 seqs.extend(row.seq for row in candidates if entry_matches_source_ref(row.row, [ref]))
         return {"chat": RoomLens((*keys, *dict.fromkeys(owners)), tuple(sorted(set(seqs)))),
                 "progress": RoomLens(tuple(keys))}
+    if thread_id != 1:
+        own = RoomLens((("chat_id", thread_id),))
+        return {"chat": own, "progress": own}
     chats = [room["chat_id"] for room in ds.rooms(data_dir) if room["chat_id"] not in project_chat_ids
              and room["chat_id"] != HIDDEN_CHAT_ID and not is_a2a_chat_id(room["chat_id"])]
     keys = [("chat_id", chat) for chat in chats] + [("chat_id", None)]
