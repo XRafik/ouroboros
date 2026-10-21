@@ -91,9 +91,11 @@ def test_deleted_related_cron_stops_firing_and_waits_visibly_until_its_task_sett
         assert view['status'] == 'delete_pending' and view['delete_pending'] is True
         assert view['retained'] is True
     assert _manage_schedules(ctx, action='list').count('delete_pending') >= 1
-    from ouroboros.context import _scheduled_tasks_digest
-    digest = _scheduled_tasks_digest(SimpleNamespace(drive_path=lambda rel: root / rel))
-    assert [entry['id'] for entry in digest['delete_pending']] == [sid]
+    from supervisor.schedule_view import digest
+    from datetime import datetime, timezone
+    view = digest(schedules.load_schedule_store(root)["tasks"], datetime.now(timezone.utc))
+    assert [entry["id"] for entry in view["standing"]] == [sid]
+    assert view["standing"][0]["status"] == "delete_pending"
     # Fresh firings stop at once, however often the tick runs.
     for _ in range(2):
         data = schedules.load_schedule_store(root)

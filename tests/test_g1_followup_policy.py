@@ -492,7 +492,7 @@ def test_followup_disable_is_an_ordinary_disable_and_restore_lifts_only_it(world
     registered = register(world)
     queue.mutate_scheduled_task('disable', registered['id'], reason='Independent owner disable', actor='owner:test', drive_root=root)
     current = row(root, registered['id'])
-    # Only skill-manifest rows keep a resync-proof suppression marker.
+    # Disabling changes future dispatch without adding a legacy skill marker.
     assert current['enabled'] is False and 'manual_override' not in current
     assert schedules.schedule_lifecycle_status(current) == 'disabled'
     queue.check_scheduled_tasks()
@@ -505,16 +505,17 @@ def test_followup_disable_is_an_ordinary_disable_and_restore_lifts_only_it(world
 
 
 def test_context_and_continue_expose_held_obligations_without_auto_release(world):
-    from ouroboros.context import _scheduled_tasks_digest
+    from supervisor.schedule_view import digest
+    from datetime import datetime, timezone
     from ouroboros.owner_continue import work_order_text
     _, root, _ = world
     registered = register(world)
     queue.check_scheduled_tasks()
     stop(root)
     queue.check_scheduled_tasks()
-    digest = _scheduled_tasks_digest(SimpleNamespace(drive_path=lambda rel: root / rel))
-    assert not digest['active'] and digest['held'][0]['id'] == registered['id']
-    assert digest['held'][0]['status'] == 'consumed' and digest['held'][0]['hold_persisted']
+    view = digest(schedules.load_schedule_store(root)['tasks'], datetime.now(timezone.utc))
+    assert not view['one_shots'] and view['attention'][0]['id'] == registered['id']
+    assert view['attention'][0]['status'] == 'consumed' and view['attention'][0]['hold_persisted']
     text = work_order_text(ORIGIN, 'owner_restart', {}, deadline_at=DEADLINE)
     assert 'manage_schedules' in text and 'does not release their holds' in text and DEADLINE in text
 

@@ -32,6 +32,7 @@ from supervisor.schedule_time import (
     schedule_next_run as _schedule_next_run,  # noqa: F401 -- lifecycle writer seam
     timezone_for_schedule as _timezone_for_schedule,
 )
+from supervisor.schedule_view import decorate
 
 log = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ _SCHEDULE_LOCK_SUFFIX = ".lock"
 _SCHEDULE_LOCK_TIMEOUT_SEC = 8.0
 _SCHEDULE_LOCK_STALE_SEC = 30.0
 # The owner-governed actions over an EXISTING row; creation and editing stay on
-# the upsert seam, so this set is exactly "what happens to a future dispatch".
+# the upsert/patch seams, so this set is exactly "what happens to a future dispatch".
 SCHEDULE_ACTIONS: frozenset[str] = frozenset({"disable", "delete", "restore"})
 # Fields the RUNTIME owns. A caller builds its record from a GET that may already
 # be stale, so these are always taken from the row on disk instead of the payload.
@@ -285,8 +286,8 @@ def schedule_lifecycle_status(record: Dict[str, Any]) -> str:
     """The one lifecycle word every surface says about a row.
 
     ``consumed`` is retained history, never an active schedule.
-    ``delete_pending`` outranks them: a deleted row that still owes accepted
-    work stays visible until that work no longer needs it, then disappears.
+    ``delete_pending`` outranks them: a withdrawal stays visible through retention
+    and until any work that needs its row has settled.
     """
     if record.get("delete_requested_at"):
         return "delete_pending"
@@ -339,7 +340,8 @@ def _schedule_projection_row(raw: Dict[str, Any]) -> Dict[str, Any]:
         else:
             row[key] = _bounded_projection_text(value)
 
-    template = raw.get("task") if isinstance(raw.get("task"), dict) else {}
+    template_key = "notification" if raw.get("kind") in {"notify", "note"} else "task"
+    template = raw.get(template_key) if isinstance(raw.get(template_key), dict) else {}
     objective_source = ""
     for candidate in (template.get("objective"), template.get("text"),
                       template.get("description"), raw.get("description"), raw.get("name")):
@@ -381,6 +383,11 @@ def _schedule_projection_row(raw: Dict[str, Any]) -> Dict[str, Any]:
     occurrence = raw.get("occurrence") if isinstance(raw.get("occurrence"), dict) else None
     if occurrence:
         row["occurrence"] = {key: str(occurrence.get(key) or "") for key in ("phase", "task_id", "due_at")}
+    facts = decorate(raw, datetime.datetime.now(datetime.timezone.utc))
+    for key in ("display_name", "kind", "timezone", "destination", "outcome", "previous_run_open", "waiting_detail", "withdrawal"):
+        if key in facts:
+            row[key] = facts[key]
+    row["display_name"] = _bounded_projection_text(row["display_name"])
     return row
 
 
@@ -452,7 +459,7 @@ def schedule_activity_projection(data: Dict[str, Any]) -> Dict[str, Any]:
     for raw in out.get("tasks") or []:
         if not isinstance(raw, dict):
             continue
-        row = dict(raw)
+        row = decorate(raw, datetime.datetime.now(datetime.timezone.utc))
         status = schedule_lifecycle_status(row)
         row["status"] = status
         row["active"] = status == "active"
