@@ -46,6 +46,7 @@ def test_unchanged_patch_does_not_write_the_table(root):
     ({"enabled": True}, "invalid_patch"), ({"followup_hold": None}, "invalid_patch"),
     ({"objective": ""}, "invalid_template"), ({"trigger": {}}, "invalid_template"),
     ({"trigger": {"type": "cron", "expr": "bad"}}, "invalid_template"),
+    ({"trigger": {"type": "once", "run_at": "bad"}}, "invalid_template"),
     ({"timezone": "No/SuchZone"}, "invalid_template"),
     ({"reasoning_effort": "invented"}, "invalid_template"), ({"context": None}, "invalid_template"),
 ])
@@ -163,6 +164,10 @@ def test_equal_description_copies_collapse_after_claim_basis_is_remembered(root)
     _write(root, [row])
     reply = lifecycle.upsert_scheduled_task(copy.deepcopy(row), drive_root=root)
     assert reply["description"] == "Different description" and "description" not in reply["task"]
+    row["task"]["description"] = "Distinct task description"
+    _write(root, [row])
+    reply = patch(root, {"name": "Keep distinct descriptions"})
+    assert reply["description"] == "Different description" and reply["task"]["description"] == "Distinct task description"
 
 
 def test_legacy_deleted_row_is_refused_without_losing_its_marker(root):
@@ -170,3 +175,14 @@ def test_legacy_deleted_row_is_refused_without_losing_its_marker(root):
     _write(root, [row])
     assert patch(root, {"name": "Changed"})["status"] == "withdrawn"
     assert _rows(root) == [row]
+
+
+def test_all_allowed_fields_accept_valid_values_without_enabling_a_paused_row(root):
+    fields = {"name": "Weekly review", "objective": "Read the updates", "context": "Include the notes",
+              "trigger": {"type": "cron", "expr": "0 8 * * 1"}, "timezone": "Europe/Paris", "reasoning_effort": "high"}
+    reply = patch(root, fields)
+    assert reply["status"] == "updated" and reply["changed_fields"] == sorted(fields)
+    assert not reply["enabled"] and reply["next_run_at"]
+    assert reply["task"]["text"] == fields["objective"] and reply["task"]["context"] == fields["context"]
+    assert reply["task"]["reasoning_effort"] == "high" and reply["timezone"] == "Europe/Paris"
+    assert reply["trigger"] == fields["trigger"]
