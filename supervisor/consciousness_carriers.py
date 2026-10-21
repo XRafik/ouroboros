@@ -22,6 +22,15 @@ def queued_wakes(*, blocking=True) -> list[str]:
         q._queue_lock.release()
 
 
+def is_autonomous_work(metadata) -> bool:
+    """Work consciousness itself started, its tree included: the only work its switch stops.
+
+    Unmarked work is checked at the consciousness Safety level, but it is not
+    autonomous: Off must never stop system, owner or historical work.
+    """
+    return is_consciousness_origin(metadata) and work_kind(metadata) == WORK_KIND_CONSCIOUSNESS
+
+
 def autonomous_tasks() -> list[str]:
     """All live autonomous pool members, including children and retained returns."""
     from supervisor import queue as q
@@ -29,16 +38,12 @@ def autonomous_tasks() -> list[str]:
     with q._queue_lock:
         tasks = [*q.PENDING, *(meta.get("task") or {} for meta in q.RUNNING.values())]
         return list(dict.fromkeys(str(task["id"]) for task in tasks if task.get("id")
-                                 and work_kind(task.get("metadata")) == WORK_KIND_CONSCIOUSNESS))
+                                 and is_autonomous_work(task.get("metadata"))))
 
 
 def autonomous_work_enabled(task: dict, drive_root) -> bool:
     """Recheck Off/Panic at selection and launch, including restored autonomous work."""
-    metadata = task.get("metadata") or {}
-    # Only work consciousness itself started obeys its switch. Unmarked work is
-    # checked at the consciousness Safety level, but it is not autonomous: an Off
-    # switch must never stop system, owner or historical work from dispatching.
-    if not is_consciousness_origin(metadata) or work_kind(metadata) != WORK_KIND_CONSCIOUSNESS:
+    if not is_autonomous_work(task.get("metadata") or {}):
         return True
     from ouroboros.consciousness import panic_blocks_wake
     from supervisor.state import control_is, load_state

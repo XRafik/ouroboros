@@ -201,3 +201,20 @@ def test_off_switch_stops_only_work_consciousness_started(tmp_path, monkeypatch)
     assert carriers.autonomous_work_enabled(started, tmp_path) is False
     monkeypatch.setattr(state, "load_state", lambda: {"bg_consciousness_enabled": True})
     assert carriers.autonomous_work_enabled(started, tmp_path) is True
+
+def test_turning_off_cancels_only_work_consciousness_started(monkeypatch):
+    """The stop sweep and the dispatch gate select the same work: origin and kind together."""
+    from supervisor import consciousness_carriers as carriers
+    from supervisor import queue
+
+    pending = [
+        {"id": "system-job", "metadata": {"work_kind": "consciousness"}},
+        {"id": "historical", "metadata": {}},
+        {"id": "commissioned", "metadata": {"initiator": "consciousness", "work_kind": "owner"}},
+        {"id": "autonomous-job", "metadata": {"initiator": "consciousness", "work_kind": "consciousness"}},
+    ]
+    running = {"w1": {"task": {"id": "autonomous-child", "metadata": {
+        "initiator": "consciousness", "work_kind": "consciousness", "consciousness_cause": "started"}}}}
+    monkeypatch.setattr(queue, "PENDING", pending)
+    monkeypatch.setattr(queue, "RUNNING", running)
+    assert carriers.autonomous_tasks() == ["autonomous-job", "autonomous-child"]
