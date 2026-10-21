@@ -210,18 +210,16 @@ def test_find_free_port_raises_when_range_stays_busy(monkeypatch):
         raise AssertionError("Expected find_free_port to raise when every candidate stays busy")
 
 
-def test_chat_shows_reconnect_banner_after_reconnect_and_reload():
-    """chat.js should show reconnect status after both soft reconnect and restart reload."""
+def test_reconnect_adds_no_row_and_only_a_changed_code_reload_says_restart_complete():
+    """Room status carries the outage, not the transcript.
+
+    Behaviour: tests/test_reconnect_feed_browser.py (Main, Project, failed resync, reload reasons).
+    """
     source = _read("web/modules/chat.js")
     assert "wsHasConnectedOnce" in source, "Missing reconnect-once tracking flag"
-    assert "Reconnected" in source, "Missing reconnect banner text"
-    # reconnectBannerText moved verbatim to chat_activity.js (chat.js byte ceiling).
-    assert "Restart complete" in _read("web/modules/chat_activity.js"), (
-        "Missing restart-complete banner text"
-    )
     assert "_ouro_reason" in source, "Missing restart reload reason handling"
-    assert "history.replaceState" in source, "Reconnect params should be cleared after showing banner"
-    # Ensure banner is ephemeral (not persisted to history)
+    assert "history.replaceState" in source, "Reload params should be cleared after the first open"
+    # The restart notice is ephemeral (not persisted to history)
     assert "ephemeral: true" in source
 
 
