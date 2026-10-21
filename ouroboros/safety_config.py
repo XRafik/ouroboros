@@ -47,26 +47,29 @@ def _resolved_safety_configuration(values: dict) -> tuple:
             str(values.get("OUROBOROS_SAFETY_OWNER_RULES") or ""))
 
 
-def safety_configuration_requires_owner(previous: dict, settings: dict) -> bool:
+def safety_configuration_requires_owner(previous: dict, settings: dict, *, before: dict | None = None,
+                                        after: dict | None = None) -> bool:
     """Judge a prepared write, with unauthored slots absent from both documents.
 
     Only new provider proposals for still-unauthored slots may explain a changed
     checker. Keep every other checker input at its previous resolved value, so
     this exception never authorizes an explicit model, route, mark or rules edit.
+    The gateway supplies effective snapshots to retain operator environment input;
+    the documents still own whether a slot was authored.
     """
     from ouroboros.settings_defaults import SETTINGS_DEFAULTS
     from ouroboros.server_runtime import provider_slot_proposals
 
     proposed = {**previous, **settings}
-    after = safety_configuration(proposed)
-    expected = _safety_values(previous)
-    if _resolved_safety_configuration(expected) == after:
+    resolved_after = safety_configuration(proposed if after is None else after)
+    expected = _safety_values(previous if before is None else before)
+    if _resolved_safety_configuration(expected) == resolved_after:
         return False
     proposals = provider_slot_proposals({**SETTINGS_DEFAULTS, **proposed})
     for key in ("OUROBOROS_MODEL", "OUROBOROS_MODEL_LIGHT"):
         if key not in previous and key not in settings:
             expected[key] = proposals[key]
-    return _resolved_safety_configuration(expected) != after
+    return _resolved_safety_configuration(expected) != resolved_after
 
 
 def _guard_safety_configuration(settings: dict, *, owner_write: bool = False) -> None:

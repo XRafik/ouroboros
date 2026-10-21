@@ -98,3 +98,18 @@ def test_empty_review_pool_needs_same_explicit_confirmation(settings_client, unc
     # Reposting the unchanged catalog is not another empty-pool decision.
     repeated = client.post("/api/owner/safety-model", json={"settings": body["settings"]})
     assert repeated.status_code == 200 and repeated.json() == {"ok": True}
+
+
+def test_operator_checker_is_not_replaced_by_generic_save_of_the_disk_default(settings_client, monkeypatch):
+    from ouroboros import config
+
+    client, path = settings_client
+    monkeypatch.setenv("OUROBOROS_MODEL_LIGHT", "operator/checker")
+    assert config.load_settings()["OUROBOROS_MODEL_LIGHT"] == "operator/checker"
+    before = path.read_bytes()
+    denied = client.post("/api/settings", json={"OUROBOROS_MODEL_LIGHT": config.SETTINGS_DEFAULTS["OUROBOROS_MODEL_LIGHT"]})
+    assert denied.status_code == 400 and "owner-controlled" in denied.json()["error"]
+    assert path.read_bytes() == before
+    allowed = client.post("/api/settings", json={"OUROBOROS_MODEL_HEAVY": "unrelated"})
+    assert allowed.status_code == 200, allowed.json()
+    assert config.load_settings()["OUROBOROS_MODEL_LIGHT"] == "operator/checker"
