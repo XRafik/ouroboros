@@ -714,7 +714,7 @@ def classify_llm_exception(exc: Exception, safe_error: str = "") -> LlmErrorClas
     if getattr(exc, "code", "") == "model_outcome_unknown":
         return LlmErrorClassification("provider_outcome_unknown", False)
     if getattr(exc, "code", "") == "model_substituted": return LlmErrorClassification("model_substituted", False, 0, exc.code)  # a well-formed request the route answered with another model: chain-eligible, never cools the requested one
-    if getattr(exc, "code", "") in {"unsupported_parameter", "invalid_continuation", "auth_changed", "model_unavailable", "model_source_unavailable", "model_catalog_identity_mismatch"}:
+    if getattr(exc, "code", "") in {"unsupported_parameter", "invalid_continuation", "auth_changed", "model_unavailable", "model_source_unavailable", "model_catalog_identity_mismatch", "model_capability_refused", "model_retry_invalid"}:
         return LlmErrorClassification("bad_request", False, _exception_status_code(exc), exc.code)
     if getattr(exc, "code", "") in {"auth_required", "auth_unavailable", "auth_refresh_failed"}:
         return LlmErrorClassification("auth_error", False, _exception_status_code(exc), exc.code)
