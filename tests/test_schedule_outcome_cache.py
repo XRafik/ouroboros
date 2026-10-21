@@ -23,6 +23,7 @@ def history(host, task_id="last", **extra):
     ("rejected_duplicate", False, "", False, "Own final line"),
     ("completed", True, "", True, ""),
     ("failed", True, "Host notice", False, "Host notice"),
+    ("failed", False, "Host notice", False, "Host notice"),
 ])
 def test_settled_outcomes_are_strictly_read_off_lock_on_disabled_consumed_rows(q, monkeypatch, status, silent, notice, quiet, line):  # noqa: F811
     history(q)

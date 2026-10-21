@@ -686,7 +686,8 @@ def _scan_outcomes(root, snapshot):
                 continue
             notice = terminal_host_notice_text(result)
             silent = result.get("wake_silent") is True
-            text = str(notice if silent else result.get("result") or "").strip()
+            # A host notice is the run's public line; a quiet run's own words never are.
+            text = str(notice or ("" if silent else result.get("result")) or "").strip()
             observed[str(row.get("id") or "")] = {
                 "task_id": task_id, "state": result["status"], "quiet": silent and not bool(notice),
                 "notice": bool(notice), "ended_at": terminal_time_fact(result)["occurred_at"],
