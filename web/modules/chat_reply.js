@@ -148,9 +148,10 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     // so the row above it rises with it instead of jumping; a reply staged over another one swaps in place. The room it
     // takes at rest (its box and margins, --reply-room) is where the composer's reserve goes at once (chat.js).
     function run(node, to) {
-        const { marginTop, marginBottom } = getComputedStyle(node);
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null;
+        const margins = style ? (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0) : 0;
         node.style.setProperty('--reply-h', `${node.offsetHeight}px`);
-        node.style.setProperty('--reply-room', `${node.offsetHeight + (parseFloat(marginTop) || 0) + (parseFloat(marginBottom) || 0)}px`);
+        node.style.setProperty('--reply-room', `${node.offsetHeight + margins}px`);
         node.dataset.motion = to === 'open' ? 'shut' : 'open';
         void node.offsetHeight;  // the motion starts from this height
         node.dataset.motion = to;
