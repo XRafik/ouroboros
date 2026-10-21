@@ -86,7 +86,7 @@ def test_task_done_carries_canonical_quiet_facts(tmp_path, scheduled_project, mo
     done = next(row for row in pushed if row.get("type") == "task_done")
     assert done["wake_silent"] is silent
     assert done["quiet_effective"] is bool(silent and not notice)
-    records = [json.loads(line) for line in (tmp_path / "logs" / "events.jsonl").read_text().splitlines()]
+    records = [json.loads(line) for line in (tmp_path / "logs" / "events.jsonl").read_text(encoding="utf-8").splitlines()]
     recorded = next(row for row in records if row.get("type") == "task_done")
     assert recorded["wake_silent"] is silent and recorded["quiet_effective"] == done["quiet_effective"]
     assert task["id"] not in ctx.RUNNING

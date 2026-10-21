@@ -155,7 +155,7 @@ def test_corrupt_store_is_unavailable_and_not_an_empty_success(registry, action)
     before = path.read_bytes()
     path.write_text("{torn", encoding="utf-8")
     result = _call(registry, action, reason="Change", name="Changed")
-    assert result.status != "ok" and path.read_text() == "{torn"
+    assert result.status != "ok" and path.read_text(encoding="utf-8") == "{torn"
     path.write_bytes(before)
     assert _call(registry, action, reason="Change", name="Changed").status == "ok"
 

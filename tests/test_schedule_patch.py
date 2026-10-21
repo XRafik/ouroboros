@@ -141,7 +141,7 @@ def test_corrupt_store_and_lock_timeout_are_typed(root, monkeypatch):
     path = root / "state/scheduled_tasks.json"
     valid = path.read_bytes()
     path.write_text("{torn")
-    assert patch(root, {})["status"] == "store_unreadable" and path.read_text() == "{torn"
+    assert patch(root, {})["status"] == "store_unreadable" and path.read_text(encoding="utf-8") == "{torn"
     path.write_bytes(valid)
     transaction = lifecycle.schedule_transaction
     @contextmanager
