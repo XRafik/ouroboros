@@ -7,7 +7,7 @@ def safety_configuration(settings: dict) -> tuple:
     from ouroboros.configured_subagents import parse_configured_subagents
     from ouroboros.settings_defaults import SETTINGS_DEFAULTS
     from ouroboros.settings_scales import normalize_safety_mode
-    from ouroboros.model_slots import (normalize_model_role_options, MODEL_ACCOUNTS_KEY,
+    from ouroboros.model_slots import (model_role_option, MODEL_ACCOUNTS_KEY,
                                      MODEL_CONTEXT_WINDOWS_KEY, MODEL_PROCESSING_PREFERENCES_KEY)
     from ouroboros.server_runtime import authored_model_slots, propose_unauthored_model_slots, apply_runtime_provider_defaults
 
@@ -21,7 +21,7 @@ def safety_configuration(settings: dict) -> tuple:
                            "main": "OUROBOROS_MODEL"}[slot]) or SETTINGS_DEFAULTS["OUROBOROS_MODEL"]).strip()
     local = model.endswith(" (local)") or str(values.get(f"USE_LOCAL_{slot.upper()}") or "").lower() in {"true", "1", "yes", "on"}
     model = model.removesuffix(" (local)")
-    options = tuple(normalize_model_role_options(key, values.get(key))[0].get("safety", "")
+    options = tuple(model_role_option(key, "safety", settings=values)
                     for key in (MODEL_ACCOUNTS_KEY, MODEL_CONTEXT_WINDOWS_KEY, MODEL_PROCESSING_PREFERENCES_KEY))
     raw = values.get("OUROBOROS_SUBAGENTS")
     recheck = ()

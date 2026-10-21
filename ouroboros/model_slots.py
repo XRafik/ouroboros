@@ -95,6 +95,18 @@ def model_role_option(key: str, role: str, *, settings: dict | None = None) -> s
     default = 0 if key == MODEL_CONTEXT_WINDOWS_KEY else ""
     raw = (settings or {}).get(key, "") if settings is not None else runtime_setting(key, "")
     options, _canonical = normalize_model_role_options(key, raw)
+    if role == "safety":
+        # An empty Supervisor slot inherits the route's authored options as
+        # well as its model. An explicit Supervisor model ends that chain.
+        for candidate in ("safety", "light", "main"):
+            if options.get(candidate):
+                return options[candidate]
+            setting = MODEL_ROLE_SETTINGS[candidate]
+            model = (settings.get(setting, SETTINGS_DEFAULTS[setting]) if settings is not None
+                     else runtime_setting(setting, SETTINGS_DEFAULTS[setting]))
+            if str(model or "").strip():
+                break
+        return default
     family, separator, position = role.partition(":")
     if family == "fallback" and separator:
         try:

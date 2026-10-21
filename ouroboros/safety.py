@@ -998,6 +998,12 @@ def _safety_model_call(
     from ouroboros import model_concurrency
     from ouroboros.llm_observability import chat_observed
     from ouroboros.tools.review_helpers import cached_prompt_blocks
+    if model_role == "safety":
+        from ouroboros.model_slots import MODEL_ACCOUNTS_KEY, model_role_option, resolve_processing_preference
+        if account is None:
+            account = str(model_role_option(MODEL_ACCOUNTS_KEY, "safety"))
+        if processing is None:
+            processing = resolve_processing_preference("safety")
 
     if time.time() < _SAFETY_STORM_UNTIL:
         raise _SafetyRateLimited(
