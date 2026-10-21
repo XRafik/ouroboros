@@ -57,6 +57,7 @@ def test_place_state_from_every_origin_and_active_sibling(published_tool, places
         refusal = guard.dispatch_refusal(ctx, name, {"room": "C1"}, ext_tool=tool)
         assert refusal.startswith("⚠️ RESOURCE_CONSTRAINT_BLOCKED:")
         assert state.title() in refusal and "Consciousness › Places" in refusal
+        assert "configure_presence" in refusal
         assert guard.dispatch_refusal(ctx, name, {"room": "C2"}, ext_tool=tool) == ""
     name, tool = published_tool("read", target="room")
     assert guard.dispatch_refusal(ctx, name, {"room": "C1"}, ext_tool=tool) == ""
@@ -99,6 +100,10 @@ def test_supervisor_facts_keep_every_place_and_note_author(published_tool, place
     reply = guard.call_place_facts(ctx, "place_reply", {"place_id": "quiet", "text": "hi"})
     assert reply["place_state"] == "silent" and reply["effect"] == "message"
     assert [note["author"] for note in reply["notes"]] == ["owner", "ouroboros"]
+    reply = guard.call_place_facts(ctx, "place_reply", {"place_id": "quiet", "text": "hi",
+                                                       "account_id": "A", "conversation_id": "C3", "thread_id": "T"})
+    assert reply["conversation_key"] == "service:A:C3:T"
+    assert reply["targets"] == {"account_id": ["A"], "conversation_id": ["C3"], "thread_id": ["T"]}
 
 
 def test_actual_registry_callsite_blocks_and_allows(published_tool, places):
