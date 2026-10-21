@@ -704,7 +704,7 @@ def admit(prepared: List[Dict[str, Any]], *, stop: Optional[Callable[[], bool]] 
                         defer(item)
                         continue
                     if block:
-                        _refused(record, block, outcome, data)
+                        _refused(record, block, outcome)
                         continue
                     enqueued = True
                     item["task"] = outcome  # preserve host-stamped continuation and admission facts
@@ -739,7 +739,7 @@ def admit(prepared: List[Dict[str, Any]], *, stop: Optional[Callable[[], bool]] 
             log.error("Queue snapshot failed after scheduled admission; %d task(s) withdrawn", len(admitted))
 
 
-def _refused(record: Dict[str, Any], block: str, outcome: Dict[str, Any], data: Dict[str, Any]) -> None:
+def _refused(record: Dict[str, Any], block: str, outcome: Dict[str, Any]) -> None:
     detail = str(outcome.get("_admission_detail") or outcome.get("_worker_pool_disabled_reason") or "")
     trigger = record.get("trigger") if isinstance(record.get("trigger"), dict) else {}
     if block == "project_routing_fence" and outcome.get("_project_lifecycle") == "tombstoned":
