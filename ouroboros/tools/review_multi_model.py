@@ -219,7 +219,8 @@ async def _query_model(
     retry_key: str = "", subagent_id: str = "", use_local: bool | None = None, task_evidence: dict = None,
     native_retrieval: bool = False, resolved_wave_id: str = "",
     session_access: str = "", checking_source: dict = None, preflight_execution: dict = None,
-    processing_preference: str | None = None,
+    processing_preference: str | None = None, parts: Any = None,
+    additional: bool = False, severity_policy: dict = None,
 ):
     async with semaphore:
         slot = None
@@ -243,6 +244,7 @@ async def _query_model(
             from ouroboros.review_evidence import commit_review_evidence_refs, commit_review_evidence_section
             evidence = task_evidence or {}
             policy = dict(session_policy or {"output_contract": _rev().REVIEW_JSON_ARRAY_CONTRACT}) if retrieves else {}
+            policy.update(parts=list(parts or ()), additional=additional, severity_policy=severity_policy or {})
             if retrieves and evidence:
                 session_task += "\n\n" + commit_review_evidence_section(evidence, delivery="session" if delegated else "native")
                 if not delegated:
@@ -424,6 +426,9 @@ async def _multi_model_review_async(content: str, prompt: str,
                      session_profile=row_profiles[idx], surface=surface,
                      processing_preference=row_processing[idx],
                      session_policy=row_policies[idx] or session_policy, usage_attribution=usage_attribution,
+                     parts=_row_vector("parts", lambda idx: ())[idx],
+                     additional=_row_vector("additional", lambda idx: False)[idx],
+                     severity_policy=(row_plan or {}).get("severity_policy"),
                      retry_key=retry_key, subagent_id=row_actors[idx], use_local=row_local[idx], task_evidence=task_evidence,
                      preflight_execution=preflight_execution,
                      resolved_wave_id=fan_out_wave, session_access=row_access[idx], checking_source=checking_source,

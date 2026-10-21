@@ -402,7 +402,6 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/preflight_receipts.py`
 - `ouroboros/preflight_runner.py`
 - `ouroboros/review.py`
-- `ouroboros/review_actor_aggregation.py`
 - `ouroboros/review_body_fact.py`
 - `ouroboros/review_checking.py`
 - `ouroboros/review_checking_prune.py`
@@ -425,6 +424,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/review_price.py`
 - `ouroboros/review_projection.py`
 - `ouroboros/review_records.py`
+- `ouroboros/review_seat_outcome.py`
 - `ouroboros/review_session_custody.py`
 - `ouroboros/review_session_preparation.py`
 - `ouroboros/review_session_reads.py`

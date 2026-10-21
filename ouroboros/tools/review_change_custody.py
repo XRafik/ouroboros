@@ -357,6 +357,9 @@ def collect_recorded_commit_actor(ctx, surface: str, slot_id: str, retry_key: st
         return collect_recorded_review_actor(root, **identity, usage_ctx=ctx)
     recovered = recover_review_producer(root, request, slot, row)
     if recovered is not None and recovered.operation_state != "in_flight":
+        from ouroboros.review_seat_outcome import publish_seat_execution
+
+        publish_seat_execution(request, slot, recovered, ctx)
         return asdict(recovered)
     token = str(row.get("pending_invocation_id") or (row.get("usage") or {}).get("pending_invocation_id")
                 or (row.get("recovery_binding") or {}).get("pending_invocation_id") or "")

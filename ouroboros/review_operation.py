@@ -704,7 +704,11 @@ def collect_recorded_review_actor(root: Any, *, task_id: str, surface: str, row:
         request, slot = recorded_review_assignment(
             root, task_id=task_id, surface=surface, row=row, retry_key=retry_key,
             root_task_id=root_task_id, review_contract=review_contract)
-        actor, _fact = _collect_pending_row(root, request, slot, row, usage_ctx, None)
+        actor, fact = _collect_pending_row(root, request, slot, row, usage_ctx, None)
+        if fact == COLLECTED:
+            from ouroboros.review_seat_outcome import publish_seat_execution
+
+            publish_seat_execution(request, slot, actor, usage_ctx)
     except (OSError, ValueError, KeyError, TypeError) as exc:
         slot = ReviewSlot(slot_id=str(row.get("slot_id") or row.get("slot") or ""),
                           model=str(row.get("model") or row.get("model_id") or ""))
@@ -760,7 +764,8 @@ def recover_review_producer(root: Any, request: Any, slot: Any, row: dict) -> An
         if outcome.get("operation_id") != operation or outcome.get("slot_id") != slot.slot_id:
             raise ValueError("producer actor identity mismatch")
         # The outcome is stamped before its failure is logged; this verified operation's row holds the receipt (#1578).
-        actor = ReviewActorRecord(**{**outcome, "error_event_logged": row.get("error_event_logged") is True})
+        actor = ReviewActorRecord(**{**outcome, "error_event_logged": bool(
+            outcome.get("error_event_logged") or row.get("error_event_logged"))})
         message = payload.get("message")
         actor.raw_text = str(message.get("content") or "") if isinstance(message, dict) else ""
         actor.usage = dict(payload.get("usage") or {})
@@ -769,6 +774,9 @@ def recover_review_producer(root: Any, request: Any, slot: Any, row: dict) -> An
         if actor.operation_state in {"in_flight", "custody_lost"}:
             actor.status, actor.raw_text = "error", ""
             actor.error = actor.error or "Producer outcome still lacks terminal custody; full partial source retained"
+        from ouroboros.review_seat_outcome import finalize_seat_outcome
+
+        finalize_seat_outcome(original_request, original_slot, actor)
         return actor
     except (OSError, ValueError, KeyError, TypeError) as exc:
         actor = _row_actor(slot, operation, row, state="custody_lost",
@@ -872,6 +880,7 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     from ouroboros.review_execution import _full_session_text, session_identity_deltas
     from ouroboros.gateways.claudexor import final_attempt_facts
     from ouroboros.review_records import ReviewActorRecord
+    from ouroboros.review_seat_outcome import retain_collected_outcome
     from ouroboros.review_verdict_extraction import canonicalize_session_verdict
     from ouroboros.triad_review import default_output_contract, request_output_shape
 
@@ -931,10 +940,13 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     if invocation.get("invocation_id"):
         binding["pending_invocation_id"] = str(invocation["invocation_id"])
     if state != "succeeded":
-        return ReviewActorRecord(slot_id=slot.slot_id, model=slot.model, status="error", usage=usage,
-                                 error=f"delegated review run {run_id} ended {state or 'without a state'}",
-                                 operation_id=operation_id, operation_state="late_settled",
-                                 recovery_binding=binding)
+        interrupted = state in {"cancelled", "interrupted"}
+        actor = ReviewActorRecord(slot_id=slot.slot_id, model=slot.model, status="error", usage=usage,
+                                  error=f"delegated review run {run_id} ended {state or 'without a state'}",
+                                  failure_code="review_run_cancelled" if interrupted else "review_run_failed",
+                                  transport_status="interrupted" if interrupted else "provider_transport_error",
+                                  operation_id=operation_id, operation_state="late_settled", recovery_binding=binding)
+        return retain_collected_outcome(root, request, slot, actor)
     shape = request_output_shape(request)
     canonical, method, _unused = canonicalize_session_verdict(
         text, conformance_passed=str(summary.get("outputConformance") or "").lower() == "passed",
@@ -947,19 +959,7 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     actor = ReviewActorRecord(slot_id=slot.slot_id, model=slot.model,
                               status="ok" if canonical.strip() else "empty", raw_text=canonical, usage=usage,
                               operation_id=operation_id, operation_state="late_settled", recovery_binding=binding)
-    try:
-        from ouroboros.observability import persist_call
-
-        actor.response_ref = persist_call(
-            root, task_id=request.task_id or "review", call_id=f"{operation_id}_collected",
-            call_type=f"{request.surface}_review_collected",
-            payload={"message": {"content": canonical, "session_transcript": text}, "usage": usage},
-            manifest={"surface": request.surface, "slot_id": slot.slot_id, "collection": "attach_only_observation"})
-    except Exception:
-        log.warning("Collected review transcript could not be retained: %s", operation_id, exc_info=True)
-    if method == "parse_unavailable":
-        actor.parse_status = "parse_unavailable"
-    return actor
+    return retain_collected_outcome(root, request, slot, actor, transcript=text)
 
 
 def _collect_pending_row(root: Any, request: Any, slot: Any, row: dict, usage_ctx: Any,
@@ -973,7 +973,7 @@ def _collect_pending_row(root: Any, request: Any, slot: Any, row: dict, usage_ct
     slot = recorded_review_slot(request, slot, operation_id, row.get("recovery_binding"))
     if not row.get("recovery_binding") and root and str(getattr(slot.route, "value", slot.route)) == "agent_session":
         try:
-            _original_request, slot = recorded_review_assignment(root, row=row, assignment=(request, slot))
+            request, slot = recorded_review_assignment(root, row=row, assignment=(request, slot))
         except FileNotFoundError:
             pass  # Older invocation-only rows may have no retained prompt.
         except (OSError, ValueError, KeyError, TypeError) as exc:

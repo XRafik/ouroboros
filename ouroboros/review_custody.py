@@ -237,6 +237,10 @@ def _review_exception_projection(
         phase = "authority"
     else:
         phase = "delivery"
+    from ouroboros.owner_pause import _REVIEW_EPISODE
+
+    if not dispatched and (_REVIEW_EPISODE.get() or {}).get("pause_before_launch"):
+        failure_custody["owner_pause_preparing"] = True
     failure_custody["review_failure_phase"] = phase
     return failure_custody, capture_state, http_status, operation_state, failure_code
 
@@ -489,6 +493,7 @@ def _frozen_actor(row: Dict[str, Any], slot: Any) -> Any:
         model=str(row.get("model_id") or row.get("model") or getattr(slot, "model", "")),
         status=actor_status,
         raw_text=raw_text,
+        outcome=copy.deepcopy(row.get("outcome") or {}),
         usage=usage,
         prompt_ref=dict(row.get("prompt_ref") or {}),
         response_ref=dict(row.get("response_ref") or {}),
@@ -962,20 +967,28 @@ def _settle_review_attempt(
     request: Any,
     task_id: str,
     result_queue: "queue.Queue[Any]",
+    settle_actor: Any = None,
 ) -> None:
     """Publish one physical review settlement to process-local custody."""
+    late = bool(entry.timed_out or entry.detached)
+    if (entry.pause_before_launch and str(getattr(actor, "operation_state", "")) != "custody_lost"
+            and not (getattr(actor, "usage", None) or {}).get("pending_invocation_id")):
+        # The first handoff lost to Pause under the launch lock. Its worker
+        # has now actually ended: this exact unsent refusal can be collected.
+        # The physical-capture guard below still wins if an adapter reports
+        # independent positive/unknown custody; no money fact is erased.
+        actor.operation_state = "not_dispatched"
+    (failure_custody, physical_attempt_state, terminal_provider_status,
+     pending_invocation, custody_lost) = finalize_review_actor(
+        actor, operation_id=entry.operation_id, late=late)
+    if settle_actor is not None:
+        try:
+            settle_actor(slot, actor)
+        except Exception:
+            with _ACTIVE_LOCK:
+                entry.actor = actor  # Keep the source in custody without advertising durable readiness.
+            raise
     with _ACTIVE_LOCK:
-        late = bool(entry.timed_out or entry.detached)
-        if (entry.pause_before_launch and str(getattr(actor, "operation_state", "")) != "custody_lost"
-                and not (getattr(actor, "usage", None) or {}).get("pending_invocation_id")):
-            # The first handoff lost to Pause under the launch lock. Its worker
-            # has now actually ended: this exact unsent refusal can be collected.
-            # The physical-capture guard below still wins if an adapter reports
-            # independent positive/unknown custody; no money fact is erased.
-            actor.operation_state = "not_dispatched"
-        (failure_custody, physical_attempt_state, terminal_provider_status,
-         pending_invocation, custody_lost) = finalize_review_actor(
-            actor, operation_id=entry.operation_id, late=late)
         entry.actor = actor
         entry.event.set()
         if _ACTIVE.get(entry.key) is entry:
@@ -1221,6 +1234,7 @@ def _run_custodied_review_slots(
     review_usage_scope: Any,
     run_slot: Callable[[Any, str, Dict[str, Any], float, Any], Any],
     error_actor: Callable[..., Any],
+    settle_actor: Any = None,
 ) -> List[Any]:
     """Run slots with independent logical windows and late-result custody."""
     from ouroboros.usage_accounting import usage_scope
@@ -1429,7 +1443,7 @@ def _run_custodied_review_slots(
                     _attach_worker_exception_facts(actor, exc, entry.retry_state)
                 _settle_review_attempt(
                     entry, slot, actor, usage_ctx=usage_ctx, request=request,
-                    task_id=task_id, result_queue=result_queue,
+                    task_id=task_id, result_queue=result_queue, settle_actor=settle_actor,
                 )
 
             threading.Thread(
