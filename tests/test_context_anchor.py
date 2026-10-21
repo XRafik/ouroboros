@@ -166,7 +166,7 @@ def test_the_facts_line_states_where_the_size_comes_from():
                           tool_schemas=[], context_fit_plan=None, round_idx=1482, tools=None)
     line = context_facts_line(ctx, money={})
     assert "round 1481 accepted 874,829, +5,171 since" in line
-    assert "window above 903,762: this model accepted that input, the stated 872,000 is below it" in line
+    assert "window unknown (largest accepted input 903,762)" in line  # no bound plan in this fixture
     assert "free unknown" in line
     usage.update(_context_capacity_total_tokens=1_000_000, _context_window_reading_tokens=1_000_000)
     assert "free ~54,464" in context_facts_line(ctx, money={})

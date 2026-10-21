@@ -187,6 +187,7 @@ class ContextFitPlan:
                     self.user_content_json, preferred=self.preferred_mode, start=start_mode, select=select_mode,
                     tool_schemas=tool_schemas,
                     window_tokens=window_tokens, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
+                    window_record=self.window_record,
                     resident=True, current_messages=current_messages,  # actual running tail, enable_tools included
                     kept={mode: memory_floor.kept_level(snapshot, self.projection(mode).memory_facts)
                           for mode in memory_floor.MODES},

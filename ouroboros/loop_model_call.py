@@ -587,10 +587,9 @@ def _rebind_context_fit_plan(
     except Exception:
         log.debug("Route-switch capability probe failed; preserving unknown Max", exc_info=True)
         route, evidence = _failed_route_evidence(task)
-    # The same model keeps this conversation's own anchor across an account rotation; a model it
-    # has not answered on yet starts from the plan-time witness, as at the task's start.
+    # Account/server changes have their own anchors and durable window observations.
     anchor, _accepted = main_input_anchor(getattr(tools._ctx, "_accumulated_usage", None), SimpleNamespace(
-        model=str(route.get("model") or model), provider=str(route.get("provider") or "")))
+        model=str(route.get("model") or model), provider=str(route.get("provider") or ""), route_fp=evidence.route_fp))
     ratio = anchor.density if anchor is not None else _route_calibration_ratio(
         None,  # canonical evidence root (one observation store)
         str(getattr(evidence, "route_fp", "") or ""),
@@ -598,12 +597,11 @@ def _rebind_context_fit_plan(
         estimate_context_prompt_tokens(messages, tool_schemas, provider=str(route.get("provider") or "")),
         view_kind=plan.view_kind,
     )
-    from ouroboros.context_anchor import floored_window
-
-    # A window this model already exceeded in this conversation is no window: a rotation never re-cuts by it.
-    window_tokens, known_window = floored_window(
-        int(getattr(evidence, "window_tokens", 0) or 0), is_known(evidence, require_fresh=True), _accepted)
+    from ouroboros.context_window import resolve_window
     output_reserve = main_output_reserve_tokens(use_local=bool(route.get("use_local", use_local)), evidence=evidence)
+    bound = route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint"))
+    window = resolve_window(evidence, output_reserve, bound=bound)
+    window_tokens, known_window = window.total_equivalent, window.usable is not None
     preferred = preferred_mode or getattr(plan, "preferred_mode", "")
     preferred = preferred if preferred in {"low", "max", "nano"} else "max"
     rebound = replace(
@@ -622,6 +620,7 @@ def _rebind_context_fit_plan(
             "accountFingerprint": str(getattr(evidence, "account_fingerprint", "") or ""),
         } if route.get("provider") == "claudexor" else {},
         evidence_source=str(getattr(evidence, "source", "") or ""),
+        window_record=window, window_witness_bound=bound, route_base_url=str(route.get("base_url") or ""),
     ).reproject_for_route(  # the shown view kept while it fits this route's window, else narrowed
         window_tokens=window_tokens, known_window=known_window, ratio=ratio, output_reserve=output_reserve,
         tool_schemas=tool_schemas, start_mode=start_mode, current_messages=messages)

@@ -974,6 +974,7 @@ def _cached_evidence(record: Dict[str, Any], fp: str, model: str, provider: str,
         credential_profile_id=str(record.get("credential_profile_id") or ""),
         account_fingerprint=str(record.get("account_fingerprint") or ""),
         provenance=str(record.get("provenance") or ""),
+        window_kind=str(record.get("window_kind") or "total"),
     )
 
 

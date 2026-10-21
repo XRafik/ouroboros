@@ -27,6 +27,7 @@ class WindowRecord:
     reserve: int = 0
     transmitted: Optional[int] = None
     accepted: int = 0
+    declared: tuple[WindowLimit, ...] = ()
 
     @property
     def usable(self) -> Optional[int]:
@@ -84,19 +85,23 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True) -> 
     rows = ((ce._load(root or ce.canonical_evidence_root()).get("main_windows", {}).get(fp) or {})
             .get("observations", [])) if bound and fp else []
     accepted = max((row.get("accepted", 0) for row in rows), default=0)
-    limits = {}
-    if ce.is_known(evidence, require_fresh=True):
+    captured = getattr(evidence, "window_record", None)
+    limits = ({limit.kind: limit for limit in captured.declared}
+              if captured is not None and ce.is_known(evidence, require_fresh=True) else {})
+    if captured is None and ce.is_known(evidence, require_fresh=True):
         kind = str(getattr(evidence, "window_kind", "total") or "total")
         limits[kind] = WindowLimit(int(evidence.window_tokens), kind,
-                                  str(getattr(evidence, "source", "metadata")), str(getattr(evidence, "ts", "")))
+                                  str(getattr(evidence, "source", None) or getattr(evidence, "evidence_source", "metadata")),
+                                  str(getattr(evidence, "ts", "")))
+    declared = tuple(limits.values())
     # Acceptance raises a known planning boundary, without adding its reserved
     # output. With no stated kind, only the total lower bound is established.
     if accepted:
-        kind = "input" if "input" in limits and "total" not in limits else "total"
-        prior = limits.get(kind)
-        if prior is None or accepted > prior.tokens:
-            row = next(row for row in rows if row.get("accepted") == accepted)
-            limits[kind] = WindowLimit(accepted, kind, "accepted", row["ts"])
+        for kind in tuple(limits) or ("total",):
+            prior = limits.get(kind)
+            if prior is None or accepted > prior.tokens:
+                row = next(row for row in rows if row.get("accepted") == accepted)
+                limits[kind] = WindowLimit(accepted, kind, "accepted", row["ts"])
     for index in range(len(rows) - 1, -1, -1):
         row = rows[index]
         if row.get("refused"):
@@ -108,8 +113,9 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True) -> 
     maximum = output.get("max_output_tokens", 0)
     return WindowRecord(fp, limits.get("input"), limits.get("total"),
                         WindowLimit(maximum, "output", output.get("source", "metadata"),
-                                    output.get("observed_at", "")) if maximum and not output.get("stale") else None,
-                        reserve=reserve, accepted=accepted)
+                                    output.get("observed_at", "")) if maximum and not output.get("stale")
+                        else captured.output if captured else None,
+                        reserve=reserve, accepted=accepted, declared=declared)
 
 
 def record_refusal(usage, plan) -> None:
