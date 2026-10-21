@@ -105,3 +105,18 @@ def test_withdrawn_occurrence_republishes_and_settles_before_removal(q, monkeypa
     q.queue.check_scheduled_tasks()
     assert "s1" not in _rows(q)
     assert load_task_result(q.root, task["id"])["status"] == "completed"
+
+
+def test_unstarted_claim_blocks_collection_even_when_it_owes_no_task(q):  # noqa: F811
+    _row(q, intent={"kind": "system_repo"})
+    withdraw(q)
+    with store.schedule_transaction(q.root):
+        data = store.load_schedule_store(q.root)
+        row = data["tasks"][0]
+        row["occurrence"] = {"phase": "claimed", "token": "never-admitted", "task_id": "unstarted"}
+        assert occurrence.owed(row, drive_root=q.root) is False
+        assert occurrence.deletion_settled(row, drive_root=q.root) is True
+        cutoff = datetime.datetime.now(datetime.timezone.utc).timestamp() + 1
+        assert not store._remove_withdrawn(data, q.root, cutoff) and data["tasks"] == [row]
+        row.pop("occurrence")  # reconciliation has now released the claim
+        assert store._remove_withdrawn(data, q.root, cutoff) and data["tasks"] == []
