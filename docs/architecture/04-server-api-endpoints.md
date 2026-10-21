@@ -8,7 +8,7 @@ Registry of browser, CLI and Host Service routes. `gateway/router.py` owns Route
 
 File-browser routes are contributed by `gateway/files.py::file_browser_routes()`; envelopes and their parity: §11. The loopback Host Service is a separate token-authenticated app assembled by `gateway/host_service.py::create_host_service_app`, not a second public owner API (§12).
 
-Every path-addressed `/api/files/*` operation resolves its requested `path` and refuses when the resolution leaves the configured file root. In-root symlinks stay usable; out-of-root symlinks may be listed with `is_symlink: true` but cannot be read, written, downloaded, deleted or traversed. A chat attachment (`/api/files/download?upload=<id>`) names no path: a separate confined authority opens it by stored id via `chat_uploads.open_upload` inside `data/uploads`, independent of the Files root.
+`/api/files/*` resolves paths inside the configured root. In-root symlinks work; outside links may be listed (`is_symlink: true`), never read, written, downloaded, deleted or traversed. Chat downloads (`?upload=<id>`) instead use `chat_uploads.open_upload` inside `data/uploads`, independently of the Files root.
 
 | Method | Path | Note |
 |---|---|---|
@@ -120,7 +120,7 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | GET | `/api/tasks/{task_id}` | |
 | GET | `/api/tasks/{task_id}/events` | integer rank |
 | POST | `/api/tasks/{task_id}/events` | read-only v2 cursor (§3 History reads and the SSE v2 transport) |
-| GET | `/api/tasks/{task_id}/artifacts/{name}` | confined reads of the task's own stores; SVG: `sandbox` CSP, `nosniff` (`gateway/task_archive.py`) |
+| GET | `/api/tasks/{task_id}/artifacts/{name}` | own stores: POSIX no-follow or Windows NT relative handles; admission facts precede child-store metadata reads; SVG: `sandbox` CSP, `nosniff` (`gateway/task_archive.py`) |
 | POST | `/api/tasks/{task_id}/cancel` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/hurry` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/pause` | (§6 Owner Pause of a whole tree) |

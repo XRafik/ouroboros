@@ -26,3 +26,26 @@ tests/fixtures/llm_wire/** -text -whitespace
 # LF so a Windows checkout reads the same lines and digests as the committed
 # bytes.
 docs/**/*.md text eol=lf
+
+# Exact diagnostic source bytes on the native runner.
+docs/architecture/01-high-level-architecture.md text eol=lf
+docs/architecture/04-server-api-endpoints.md text eol=lf
+docs/development/10-platform-abstraction-rule.md text eol=lf
+docs/inventories/DATA_LAYOUT_INVENTORY.md text eol=lf
+ouroboros/artifacts.py text eol=lf
+ouroboros/confined_files.py text eol=lf
+ouroboros/evidence_packs.py text eol=lf
+ouroboros/gateway/task_archive.py text eol=lf
+ouroboros/gateway/tasks.py text eol=lf
+ouroboros/source_retention.py text eol=lf
+ouroboros/store.py text eol=lf
+ouroboros/task_custody.py text eol=lf
+ouroboros/task_finalization.py text eol=lf
+ouroboros/task_status.py text eol=lf
+tests/test_headless_task_artifacts.py text eol=lf
+tests/test_store_wal_index.py text eol=lf
+tests/test_task_download_confinement.py text eol=lf
+tests/test_task_source_confined_qa.py text eol=lf
+tests/test_task_summary.py text eol=lf
+tests/test_task_write_authority_qa.py text eol=lf
+.platform-qa/run_windows.ps1 text eol=lf
