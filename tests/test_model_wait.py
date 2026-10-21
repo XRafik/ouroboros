@@ -786,3 +786,43 @@ def test_declining_resource_wait_still_honors_owner_control(live_wait, monkeypat
             client.chat(*args, **kwargs)
     assert caught.value.control_reason == "finalize_requested"
     assert not transport.accepted_operations and not controller.waits and events.empty()
+
+
+@pytest.mark.parametrize("role,key", [("light", "OUROBOROS_MODEL_LIGHT"),
+                                      ("main", "OUROBOROS_MODEL"), ("safety", "OUROBOROS_MODEL_SAFETY")])
+def test_owner_keep_checker_role_persists_and_resumes_but_nonowner_cannot(live_wait, monkeypatch, role, key):
+    from ouroboros import config
+
+    root, transport, client, controller, events, decide = live_wait
+    path = root / "settings.json"
+    monkeypatch.setattr(config, "SETTINGS_PATH", path)
+    monkeypatch.setattr(config, "DATA_DIR", root)
+    monkeypatch.setattr(config, "get_runtime_mode", lambda: "light")
+    path.write_text(json.dumps({"OUROBOROS_MODEL": "original/main", "OUROBOROS_MODEL_LIGHT": "" if role == "main" else "original/light",
+                               "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full"}))
+    before = path.read_bytes()
+    with pytest.raises(PermissionError, match="owner-controlled"):
+        config.save_settings({**config.load_settings(), key: MODEL})
+    assert path.read_bytes() == before
+    transport.results = [_refusal(), result()]
+    transport.dispatch = ["not_started", "response_received"]
+    acted = False
+
+    def catalog(*_, **_kw):
+        nonlocal acted
+        if not acted:
+            response = decide(_action_for(list(events.queue)[-1], "switch", model=MODEL,
+                                          credential_profile_id="account-b", use_local=False, persist_role=True))
+            assert response.status_code == 202 and json.loads(response.body)["saved"] is True
+            acted = True
+        raise ClaudexorUnavailable("subscription_window_exhausted", "not ready")
+
+    monkeypatch.setattr(client, "claudexor_model_catalog", catalog)
+    answer, _usage = client.chat([{"role": "user", "content": "resume with owner choice"}], MODEL, model_role=role)
+    assert acted and answer == result()["message"]
+    assert json.loads(path.read_text())[key] == MODEL
+    assert json.loads(json.loads(path.read_text())["OUROBOROS_MODEL_ACCOUNTS"])[role] == "account-b"
+    assert controller.overrides[role]["model_account_override"] == "account-b"
+    assert len(transport.uploads) == 2
+    assert list(events.queue)[-1]["resolution"] == "model_switched"
+    assert list(events.queue)[-1]["state"] == "resolved"
