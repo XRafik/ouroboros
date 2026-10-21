@@ -849,6 +849,17 @@ def _read_source(root: Path, ref: Any, start: int, limit: int) -> str:
                    lambda end: f"memory_read(source_ref=<same>, start={end})")
 
 
+def _read_rooms(root: Path, store: ChronicleStore, start: int, limit: int) -> str:
+    from ouroboros import memory_view as mv
+
+    spec = mv.ViewSpec("integrator", room_id=None)
+    rows, lineage = memory_inventory.open_rows_by_room(root), row_lineage(root)
+    rooms = mv._live_rooms(store, root, spec, mv._labeler(root), rows, mv._notes_by_room(store), lineage)
+    body = "\n".join(mv._directory_room(room) for room in rooms)
+    return _window(f"Live rooms: {len(rooms)}", body, start, limit,
+                   lambda n: f"memory_read(room_id='*', start={n})")
+
+
 @completed_local_read
 def _memory_read(ctx: Any, node_id: str = "", room_id: Any = None, after_seq: int = 0, rows: bool = False,
                  task_id: str = "", period: Any = None, source_ref: Any = None, start: int = 0, revision: str = "",
@@ -865,8 +876,10 @@ def _memory_read(ctx: Any, node_id: str = "", room_id: Any = None, after_seq: in
     limit = tool_result_limit("memory_read")
     try:
         root = _root(ctx)
-        _activated(root)
-        if source_ref:
+        store = _activated(root)
+        if str(room_id) == "*":
+            text = _read_rooms(root, store, start, limit)
+        elif source_ref:
             text = _read_source(root, source_ref, start, limit)
         elif node_id:
             text = _read_node(root, str(node_id), start, limit, str(revision or ""))

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
+from ouroboros import context_budget
 from ouroboros.context_window import WindowRecord, resolve_window
 # Tool-result delivery (the whole-batch projection under the measured frame)
 # lives in ``tool_result_delivery``; the consolidator imports its contract here.
@@ -132,10 +133,6 @@ class ContextFitPlan:
     model: str
     provider: str
     route_fp: str
-    # Named for ``capability_evidence.CapabilityEvidence``, not paraphrased: the plan
-    # is an evidence-shaped record, so ``is_known`` applies to it DIRECTLY instead of
-    # each reader restating the three-clause freshness boolean (the wire keys stay
-    # ``evidence_status`` / ``evidence_stale``).
     status: str
     stale: bool
     window_tokens: int
@@ -157,18 +154,7 @@ class ContextFitPlan:
                             tool_schemas: Optional[List[Dict[str, Any]]], start_mode: Optional[str] = None,
                             current_messages: Optional[List[Dict[str, Any]]] = None,
                             refused_tokens: int = 0, select_mode: Optional[str] = None) -> "ContextFitPlan":
-        """This plan on another route's window: fit and starting mode measured anew, shown views kept while they fit.
-
-        Measured on the actual running tail and resident schemas from ``start_mode`` (the task's mode; default
-        ``preferred_mode``). While that mode's request with its reply reserve fits a known fresh window -- a
-        smaller one included -- or the window is unknown, every view keeps its bytes: a larger window or a
-        shorter tail unfolds nothing (owner decision 2026-10-11, 2A). A request the window cannot hold, or
-        ``refused_tokens`` (size recovery's calibrated deficit, at least 1), narrows each view from the
-        level it shows against the window alone (``memory_floor.render_view_for_mode``), from
-        ``core.memory_view_json`` (chronicle and chat not read again). Current Max books stay full until
-        size recovery selects another mode (``select_mode``: rendered from the level ``start_mode`` shows, never
-        its own unsent one); lower starts keep their mode. Only the owner's mode carries a target.
-        """
+        """Keep fitting shown bytes; narrow on physical deficit from the same snapshot and selected forms."""
         from dataclasses import replace
 
         contents, start, books = {}, start_mode or self.preferred_mode, ("max", "low")
@@ -327,17 +313,13 @@ def _render_context_system_content(
     """``[A'▸, D?▸, B▸, C]``: common governance, optional handbook, identity/story, changing facts.
 
     ``story`` and ``room`` are the memory view rendered for this projection's mode and
-    window (``memory_floor.mode_views``); empty without a view.
+    selected forms; empty without a view.
     """
     return _system_blocks(core, _governance_blocks(env, core, mode=mode), story, room)
 
 
 def _governance_blocks(env: Any, core: ContextCore, *, mode: str) -> Tuple[str, ...]:
-    # D-ARCH (owner, 2026-08-08): the reference-doc form follows the RENDERED
-    # mode directly — ARCHITECTURE is full in max for every task class and the
-    # nav map in low; DEVELOPMENT inclusion is the caller's mode-independent
-    # decision carried on the core (the former per-task force_low_docs lever is
-    # gone: workspace binding no longer shapes the docs).
+    # Max carries whole reference books; Low carries chapter maps.
     static_parts = [core.base_prompt, "## BIBLE.md\n\n" + core.bible_md]
     sections, development = reference_doc_sections(
         env,
@@ -764,40 +746,69 @@ def _request_tokens(system_content: List[Dict[str, Any]], user_content_json: str
     return estimate_context_prompt_tokens([{"role": "system", "content": system_content}, *tail])
 
 
+class MinimumViewUnfit(ValueError):
+    """The core, assignment, resident tools and work room cannot fit this route."""
+
+
 def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...]], user_content_json: str, *, preferred: str,
                       tool_schemas: Optional[List[Dict[str, Any]]], window_tokens: int, known_window: bool, output_reserve: int,
                       ratio: float, start: Optional[str] = None, resident: bool = False,
                       current_messages: Optional[List[Dict[str, Any]]] = None,
                       kept: Optional[Mapping[str, Any]] = None, saving: Optional[Mapping[str, int]] = None,
-                      select: Optional[str] = None,
+                      select: Optional[str] = None, window_record: Optional[WindowRecord] = None,
                       ) -> Tuple[Dict[str, Tuple[List[Dict[str, Any]], Dict]], str]:
-    """Each mode's ``(system content, view receipt)`` and the mode the task starts in.
-
-    ``governance`` is A' and optional D by book form. A mode's fixed part is its request without my memory
-    plus the schemas it sends: the owner-mode selection of ``tool_schemas`` on the first request,
-    or, ``resident``, the list a running task already sends (an ``enable_tools`` addition counts,
-    whatever the mode). View and starting mode are ``memory_floor.mode_views`` of the core's
-    snapshot, so a new route re-renders both from the same capture; ``kept``/``saving`` narrow
-    the shown views from their own levels and ``select`` is a mode an actual refusal chose
-    (``ContextFitPlan.reproject_for_route``).
-    """
-    form = {mode: "low" if core.compact_reference_docs or mode == "nano" else mode for mode in ("max", "low", "nano")}
-    if not core.memory_view_json:
-        return {mode: (_system_blocks(core, governance[form[mode]]), {}) for mode in form}, start or preferred
-    from ouroboros import memory_floor
-    from ouroboros.memory_view import snapshot_from_json
+    """Select books once, walk memory once. Unsent book forms share the selected memory, not another budget."""
+    from dataclasses import replace
+    from ouroboros import memory_floor as floor
+    from ouroboros.memory_view import snapshot_from_json, render_story
     from ouroboros.tool_policy import select_tool_schemas
+
+    mode = select or start or preferred
+    form = {m: "low" if core.compact_reference_docs or m == "nano" else m for m in floor.MODES}
+    snapshot = snapshot_from_json(core.memory_view_json) if core.memory_view_json else None
     names = [schema["function"]["name"] for schema in tool_schemas or []] if resident else None
-    sent = {mode: select_tool_schemas(tool_schemas or [], context_mode=mode, schema_names=names) for mode in form}
-    fixed = {mode: _request_tokens(_system_blocks(core, governance[form[mode]]), user_content_json,
-                supplementary_messages_json=core.supplementary_messages_json, current_messages=current_messages)
-             + tool_schema_tokens(list(sent[mode].schemas)) for mode in form}
-    views, start = memory_floor.mode_views(snapshot_from_json(core.memory_view_json), preferred=preferred, start=start,
-        fixed_tokens_by_mode=fixed, tool_names=None if tool_schemas is None else {m: sent[m].chosen for m in form},
-        window_tokens=window_tokens, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
-        allow_mode_lowering=preferred != "max" or start in {"low", "nano"}, kept=kept, saving=saving, select=select)
-    return {mode: (_system_blocks(core, governance[form[mode]], story, room), receipt)
-            for mode, (story, room, receipt) in views.items()}, start
+
+    def frame(selected):
+        sent = select_tool_schemas(tool_schemas or [], context_mode=selected, schema_names=names)
+        fixed = _request_tokens(_system_blocks(core, governance[form[selected]]), user_content_json,
+            supplementary_messages_json=core.supplementary_messages_json, current_messages=current_messages)
+        fixed += tool_schema_tokens(list(sent.schemas))
+        target, reserve = context_budget.context_mode_limits(selected, preferred, output_reserve)
+        record = replace(window_record, reserve=reserve) if window_record else None
+        window = record.total_equivalent if record and record.usable is not None else window_tokens
+        boundary = record.boundary if record else None
+        allowances = floor.floor_allowances(window_tokens=window if known_window else None,
+            output_reserve_tokens=reserve, non_memory_tokens=fixed, target_tokens=target if kept is None else None,
+            calibration_ratio=ratio, work_room_levels=snapshot.spec.work_room_levels if snapshot else 1,
+            boundary_tokens=boundary)
+        return sent, fixed, reserve, window, boundary, allowances
+
+    sent, fixed, reserve, window, boundary, allowances = frame(mode)
+    # Max names whole books. Story is the last rung: change books before taking its pages.
+    if kept is None and mode == "max" and allowances["margin"] is not None:
+        story_size = floor.view_tokens(render_story(snapshot)) if snapshot else 0
+        if story_size > allowances["margin"] or math.ceil(fixed * ratio) + reserve > window:
+            mode = "low"
+            sent, fixed, reserve, window, boundary, allowances = frame(mode)
+    if kept is None and known_window:
+        work = math.ceil((boundary or window) / context_budget.RECLAIM_LOW_WATER_DIVISOR) * (
+            snapshot.spec.work_room_levels if snapshot else 1)
+        if math.ceil(fixed * ratio) + reserve + work > window:
+            raise MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
+                                  f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work} work > {window} tokens")
+    if snapshot:
+        shown = start or preferred
+        story, room, facts = floor.render_view_for_mode(snapshot, mode=mode, owner_mode=preferred,
+            window_tokens=window, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
+            non_memory_tokens=fixed, lowered_from=preferred if mode != preferred else None,
+            tool_names=None if tool_schemas is None else sent.chosen,
+            kept=None if kept is None else kept.get(shown), saving=(saving or {}).get(shown, 0), boundary_tokens=boundary)
+        if kept is None and known_window and math.ceil((fixed + floor.view_tokens(story) + floor.view_tokens(room)) * ratio) + reserve > window:
+            raise MinimumViewUnfit("Protected owner words and the minimum view cannot fit the usable input")
+        receipt = floor.view_receipt(snapshot, story, room, facts)
+    else:
+        story, room, receipt = "", "", {}
+    return {m: (_system_blocks(core, governance[form[m]], story, room), receipt) for m in floor.MODES}, mode
 
 
 def build_context_fit_plan(
@@ -809,13 +820,7 @@ def build_context_fit_plan(
     route_resolver: Callable[..., Tuple[Dict[str, Any], Any]],
     tool_schemas: Optional[List[Dict[str, Any]]] = None,
 ) -> ContextFitPlan:
-    """Deterministically project one captured core into ordinary-task Max, Low and Nano.
-
-    Each mode renders the captured memory view against its own fixed part: the books
-    of its view, the tool schemas it would send (``tool_schemas``, Nano's selection of
-    them) and its reply reserve; the physical floor decides what of my memory that
-    mode shows only by address (``memory_floor.render_view_for_mode``).
-    """
+    """Capture route facts, choose books and fit one start view."""
     preferred = str(preferred_mode or "max").strip().lower()
     if preferred not in {"low", "max", "nano"}:
         preferred = "max"
@@ -843,27 +848,23 @@ def build_context_fit_plan(
     known_window = window_record.usable is not None
     view_args = dict(
         preferred=preferred, tool_schemas=tool_schemas, window_tokens=window_record.total_equivalent,
-        known_window=known_window, output_reserve=output_reserve)
+        known_window=known_window, output_reserve=output_reserve, window_record=window_record)
     governance = {form: _governance_blocks(env, core, mode=form) for form in ("max", "low")}
     from ouroboros.memory_view import view_role
 
     role = view_role({**task, "metadata": task.get("metadata") or meta})
     view_kind = {"consciousness": "own_wake", "presence": "focus", "integrator": "owner_turn"}.get(role, role)
-    # Size the cold starting view before selecting a witness, just as round one does.
-    contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=1.0)
-    ratio = _route_calibration_ratio(
-        None,  # canonical host evidence, never a child task's own drive
-        str(evidence.route_fp or ""),
-        str(route["model"] or ""),
-        estimate_context_prompt_tokens(
-            [{"role": "system", "content": contents[initial_mode][0]},
-             {"role": "user", "content": user_content}, *json.loads(core.supplementary_messages_json)],
-            list(select_tool_schemas(tool_schemas or [], context_mode=initial_mode).schemas),
-            provider=str(route.get("provider") or "")),
-        view_kind=view_kind,
-    )
-    if ratio != 1.0:
-        contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio)
+    # Select the route/view density from the whole capture before making one floor decision.
+    from ouroboros.memory_view import render_story, render_room, snapshot_from_json
+    snapshot = snapshot_from_json(core.memory_view_json) if core.memory_view_json else None
+    full = _system_blocks(core, governance["low" if preferred == "nano" else preferred],
+                          render_story(snapshot) if snapshot else "", render_room(snapshot) if snapshot else "")
+    ratio = _route_calibration_ratio(None, str(evidence.route_fp or ""), str(route["model"] or ""),
+        estimate_context_prompt_tokens([{"role": "system", "content": full}, {"role": "user", "content": user_content},
+            *json.loads(core.supplementary_messages_json)],
+            list(select_tool_schemas(tool_schemas or [], context_mode=preferred).schemas),
+            provider=str(route.get("provider") or "")), view_kind=view_kind)
+    contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio)
     input_source = None
 
     from ouroboros.context_budget import context_mode_limits
