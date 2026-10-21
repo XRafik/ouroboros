@@ -409,7 +409,7 @@ def test_dynamic_session_supervision_fact_line_and_switch_model_cache_invariance
     )
     expected_before = (
         "An Agent-session row also creates a supervising child on openai::gpt-5.6-sol; "
-        "its calls bill as unknown; the row named as supervisor (D5) replaces that route."
+        "its calls bill as unknown; the row named as supervisor replaces that route."
     )
     assert expected_before in core_before.dynamic_text
     assert "also creates a supervising child on" not in core_before.semi_stable_text
@@ -430,7 +430,7 @@ def test_dynamic_session_supervision_fact_line_and_switch_model_cache_invariance
     )
     expected_after = (
         "An Agent-session row also creates a supervising child on claudexor::claude=sonnet-4-6; "
-        "its calls bill as subscription; the row named as supervisor (D5) replaces that route."
+        "its calls bill as subscription; the row named as supervisor replaces that route."
     )
     assert core_after.semi_stable_text == core_before.semi_stable_text
     assert expected_after in core_after.dynamic_text

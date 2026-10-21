@@ -471,7 +471,7 @@ def subagent_supervision_fact_line(
         route_label, billing = current_cognitive_route_and_billing(task, ctx=ctx)
         return (
             f"An Agent-session row also creates a supervising child on {route_label}; "
-            f"its calls bill as {billing}; the row named as supervisor (D5) replaces that route."
+            f"its calls bill as {billing}; the row named as supervisor replaces that route."
         )
     except Exception:
         return ""
