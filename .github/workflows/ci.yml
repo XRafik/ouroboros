@@ -23,7 +23,7 @@ jobs:
       - name: Native primitive probe; skips remain incomplete
         shell: pwsh
         run: |
-          & ./.platform-probe/rerun-disposable-windows.ps1 -AcknowledgeDisposableRunner -StopServerForSinks
+          & ./.platform-probe/rerun-disposable-windows.ps1 -AcknowledgeDisposableRunner -StopServerForSinks -StopServerDriversForSinks
       - uses: actions/upload-artifact@v4
         if: always()
         with:

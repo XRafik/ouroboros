@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [switch]$AcknowledgeDisposableRunner,
-    [switch]$StopServerForSinks
+    [switch]$StopServerForSinks,
+    [switch]$StopServerDriversForSinks
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
@@ -36,13 +37,24 @@ try {
     & sc.exe query srvnet > "$evidence/srvnet-before.txt"
     & netsh.exe interface ipv4 show excludedportrange protocol=tcp > "$evidence/excluded-ports.txt"
     if ($StopServerForSinks) {
-        # Only the SMB server is eligible. No -Force, dependent service stops,
-        # driver changes, client/redirector changes, registry edits, or reboot.
+        # Stop only the SMB server here. No -Force, client/redirector changes,
+        # registry edits, or reboot. Driver experiment is separately explicit below.
         try {
             Stop-Service -Name LanmanServer -ErrorAction Stop
             Write-Output 'LanmanServer stopped; port release still requires successful exclusive binds.'
         } catch {
             Write-Output "LanmanServer stop failed; keep the diagnostic probe outcome: $_"
+        }
+    }
+    if ($StopServerDriversForSinks) {
+        if (-not $StopServerForSinks) { throw 'Driver experiment requires the server stop first.' }
+        # Prior run proved stopped LanmanServer still leaves srvnet and port445 live.
+        # This affects only this disposable runner, never a desktop/self-hosted host.
+        # Keep the SMB client/redirector intact so the UNC positive control is real.
+        foreach ($driver in @('srv2', 'srvnet')) {
+            & sc.exe stop $driver 1> "$evidence/$driver-stop.txt" 2>&1
+            $driverCode = $LASTEXITCODE
+            Write-Output "$driver stop exit=$driverCode; native observer must prove readiness"
         }
     }
     Get-Service -Name LanmanServer,LanmanWorkstation | Format-List Name,Status | Out-File "$evidence/services-after.txt"
