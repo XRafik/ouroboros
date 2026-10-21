@@ -14,7 +14,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
 | D06 | Review stack | 94 | 0 |
-| D07 | Delegation, subagents & Claudexor | 74 | 0 |
+| D07 | Delegation, subagents & Claudexor | 76 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 72 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 33 | 0 |
@@ -28,7 +28,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **844** | **0** |
+| **total** | | **846** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -40,7 +40,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 | **D02** | ✓ | · | ✓ | · | · | · | ✓ | · | ✓ | · | · | ✓ | · | · | · | ✓ | · | ✓ | · | · |
 | **D03** | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | · |
 | **D04** | · | · | · | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | ✓ | ✓ | · |
-| **D05** | ✓ | ✓ | · | ✓ | · | · | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
+| **D05** | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
 | **D06** | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | · | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D07** | ✓ | ✓ | · | ✓ | ✓ | ✓ | · | ✓ | · | · | · | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
 | **D08** | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | · |
@@ -65,7 +65,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 
 ## Hidden coupling (classified out of the strict graph)
 
-- lazy-only cross-domain pairs: **122**
+- lazy-only cross-domain pairs: **121**
   - D01->D10
   - D01->D11
   - D02->D05
@@ -93,7 +93,6 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D04->D20
   - D05->D03
   - D05->D06
-  - D05->D07
   - D05->D08
   - D05->D14
   - D05->D20
@@ -515,12 +514,14 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/delegate_hold.py`
 - `ouroboros/delegate_interactions.py`
 - `ouroboros/delegate_invocation.py`
+- `ouroboros/delegate_message_store.py`
 - `ouroboros/delegate_output.py`
 - `ouroboros/delegate_pending.py`
 - `ouroboros/delegate_progress.py`
 - `ouroboros/delegate_readonly_inputs.py`
 - `ouroboros/delegate_recovery.py`
 - `ouroboros/delegate_registration_policy.py`
+- `ouroboros/delegate_reply.py`
 - `ouroboros/delegate_shared.py`
 - `ouroboros/delegate_source_coverage.py`
 - `ouroboros/delegate_start_claims.py`

@@ -55,6 +55,7 @@ from ouroboros.delegate_source_coverage import (
     prepare_work_order_start_binding,
     record_started_custody,
 )
+from ouroboros.delegate_reply import REPLY_TO_SCHEMA
 from ouroboros.delegate_supervision import delegate_wait_entry as _delegate_wait_entry
 from ouroboros.delegate_start_instructions import (
     HOST_FACTS_INSTRUCTION as _HOST_FACTS_INSTRUCTION,
@@ -1511,6 +1512,7 @@ def get_tools() -> List[ToolEntry]:
                         "Free-text answer; omit when options were selected."},
                 }, "required": ["question_id"]}, "description":
                     "One row per question you are answering."},
+                "reply_to": REPLY_TO_SCHEMA,
                 "source_response": {"type": "object", "description":
                     "Only for a partial work-order run: exact canonical source range "
                     "receipt. The host verifies schema=1, kind=source_response, the "
@@ -1522,8 +1524,11 @@ def get_tools() -> List[ToolEntry]:
             "name": "delegate_message",
             "description": (
                 "Place one live message into a delegated run's RUNNING turn (a "
-                "correction, a new fact, a redirection) without cancelling it. Only the "
-                "task that started the run may send. Capability-gated, never by harness "
+                "correction, a new fact, a redirection) without cancelling it. The starter, "
+                "ancestors and same-tree tasks may send context; only the starter controls "
+                "answers, cancellation, continuation and integration. The host stamps and "
+                "retains the frame before sending; peer messages appear in its journal on "
+                "the starter's next receipt, without an extra wake. Capability-gated, never by harness "
                 "name: the route's catalog row declares liveInput (mid_turn / "
                 "next_tool_boundary / none) and the engine must list the operation; "
                 "otherwise the typed outcome is unsupported and nothing is sent. Typed "
@@ -1545,8 +1550,9 @@ def get_tools() -> List[ToolEntry]:
             "parameters": {"type": "object", "required": ["run_id", "text"], "properties": {
                 "run_id": {"type": "string", "description": "Run id from delegate_start."},
                 "text": {"type": "string", "description":
-                    "The message, verbatim, as the harness will read it mid-turn "
+                    "The message, retained verbatim inside a host-stamped JSON frame "
                     "(non-empty; the engine bounds its length)."},
+                "reply_to": REPLY_TO_SCHEMA,
                 "message_id": {"type": "string", "description":
                     "ONLY the message_id a previous delivery_unknown result returned, to "
                     "replay that exact message under its original key. Omit for a new "

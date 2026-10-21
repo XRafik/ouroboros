@@ -225,6 +225,8 @@ D20 = "Presence"
 "ouroboros/delegate_evidence.py" = "D07"
 "ouroboros/delegate_hold.py" = "D07"
 "ouroboros/delegate_interactions.py" = "D07"
+"ouroboros/delegate_message_store.py" = "D07"
+"ouroboros/delegate_reply.py" = "D07"
 "ouroboros/delegate_output.py" = "D07"
 "ouroboros/delegate_pending.py" = "D07"
 "ouroboros/delegate_progress.py" = "D07"
@@ -970,6 +972,7 @@ allowed = [
   "D05->D01",
   "D05->D02",
   "D05->D04",
+  "D05->D07",
   "D05->D09",
   "D05->D10",
   "D05->D11",
@@ -1150,7 +1153,6 @@ lazy_only = [
   "D04->D20",
   "D05->D03",
   "D05->D06",
-  "D05->D07",
   "D05->D08",
   "D05->D14",
   "D05->D20",
