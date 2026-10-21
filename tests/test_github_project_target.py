@@ -244,7 +244,7 @@ def test_cli_store_metadata_enables_only_cli_tools_without_probing(tmp_path, mon
 @pytest.mark.parametrize("bound,explicit", [(False, False), (False, True), (True, True)])
 def test_presence_repository_selection_keeps_host_argument_authority(tmp_path, gh_calls, bound, explicit):
     from ouroboros.presence_authority import PresenceCapabilityCeiling, PresenceToolGrant, presence_ceiling_payload
-    from ouroboros.presence_capabilities import PresenceArgumentBinding
+    from tests.frozen_presence_capabilities import PresenceArgumentBinding
     from ouroboros.tools.registry import ToolRegistry
 
     bindings = (PresenceArgumentBinding(("repo",), "static", static_value="owner/allowed"),) if bound else ()

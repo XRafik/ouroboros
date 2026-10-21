@@ -49,11 +49,12 @@ def _seed_reviewing_behavior(data_dir: pathlib.Path) -> str:
     """``test_host_service_api``'s fixture behavior, bound to any room of the account, whose owner also
     selected ``review_change``: its turns may review their own result (a result review takes no workspace
     binding, so no resource is selected)."""
-    from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint, new_presence_binding_id, save_presence_binding
-    from ouroboros.presence_capabilities import (
+    from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint
+    from tests.frozen_presence_bindings import new_presence_binding_id, save_presence_binding
+    from tests.frozen_presence_capabilities import (
         PresenceSelection, PresenceState, PresenceToolTarget, presence_state_fingerprint, save_presence_state,
     )
-    from ouroboros.presence_profile import parse_presence_profile, presence_request_fingerprint
+    from tests.frozen_presence_profile import parse_presence_profile, presence_request_fingerprint
     from ouroboros.skill_loader import SkillReviewState, load_skill, save_enabled, save_review_state
 
     skill_dir = data_dir / "skills" / "external" / "community-helper"

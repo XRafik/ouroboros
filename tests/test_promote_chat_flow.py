@@ -512,16 +512,14 @@ def test_source_prepared_promote_announces_started_for_flow_created_project(
 
 def test_worker_admits_promoted_presence_with_same_verified_ceiling(tmp_path, monkeypatch):
     import supervisor.workers as workers
-    from ouroboros.presence_authority import (
-        build_presence_capability_ceiling,
-        presence_ceiling_payload,
-    )
-    from ouroboros.presence_capabilities import (
+    from ouroboros.presence_authority import presence_ceiling_payload
+    from tests.frozen_presence_authority import build_presence_capability_ceiling
+    from tests.frozen_presence_capabilities import (
         PresenceProfileResolution,
         PresenceSelection,
         PresenceToolTarget,
     )
-    from ouroboros.presence_runtime import ResolvedPresenceRuntime
+    from tests.frozen_presence_runtime import ResolvedPresenceRuntime
 
     resolution = PresenceProfileResolution(
         active=(PresenceSelection("1" * 64, PresenceToolTarget("builtin", "chat_history")),),

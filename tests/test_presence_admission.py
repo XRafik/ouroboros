@@ -3,20 +3,16 @@ from __future__ import annotations
 import pytest
 
 from ouroboros.presence_admission import PresenceAdmissionError, admit_presence_turn
-from ouroboros.presence_bindings import (
-    PresenceBinding,
-    PresenceEndpoint,
-    new_presence_binding_id,
-    save_presence_binding,
-)
-from ouroboros.presence_capabilities import (
+from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint
+from tests.frozen_presence_bindings import new_presence_binding_id, save_presence_binding
+from tests.frozen_presence_capabilities import (
     PresenceSelection,
     PresenceState,
     PresenceToolTarget,
     presence_state_fingerprint,
     save_presence_state,
 )
-from ouroboros.presence_profile import parse_presence_profile, presence_request_fingerprint
+from tests.frozen_presence_profile import parse_presence_profile, presence_request_fingerprint
 from ouroboros.skill_loader import (
     SkillReviewState,
     load_skill,

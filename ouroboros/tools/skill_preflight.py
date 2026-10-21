@@ -670,7 +670,6 @@ def _handle_skill_preflight(
     manifest_findings: List[Dict[str, Any]] = []
     widget_findings: List[Dict[str, Any]] = []
     permission_findings: List[Dict[str, Any]] = []
-    presence_findings: List[Dict[str, Any]] = []
     manifest: Optional[SkillManifest] = None
     manifest_path = None
     for candidate in ("SKILL.md", "skill.json"):
@@ -881,7 +880,6 @@ def _handle_skill_preflight(
         all(f.get("ok") for f in manifest_findings)
         and all(f.get("ok") for f in widget_findings)
         and all(f.get("ok") for f in permission_findings)
-        and all(f.get("ok") for f in presence_findings)
         and all(f.get("ok") for f in file_findings if not f.get("skipped"))
     )
     skipped_files = [f for f in file_findings if f.get("skipped")]
@@ -904,8 +902,6 @@ def _handle_skill_preflight(
         "omitted_files": omitted_files,
         "ok": bool(overall_ok),
     }
-    if presence_findings:
-        payload["presence"] = presence_findings
     notes: List[str] = []
     if skipped_files:
         notes.append(

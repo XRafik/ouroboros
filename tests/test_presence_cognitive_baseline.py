@@ -13,21 +13,15 @@ import json
 
 import pytest
 
-from ouroboros.presence_authority import (
-    PresenceAuthorityError,
-    apply_presence_argument_bindings,
-    build_presence_capability_ceiling,
-    presence_ceiling_allows_tool,
-    presence_ceiling_from_payload,
-    presence_ceiling_payload,
-)
-from ouroboros.presence_capabilities import (
+from ouroboros.presence_authority import PresenceAuthorityError, apply_presence_argument_bindings, presence_ceiling_allows_tool, presence_ceiling_from_payload, presence_ceiling_payload
+from tests.frozen_presence_authority import build_presence_capability_ceiling
+from tests.frozen_presence_capabilities import (
     PresenceArgumentBinding,
     PresenceProfileResolution,
     PresenceSelection,
     PresenceToolTarget,
 )
-from ouroboros.presence_runtime import ResolvedPresenceRuntime
+from tests.frozen_presence_runtime import ResolvedPresenceRuntime
 from ouroboros.tool_capabilities import COGNITIVE_MEMORY_TOOL_NAMES
 from ouroboros.tools.registry import ToolContext
 

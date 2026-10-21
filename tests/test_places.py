@@ -5,7 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from ouroboros import places as p
-from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint, save_presence_binding
+from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint
+from tests.frozen_presence_bindings import save_presence_binding
 
 
 def connect(root, **kw):
@@ -92,3 +93,20 @@ def test_empty_and_malformed_sources_preserved(tmp_path):
 def test_chat_identity_matches_old_runner():
     from ouroboros.presence_runner import _stable_numeric_id
     assert p.conversation_chat_id("slack:team:room:0") == _stable_numeric_id("presence-conversation", "slack:team:room:0")
+
+
+def test_declared_targets_keep_active_siblings_distinct(tmp_path):
+    active = connect(tmp_path, conversation_id="a")
+    closed = connect(tmp_path, conversation_id="b")
+    closed = p.edit_place(tmp_path, closed.place_id, "set_state", author="owner", state="silent")
+    assert p.place_for_target(tmp_path, connector="slack-bridge", targets={"to": ["a"]}) == (active, True)
+    assert p.place_for_target(tmp_path, connector="slack-bridge", targets={"to": ["b"]}) == (closed, True)
+    assert p.place_for_target(tmp_path, connector="slack-bridge", targets={"to": ["unknown"]}) == (None, False)
+    assert p.place_for_target(tmp_path, connector="slack-bridge", targets={}) == (None, False)
+
+
+def test_owner_door_settings_do_not_create_places(tmp_path):
+    (tmp_path / "settings.json").write_text(json.dumps({"TELEGRAM_BOT_TOKEN": "test-only", "OWNER_CHAT_ID": "42"}))
+    assert p.load_places(tmp_path) == []
+    connected = connect(tmp_path)
+    assert p.load_places(tmp_path) == [connected]

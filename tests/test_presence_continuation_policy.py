@@ -41,11 +41,11 @@ from tests.test_presence_continuation import (
 
 def select_review_change(data):
     """The installed behavior also requests a tool its owner maps to ``review_change``."""
-    from ouroboros.presence_capabilities import (
+    from tests.frozen_presence_capabilities import (
         PresenceSelection, PresenceState, PresenceToolTarget, load_presence_state,
         presence_state_fingerprint, save_presence_state,
     )
-    from ouroboros.presence_profile import parse_presence_profile, presence_request_fingerprint
+    from tests.frozen_presence_profile import parse_presence_profile, presence_request_fingerprint
     from ouroboros.skill_loader import SkillReviewState, load_skill, save_review_state
 
     skill_dir = data / "skills/external/community-helper"

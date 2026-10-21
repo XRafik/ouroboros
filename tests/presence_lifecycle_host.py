@@ -48,10 +48,11 @@ def shutdown_fixture_processes(root, generation):
 
 
 def seed(data):
-    from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint, save_presence_binding
-    from ouroboros.presence_capabilities import (
+    from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint
+    from tests.frozen_presence_bindings import save_presence_binding
+    from tests.frozen_presence_capabilities import (
         PresenceSelection, PresenceState, PresenceToolTarget, presence_state_fingerprint, save_presence_state)
-    from ouroboros.presence_profile import parse_presence_profile, presence_request_fingerprint
+    from tests.frozen_presence_profile import parse_presence_profile, presence_request_fingerprint
     from ouroboros.skill_loader import load_skill, save_enabled, save_review_state, SkillReviewState
     from tests.test_host_service_api import _seed_token
     from tests.test_presence_continuation_process import TOKEN

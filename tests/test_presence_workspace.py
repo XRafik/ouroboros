@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from ouroboros.presence_admission import admit_presence_turn
-from ouroboros.presence_capabilities import (
+from tests.frozen_presence_capabilities import (
     PresenceState,
     PresenceStateError,
     load_presence_state,
@@ -98,7 +98,7 @@ def test_legacy_state_shape_and_fingerprint_stay_identical(tmp_path):
         "schema_version": 1, "selections": [],
         "runtime_overrides": {"model_slot": None, "inline_max_rounds": None},
     }
-    from ouroboros.presence_capabilities import _domain_sha256
+    from tests.frozen_presence_capabilities import _domain_sha256
 
     expected = _domain_sha256("ouroboros.presence.state.v1", payload)
     assert presence_state_fingerprint(PresenceState()) == expected
@@ -205,7 +205,7 @@ def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory
         result = _handle_schedule_followup(ctx, objective="Revisit the report", relation="related", **params)
         assert result.startswith("FOLLOWUP_SCHEDULED"), result
     # A future configuration cannot retarget work already admitted/scheduled.
-    _configure_presence(installed.ctx, "workspace", behavior_skill=installed.skill.name, workspace_root="")
+    _configure_presence(installed.ctx, "set_working_folder", place_id=_admit(installed).place.place_id, working_folder="")
     for record in queue.list_scheduled_tasks(installed.data)["tasks"]:
         assert record["followup_relation"]["kind"] == "related"
         assert record["followup_relation"]["billing_group"] == {
@@ -221,7 +221,7 @@ def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory
         "workspace_root": str(installed.workspace), "workspace_mode": "external",
     })
     assert child["workspace"] == task["task_contract"]["workspace"]
-    assert child["capability_ceiling"] == task["task_contract"]["capability_ceiling"]
+    assert "capability_ceiling" not in child and "capability_ceiling" not in task["task_contract"]
     assert not (installed.data / "state" / "headless_tasks").exists()
 
 
