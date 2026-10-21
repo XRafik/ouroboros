@@ -842,22 +842,29 @@ def _finish_task(ctx: ToolContext, action: str, answer: str | None = None,
                  answer_sha256: str | None = None, rationale: str = "",
                  acceptance_subject: dict | None = None, pending_review: str | None = None,
                  silent: bool = False) -> str:
-    """Stage an author act; only a wake's own direct turn can choose silence."""
+    """Stage an author act; wakes and schedule-born roots may choose silence."""
     allow_empty = False
     if silent:
         if action != "finish":
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent requires action=finish"))
         from ouroboros.consciousness_authority import CONSCIOUSNESS_CATEGORY, is_consciousness_origin
-        metadata = getattr(ctx, "task_metadata", None)
-        if not bool(getattr(ctx, "is_direct_chat", False)):
-            return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
-                text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn"))
-        if not (is_consciousness_origin(metadata)
-                and str((metadata or {}).get("usage_category") or "") == CONSCIOUSNESS_CATEGORY):
+        from ouroboros.dialogue_provenance import presence_caller_binding
+        from ouroboros.task_results import resolve_ctx_lineage
+
+        metadata = getattr(ctx, "task_metadata", None) or {}
+        wake = (bool(getattr(ctx, "is_direct_chat", False)) and is_consciousness_origin(metadata)
+                and str(metadata.get("usage_category") or "") == CONSCIOUSNESS_CATEGORY)
+        occurrence = metadata.get("schedule_occurrence")
+        scheduled_root = (isinstance(occurrence, dict)
+                          and str(occurrence.get("schedule_id") or "").strip()
+                          and str(occurrence.get("token") or "").strip()
+                          and resolve_ctx_lineage(ctx)["is_root_task"]
+                          and presence_caller_binding(ctx) is None)
+        if not (wake or scheduled_root):
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn, "
-                     "not on the tasks it started or any other turn"))
+                     "or a schedule-born root without a Presence binding"))
         allow_empty = True
         if answer is None and not answer_sha256:
             answer = ""  # silence needs no words; complete bytes given anyway stay an internal result
