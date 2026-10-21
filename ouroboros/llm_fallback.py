@@ -14,7 +14,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import logging
-import re
 import time
 from typing import Any, Dict, Optional
 
@@ -24,14 +23,15 @@ from ouroboros.llm_attempt import (
     _execute_candidate,
     _execute_candidate_async,
     _finalized_physical_candidate,
+    _is_http_status,
     _is_provider_policy_refusal,
     _is_structured_context_overflow_body,
     _is_structured_context_overflow_exception,
     preserve_prior_dispatch,
     strongest_dispatch_capture,
     processing_refusal,
+    reasoning_strip_retry_allowed,
 )
-from ouroboros.context_budget import context_overflow_message
 from ouroboros.deadline_utils import physical_dispatch_timeout
 from ouroboros.llm_stream import consume_stream, consume_stream_async
 from ouroboros.reasoning_artifacts import (
@@ -132,23 +132,7 @@ class _RecoveryLadderMixin:
         )
         return retry_payload
 
-    @staticmethod
-    def _is_http_status(exc: Exception, code: int) -> bool:
-        """Structural HTTP-status check on a provider exception (``status_code``
-        attribute; falls back to the OpenAI-SDK ``Error code: NNN`` message shape).
-        Used instead of error-string matching so the recovery covers every provider
-        phrasing of the same status class."""
-        sc = getattr(exc, "status_code", None)
-        if sc is not None:
-            try:
-                return int(sc) == int(code)
-            except (TypeError, ValueError):
-                pass
-        # No status_code attr (non-SDK exceptions): match the code only as a
-        # STATUS token — leading, or after error/status/http labels — not any bare
-        # number, so a token count or id with "400" in it can't false-trigger.
-        text = str(exc).strip().lower()
-        return bool(re.search(rf"(?:^|error code:?\s*|status(?:[ _]code)?:?\s*|http[\s:]*){int(code)}\b", text))
+    _is_http_status = staticmethod(_is_http_status)
 
     def _openrouter_signature_retry_kwargs(
         self,
@@ -157,17 +141,9 @@ class _RecoveryLadderMixin:
         exc: Exception,
     ) -> Optional[Dict[str, Any]]:
         """Strip replayed reasoning once for a non-overflow OpenRouter 400."""
-        if getattr(exc, "stream_incomplete", False):
-            return None
-        if _is_structured_context_overflow_exception(exc) or _is_provider_policy_refusal(exc):
-            return None
-        if context_overflow_message(str(exc)):
-            # An upstream's "prompt is too long" inside the aggregated 400 is the loop's
-            # size recovery (the same shared classifier), never a reasoning strip.
-            return None
         if not target.get("supports_openrouter_extensions"):
             return None
-        if not self._is_http_status(exc, 400):
+        if not reasoning_strip_retry_allowed(exc):
             return None
         retry_kwargs = self._reroute_same_model_kwargs(target, kwargs)
         if retry_kwargs is not None:
