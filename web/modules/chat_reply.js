@@ -147,8 +147,8 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     // The strip opens and closes like the capsule row's fold (style.css): its height runs from 0 while its words fade,
     // so the row above it rises with it instead of jumping; a reply staged over another one swaps in place. The room it
     // takes at rest (its box and margins, --reply-room) is where the composer's reserve goes at once (chat.js). Staging
-    // focuses the field and lays the composer out, a long frame the first time: the strip is held shut through it
-    // (`data-hold`) and opens from the next frame, so no long frame shows it half open.
+    // focuses the field and lays the composer out, a long first frame the first time: the strip is held shut through it
+    // (`data-hold`) and opens from the frame after, so no long frame shows it half open.
     function run(node, to) {
         const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null;
         const margins = style ? (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0) : 0;
@@ -157,7 +157,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         if (to === 'open' && typeof requestAnimationFrame === 'function') {
             node.dataset.hold = '';
             node.dataset.motion = 'open';
-            return new Promise((resolve) => requestAnimationFrame(resolve)).then(() => {
+            return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))).then(() => {
                 if (!('hold' in node.dataset)) return 'cancel';
                 delete node.dataset.hold;
                 return afterMotion(node, { property: 'max-height' }).done;

@@ -9664,7 +9664,7 @@ body.keyboard-open .project-panel {
     margin-bottom: 0;
     opacity: 0;
 }
-/* Held through the frame that staged it (chat_reply.js): shut at once, then it opens from the next frame. */
+/* Held through the first frame after it was staged (chat_reply.js): shut at once, then it opens from the next. */
 .chat-field > .chat-quote--composer[data-hold] { transition: none; }
 /* The sent draft's copy in flight (send_flight.js; DESIGN "The composer field"): the new bubble's own look, fixed over
    the room for one motion, above a Project and below the drawer, inert. */

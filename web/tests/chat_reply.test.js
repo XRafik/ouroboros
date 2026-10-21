@@ -227,7 +227,7 @@ test('Reply stages the strip and the next frame carries only the address; Esc or
     } finally { f.close(); }
 });
 
-test('a staged strip is held shut through the frame that staged it and opens from the next', async () => {
+test('a staged strip is held shut through the first frame after staging and opens from the next', async () => {
     const frames = [], prior = globalThis.requestAnimationFrame;
     globalThis.requestAnimationFrame = (callback) => frames.push(callback);
     const f = fixture();
@@ -239,6 +239,10 @@ test('a staged strip is held shut through the frame that staged it and opens fro
         const strip = f.strip();
         assert.deepEqual([strip.dataset.motion, 'hold' in strip.dataset], ['open', true],
             'staging focuses the field and lays it out: the strip waits that frame out shut');
+        frames.splice(0).forEach((callback) => callback());
+        await Promise.resolve();
+        assert.deepEqual([strip.dataset.motion, 'hold' in strip.dataset], ['open', true],
+            'the first frame lays the focused field out (the long one): still held');
         frames.splice(0).forEach((callback) => callback());
         await Promise.resolve();  // the frame's callback settles before that frame's style is worked out
         assert.deepEqual([strip.dataset.motion, 'hold' in strip.dataset], ['open', false], 'then it opens');
