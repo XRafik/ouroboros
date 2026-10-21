@@ -434,7 +434,8 @@ def test_a_forced_final_that_never_dispatched_counts_nothing(acting):
 @pytest.mark.parametrize("stage", ["before_prepare", "after_prepare", "after_forced_send"])
 def test_a_resumed_task_keeps_one_change_and_its_origin(acting, stage):
     """Pause, quit and Resume carry the send observer's state: a change made before the
-    checkpoint is neither counted again nor left unnamed after the restore."""
+    checkpoint is neither counted again nor left unnamed after the restore, though the
+    resumed request goes out a round later (a parked tool tail runs first)."""
     from ouroboros import loop, owner_wait, transcript_prefix
     from ouroboros.loop_messages import _append_or_merge_user_content
     from ouroboros.preflight_receipts import canonical_data_root
@@ -451,11 +452,20 @@ def test_a_resumed_task_keeps_one_change_and_its_origin(acting, stage):
                                task_metadata=deepcopy(slot.task_metadata))
     messages, usage = [], {}
     owner_wait.restore_continuation_state(SimpleNamespace(_ctx=restored), state, messages, {}, usage, set())
+    resumed = ctx.round_idx + 1
     _append_or_merge_user_content(messages, "Continue after restart", slot=restored)  # the resumed request only appends
     assert transcript_prefix.prepare_reasoning_for_send(restored, messages, ctx.tool_schemas,
-                                                        round_idx=ctx.round_idx, usage=usage) is None
-    loop._record_transcript_prefix(restored, messages, ctx.round_idx, usage, None, ctx.task_id,
+                                                        round_idx=resumed, usage=usage) is None
+    loop._record_transcript_prefix(restored, messages, resumed, usage, None, ctx.task_id,
                                    slot.drive_root / "logs", ctx.tool_schemas)
     record = json.loads(transcript_prefix.history_changes_path(root).read_text())
     assert usage["prompt_prefix_breaks"] == 1
     assert {origin: row["count"] for origin, row in record["origins"].items()} == {"image_eviction": 1}
+    # The facts line names the change beside the request that carried it.
+    carrier = ctx.round_idx if stage == "after_forced_send" else resumed
+    assert "(image_eviction)" in transcript_prefix.history_change_text(usage["_recent_prefix_breaks"], carrier)
+    # The carried identity is spent: a later, separate change still counts.
+    messages[1] = {**messages[1], "content": "An earlier message edited later"}
+    loop._record_transcript_prefix(restored, messages, resumed + 1, usage, None, ctx.task_id,
+                                   slot.drive_root / "logs", ctx.tool_schemas)
+    assert usage["prompt_prefix_breaks"] == 2

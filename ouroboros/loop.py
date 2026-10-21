@@ -386,7 +386,7 @@ def _record_transcript_prefix(ctx, messages, round_idx, accumulated_usage,
     from ouroboros.tools.compact_context import record_context_view
 
     # Before the view replaces it: a restored slot's baseline is its context observation.
-    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx, tools=tool_schemas)
+    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx, tools=tool_schemas, usage=accumulated_usage)
     record_context_view(ctx, messages, tool_schemas, physical_capture=getattr(ctx, "_usable_main_capture", None))
     from ouroboros.context_input_selection import capture_historical_inputs
 

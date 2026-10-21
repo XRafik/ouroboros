@@ -191,6 +191,7 @@ def observe_send(
     round_idx: int,
     sanctioned_by: Optional[str] = None,
     tools: Any = None,
+    usage: Optional[dict] = None,
 ) -> Optional[Dict[str, Any]]:
     """Record whether this send extends the previous one.  Never blocks it.
 
@@ -203,6 +204,9 @@ def observe_send(
     unexplained break.  The stamp is consumed by every observation and
     explains a break below the system row only: compaction never touches the
     system row, while a context-fit reprojection touches nothing else.
+    A change the slot's retirement already counted is not returned again, even
+    when its request goes out in a later round; ``usage`` then binds its round
+    fact to this request.
     """
     current = [message_digest(message) for message in messages]
     reported = getattr(slot, "_reasoning_retirement_break", None)
@@ -236,7 +240,21 @@ def observe_send(
         "current_messages": len(current),
         **_break_details(index, cause, len(previous), sanction),
     }
-    return None if reported == _break_identity(fact) else fact
+    if not isinstance(reported, tuple) or reported[1:] != _break_identity(fact)[1:]:
+        return fact
+    _carry_counted_change(usage, reported, round_idx)
+    return None
+
+
+def _carry_counted_change(usage: Any, reported: tuple, round_idx: int) -> None:
+    """A change counted before a request that never went out (a failed send, a parked
+    tool tail) explains the cache share of the request that finally carried it."""
+    recent = [item for item in (usage or {}).get("_recent_prefix_breaks") or () if isinstance(item, dict)]
+    if reported[0] == round_idx or any(item.get("round") == round_idx for item in recent):
+        return
+    for item in recent:
+        if _break_identity(item) == reported:
+            item["round"] = round_idx
 
 
 def _baseline(slot: Any) -> tuple:
@@ -280,8 +298,8 @@ def retire_unbound_reasoning(slot: Any, messages: List[Dict[str, Any]], tools: A
     return fact
 
 
-def _break_identity(fact: dict) -> tuple:
-    return tuple(fact[key] for key in ("round", "index", "kind", "sanctioned_by"))
+def _break_identity(fact: Mapping[str, Any]) -> tuple:
+    return tuple(fact.get(key) for key in ("round", "index", "kind", "sanctioned_by"))
 
 
 _HISTORY_TASKS_KEPT = 32
@@ -351,7 +369,7 @@ def count_accepted_send(slot: Any, messages: list, tools: Any, *, round_idx: int
 
     Its retirement before the send left the same identity on the slot, so a change it
     already counted is not counted twice; a model without signed reasoning still counts."""
-    fact = observe_send(slot, messages, round_idx=round_idx, tools=tools)
+    fact = observe_send(slot, messages, round_idx=round_idx, tools=tools, usage=usage)
     if not fact:
         return
     from ouroboros.loop_messages import _emit_checkpoint_event
@@ -417,7 +435,7 @@ def history_changes_line(drive_root: Any) -> str:
                     f"task{'s' if tasks != 1 else ''}")
     code = str(record.get("code"))
     return (f"INFO: SENT HISTORY CHANGES under the running code ({code if ' ' in code else code[:12]}, first at "
-            f"{str(record.get('first'))[:16]}) — {'; '.join(rows)}. Ordinary steps append; the round facts name "
+            f"{str(record.get('first'))[:16]}Z) — {'; '.join(rows)}. Ordinary steps append; the round facts name "
             "each change beside the cache share it preceded.")
 
 

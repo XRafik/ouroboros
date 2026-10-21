@@ -68,6 +68,8 @@ class TestSentHistoryHealth:
         line = next(row for row in build_health_invariants(env).splitlines() if "SENT HISTORY CHANGES" in row)
         assert line.startswith("- INFO: SENT HISTORY CHANGES under the running code ("), line
         assert ", first at " in line and "the round facts name each change" in line
+        first = line.split(", first at ", 1)[1].split(")", 1)[0]
+        assert len(first) == 17 and first.endswith("Z"), first  # minutes, labelled UTC
         assert "superseded_skill_snapshot 2 in 2 tasks; compaction 1 in 1 task" in line
 
     def test_another_codes_record_is_not_this_codes_history(self, tmp_path):
