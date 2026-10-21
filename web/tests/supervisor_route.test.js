@@ -20,7 +20,7 @@ test('schema-2 scheduling snapshot feeds the existing coordinator card and chip'
     } }) };
     t.after(() => { globalThis.document = priorDocument; });
     const event = { subagent_task_id: 'child', executor_route: 'codex', effective_executor: 'harness',
-        model: snapshot.model, parent_cognitive_route: snapshot };
+        model: snapshot.model, parent_cognitive_route: snapshot, coordinator_billing: 'subscription' };
     const chip = executorChip(event);
     assert.equal(chip.coordinatorProvenance, 'chosen by the delegator (cognition)');
     assert.match(chip.title, /this subagent itself runs on claudexor::codex=cognitive-model \(bills as subscription\)/);

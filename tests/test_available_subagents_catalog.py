@@ -376,6 +376,9 @@ def test_dynamic_session_supervision_fact_line_and_switch_model_cache_invariance
         "claudexor::claude=sonnet-4-6", "subscription",
     )
     assert cognitive_route_billing_basis("qwen/qwen3-coder", use_local=True) == (
+        "qwen/qwen3-coder (local)", "unknown",
+    )
+    assert cognitive_route_billing_basis("qwen/qwen3-coder", use_local=True, cost=0.0) == (
         "qwen/qwen3-coder (local)", "measured",
     )
     assert cognitive_route_billing_basis("openai::gpt-5.6-sol") == (
@@ -452,4 +455,3 @@ def test_dynamic_session_supervision_fact_line_and_switch_model_cache_invariance
     )
     assert "also creates a supervising child on" not in core_api.dynamic_text
     assert "also creates a supervising child on" not in core_api.semi_stable_text
-

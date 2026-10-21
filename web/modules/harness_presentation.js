@@ -135,7 +135,7 @@ export function formatCoordinatorProvenance(source) {
         || snap?.chosen_by || snap?.provenance || source.chosen_by || '',
     ).trim();
     const lower = explicit.toLowerCase();
-    const role = String(snap?.source_role || source.source_role || source.effective_model_lane || '').trim().toLowerCase();
+    const role = String(snap?.source_role || '').trim().toLowerCase();
     if (chosenRow || lower === 'delegator') {
         return chosenRow ? `chosen by the delegator (${chosenRow})` : 'chosen by the delegator';
     }
@@ -154,17 +154,12 @@ export function coordinatorRouteClause(evt) {
         ? evt.parent_cognitive_route
         : null;
     const rawModel = String(evt?.coordinator_route || evt?.model || snap?.model || '').trim();
-    const local = Boolean(evt?.use_local_model || snap?.use_local_model) || rawModel.endsWith(' (local)');
+    const local = Boolean(evt?.use_local_model ?? snap?.use_local_model) || rawModel.endsWith(' (local)');
     const route = local && rawModel && !rawModel.endsWith(' (local)') ? `${rawModel} (local)` : rawModel;
     const explicitBilling = String(
         evt?.coordinator_billing || evt?.nanny_billing || evt?.cost_kind || snap?.billing || snap?.cost_kind || '',
     ).trim();
-    const hasNumericCost = (typeof evt?.cost_usd === 'number' && Number.isFinite(evt.cost_usd))
-        || (typeof evt?.cost === 'number' && Number.isFinite(evt.cost));
-    const billing = explicitBilling
-        || (route.startsWith('claudexor::') ? 'subscription'
-            : local || hasNumericCost ? 'measured'
-            : 'unknown');
+    const billing = explicitBilling || 'unknown';
     return route
         ? `this subagent itself runs on ${route} (bills as ${billing})`
         : `this subagent runs on its coordinator route (bills as ${billing})`;
