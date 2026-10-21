@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { initActivity } from '../modules/activity.js';
 import { initLogs } from '../modules/logs.js';
@@ -284,7 +283,7 @@ test('Activity separates standing schedules from retained history and keeps Rest
     assert.equal(standing[1].querySelector('button').dataset.action, 'restore');
 
     assert.equal(history.hasAttribute('open'), false);
-    assert.match(history.querySelector('summary').textContent, /suppressed \(2\)/);
+    assert.match(history.querySelector('summary').textContent, /withdrawn \(2\)/);
     const retained = history.querySelectorAll('.activity-row');
     assert.equal(retained.length, 2);
     assert.match(retained[0].textContent, /Suppressed skill[\s\S]*suppressed/);
@@ -413,20 +412,27 @@ test('Activity distinguishes a recorded restore that is not ready from audit fai
     assert.doesNotMatch(toasts().at(-1), /audit.*incomplete/);
 });
 
-test('Activity delete reads its outcome through the same seam as the toggles', async () => {
-    // Delete opens a modal this fixture cannot drive, so the centralisation is
-    // pinned at the source: ONE request helper, which reports every outcome, and
-    // no branch that fires the action and ignores what came back.
-    const source = await readFile(new URL('../modules/activity.js', import.meta.url), 'utf8');
-    const requests = source.match(/fetchJson\(`\/api\/schedules\//g) || [];
-    assert.equal(requests.length, 1, 'every lifecycle button goes through one request helper');
-    const helper = source.split('async function scheduleAction(')[1].split('\n    }')[0];
-    assert.match(helper, /reportScheduleOutcome\(action, outcome\)/);
-    for (const branch of ["scheduleAction(id, 'delete'", 'scheduleAction(id, action']) {
-        assert.ok(source.includes(branch), branch);
+test('Activity delete requires confirmation and reports the withdrawal receipt', async (t) => {
+    const { mount, routes, ws, document, toasts } = setup(t);
+    emptyActivity(routes);
+    routes.set(schedulesUrl, response({ tasks: [lifecycleSchedules[0]] }));
+    const sent = [];
+    routes.set('/api/schedules/active/action', (_, init) => {
+        sent.push(JSON.parse(init.body));
+        return response({ ok: true, changed: true, status: 'withdrawn', audit: 'recorded', running_or_queued: false });
+    });
+    await initActivity({ mount, ws }).refresh();
+    for (const confirmed of [false, true]) {
+        const click = mount.fire('click', { target: mount.querySelector('[data-act="schedule-delete"]') });
+        const dialog = document.body.querySelector('[role="dialog"]');
+        assert.match(dialog.textContent, /stays restorable for a while/);
+        assert.equal(sent.length, 0, 'nothing is sent before confirmation');
+        await dialog.parentElement.fire('click', { target: dialog.querySelector(confirmed ? '[data-confirm-ok]' : '[data-confirm-cancel]') });
+        await click;
+        assert.equal(sent.length, confirmed ? 1 : 0);
     }
-    // No second, button-local reading of the response beside the shared one.
-    assert.equal((source.match(/outcome\.ok/g) || []).length, 1);
+    assert.deepEqual(sent, [{ action: 'delete', reason: 'owner deleted the schedule from Activity', expected_hold_id: '' }]);
+    assert.deepEqual(toasts(), ['Schedule withdrawn.']);
 });
 
 test('Activity keeps the retained-history disclosure and focus the owner left open', async (t) => {

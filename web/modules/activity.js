@@ -129,11 +129,12 @@ export function scheduleStatus(s) {
     return s.enabled === false ? 'disabled' : 'active';
 }
 
-// Retained rows — a fired one-shot, a suppressed skill row — are history, not
-// schedules wearing a disabled flag. A deleted row still finishing accepted
-// work is not history: it stays in the standing list until it disappears.
+// Known work in flight keeps a withdrawn row in the standing list. Other
+// withdrawn rows and fired one-shots remain reachable in history.
 export function isRetainedSchedule(s) {
-    return ['consumed', 'suppressed'].includes(scheduleStatus(s));
+    const status = scheduleStatus(s);
+    return ['consumed', 'suppressed'].includes(status)
+        || (status === 'delete_pending' && Boolean(s.withdrawal) && s.withdrawal.work_in_flight !== true);
 }
 
 function scheduleTextHtml(s, note, expanded) {
@@ -199,12 +200,18 @@ export function scheduleRowHtml(s, expanded = false) {
         pending_binding_unavailable: 'Fired task awaits verified work binding',
         followup_result_persistence_unavailable: 'Task record could not be saved',
     };
-    const pendingDetail = pendingDelete ? ` · deletion waits for ${relation === 'independent'
-        ? 'its accepted run to start' : 'its task to finish'}` : '';
-    const statusLabel = pendingDelete ? 'deletion pending' : status;
+    const withdrawal = s.withdrawal;
+    const statusLabel = !pendingDelete ? status : withdrawal?.work_in_flight === true
+        ? 'deletion pending · work in flight' : withdrawal?.restorable === true
+            ? 'withdrawn · restorable' : withdrawal ? 'withdrawn' : 'deletion pending';
     const destination = s.destination || s.task || {};
     const address = `${destination.project_id ? ` · project ${esc(destination.project_id)}` : ''}${destination.chat_id != null ? ` · chat ${esc(destination.chat_id)}` : ''}`;
-    const sub = `${note ? 'reminder · ' : s.kind === 'task' ? 'task · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)}${pendingDetail} · ${esc(relation)}${binding}${address}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}${hold.detail ? `: ${esc(hold.detail)}` : ''}` : ''}${s.followup_wait && !s.waiting_detail ? ` · ${esc(explanations[s.followup_wait] || s.followup_wait)}` : ''}${s.completed_at ? ' · already fired' : ''}${managed && s.skill ? ` · ${esc(s.skill)}` : ''}${waiting}${failed}`;
+    const sub = `${note ? 'reminder · ' : s.kind === 'task' ? 'task · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)} · ${esc(relation)}${binding}${address}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}${hold.detail ? `: ${esc(hold.detail)}` : ''}` : ''}${s.followup_wait && !s.waiting_detail ? ` · ${esc(explanations[s.followup_wait] || s.followup_wait)}` : ''}${s.completed_at ? ' · already fired' : ''}${managed && s.skill ? ` · ${esc(s.skill)}` : ''}${waiting}${failed}`;
+    const withdrawalDetail = withdrawal ? [
+        withdrawal.at ? `withdrawn ${scheduleInstantHtml(withdrawal.at, { includeYear: true })}` : '',
+        withdrawal.by ? `by ${esc(withdrawal.by)}` : '',
+        withdrawal.reason ? esc(withdrawal.reason) : '',
+    ].filter(Boolean).join(' · ') : '';
     // The exact hold release stays available wherever a hold exists, including on a
     // deleted row whose accepted task still needs it; it never re-enables the row.
     const holdControl = !hold.hold_id ? ''
@@ -220,11 +227,12 @@ export function scheduleRowHtml(s, expanded = false) {
     // its skill's readiness and re-arms on resync; an Enable button there
     // would offer to lift a suppression nobody applied. A pending deletion can
     // be explicitly cancelled; naming it Enable would hide that extra effect.
-    const cancelDelete = !hold.hold_id && !(once && s.completed_at)
-        ? `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="restore">Cancel deletion</button>` : '';
+    const canRestore = withdrawal ? withdrawal.restorable === true : !hold.hold_id && !(once && s.completed_at);
+    const restoreWithdrawal = canRestore
+        ? `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="restore">Restore</button>` : '';
     const readinessHeld = managed && !enabled && !suppressed;
     const lifecycle = pendingDelete
-        ? `${holdControl}${cancelDelete}`
+        ? `${holdControl}${restoreWithdrawal}`
         : status === 'waiting'
             ? '<span class="activity-tag">waiting for existing control</span>'
             : hold.hold_id
@@ -240,6 +248,7 @@ export function scheduleRowHtml(s, expanded = false) {
             ${scheduleTextHtml(s, note, expanded)}
             <span class="activity-sub">${sub}</span>
             ${scheduleRunHtml(s)}
+            ${withdrawalDetail ? `<span class="activity-sub">${withdrawalDetail}</span>` : ''}
         </div>
         <div class="activity-row-actions">${lifecycle}
            <button type="button" class="btn btn-xs btn-danger" data-act="schedule-delete" data-id="${id}" data-managed="${managed ? '1' : ''}" data-note="${note ? '1' : ''}">Delete</button></div>
@@ -258,7 +267,7 @@ export function scheduleOutcomeToast(action, outcome) {
     if (outcome.changed === false) return [`Schedule ${action} did not change anything: ${detail}`, 'error'];
     // Restriction refresh can change bookkeeping while REFUSING release.
     // Only typed applied outcomes may produce an applied/success message.
-    if (!['updated', 'deleted', 'delete_deferred', 'suppressed', 'restored_not_ready',
+    if (!['updated', 'withdrawn', 'deleted', 'delete_deferred', 'suppressed', 'restored_not_ready',
         'hold_released', 'changed_audit_incomplete'].includes(outcome.status)) {
         return [`Schedule ${action} refused: ${detail}`, 'error'];
     }
@@ -270,7 +279,8 @@ export function scheduleOutcomeToast(action, outcome) {
     if (outcome.ok !== true) return [`Schedule ${action} changed, but did not finish successfully: ${detail}`, 'warn'];
     // Name what actually happened: a delete on a skill row is a durable
     // suppression, and saying "deleted" would claim a removal that did not occur.
-    const done = outcome.status === 'suppressed' ? 'suppressed (kept disabled until restored)' : `${action}d`;
+    const done = outcome.status === 'withdrawn' ? 'withdrawn'
+        : outcome.status === 'suppressed' ? 'suppressed (kept disabled until restored)' : `${action}d`;
     // Lifecycle actions govern FUTURE dispatch; a run already admitted keeps
     // going. Silence here would let the owner read the button as a stop.
     if (outcome.running_or_queued === true) {
@@ -279,7 +289,7 @@ export function scheduleOutcomeToast(action, outcome) {
     if (outcome.running_or_queued === null || outcome.running_or_queued === undefined) {
         return [`Schedule ${done}. Whether a task it already started is still running is unknown.`, 'info'];
     }
-    return outcome.status === 'suppressed' ? [`Schedule ${done}.`, 'info'] : null;
+    return ['withdrawn', 'suppressed'].includes(outcome.status) ? [`Schedule ${done}.`, 'info'] : null;
 }
 
 export function initActivity({ mount, ws } = {}) {
@@ -439,9 +449,7 @@ export function initActivity({ mount, ws } = {}) {
         if (!Array.isArray(data?.tasks)) throw new Error('Schedules unavailable');
         const tasks = data.tasks;
         if (!tasks.length) return '<div class="activity-empty">No scheduled tasks.</div>';
-        // Retained rows — a fired one-shot, a suppressed skill row — are history,
-        // not schedules wearing a disabled flag. They stay reachable (and
-        // restorable) but collapsed, so the standing schedules are the list.
+        // History stays reachable without padding the standing schedules.
         const standing = [];
         const retained = [];
         for (const s of tasks) (isRetainedSchedule(s) ? retained : standing).push(s);
@@ -454,7 +462,7 @@ export function initActivity({ mount, ws } = {}) {
             // they just opened (and drops the focus they had inside it) reads as
             // the app undoing their action.
             parts.push(`<details class="activity-history" data-activity-history${historyOpen ? ' open' : ''}>
-                <summary>History &amp; suppressed (${retained.length})</summary>
+                <summary>History &amp; withdrawn (${retained.length})</summary>
                 ${retained.map((s) => scheduleRowHtml(s, expandedSchedules.has(String(s.id || '')))).join('')}
             </details>`);
         }
@@ -476,7 +484,8 @@ export function initActivity({ mount, ws } = {}) {
     function restoreFocus(previous) {
         if (!previous) return;
         const target = [...mount.querySelectorAll('[data-act]')].find((el) => (
-            el.dataset.act === previous.act && (el.dataset.id || '') === previous.id));
+            el.dataset.act === previous.act && (el.dataset.id || '') === previous.id
+            && (el.dataset.holdId || '') === previous.holdId));
         if (!target) return;
         // Focus lives inside the disclosure for a retained row: open it rather
         // than focusing a control the owner cannot see.
@@ -491,7 +500,7 @@ export function initActivity({ mount, ws } = {}) {
         const revision = ++refreshRevision;
         rememberDisclosure();
         const focused = focusedControl();
-        const focusedKey = focused && { act: focused.dataset.act, id: focused.dataset.id || '' };
+        const focusedKey = focused && { act: focused.dataset.act, id: focused.dataset.id || '', holdId: focused.dataset.holdId || '' };
         sections.forEach(({ root, status, loaded }) => {
             root.setAttribute('aria-busy', 'true');
             setInlineStatus(status, loaded ? 'Refreshing… Previously loaded values shown.' : 'Loading…');
@@ -636,7 +645,7 @@ export function initActivity({ mount, ws } = {}) {
                     title: managedRow ? 'Suppress skill schedule' : `Delete ${noun}`,
                     body: managedRow
                         ? 'This schedule is declared by an installed skill and cannot be removed; Delete keeps it suppressed until you Restore it. Suppress it?'
-                        : `Delete this ${noun}?`,
+                        : `Delete this ${noun}? It stays restorable for a while and is removed after the retention window once its work has settled. This does not cancel work already started.`,
                     confirmLabel: managedRow ? 'Suppress' : 'Delete',
                     danger: true,
                 });
