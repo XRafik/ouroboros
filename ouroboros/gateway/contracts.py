@@ -188,6 +188,12 @@ class ChatOutbound(ChatReferenceFields):
     # Opaque delegated route stamped once by resolve_subagent_dispatch; absent/empty = native/no chip. Dispatch
     # intent is not a landing receipt: a reduction belongs in capability_delta, never rewrites this route.
     executor_route: NotRequired[str]
+    # Recorded coordinator facts on live/history frames; absence carries no billing or provenance claim.
+    parent_cognitive_route: NotRequired[Dict[str, Any]]
+    coordinator_route: NotRequired[str]
+    use_local_model: NotRequired[bool]
+    coordinator_billing: NotRequired[str]
+    coordinator_provenance: NotRequired[str]
     # The effort decision at dispatch (a session row: its leaf's): level, the parent's request, source
     # auto|pin|model_name|cyber. Empty/absent = unknown, no chip.
     effort_level: NotRequired[str]
