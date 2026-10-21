@@ -527,5 +527,3 @@ def test_a_blocked_review_never_queues_an_automatic_repair(monkeypatch, tmp_path
     assert response.status_code == 200 and _json_response_payload(response)["review_status"] == "blockers"
     assert sent == [] and not (tmp_path / "state" / "skills" / "demo" / "auto_repair.json").exists()
     assert not any(name.startswith("_maybe_enqueue") for name in vars(marketplace_api))
-
-

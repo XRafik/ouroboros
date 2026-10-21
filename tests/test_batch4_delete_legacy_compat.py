@@ -129,7 +129,7 @@ def test_deleted_related_row_still_binds_its_admitted_task_through_a_resumed_han
     [task] = pending
     outcome = _delete(root, sid)
     assert outcome['status'] == 'withdrawn'
-    assert 'its task settles' in outcome['detail']
+    assert 'retention window once its work has settled' in outcome['detail']
     assert _claim_worker_launch(queue, task, _worker(sent)) and len(sent) == 1
     pending.clear()
     queue.check_scheduled_tasks()  # the occurrence settles (possible dispatch)

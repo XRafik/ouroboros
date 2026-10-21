@@ -920,7 +920,6 @@ from supervisor.queue_schedules import (  # noqa: E402, F401 -- intentional publ
 from supervisor.schedule_lifecycle import (  # noqa: E402, F401 -- intentional public re-exports
     mutate_scheduled_task,
     patch_scheduled_task,
-    remove_scheduled_task,
     upsert_scheduled_task,
 )
 from supervisor.queue_snapshot import (  # noqa: E402, F401 -- intentional public re-exports

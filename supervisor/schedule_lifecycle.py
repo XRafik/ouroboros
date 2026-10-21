@@ -1,4 +1,4 @@
-"""Owner-governed schedule lifecycle: create/edit, disable/delete/restore, remove.
+"""Owner-governed schedule lifecycle: create/edit and disable/delete/restore.
 
 The leaf beside ``supervisor/queue_schedules.py`` (the store, transaction,
 audit, projections and dispatch): every OWNER-authored mutation of
@@ -525,16 +525,3 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
     except ScheduleLockTimeout as exc:
         return {"ok": False, "changed": False, "status": "lock_timeout",
                 "schedule_id": wanted, "detail": str(exc), "audit": "not_written"}
-
-
-def remove_scheduled_task(schedule_id: str, *, drive_root: pathlib.Path | None = None,
-                          actor: str = "", task_id: str = "", reason: str = "") -> bool:
-    """Remove a scheduled task record by id, through the one audited delete seam.
-
-    The boolean reports whether the audited lifecycle action changed the row.
-    """
-    outcome = mutate_scheduled_task(
-        "delete", schedule_id, drive_root=drive_root, task_id=task_id,
-        actor=str(actor or "").strip() or "host",
-        reason=str(reason or "").strip() or "schedule_removed")
-    return bool(outcome.get("changed"))
