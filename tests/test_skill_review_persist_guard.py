@@ -329,16 +329,20 @@ def test_direct_review_ignores_historical_completed_job_hash(tmp_path, monkeypat
         },
         trailing_newline=True,
     )
-    monkeypatch.setattr(
-        "ouroboros.tools.review._handle_multi_model_review",
-        lambda *_a, **_kw: json.dumps(
-            {"results": [_pass_actor("fake/a"), _pass_actor("fake/b")]}
-        ),
-    )
+    # The one wave over the golden pool with an offline seam: every seat answers the skill question clean.
+    import ouroboros.review_substrate as substrate
+    from tests import _contributor_packet_shared as shared
+    from tests.review_pool_rosters import set_review_pool
+
+    monkeypatch.setenv("OUROBOROS_REVIEW_ENFORCEMENT", "advisory")
+    set_review_pool(monkeypatch, shared.golden_pool())
+    sends: list = []
+    monkeypatch.setattr(substrate.ReviewCoordinator, "_run_slot", shared.golden_physical_seam(sends))
 
     outcome = review_skill(ctx, "alpha")
 
-    assert outcome.status == "clean"
+    assert outcome.status == "clean", outcome.error
+    assert sorted(send["slot_id"] for send in sends) == ["s1", "t1", "t2"]
     assert load_review_state(drive_root, "alpha").content_hash == content_hash
 
 

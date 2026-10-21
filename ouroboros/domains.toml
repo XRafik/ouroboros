@@ -556,20 +556,14 @@ D20 = "Presence"
 "ouroboros/skill_review.py" = "D14"
 "ouroboros/skill_review_output.py" = "D14"
 "ouroboros/skill_review_packs.py" = "D14"
-"ouroboros/skill_review_prompt.py" = "D14"
 "ouroboros/skill_source_catalog.py" = "D14"
 "ouroboros/skill_source_git.py" = "D14"
 "ouroboros/skill_source_install.py" = "D14"
 "ouroboros/skill_sources.py" = "D14"
 "ouroboros/skill_starter.py" = "D14"
-"ouroboros/skill_review_rebuttals.py" = "D14"
-"ouroboros/skill_review_collect.py" = "D14"
-"ouroboros/skill_review_cycles.py" = "D14"
 "ouroboros/skill_review_history.py" = "D14"
-"ouroboros/skill_review_passes.py" = "D14"
 "ouroboros/skill_review_runner.py" = "D14"
 "ouroboros/skill_review_status.py" = "D14"
-"ouroboros/skill_review_usage.py" = "D14"
 "ouroboros/skill_token.py" = "D14"
 "ouroboros/subagent_bootstrap.py" = "D07"
 "ouroboros/subagent_dispatch_notes.py" = "D07"
@@ -708,6 +702,7 @@ D20 = "Presence"
 "ouroboros/tools/review_brief_coupling.py" = "D06"
 "ouroboros/tools/review_change.py" = "D06"
 "ouroboros/tools/review_result.py" = "D06"
+"ouroboros/tools/review_skill.py" = "D14"
 "ouroboros/tools/review_change_custody.py" = "D06"
 "ouroboros/tools/review_checklist.py" = "D06"
 "ouroboros/tools/governance_context.py" = "D06"
@@ -1061,7 +1056,6 @@ allowed = [
   "D16->D02",
   "D16->D06",
   "D16->D12",
-  "D16->D14",
   "D16->D17",
   "D16->D18",
   "D17->D01",

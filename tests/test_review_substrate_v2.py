@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 from ouroboros.review_substrate import ReviewRequest, ReviewSlot, run_review_request
-from ouroboros.triad_review import parse_model_review_results
+from ouroboros.triad_review import parse_seat_answers
 
 from tests._review_substrate_shared import FakeLLM
 
@@ -772,14 +772,14 @@ def test_review_substrate_preserves_explicit_zero_budget_rails(tmp_path):
 
 
 def test_triad_actor_records_preserve_review_refs():
-    parsed = parse_model_review_results({
+    parsed = parse_seat_answers({
         "results": [{
             "model": "m1",
             "text": "[{\"item\":\"x\",\"verdict\":\"PASS\",\"severity\":\"advisory\",\"reason\":\"ok\"}]",
             "prompt_ref": {"manifest_ref": {"path": "prompt.json"}},
             "response_ref": {"manifest_ref": {"path": "response.json"}},
         }]
-    })
+    }, {})
 
     actor = parsed.actor_records[0].to_dict()
     assert actor["prompt_ref"]["manifest_ref"]["path"] == "prompt.json"

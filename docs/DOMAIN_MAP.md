@@ -21,14 +21,14 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D11 | Gateway, server & Web UI | 99 | 0 |
 | D12 | Settings & configuration | 21 | 0 |
 | D13 | Safety, guards & runtime mode | 9 | 0 |
-| D14 | Skills & extensions | 72 | 0 |
+| D14 | Skills & extensions | 67 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 29 | 0 |
 | D16 | Observability, usage accounting & cost | 22 | 0 |
 | D17 | Projects, workspaces & task results | 46 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 30 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 13 | 0 |
-| **total** | | **818** | **0** |
+| **total** | | **813** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -51,7 +51,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 | **D13** | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | · | ✓ | ✓ | · | · |
 | **D14** | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D15** | ✓ | · | ✓ | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | ✓ | ✓ | ✓ | · |
-| **D16** | · | ✓ | · | · | · | ✓ | · | · | · | · | · | ✓ | · | ✓ | · | · | ✓ | ✓ | · | · |
+| **D16** | · | ✓ | · | · | · | ✓ | · | · | · | · | · | ✓ | · | · | · | · | ✓ | ✓ | · | · |
 | **D17** | ✓ | · | · | ✓ | ✓ | ✓ | · | ✓ | · | · | ✓ | ✓ | · | · | ✓ | ✓ | · | ✓ | ✓ | · |
 | **D18** | · | · | · | · | · | · | · | · | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | · |
 | **D19** | · | · | · | · | · | · | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | · | · |
@@ -878,17 +878,11 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/skill_readiness.py`
 - `ouroboros/skill_repair_admission.py`
 - `ouroboros/skill_review.py`
-- `ouroboros/skill_review_collect.py`
-- `ouroboros/skill_review_cycles.py`
 - `ouroboros/skill_review_history.py`
 - `ouroboros/skill_review_output.py`
 - `ouroboros/skill_review_packs.py`
-- `ouroboros/skill_review_passes.py`
-- `ouroboros/skill_review_prompt.py`
-- `ouroboros/skill_review_rebuttals.py`
 - `ouroboros/skill_review_runner.py`
 - `ouroboros/skill_review_status.py`
-- `ouroboros/skill_review_usage.py`
 - `ouroboros/skill_source_catalog.py`
 - `ouroboros/skill_source_git.py`
 - `ouroboros/skill_source_install.py`
@@ -896,6 +890,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/skill_starter.py`
 - `ouroboros/skill_token.py`
 - `ouroboros/skill_uninstall_state.py`
+- `ouroboros/tools/review_skill.py`
 - `ouroboros/tools/skill_exec.py`
 - `ouroboros/tools/skill_preflight.py`
 - `ouroboros/tools/skill_publish.py`

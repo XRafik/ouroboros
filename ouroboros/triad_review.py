@@ -604,15 +604,6 @@ non-response and excluded from quorum.
 """
 
 
-# Required-matrix: the parser rejects an empty array as missing coverage, so
-# offering the sentinel here would contradict it.
-REVIEW_JSON_MATRIX_CONTRACT = f"""\
-Return ONLY a JSON array with one entry per required checklist item. Each element:
-{_REVIEW_JSON_ELEMENT_SCHEMA}
-There is no all-clear shortcut in this mode: an empty array is a non-response.
-Report PASS explicitly for every item you reviewed and found clean.
-"""
-
 # Contract B — the two-part brief's answer (one brief, two parts): the change
 # findings array of contract A under ``change`` plus the required coupling
 # matrix under ``coupling``, in ONE object. ``change_clean`` replaces the
@@ -696,84 +687,6 @@ def empty_array_is_verified_clean(raw_text: str) -> bool:
         if rest.strip() and tag.strip().isalnum():
             text = rest.strip()  # drop a language tag line (json/JSON/text/...)
     return bool(_CLEAN_EMPTY_RESPONSE_RE.match(text))
-
-
-def parse_model_review_results(
-    result_json: Dict[str, Any],
-    *,
-    required_items: Optional[Sequence[str]] = None,
-    additional: Sequence[str] = (),
-) -> ParsedTriadReview:
-    """Parse model result envelopes into normalized findings and actor records.
-
-    ``required_items`` enforces the skill-review matrix contract: a reviewer
-    that omits a checklist item is non-responsive for quorum.
-    """
-    findings: List[Dict[str, Any]] = []
-    responsive: List[str] = []
-    responsive_ids: set[str] = set()
-    records: List[ReviewActorRecord] = []
-    required = set(required_items or [])
-    for idx, actor in enumerate(result_json.get("results") or []):
-        if not isinstance(actor, dict):
-            continue
-        actor = {**actor, "additional": bool(actor.get("additional") or actor.get("slot_id") in additional)}
-        model = str(actor.get("model") or actor.get("request_model") or "").strip()
-        raw_text = str(actor.get("text") or "")
-        model_label = model or "reviewer"
-        actor_slot_id = str(actor.get("slot_id") or "")
-        if str(actor.get("operation_state") or "") == "not_dispatched":
-            records.append(_actor_record(
-                actor, idx=idx, model_label=model_label,
-                status="not_dispatched", raw_text=raw_text,
-            ))
-            continue
-        if str(actor.get("verdict") or "").upper() == "ERROR":
-            records.append(_actor_record(actor, idx=idx, model_label=model_label, status="error", raw_text=raw_text))
-            continue
-        parsed = extract_json_array(raw_text, normalize=not required)
-        if parsed is None:
-            records.append(_actor_record(actor, idx=idx, model_label=model_label, status="parse_failure", raw_text=raw_text))
-            continue
-        if not required and not parsed and not empty_array_is_verified_clean(raw_text):
-            # Anti-refusal coverage contract: an empty array counts as a real
-            # "no findings" verdict only with the explicit NO_FINDINGS sentinel
-            # (or a bare `[]`-only response). A `[]` buried in refusal prose
-            # ("I cannot review this diff... []") must not enter the quorum as
-            # a clean PASS.
-            records.append(_actor_record(actor, idx=idx, model_label=model_label, status="parse_failure", raw_text=raw_text))
-            continue
-        actor_findings: List[Dict[str, Any]] = []
-        covered_items: set[str] = set()
-        for entry in parsed:
-            if not isinstance(entry, dict):
-                continue
-            item = str(entry.get("item") or "")
-            verdict = str(entry.get("verdict") or "").upper()
-            if not item or verdict not in {"PASS", "FAIL"}:
-                continue
-            covered_items.add(item)
-            actor_findings.append({
-                "item": item,
-                "verdict": verdict,
-                "severity": str(entry.get("severity") or "advisory").lower(),
-                "reason": str(entry.get("reason") or "").strip(),
-                "model": model_label,
-                "slot_id": actor_slot_id,
-                **({"additional": True} if actor.get("additional") else {}),
-                **({"obligation_id": str(entry.get("obligation_id") or "")} if entry.get("obligation_id") else {}),
-            })
-        if required and not required.issubset(covered_items):
-            records.append(_actor_record(actor, idx=idx, model_label=model_label, status="partial", raw_text=raw_text, parsed_items=actor_findings))
-            continue
-        findings.extend(actor_findings)
-        responsive_id = f"{model_label} [{actor_slot_id}]" if actor_slot_id else f"{model_label}#{idx + 1}"
-        response_identity = f"slot:{actor_slot_id}" if actor_slot_id else f"actor:{idx}"
-        if response_identity not in responsive_ids and not actor.get("additional"):
-            responsive.append(responsive_id)
-            responsive_ids.add(response_identity)
-        records.append(_actor_record(actor, idx=idx, model_label=model_label, status="responded", raw_text=raw_text, parsed_items=actor_findings))
-    return ParsedTriadReview(findings=findings, responsive_models=responsive, actor_records=records)
 
 
 def emit_review_model_error_events(ctx: Any, parsed: ParsedTriadReview, *, source: str, skill_name: str = "") -> None:

@@ -1044,8 +1044,8 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
                 kind = request.surface if request.surface in SINGLE_QUESTION else "change"
                 left = review_pause.watch_left_review(ctx, surface=kind, retry_key=wave.retry_key,
                                                       record_id=wave.record_id,
-                                                      reissue=("the same unchanged skill_review call" if kind == SKILL
-                                                               else "the same unchanged review_change call"))
+                                                      reissue=(f"the same unchanged skill_review(skill={wave.root.name!r}) call"
+                                                               if kind == SKILL else "the same unchanged review_change call"))
             settled = _settle(ctx, wave, wave_facts(ctx, wave, outcome=outcome, forensic=forensic), outcome, retention)
             if settled.get("state") == "pending" and left is None:
                 # Nobody waits for these seats any more: their record settles once they finish
