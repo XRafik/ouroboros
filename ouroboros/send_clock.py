@@ -11,7 +11,9 @@ server's own zone is never presented as the owner's.
 
 Scope: only a Main send binds a policy (``loop_llm_call._send_main_candidate``);
 delegated children, Presence, reviewers and helper calls made inside a Main call
-(vision, reclaim summaries) bind none and their bytes are unchanged.
+(vision, reclaim summaries) bind none and their bytes are unchanged. Every loop that
+sends through that seam still keeps a recovery send's omission of replayed reasoning
+(below); the native review episode calls ``chat`` directly and does not.
 
 Identity: every new physical send samples anew, including compatibility and
 processing retries. Request-wire rebinding preserves the canonical tool source
@@ -19,9 +21,9 @@ and its applied actions. Rejoining one idempotent invocation retains its bytes.
 The line of the send whose response came back becomes canonical history,
 appended just before the answer (``main_send_scope``), so the next request
 extends the last one byte for byte (OpenAI-family caches reuse only an exact
-prefix, #906) and a replay shows what the model actually read; the same scope
-keeps a recovery send's omission of replayed reasoning in every loop. A line no
-response consumed is never kept. A priced lookahead (the forced final) carries
+prefix, #906) and a replay shows what the model actually read; for the same
+reason the history keeps a recovery send's omission of replayed reasoning. A line
+no response consumed is never kept. A priced lookahead (the forced final) carries
 a line of its own sample, so it is advice only: equal width is not equal
 tokens. The final admission reads the FRESH request — its clock-free digest
 (``AttemptRequest.candidate_clock_free_sha256``) must match the lookahead's,
@@ -140,15 +142,17 @@ def main_send_scope(policy: Optional[SendClockPolicy],
 
     The consumed line is appended to ``canonical`` (the loop's transcript) before
     the caller appends the answer, so the canonical history is exactly what the
-    model read and a prefix of the next request. For the same reason every loop's
-    ``canonical`` adopts a recovery send's omission of replayed reasoning
-    (``reasoning_artifacts.pop_replay_omission``): a thinking block is bound to the
-    prefix it was produced on, so restoring the omitted blocks would get the next
-    request refused again. A raised send replays nothing. Without a policy the
-    scope suspends any outer clock and adds no line.
+    model read and a prefix of the next request. For the same reason the ``canonical``
+    of every loop sending through this scope adopts the omission of replayed reasoning
+    by a recovery send this scope's call got its answer from (``reasoning_artifacts.pop_replay_omission``):
+    a provider may bind a thinking block to the prefix it was produced on, so
+    restoring the omitted blocks can get every later request refused. A raised send
+    replays nothing. Without a policy the scope suspends any outer clock and adds
+    no line.
     """
     from ouroboros.reasoning_artifacts import pop_replay_omission
 
+    pop_replay_omission()  # only an omission by this scope's own send counts
     clock = MainSendClock(policy)
     with clock.bound():
         yield clock

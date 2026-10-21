@@ -105,6 +105,29 @@ def test_signature_retry_fires_on_400_with_thinking_block_no_string_marker():
     assert inst._openrouter_signature_retry_kwargs(target, kwargs, Exception("Error code: 429")) is None
 
 
+def test_signature_retry_leaves_a_textual_context_overflow_to_size_recovery():
+    """An OpenRouter 400 whose upstream says the prompt is too long goes to the loop's size
+    recovery (the same shared classifier), not to a reasoning strip that history would keep."""
+    from ouroboros.llm import LLMClient
+
+    class _BadReq(Exception):
+        status_code = 400
+
+    def routed(raw: str, previous: str = "") -> _BadReq:
+        nested = f", 'previous_errors': [{{'raw': '{previous}'}}]" if previous else ""
+        return _BadReq("Error code: 400 - {'error': {'message': 'Provider returned error', 'code': 400, "
+                       f"'metadata': {{'raw': '{raw}'{nested}}}}}}}")
+
+    inst = LLMClient.__new__(LLMClient)
+    target = {"supports_openrouter_extensions": True}
+    kwargs = {"messages": _thinking_history(), "extra_body": {"provider": {"allow_fallbacks": False}}}
+    too_long = "prompt is too long: 1000794 tokens > 1000000 maximum"
+    bound = "messages.3.content.0: Invalid `signature` in `thinking` block: bound to a different conversation"
+    assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(too_long)) is None
+    assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(bound, too_long)) is None
+    assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(bound)) is not None
+
+
 def test_sanitize_on_model_switch_strips_cross_family_preserves_same_family():
     from ouroboros.llm import LLMClient
     hist = _thinking_history()
@@ -309,11 +332,11 @@ def _signed_turn_kwargs(client, target):
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("refusals", [0, 1, 2])
-def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission(monkeypatch, asynchronous, refusals):
-    """The omission fact describes the send the provider answered: the stripped retry
-    after a 400 notes it, an untouched success notes nothing, and a ladder that ends
-    in an exception leaves no fact behind for a later call."""
+@pytest.mark.parametrize("scenario", ["answered", "refused_then_answered", "refused_twice", "refused_then_error_body"])
+def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission(monkeypatch, asynchronous, scenario):
+    """The omission fact describes the send whose generated answer came back: the stripped
+    retry after a 400 notes it; an untouched success, a retry answered only with an error
+    body (the model read nothing) and a ladder that ends in an exception note nothing."""
     import asyncio
     from ouroboros.llm import LLMClient
     from ouroboros.reasoning_artifacts import note_replay_omission, pop_replay_omission
@@ -322,10 +345,17 @@ def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission
         status_code = 400
 
     class _Resp:
-        def model_dump(self):
-            return {"id": "gen-1", "provider": "P", "usage": {"prompt_tokens": 1},
-                    "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+        def __init__(self, body):
+            self.body = body
 
+        def model_dump(self):
+            return self.body
+
+    answer = {"id": "gen-1", "provider": "P", "usage": {"prompt_tokens": 1},
+              "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+    error_body = {"id": "gen-2", "error": {"code": 502, "message": "upstream unavailable"}, "choices": None}
+    plan = {"answered": [answer], "refused_then_answered": [None, answer], "refused_twice": [None, None],
+            "refused_then_error_body": [None, error_body]}[scenario]
     client = LLMClient()
     monkeypatch.setattr(client, "_get_supported_parameters", lambda _m: None)
     target = client._resolve_remote_target("anthropic/claude-opus-5.5")
@@ -333,9 +363,10 @@ def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission
 
     def create(**candidate):
         sent.append(candidate["messages"])
-        if len(sent) <= refusals:
+        reply = plan[min(len(sent), len(plan)) - 1]
+        if reply is None:
             raise _BadReq("Error code: 400 - Invalid `signature` in `thinking` block")
-        return _Resp()
+        return _Resp(reply)
 
     async def create_async(**candidate):
         return create(**candidate)
@@ -359,7 +390,6 @@ def test_only_an_answered_send_without_the_replayed_reasoning_notes_the_omission
             return observe(error)
 
     outcome, omitted = asyncio.run(run_async()) if asynchronous else run_sync()
-    assert isinstance(outcome, _BadReq) is (refusals == 2)
-    assert omitted is (refusals == 1)
-    if refusals < 2:
-        assert LLMClient._has_replayed_reasoning_metadata(sent[-1]) is (refusals == 0)
+    assert isinstance(outcome, _BadReq) is (scenario == "refused_twice")
+    assert omitted is (scenario == "refused_then_answered")
+    assert LLMClient._has_replayed_reasoning_metadata(sent[-1]) is (scenario == "answered")

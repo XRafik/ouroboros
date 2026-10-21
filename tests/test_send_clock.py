@@ -10,6 +10,7 @@ manifest) and sent (the transport's arguments) are one candidate.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import datetime as dt
 import hashlib
@@ -517,6 +518,29 @@ def test_an_answered_send_without_the_replayed_reasoning_is_what_history_keeps(
     assert "reasoning_details" not in first[2] and second[:len(first)] == first  # the next request extends what was read
     assert "reasoning_details" not in messages[2] and messages[2]["tool_calls"] == [call]
     assert messages[2]["reasoning_content"] == "a direct-route echo"  # never sent on this route, so never omitted
+
+
+@pytest.mark.parametrize("case", ["answered", "nothing_omitted", "stale_before_the_scope", "raised"])
+def test_a_transcript_adopts_only_its_own_answered_omission(case):
+    """Both sides, with no clock policy (a child or helper loop): only an omission noted
+    by this scope's own answered send strips the transcript; a fact left by an earlier
+    raised ladder, or a raised send, leaves it as it was."""
+    from ouroboros.reasoning_artifacts import note_replay_omission, pop_replay_omission
+
+    thought = {"type": "reasoning.text", "text": "t", "signature": "s", "format": "anthropic-claude-v1", "index": 0}
+    transcript = [{"role": "user", "content": "q"},
+                  {"role": "assistant", "content": "", "reasoning_details": [thought], "reasoning_content": "echo"}]
+    original = copy.deepcopy(transcript)
+    if case == "stale_before_the_scope":
+        note_replay_omission(True)
+    with contextlib.suppress(RuntimeError), sc.main_send_scope(None, transcript):
+        if case in {"answered", "raised"}:
+            note_replay_omission(True)
+        if case == "raised":
+            raise RuntimeError("the send raised")
+    pop_replay_omission()  # no residue for the next test
+    assert transcript == ([original[0], {"role": "assistant", "content": "", "reasoning_content": "echo"}]
+                          if case == "answered" else original)
 
 
 # --- the forced final is admitted on its fresh request ------------------------------------

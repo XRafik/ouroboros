@@ -20,21 +20,23 @@ the source for future exports.
 
 Redaction rule (applied before commit): every string value under the keys `data` and
 `signature` (opaque encrypted reasoning / thought signatures) keeps its first 24
-characters followed by `…`. `claude-opus-5.5/twoblock_stream.sse` comes from a real task's
-retained `physical_stream` (2026-10-20), because no synthetic prompt drew two thinking
-blocks: every text and tool-argument value is filler of the same length (keys kept), ids
-are fixture ids, frames, indices and usage are as recorded. Ids (`call_…`, `rs_…`, `gen-…`, `toolu_…`), types, indices,
+characters followed by `…`. Ids (`call_…`, `rs_…`, `gen-…`, `toolu_…`), types, indices,
 text, tool arguments and usage are intact. SSE framing is byte-exact (`: OPENROUTER
 PROCESSING` comment lines, blank lines, `[DONE]`, `event:` lines, the provider's own JSON
 spacing on frames the redaction did not touch); a redacted `data:` line is re-serialized
 compactly. Non-stream bodies keep their leading keep-alive whitespace.
 
+One exception: `claude-opus-5.5/twoblock_stream.sse` comes from a real task's retained
+`physical_stream` (2026-10-20), because no synthetic prompt drew two thinking blocks. There
+every text and tool-argument value is filler of the same length (keys kept) and ids are
+fixture ids; frames, indices, signature prefixes and usage are as recorded.
+
 Fixture pairs are separate live requests, so parity is structural (message keys, tool
 names, argument key sets, `reasoning_details` type sequence and per-record key sets,
 finish reason, usage keys), never exact text.
 
-Cases — the same synthetic prompt and `lookup` tool everywhere; what differs is the request
-knob (or simply the reply the model chose to give on that run):
+Cases — the same synthetic prompt and `lookup` tool everywhere except `twoblock_stream`;
+what differs is the request knob (or simply the reply the model chose to give on that run):
 
 | case | route / model | request knob | what the reply exercises |
 |---|---|---|---|

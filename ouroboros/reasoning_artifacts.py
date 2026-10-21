@@ -166,11 +166,11 @@ def pop_reasoning_pin_note() -> Optional[Dict[str, Any]]:
     return pending if isinstance(pending, dict) else None
 
 
-# Omission slot: the recovery ladder (``llm_fallback``) answered with a send that no
-# longer carried the transcript's replayed reasoning; the conversation owner
-# (``send_clock.main_send_scope``) adopts the omission, because a thinking block is
-# bound to the prefix it was produced on and the next request must extend what the
-# model read, or the provider refuses it again on every round.
+# Omission slot: the recovery ladder (``llm_fallback``) got its answer from a send
+# that no longer carried the transcript's replayed reasoning; the conversation owner
+# (``send_clock.main_send_scope``) adopts the omission, so the next request extends
+# what the model read: a provider may bind a thinking block to the prefix it was
+# produced on and refuse every later request that restores the omitted blocks.
 _REPLAY_OMITTED_CVAR: contextvars.ContextVar = contextvars.ContextVar(
     "ouroboros_reasoning_replay_omitted", default=False,
 )

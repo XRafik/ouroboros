@@ -126,10 +126,11 @@ def _closed_by_signature(last: dict, item: dict) -> bool:
     """A signature is the last fact of the record it signs: content after it opens the next one.
 
     OpenRouter streams the thinking blocks of one Anthropic answer id-less, each ending
-    in a signature-only delta, and their ``index`` is a block ordinal there while
-    Gemini repeats 0, so ``index`` cannot be the boundary. A record fused from two
-    blocks is refused by every upstream; OpenRouter's own SDK fuses them too (keeping
-    the first signature), so it is no reference for this boundary.
+    in a signature-only delta (a signature arrives whole, in one delta), and their
+    ``index`` is a block ordinal there while Gemini repeats 0, so ``index`` cannot be
+    the boundary; a delta that adds nothing still joins the signed record. A record
+    fused from two blocks is refused on replay; OpenRouter's own SDK fuses them too
+    (keeping the first signature), so it is no reference for this boundary.
     """
     return (isinstance(last.get("signature"), str) and bool(last["signature"])
             and any(item.get(field) for field in ("text", "summary", "data", "signature")))
