@@ -1228,10 +1228,7 @@ def _join_cause_clauses(clauses: List[str]) -> str:
     A clause that is not last drops its own full stop so the line reads as one
     statement rather than a row of stubs. The browser twin is joinCauseClauses.
     """
-    kept: List[str] = []
-    for clause in clauses:
-        if clause and clause not in kept:
-            kept.append(clause)
+    kept = list(dict.fromkeys(clause for clause in clauses if clause))
     return " · ".join(c[:-1] if index < len(kept) - 1 and c.endswith(".") else c
                       for index, c in enumerate(kept))
 
