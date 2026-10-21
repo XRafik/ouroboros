@@ -573,9 +573,10 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
             **({"chat_id": source_chat_id} if source_chat_id not in (None, "") else {}),
         },
     }
-    # A follow-up from a consciousness turn/tree starts a consciousness root: the
-    # origin, category and level ride the template; admission derives the rest.
-    record["task"]["metadata"].update(consciousness_origin_metadata(metadata_src, started_root=True))
+    # The host writer persists this origin separately; the template is not its
+    # authority. Only independent work uses the root-start exception and cause.
+    record["task"]["metadata"].update(consciousness_origin_metadata(
+        metadata_src, started_root=relation["kind"] == "independent"))
     # The resource choice rides BY VALUE (#1315): the origin's producer-stamped intent,
     # else a direct turn's own (its room's default, or Main's system repo).
     intent = followup_resource_intent(ctx, metadata_src, project_id)

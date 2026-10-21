@@ -500,13 +500,13 @@ def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, 
                     "running_or_queued": store._schedule_running_or_queued(current["id"], root),
                     "audit": "recorded" if recorded else "incomplete"}
         after = copy.deepcopy(current)
-        from ouroboros.consciousness_authority import consciousness_origin_metadata
-        after["writer_kind"] = "owner" if writer_kind == "owner" else "consciousness"
-        after["writer_origin"] = consciousness_origin_metadata({**(writer_metadata or {}), "work_kind": writer_kind})
         if resolved:
             if relation_kind(current) != "unknown":
                 raise store.ScheduleRefused("relationship_immutable", "only an unknown relationship can be resolved")
             after["followup_origin"], after["followup_relation"] = resolved
+        from ouroboros.consciousness_authority import stamp_schedule_writer
+        stamp_schedule_writer(after, writer_kind, writer_metadata,
+                              started_root=relation_kind(after) == "independent")
         after["followup_released"] = {**(after.get("followup_released") or {}), **hold.get("controls", {})}
         after.pop("followup_hold", None)
         after["followup_wait"] = policy_view(root, data, after)["wait"]
