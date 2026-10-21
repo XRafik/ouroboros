@@ -366,7 +366,8 @@ def _persist_projection(ctx: Any, skill: Any, drive_root: pathlib.Path, outcome:
     The wave ran with the lifecycle lane lent out, so the payload may have moved on (an update, an edit, an
     uninstall): the verdict lands only while the installed bytes are still the reviewed bytes, and only while
     the lifecycle job that owns this review still does. A wave without a verdict (quorum failed, not
-    dispatched, not performed) never overwrites a substantive verdict already held for the same bytes."""
+    dispatched, not performed) never overwrites what already admits the same bytes: a substantive verdict,
+    the owner's attestation, or an author acceptance bound to them."""
     from ouroboros.skill_loader import SkillPayloadUnreadable
 
     try:
@@ -389,10 +390,19 @@ def _persist_projection(ctx: Any, skill: Any, drive_root: pathlib.Path, outcome:
                              "longer matches this content hash")
             return
     existing = load_review_state(drive_root, skill.name, skill_type=skill.manifest.type, skill_dir=skill.skill_dir)
-    held = (existing.content_hash == outcome.content_hash and existing.status in SUBSTANTIVE_STATUSES
-            and existing.review_profile != "owner_attested")
-    if outcome.status == STATUS_PENDING and held:
-        outcome.error = f"{outcome.error}; the earlier {existing.status} verdict for these bytes stands".strip("; ")
+    same_bytes = existing.content_hash == outcome.content_hash and existing.status in SUBSTANTIVE_STATUSES
+    attested = same_bytes and existing.review_profile == "owner_attested"
+    held = same_bytes and not attested
+    # An author acceptance (Advisory finish) is bound to the bytes it accepted, not to the reviewer's hash.
+    accepted = str((existing.author_disposition or {}).get("subject_hash") or "") == outcome.content_hash
+    if outcome.status == STATUS_PENDING and (held or attested or accepted):
+        # A wave that formed no verdict never erases what already admits these exact bytes: the owner's
+        # Skip, the author's acceptance, or an earlier substantive verdict (opus R1-1). A substantive
+        # outcome below still replaces each of them.
+        stands = ("the owner's attestation" if attested else f"the earlier {existing.status} verdict" if held
+                  else "the author's acceptance")
+        outcome.error = (f"{outcome.error}; {stands} for these bytes stands"
+                         + (f" (record {outcome.record_id} formed no verdict)" if outcome.record_id else "")).strip("; ")
         skill.review = existing
         return
     if outcome.reused and held and existing.record_id == outcome.record_id:

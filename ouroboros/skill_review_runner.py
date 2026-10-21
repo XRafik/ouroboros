@@ -1277,6 +1277,15 @@ def run_skill_review_lifecycle_blocking(
                                                             panel_request=panel_request, source=source)
             if not outcome.panel and panel is not None:
                 outcome.panel = dict(panel.facts)
+            if outcome.pending:
+                # The author left the wave on an addressed message, or a seat still answers: the review goes
+                # on without this job, and nothing below may run on a verdict that is not there — no
+                # dependency install, no turn-on, no extension reload, no update settlement (astra R1-1).
+                # The job ends as a non-failure; the re-issued skill_review (a new job) collects at $0,
+                # projects the record and runs this tail then. A kept update stays pending until that call.
+                setattr(outcome, "deps_status", "not_run")
+                setattr(outcome, "deps_error", "")
+                return outcome
             deps_status = "not_required"
             deps_error = ""
             reviewed = _load_binding_skill(binding) if binding is not None else find_skill(
@@ -1347,7 +1356,10 @@ def run_skill_review_lifecycle_blocking(
                 presentation=provenance,
                 progress_target=progress,
                 result_message=_review_result_message,
-                result_error=lambda item: getattr(item, "error", "") or getattr(item, "deps_error", "") or getattr(item, "extension_load_error", "") or "",
+                # A review still running (the author left it) is not this job's failure: its words stay on
+                # the outcome and the job file, the job ends succeeded.
+                result_error=lambda item: "" if getattr(item, "pending", False) else (
+                    getattr(item, "error", "") or getattr(item, "deps_error", "") or getattr(item, "extension_load_error", "") or ""),
                 on_started=_on_started(
                     drive_root, skill_name, content_hash, started_monotonic, provenance,
                     refresh_content_hash=lambda: _skill_content_hash(
@@ -1377,7 +1389,8 @@ def run_skill_review_lifecycle_blocking(
     finally:
         from ouroboros.skill_install_record import update_backup_path
 
-        if owned_job and update_backup_path(drive_root, skill_name).exists():
+        # A left wave settles nothing here: the kept update waits for the call that collects the verdict.
+        if owned_job and not getattr(outcome, "pending", False) and update_backup_path(drive_root, skill_name).exists():
             from ouroboros.skill_source_install import run_in_lane, settle_pending_update
 
             run_in_lane(drive_root, "update_settle", skill_name, lambda: settle_pending_update(

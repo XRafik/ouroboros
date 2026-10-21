@@ -614,6 +614,19 @@ def _skill_review_refusal(ctx: ToolContext, code: str, text: str) -> str:
     return _publish_tool_result(ctx, ToolResult(status=TOOL_CODE_SPECS[code].status, code=code, text=text))
 
 
+def _record_open(drive_root: pathlib.Path, record_id: str) -> bool:
+    """Whether the ledger record a reference names is still pending (open seats); an unknown id is not open."""
+    from ouroboros import review_ledger as ledger
+
+    if not record_id:
+        return False
+    try:
+        record = ledger.load_record(drive_root, record_id)
+    except ValueError:
+        return False
+    return bool(record) and str(record.get("state") or "") != "settled"
+
+
 def _earlier_feedback(drive_root: pathlib.Path, skill_name: str, review_state: Any, content_hash: str,
                       review_reference: Any) -> tuple[bool, Dict[str, Any], str]:
     """``(has feedback, basis, refusal)`` of an author finish. Earlier reviewer feedback is a substantive
@@ -645,6 +658,10 @@ def _earlier_feedback(drive_root: pathlib.Path, skill_name: str, review_state: A
             and job.get("skill") == skill_name and str(job.get("content_hash") or "") == supplied_hash
             and job.get("status") in {"completed", "succeeded", "failed", "interrupted", "cancelled", "timeout"}
             and job.get("review_status") in {"pending", "failed", "interrupted", "cancelled", "timeout"}):
+        # The job ended, the wave may not have: a record still open (its author left; a seat still answers)
+        # is a review running, which the ledger knows and which is never "unavailable" (opus R1-2).
+        if _record_open(drive_root, str(supplied.get("record_id") or job.get("record_id") or "")):
+            return False, basis, refusal
         actors = ([actor for actor in (review_state.raw_actor_records or []) if isinstance(actor, dict)]
                   if review_state.content_hash == supplied_hash else [])
         feedback = [item for actor in actors for item in (actor.get("parsed_items") or [])

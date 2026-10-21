@@ -444,6 +444,284 @@ def test_an_author_finish_after_an_edit_binds_the_new_bytes_in_advisory_and_is_r
     assert gate["executable_review"] is True and gate["blocking_reason"] == "author_accepted_advisory"
 
 
+def test_a_wave_without_a_verdict_keeps_the_owner_skip_and_a_substantive_wave_replaces_it(harness):
+    """The owner's Skip admits these exact bytes; a later wave that forms no verdict (quorum failed) leaves it
+    standing and names the pending record, a PASS/FAIL wave replaces it (opus R1-1, both directions)."""
+    from ouroboros.skill_owner_attestation import review_skill_owner_attest
+
+    h = harness
+    payload = _lifecycle(h, source="skills", owner_attestation=True, review_impl=review_skill_owner_attest)
+    assert (payload["status"], payload["review_profile"]) == ("clean", "owner_attested"), payload["error"]
+    h.answers["t1"] = "I cannot review this."
+    silent = _review(h, reviewers=["t1"], reason="small payload")
+    assert silent.status == "pending" and "the owner's attestation for these bytes stands" in silent.error, silent.error
+    assert f"record {silent.record_id} formed no verdict" in silent.error
+    state = _state(h)
+    assert (state.status, state.review_profile, state.record_id) == ("clean", "owner_attested", "")
+    assert state.gate_for(silent.content_hash, enforcement="blocking")["executable_review"] is True
+    h.answers["t1"] = HARD
+    (h.skill_dir / "SKILL.md").write_text("# weather\n\nRevised.\n", encoding="utf-8")
+    judged = _review(h, reviewers=["t1"], reason="small payload")
+    assert judged.status == "blockers" and _state(h).review_profile == "" and _state(h).status == "blockers"
+
+
+def test_a_wave_without_a_verdict_keeps_the_author_acceptance_and_a_substantive_wave_replaces_it(harness):
+    """Advisory: the author accepted edited bytes against the reviewer's warning; a wave on those bytes that forms
+    no verdict keeps the acceptance (the gate stays executable), a clean wave replaces it with its verdict."""
+    from ouroboros.tool_access_types import ResolvedResourceBinding
+    from ouroboros.tools import skill_exec
+
+    h = harness
+    h.monkeypatch.setenv("OUROBOROS_REVIEW_MAX_CYCLES", "3")  # three paid waves of this root task below
+    h.answers["t1"] = SOFT
+    first = _review(h, reviewers=["t1"], reason="small payload")
+    assert first.status == "warnings"
+    (h.skill_dir / "scripts" / "hello.py").write_text("print('handled')\n", encoding="utf-8")
+    binding = ResolvedResourceBinding(profile="self_modification", root="skill_payload", operation="review",
+                                      base_path=h.skill_dir, target_path=h.skill_dir, source="test",
+                                      skill_name="weather", state_drive_root=h.drive)
+    finished = skill_exec._author_finish_existing_skill_review(
+        h.ctx, binding, "weather", disposition="accepted", rationale="The exception is handled now; verified locally.")
+    assert "error" not in finished
+    accepted_hash = finished["content_hash"]
+    h.answers["t1"] = "I cannot review this."
+    silent = _review(h, reviewers=["t1"], reason="small payload")
+    assert silent.status == "pending" and "the author's acceptance for these bytes stands" in silent.error, silent.error
+    state = _state(h)
+    assert state.author_disposition["subject_hash"] == accepted_hash and state.content_hash == first.content_hash
+    assert state.gate_for(accepted_hash, enforcement="advisory")["blocking_reason"] == "author_accepted_advisory"
+    # The same bytes asked again in the same round would replay the settled seat; a rebuttal opens a new round.
+    h.answers["t1"] = CLEAN
+    judged = _review(h, reviewers=["t1"], reason="small payload", review_rebuttal="The exception is handled; look again.")
+    assert judged.status == "clean" and len(h.sends) == 3, (judged.status, judged.error, len(h.sends))
+    state = _state(h)
+    assert (state.status, state.content_hash, state.author_disposition) == ("clean", accepted_hash, {})
+
+
+# --- a wave the author really leaves: a seat blocks until an addressed message ends the author's wait ---------
+
+
+def _until(predicate, timeout=90.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while True:
+        value = predicate()
+        if value:
+            return value
+        assert time.monotonic() < deadline, "condition not met in time"
+        time.sleep(0.05)
+
+
+@pytest.fixture
+def leaving(harness):
+    """The ``skill_review`` tool's author under a real model-wait scope with a real owner mailbox; seat t1
+    answers only once ``gate`` is set, so the author can leave on an addressed message while the seat still
+    runs. The lifecycle tail (dependencies, turn-on, extension reload, update settlement) is spied."""
+    import queue
+    import threading
+
+    from ouroboros import model_wait, review_pause
+    from ouroboros import skill_review_runner as runner
+    from ouroboros import skill_source_install as install
+    from ouroboros.task_results import write_task_result
+    from ouroboros.tools import skill_exec
+    from tests.test_skill_review_runner import _reset_queue
+
+    h = harness
+    h.monkeypatch.setattr(review_pause, "DETACH_POLL_SEC", 0.05)
+    h.monkeypatch.setattr(skill_exec, "_skill_tool_preflight", lambda *a, **k: "")
+    write_task_result(h.drive, "task-skill", "running", chat_id=7)
+    h.ctx.owner_wait_callback = lambda *_a, **_k: "parked"  # an interactive author's continuation owner
+    h.ctx.task_attempt, h.ctx.current_task_type, h.ctx._loop_mailbox_seen_ids = 1, "task", set()
+    h.ctx.task_lifecycle_bound = True
+    gate, sent = threading.Event(), threading.Event()
+
+    def answer(request, slot, actor, *, retry_state, pending_invocation_checkpoint):
+        sent.set()
+        assert gate.wait(120), "the seat was never released"
+        actor.raw_text = h.answers.get(slot.slot_id, CLEAN)
+        return actor
+
+    h.monkeypatch.setattr(substrate.ReviewCoordinator, "_run_slot", shared.golden_physical_seam(h.sends, answer=answer))
+    tail = {"deps": [], "turn_on": [], "reload": [], "settle": []}
+    h.monkeypatch.setattr("ouroboros.skill_dependencies.ensure_skill_dependencies",
+                          lambda *a, **k: tail["deps"].append(a[1].name) or ("not_required", ""))
+    h.monkeypatch.setattr("ouroboros.skill_lifecycle_actions.reconcile_turn_on_when_ready",
+                          lambda *a, **k: tail["turn_on"].append(a[1]) or {"action": "no_change"})
+    h.monkeypatch.setattr(runner, "_reconcile_extension_payload", lambda *a, **k: tail["reload"].append(a[1]) or {})
+    h.monkeypatch.setattr(install, "settle_pending_update",
+                          lambda drive, name, **kw: tail["settle"].append((name, kw)) or {"status": "accepted"})
+    backup = install.update_backup_path(h.drive, "weather")
+    backup.parent.mkdir(parents=True, exist_ok=True)
+    backup.write_text("{}", encoding="utf-8")
+    threads = []
+
+    def call(**kwargs):
+        box = {}
+
+        def run():
+            with model_wait.task_model_wait_scope(task={"id": "task-skill", "chat_id": 7, "_attempt": 1},
+                                                  drive_root=h.drive, event_queue=queue.Queue(), worker_slot_held=False):
+                try:
+                    box["text"] = skill_exec._handle_review_skill(h.ctx, skill="weather", reviewers=["t1"],
+                                                                  reason="small payload", **kwargs)
+                except BaseException as exc:  # surfaced by the test, never lost in the thread
+                    box["error"] = exc
+
+        thread = threading.Thread(target=run, name="skill-review-author")
+        threads.append(thread)
+        thread.start()
+        return thread, box
+
+    def join(thread, box, timeout=120):
+        thread.join(timeout)
+        assert not thread.is_alive(), "the author call did not finish"
+        assert "error" not in box, box.get("error")
+        return box["text"]
+
+    _reset_queue()
+    try:
+        yield SimpleNamespace(h=h, gate=gate, sent=sent, call=call, join=join, tail=tail, backup=backup)
+    finally:
+        gate.set()
+        for thread in threads:
+            thread.join(120)
+        _reset_queue()
+
+
+def _physical_sends(h):
+    """The seats physically sent (a rejoin's reconcile-only pass through the seam is not a send)."""
+    return [send for send in h.sends if not send.get("reconcile_only")]
+
+
+def _settled_record(h, record_id):
+    record = review_ledger.load_record(h.drive, record_id)
+    return record if record and record.get("state") == "settled" else None
+
+
+def _leave(L):
+    """Start the tool call, let the seat start, write an addressed owner message: the author returns pending."""
+    from ouroboros.owner_mailbox import write_owner_message
+
+    thread, box = L.call()
+    assert L.sent.wait(60), "the seat never started"
+    write_owner_message(L.h.drive, "How is the review going?", "task-skill")
+    text = L.join(thread, box, timeout=60)
+    assert "The review is still running" in text and len(_physical_sends(L.h)) == 1, text
+    return json.loads(text.rsplit("Review reference: ", 1)[1])
+
+
+def _read_mail(L):
+    from ouroboros.owner_mailbox import drain_owner_entries
+
+    drain_owner_entries(L.h.drive, "task-skill", L.h.ctx._loop_mailbox_seen_ids, 1)
+
+
+def _settled_notices(L):
+    from ouroboros.owner_mailbox import drain_owner_entries
+
+    return [entry for entry in drain_owner_entries(L.h.drive, "task-skill", set(), 1, include_acknowledged=True)
+            if str(entry.get("msg_id") or "").startswith("skill-review-settled:")]
+
+
+def _finish_binding(h):
+    from ouroboros.tool_access_types import ResolvedResourceBinding
+
+    return ResolvedResourceBinding(profile="self_modification", root="skill_payload", operation="review",
+                                   base_path=h.skill_dir, target_path=h.skill_dir, source="test",
+                                   skill_name="weather", state_drive_root=h.drive)
+
+
+@pytest.mark.parametrize("answer, status", [(CLEAN, "clean"), (HARD, "blockers")])
+def test_a_left_wave_finalizes_nothing_and_the_reissue_collects_it_at_zero(leaving, answer, status):
+    """The author leaves on an addressed message while the seat runs: the call returns pending with one send,
+    the lifecycle job ends as a non-failure and ran no tail (no dependencies, turn-on, reload or update
+    settlement; the kept update stays pending), review.json is untouched, and the author finish with that
+    reference is refused while the record is open. Released, the wave settles on its own (the record keeps
+    the frozen severity policy: a hard item called advisory still blocks) and the notice names the re-issue;
+    the re-issued call collects at $0, projects the record, runs the tail once and settles the update."""
+    from ouroboros.skill_review_runner import _read_review_job, review_job_state_path
+    from ouroboros.tools import skill_exec
+
+    L, h = leaving, leaving.h
+    h.answers["t1"] = answer
+    reference = _leave(L)
+    job = _read_review_job(review_job_state_path(h.drive, "weather"))
+    assert (job["status"], job["lifecycle_status"], job["review_status"]) == ("completed", "succeeded", "pending"), job
+    assert job["record_id"] == reference["record_id"] and "still running" in job["error"]
+    assert review_ledger.load_record(h.drive, reference["record_id"])["state"] == "pending"
+    assert _state(h).status == "pending" and _state(h).record_id == "", "nothing projected for a left wave"
+    assert L.tail == {"deps": [], "turn_on": [], "reload": [], "settle": []}, "no tail on a left wave"
+    assert L.backup.exists(), "the kept update waits for the collection"
+    refused = skill_exec._author_finish_existing_skill_review(
+        h.ctx, _finish_binding(h), "weather", disposition="accepted", rationale="Looks fine to me.",
+        review_reference=reference)
+    assert "A review still running is not unavailable" in refused["error"] and not _state(h).author_disposition
+    L.gate.set()
+    record = _until(lambda: _settled_record(h, reference["record_id"]))
+    assert record["verdict"]["aggregate"] == {"clean": "PASS", "blockers": "FAIL"}[status]
+    [notice] = _until(lambda: _settled_notices(L))
+    assert "[Review settled]" in notice["text"] and "skill_review(skill='weather')" in notice["text"]
+    assert _state(h).status == "pending", "the settled record reaches review.json on the next call (D6)"
+    _read_mail(L)
+    thread, box = L.call()
+    text = L.join(thread, box)
+    assert "The review is still running" not in text and len(_physical_sends(h)) == 1, text
+    state = _state(h)
+    assert (state.status, state.record_id) == (status, reference["record_id"])
+    assert [len(calls) for calls in L.tail.values()] == [1, 1, 1, 1], L.tail
+    assert L.tail["settle"] == [("weather", {"expected_digest": reference["content_hash"], "landing_failed": False})]
+    collected = json.loads(text.rsplit("Review reference: ", 1)[1])
+    assert collected["record_id"] == reference["record_id"] and collected["job_id"] != reference["job_id"]
+
+
+def test_a_reissue_while_the_left_wave_runs_rejoins_it_and_reads_the_frozen_severity_policy(leaving):
+    """Re-issuing the same call before the wave settles rejoins the live wave (no second send) and waits; the
+    rejoin's plan carries the record's severity policy (astra R1-2), so the hard item the seat called
+    advisory blocks exactly as on the fresh and the background-settled paths."""
+    L, h = leaving, leaving.h
+    h.answers["t1"] = HARD
+    reference = _leave(L)
+    _read_mail(L)
+    thread, box = L.call()
+    thread.join(1.0)
+    assert thread.is_alive(), "the rejoin waits for the running wave instead of returning at once"
+    L.gate.set()
+    text = L.join(thread, box)
+    assert len(_physical_sends(h)) == 1 and "The review is still running" not in text, text
+    state = _state(h)
+    assert (state.status, state.record_id) == ("blockers", reference["record_id"])
+    [finding] = [f for f in state.findings if not f.get("additional")]
+    assert (finding["item"], finding["severity"]) == ("no_repo_mutation", "critical")
+    record = review_ledger.load_record(h.drive, reference["record_id"])
+    assert record["verdict"]["aggregate"] == "FAIL" and record["rows"][0]["answers"]["skill"]["critical"] == 1
+
+
+def test_a_left_wave_that_settles_without_a_verdict_admits_the_author_finish_only_after_it_settled(leaving):
+    """The other direction of the running-is-not-unavailable rule: refused while the record is open, the same
+    reference admits an Advisory author finish once the wave settled without a verdict (quorum failed)."""
+    from ouroboros.tools import skill_exec
+
+    L, h = leaving, leaving.h
+    h.answers["t1"] = "I cannot review this."
+    reference = _leave(L)
+    refused = skill_exec._author_finish_existing_skill_review(
+        h.ctx, _finish_binding(h), "weather", disposition="accepted", rationale="Looks fine to me.",
+        review_reference=reference)
+    assert "A review still running is not unavailable" in refused["error"]
+    L.gate.set()
+    record = _until(lambda: _settled_record(h, reference["record_id"]))
+    assert record["verdict"]["aggregate"] == "QUORUM_FAILED"
+    finished = skill_exec._author_finish_existing_skill_review(
+        h.ctx, _finish_binding(h), "weather", disposition="accepted", rationale="No reviewer answered; I checked the script myself.",
+        review_reference=reference)
+    assert "error" not in finished, finished
+    state = _state(h)
+    assert state.author_disposition["disposition"] == "accepted" and len(_physical_sends(h)) == 1
+    assert state.gate_for(reference["content_hash"], enforcement="advisory")["blocking_reason"] == "author_accepted_advisory"
+
+
 # --- the receptive author, publication, and the silo between skill and repo review -------------------------
 
 
