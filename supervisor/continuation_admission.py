@@ -429,7 +429,10 @@ def _successor_task(q: Any, predecessor: str, result: Dict[str, Any], binding: D
         **({"deadline_at": deadline_at} if deadline_at else {}),
         **{key: binding[key] for key in ("workspace_root", "workspace_mode") if binding.get(key)},
         "metadata": {
-            **consciousness_origin_metadata(metadata),
+            # Legacy results may keep their verified owner reference only on
+            # the source row. Explicit kind/origin stamps still take priority.
+            **consciousness_origin_metadata({**metadata, **(
+                {"origin_message_ref": origin_ref} if isinstance(origin_ref, dict) and origin_ref else {})}),
             **({"project_id": binding["project_id"]} if binding.get("project_id") else {}),
             **({"model_role": model_role} if model_role else {}),
             **({"resource_intent": dict(intent)} if isinstance(intent, dict) and intent.get("kind") else {}),

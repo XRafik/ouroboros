@@ -35,6 +35,22 @@ def test_continue_inherits_owner_or_consciousness_origin_by_value(q, level):
             assert "initiator" not in admitted["metadata"] and "runtime_mode_cap" not in admitted["metadata"]
 
 
+@pytest.mark.parametrize("metadata", [{}, {"work_kind": "owner"}, {"work_kind": "consciousness"},
+                                     {"initiator": "consciousness", "consciousness_autonomy": "act"}])
+def test_continue_legacy_owner_source_does_not_override_consciousness(metadata):
+    from supervisor.continuation_admission import _successor_task
+    from ouroboros.consciousness_authority import work_kind
+    for ref in (None, {"chat_id": 1, "client_message_id": "owner-request"}):
+        task = _successor_task(None, "previous", {"metadata": metadata, "objective": "The work"},
+                               {"successor_task_id": "next", "chat_id": 1}, {"cause": "budget"},
+                               {"original": {"content": "The work", "origin_message_ref": ref}}, {})
+        expected = "owner" if not metadata and ref else work_kind(metadata)
+        assert task["metadata"]["work_kind"] == expected
+        if metadata.get("initiator"):
+            assert task["metadata"]["initiator"] == "consciousness"
+            assert task["metadata"]["consciousness_autonomy"] == "act"
+
+
 def test_real_schedule_restore_is_checked_at_the_callers_kind(supervisor):
     h = supervisor
     h.modes.update(owner="off", consciousness="full")
