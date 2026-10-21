@@ -168,6 +168,7 @@ ouroboros/ — agent core and shared runtime (§6)
   code_navigation.py, code_occurrences.py, code_import_candidates.py, code_search_rg.py — `query_code` views, token/import evidence, import candidates with explicit ambiguity, optional ripgrep for `search_code` behind the protected/secret gates (Code navigation below)
   pricing.py — exact-route provider-catalog lookup with nullable estimates; no static tariffs (they go stale) (§6 Budget tracking)
   usage_accounting.py, usage_admission.py, _usage_wait.py — physical attempts (reserved → dispatched → settled|unresolved) under global/root/group and review-wave admission (§6 Budget tracking)
+  physical_attempt_context.py — frozen context-fit facts, including the memory view kind, carried by one physical model attempt (§6 Context fitting)
   _usage_rows.py, _usage_money.py, _usage_response.py, usage_ledger.py, skill_review_usage.py — the reducer, Decimal cash, the usage normalizer, row rules and the money lock, the Skill Review projection (§6 Usage ledger substrate vs. accounting policy)
   _usage_cache_splits.py — process-local cache split by task/provider/route/review; a missing entry prices a full cache write (§6)
   usage_store.py, usage_journal.py, openrouter_cost.py — `state/usage.sqlite`, its journal import and explicit OpenRouter price receipts (docs/USAGE_STORE.md)
@@ -210,12 +211,14 @@ ouroboros/ — agent core and shared runtime (§6)
   memory_fallback.py — one signed Light helper draft per root task while consciousness is off; a refusal on the same input and Light route is a receipt, never a repeat (§6)
   memory.py — scratchpad, identity, chat history
   knowledge.py — linked-Markdown notes with shelf indexes and revision-checked writes, so concurrent cognition cannot silently overwrite a newer note (§6 Durable memory)
+  memory_publication.py — per-file revision-checked identity/registry publication, atomic source replacement and origin-stamped history (§6 Durable memory)
   memory_journal_compaction.py — compatibility entry point that only measures journal sizes (`server_maintenance.py` emits `memory_journal_observation`); history stays complete
   project_facts.py — project_id resolution and per-project knowledge under `projects/<id>/knowledge`, isolated from `memory/knowledge`
   task_tree_ledger.py — append-only `data/task_trees/<root>/blackboard.jsonl`: ephemeral swarm coordination (`tree_note`/`tree_read`), mirrored into the project journal at root completion
   projects_registry.py, project_admission.py — the owner Project registry (active|deleting|tombstoned) and strict admission claims (§6 Project registry and lease)
   project_handoff.py — the Main transfer receipt owed through the terminal outbox after a durable bind; a typed `RECEIPT_STATES` answer, never a boolean (§3 Project handoff receipts)
   project_dialogue.py — read-only chat lens and append-only `logs/chat_annotations.jsonl`; routes nothing but the `needs_manual_target` decision card; `routing_refusal_cause` (§3 Chat and Projects)
+  room_membership.py — canonical stored-row membership for history and inventory; a place row belongs only to its place room (§3 Chat and Projects)
   owner_words.py — the owner's words that caused a work tree, rendered verbatim for children, sessions and reviewers
   project_lease.py — one-writer-per-project lease in `assign_tasks`; same-project swarms exempt (§6 Project registry and lease)
   context.py — Main context assembly and the Available-subagents catalog (§6)
@@ -228,6 +231,7 @@ ouroboros/ — agent core and shared runtime (§6)
   memory_view.py, memory_view_legacy.py, memory_view_account.py — role-based story/room views, selected accounts, source changes and retained addresses (§6 Durable memory)
   memory_floor.py — physical memory-view floor: overflow becomes address lines, people's words last (§6 Context fitting)
   capability_evidence.py, response_limits.py — sourced capability, token-density and maximum-response evidence (`data/state/capability_evidence.json`); windows size sends and grant no review authority (§6 Prompt size, density and windows)
+  density_probe.py — the bounded cold-start review-density probe, re-exported by capability_evidence (§6 Prompt size, density and windows)
   context_layout.py — doc-layout SSOT; `book_navigation` in Low/Nano, full ARCHITECTURE in Max; reduction relocates, never silently truncates (§6 Context fitting)
   reference_books.py — ordered book reader/validator; free worktree balance vs cached official merge-base, unknown if unavailable, nonblocking (DEVELOPMENT "Documentation contract")
   local_model_server.py — read-only local formatter measurement and serving-process probe
