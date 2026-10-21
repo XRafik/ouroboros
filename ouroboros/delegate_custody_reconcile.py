@@ -92,7 +92,7 @@ def pending_invocations(drive_root: Any,
     same rule as ``invocation_record``). Legacy rows without a body stay excluded;
     an unreadable request reference retains identity with ``request=None``.
     Reconciliation cannot replay it without that body. ``rows`` shares
-    one pre-read snapshot with ``replay`` (atomic payload busy claim)."""
+    one pre-read snapshot with ``replay`` for consistent inventory reads."""
     from ouroboros.delegate_pending import pending_invocations as replay_pending
 
     return replay_pending(drive_root, rows)
@@ -154,7 +154,8 @@ def release_task_runs(drive_root: Any, task_id: str, *,
 @timed_phase("custody_reconcile", within="release_task_runs")
 def reconcile_task_runs(drive_root: Any, task_id: str, *,
                         gateway_factory: Optional[Callable[[], Any]] = None,
-                        deliberate_terminal: str = "") -> List[Dict[str, Any]]:
+                        deliberate_terminal: str = "",
+                        run_ids: Optional[set[str]] = None) -> List[Dict[str, Any]]:
     """Settle or cancel ONE task's open runs from the DURABLE rows (kill path).
 
     The supervisor-side twin of ``release_task_runs`` for a task whose worker was
@@ -185,6 +186,8 @@ def reconcile_task_runs(drive_root: Any, task_id: str, *,
     from ouroboros.delegate_custody_current import runs as current_runs
 
     view = task_snapshot(drive_root, mine)  # one read; pending starts remain the admitted sweep's duty
+    if run_ids is not None:
+        view = {"runs": {rid: run for rid, run in view["runs"].items() if rid in run_ids}, "pending": []}
     held = [c for c in view["runs"].values()
             if not c.settled or (not c.review_owned and collection_pending(c))]
     named = [_retain_panel_invocation(drive_root, record) for record in view["pending"]
@@ -209,6 +212,7 @@ def reconcile_orphaned_runs(
     *,
     gateway_factory: Optional[Callable[[], Any]] = None,
     recoverable_task_ids: Optional[set] = None,
+    recoverable_handles: Optional[set] = None,
     replay_pending: Optional[Callable[[], bool]] = None,
 ) -> List[Dict[str, Any]]:
     """Settle or cancel every open run whose owning task is no longer running.
@@ -246,12 +250,20 @@ def reconcile_orphaned_runs(
     live = running_task_ids() if callable(running_task_ids) else running_task_ids
     if live is None:
         return []  # the snapshot could not be taken: still UNKNOWN, still touch nothing
-    live_or_reserved = set(live) | set(recoverable_task_ids or ())
-    orphans = [c for c in candidates if c.task_id and c.task_id not in live_or_reserved]
+    live_or_reserved = set(live)
+    protected = set(recoverable_handles or ())
+    if recoverable_task_ids:
+        from ouroboros.delegate_recovery import recoverable_handles as saved_handles
+
+        protected.update(pair for pair in saved_handles(drive_root) if pair[0] in recoverable_task_ids)
+    orphans = [c for c in candidates if c.task_id and c.task_id not in live_or_reserved
+               and (c.task_id, c.run_id, c.invocation_id) not in protected
+               and (c.task_id, c.run_id, "") not in protected]
     # A review surface's pending invocation belongs to its panel, which rejoins it by
     # its exact key (#1006): this sweep would only re-report "retained" every pass.
     stray = [record for record in unbound
              if record["task_id"] and record["task_id"] not in live_or_reserved
+             and (record["task_id"], "", record["invocation_id"]) not in protected
              and not _custody().review_owned_source(record.get("source"))]
     return _reconcile_each(drive_root, orphans, gateway_factory or attach_only_gateway, pending=stray,
                            live_task_ids=live_or_reserved, replay_pending=replay_pending)

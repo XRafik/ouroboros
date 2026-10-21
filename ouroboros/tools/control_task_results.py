@@ -742,8 +742,10 @@ def _delegated_run_facts(drive_root: Path, child_id: str) -> Any:
     record: Any = None
     try:
         path = Path(drive_root) / "state" / "delegate_supervision" / f"{child_id}.json"
-        record = json.loads(path.read_text(encoding="utf-8"))
-        reason = "" if isinstance(record, dict) else "unreadable"
+        from ouroboros.delegate_supervision_state import normalize
+
+        record = normalize(json.loads(path.read_text(encoding="utf-8")))
+        reason = ""
     except FileNotFoundError:
         reason = "no_supervision_record"
     except (OSError, ValueError):
@@ -756,12 +758,13 @@ def _delegated_run_facts(drive_root: Path, child_id: str) -> Any:
                                "age_sec": _age_sec(started_at, now), "max_seconds": max_seconds or None}
         if reason:
             row["supervision"] = {"state": "unknown", "reason": reason}
-        elif str(record.get("run_id") or "") != run.run_id:
+        elif run.run_id not in record["runs"]:
             row["supervision"] = {"state": "unknown", "reason": "record_names_another_run"}
         else:
-            observation = record.get("observation") if isinstance(record.get("observation"), dict) else None
-            entry = record.get("sleep_entry") if isinstance(record.get("sleep_entry"), dict) else {}
-            last = str(record.get("last_answered_observation_at") or "")
+            state = record["runs"][run.run_id]
+            observation = state.get("observation") if isinstance(state.get("observation"), dict) else None
+            entry = state.get("sleep_entry") if isinstance(state.get("sleep_entry"), dict) else {}
+            last = str(state.get("last_answered_observation_at") or "")
             row["supervision"] = {
                 "hold_entered_at": str(entry.get("entered_at") or "unknown"),
                 "last_answered_observation_at": last or "unknown",
@@ -770,7 +773,7 @@ def _delegated_run_facts(drive_root: Path, child_id: str) -> Any:
                 "observation_failure": (
                     "unknown" if observation is None else "" if observation.get("answered")
                     else str(observation.get("reason") or observation.get("status") or "unanswered")),
-                "journal_cursor": record.get("journal_cursor"),
+                "journal_cursor": state.get("journal_cursor"),
             }
         rows.append(row)
     return rows
