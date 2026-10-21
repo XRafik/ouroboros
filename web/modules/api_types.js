@@ -326,11 +326,13 @@
  * @property {string=} effort_level  The effort decided at dispatch (a session row: its leaf's); empty = unknown, no chip.
  * @property {string=} effort_requested  The parent's request when it made one.
  * @property {string=} effort_source  auto | pin | model_name | cyber.
- * @property {string=} executor_route
- *   Phase 6: the OPAQUE harness route RESOLVED AT DISPATCH for this bubble /
- *   subagent (delegated routes only) — the route it was sent to, not a receipt
- *   from the engine saying where it landed. Absent/empty = the ordinary native
- *   path; no chip is drawn.
+ * @property {string=} executor_route  Opaque delegated harness route resolved at dispatch, not an engine receipt.
+ *   Absent/empty uses ordinary native presentation with no chip.
+ * @property {Object=} parent_cognitive_route  Recorded parent snapshot; never inferred from the child's model lane.
+ * @property {string=} coordinator_route
+ * @property {boolean=} use_local_model
+ * @property {string=} coordinator_billing  Recorded subscription | measured | unknown; never inferred on replay.
+ * @property {string=} coordinator_provenance
  * @property {Object=} executor_observation
  *   Latest observed progress actor, bound to own task/attempt/run/revision.
  *   model_source distinguishes requested and observed; not a terminal receipt.
