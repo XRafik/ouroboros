@@ -198,8 +198,6 @@ class SkillManifest:
             )
         if self.timeout_sec <= 0:
             warnings.append("timeout_sec must be positive")
-        if self.scheduled_tasks and "supervised_task" not in self.permissions:
-            warnings.append("scheduled_tasks require the supervised_task permission")
         if self.context_snapshot and "context_snapshot" not in self.permissions:
             warnings.append("context_snapshot requires its hash-bound owner permission")
         if self.plugin_api is not None:
