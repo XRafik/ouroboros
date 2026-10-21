@@ -441,6 +441,11 @@ def _get(read: _Read) -> str:
             if error:
                 return error
             facets[facet] = page
+        if kind == "pr":
+            facts, error = _pr_facts(read, [raw])
+            if error:
+                return error
+            item["review_decision"] = facts[raw["node_id"]].get("reviewDecision")
         payload: Dict[str, Any] = {"target": number, "item": read.project(item)}
         if facets:
             payload["facets"] = facets
@@ -581,9 +586,9 @@ def _pr_items(read: _Read, rows: list) -> Tuple[Optional[list], str]:
         enriched = {**row, "commits": node["commits"]["totalCount"]}
         if "headRefName" in node:
             owner = (node.get("headRepositoryOwner") or {}).get("login")
-            enriched["head"] = {"ref": node["headRefName"], "sha": node.get("headRefOid"),
+            enriched["head"] = {**(row.get("head") or {}), "ref": node["headRefName"], "sha": node.get("headRefOid"),
                                 "label": f"{owner}:{node['headRefName']}" if owner else node["headRefName"]}
-            enriched["base"] = {"ref": node.get("baseRefName")}
+            enriched["base"] = {**(row.get("base") or {}), "ref": node.get("baseRefName")}
             enriched.update(draft=node.get("isDraft"), merged_at=node.get("mergedAt"))
         item = enriched if read.detail == "full" else _pr_shape(read, enriched, full_body=False)
         item["review_decision"] = node.get("reviewDecision")

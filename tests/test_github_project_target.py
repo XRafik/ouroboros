@@ -68,9 +68,9 @@ def gh_calls(monkeypatch):
             route = _api_parts(argv)[0].split("?", 1)[0]
             method = argv[argv.index("--method") + 1] if "--method" in argv else "GET"
             if route == "graphql":
-                output = json.dumps({"data": {"nodes": []}})
+                output = json.dumps({"data": {"nodes": [{"id": "PR_node7", "commits": {"totalCount": 1}, "reviewDecision": "APPROVED"}]}})
             elif route.endswith(("/issues/7", "/pulls/7")):
-                output = json.dumps({"number": 7, "title": "Fixture", "state": "closed" if method == "PATCH" else "open",
+                output = json.dumps({"number": 7, "node_id": "PR_node7", "title": "Fixture", "state": "closed" if method == "PATCH" else "open",
                                      "user": {"login": "fixture"}, "head": {"sha": SHA}, "html_url": f"{BASE}/pull/7", "body": ""})
             elif method == "POST" and route.endswith("/issues"):
                 output = json.dumps({"number": 7, "title": "Title", "body": "Body", "labels": [{"name": "bug"}],
@@ -104,7 +104,7 @@ _CALLS = [
     ("github_write", {"method": "update", "target": 7, "state": "closed"}, 1),
     ("github_write", {"method": "create_issue", "title": "Title", "body": "Body", "labels": ["bug"]}, 1),
     ("github_read", {"method": "list", "kind": "pr"}, 1),
-    ("github_read", {"method": "get", "kind": "pr", "target": 7, "include": ["diff"]}, 2),
+    ("github_read", {"method": "get", "kind": "pr", "target": 7, "include": ["diff"]}, 3),
     ("github_write", {"method": "review", "target": 7, "event": "COMMENT", "body": "text"}, 1),
     ("github_read", {"method": "checks", "target": 7}, 4),
 ]
@@ -127,6 +127,11 @@ def test_every_repository_tool_keeps_target_in_all_subcalls(tmp_path, gh_calls, 
     for argv, kwargs in gh_calls:
         if argv[1] == "api":
             route, hostname, fields = _api_parts(argv)
+            if route == "graphql":  # Node facts follow the PR URL returned by GitHub, like list(kind='pr').
+                assert argv == ["gh", "api", "graphql", "--hostname", "github.example", "--input", "-"]
+                assert kwargs["cwd"] == str(ctx.repo_dir)
+                assert json.loads(kwargs["input"])["variables"] == {"ids": ["PR_node7"]}
+                continue
             if route.startswith("repos/owner/selected/check-runs/"):  # The checks reader's one literal path: the URL GitHub returned.
                 assert argv == ["gh", "api", "repos/owner/selected/check-runs/55/annotations?per_page=100",
                                 "--hostname", "github.example"]

@@ -155,6 +155,8 @@ def test_get_pr_facets_use_rest_pages_graphql_threads_and_the_diff_subcommand(gh
         if p.route == "repos/{owner}/{repo}/pulls/7":
             return json.dumps(_pr(7, additions=3, deletions=1, changed_files=1, mergeable=True, body="desc"))
         if p.route == "graphql":
+            if "nodes(ids:" in p.graphql:
+                return json.dumps({"data": {"nodes": [{"id": "PR_node7", "commits": {"totalCount": 1}, "reviewDecision": "APPROVED"}]}})
             assert p.fields["owner"] == "owner" and p.fields["name"] == "selected"
             assert p.fields["number"] == 7 and p.fields["first"] == 30 and p.fields["after"] is None
             return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
@@ -198,11 +200,42 @@ def test_get_with_a_cursor_pages_exactly_one_facet(gh):
 
 
 @pytest.mark.parametrize("detail", ["concise", "full"])
+@pytest.mark.parametrize("fields", [[], ["review_decision"]])
+def test_get_pr_keeps_review_decision_in_both_detail_modes(gh, detail, fields):
+    def answer(p, argv, kw):
+        if p.route != "graphql":
+            return json.dumps(_pr(7, body="x" * 3000))
+        assert p.fields == {"ids": ["PR_node7"]} and "reviewDecision" in p.graphql
+        return json.dumps({"data": {"nodes": [{"id": "PR_node7", "commits": {"totalCount": 1}, "reviewDecision": "APPROVED"}]}})
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="get", kind="pr", target=7, detail=detail, fields=fields))
+    assert payload["item"]["review_decision"] == "APPROVED" and len(gh.calls) == 2
+    if fields:
+        assert payload["item"] == {"review_decision": "APPROVED"}
+    else:
+        assert payload["item"]["body"] == "x" * (3000 if detail == "full" else 2000)
+
+
+def test_full_pr_list_enrichment_preserves_raw_head_and_base(gh):
+    def answer(p, argv, kw):
+        if p.route != "graphql":
+            return _rest([_pr(7, head={"ref": "feature", "repo": {"id": 1}}, base={"ref": "main", "repo": {"id": 2}})])
+        return json.dumps({"data": {"nodes": [{"id": "PR_node7", "commits": {"totalCount": 1}, "reviewDecision": "APPROVED",
+            "headRefName": "feature", "headRefOid": SHA, "headRepositoryOwner": {"login": "dev"}, "baseRefName": "main"}]}})
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="list", kind="pr", detail="full"))
+    assert payload["items"][0]["head"]["repo"] == {"id": 1}
+    assert payload["items"][0]["base"]["repo"] == {"id": 2}
+
+
+@pytest.mark.parametrize("detail", ["concise", "full"])
 @pytest.mark.parametrize("nested", ["comments", "replies"])
 def test_nested_cuts_are_disclosed_in_both_detail_modes(gh, detail, nested):
     def answer(p, argv, kw):
         if p.route != "graphql":
             return json.dumps(_pr(7))
+        if "nodes(ids:" in p.graphql:
+            return json.dumps({"data": {"nodes": [{"id": "PR_node7", "commits": {"totalCount": 1}, "reviewDecision": "APPROVED"}]}})
         node = {"id": "PRRT_1" if nested == "comments" else "DC_1",
                 nested: {"totalCount": 51, "nodes": [{"id": f"C_{i}", "body": "x"} for i in range(50)]}}
         connection = {"totalCount": 1, "pageInfo": {"hasNextPage": False}, "nodes": [node]}
