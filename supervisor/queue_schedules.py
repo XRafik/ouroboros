@@ -135,7 +135,7 @@ def automatic_acquisitions():
     worker launch's final start. Under it every ``schedule_transaction`` tries the table
     once and runs its body under ``store.acquisition_budget(0)``, and ``control_guard``
     tries the origin's cancellation and launch locks once: confirmed contention defers
-    that caller instead of every queue reader. Work between transactions keeps waits."""
+    that caller instead of every queue reader. Preparation between transactions keeps waits."""
     token = _AUTOMATIC.set(True)
     try:
         yield
@@ -868,7 +868,8 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
             running = _schedule_running_or_queued(schedule_id, root)
             if running is not False:
                 previous = str(record.get("last_task_id") or "")
-                if running is True and previous and (record.get("previous_run_open") or {}).get("task_id") != previous:
+                if (running is True and previous and (record.get("previous_run_open") or {}).get("task_id") != previous
+                        and _schedule_running_or_queued("", root, task_id=previous) is True):
                     record["previous_run_open"] = {"task_id": previous, "since": now_utc.isoformat()}
                     changed = True
                 continue  # unknown queue state never licenses a duplicate firing

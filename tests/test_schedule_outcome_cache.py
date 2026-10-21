@@ -148,8 +148,11 @@ def test_outcome_and_liveness_are_host_fields_and_not_fingerprint_fields(q):  # 
     assert occurrence.fingerprint(row) == occurrence.fingerprint({**row, **forged})
 
 
-def test_previous_run_fact_tracks_that_task_even_if_another_run_is_queued(q):  # noqa: F811
-    history(q, previous_run_open={"task_id": "last", "since": "then"})
+@pytest.mark.parametrize("due", [False, True])
+def test_previous_run_fact_tracks_that_task_even_if_another_run_is_queued(q, due):  # noqa: F811
+    history(q, previous_run_open={"task_id": "last", "since": "then"}, **({
+        "enabled": True, "completed_at": "", "trigger": {"type": "once", "run_at": "2000-01-01T00:00:00+00:00"},
+    } if due else {}))
     q.pending.extend([{"id": "last"}, {"id": "new", "metadata": {"schedule_id": "s1"}}])
     q.queue.check_scheduled_tasks()
     assert _rows(q)["s1"]["previous_run_open"]["task_id"] == "last"
