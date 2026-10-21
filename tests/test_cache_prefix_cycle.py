@@ -151,7 +151,7 @@ def test_an_ordinary_cycle_appends_whatever_a_seam_calls_its_rewrite(installed_p
         assert failures, "a sanctioned ordinary rewrite must still fail the append-only oracle"
         assert usage["prompt_prefix_breaks"] >= 1
         assert {b["sanctioned_by"] for b in _prefix_breaks(f.events)} == {"superseded_skill_snapshot"}
-        record = json.loads(f.ctx.drive_root.joinpath(*transcript_prefix.HISTORY_CHANGES_PATH).read_text())
+        record = json.loads(transcript_prefix.history_changes_path(f.ctx.drive_root).read_text())
         assert record["origins"]["superseded_skill_snapshot"]["count"] == usage["prompt_prefix_breaks"]
         return
     assert not failures, {"rewrites": failures, "breaks": _prefix_breaks(f.events)}

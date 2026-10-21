@@ -286,9 +286,9 @@ Before marking any item CRITICAL you MUST be able to answer YES to ALL of:
    ships on. A fault that needs someone who already holds the power (the owner,
    or the subject's own process editing, planting or restoring files under its
    own data root) is advisory, and disclosure is a valid fix. Ordinary use of a
-   supported capability — installing an official or OuroborosHub skill through a
-   public extension API, choosing a supported provider or setting — is a
-   supported-install trigger, not such a power: the extension need not ship here.
+   supported capability — installing an extension through the subject's public
+   extension API, choosing a supported provider or setting — is a supported-install
+   trigger, not such a power: the extension need not ship in the subject repository.
 
 If you cannot satisfy all five, use **advisory**, not critical.
 

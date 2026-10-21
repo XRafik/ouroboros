@@ -133,6 +133,19 @@ class TestImageEviction:
         assert live == [f"shot-{idx}" for idx in range(prior + incoming - MAX_LIVE_IMAGE_BLOCKS, prior + incoming)]
         assert sum("[image evicted:" in block.get("text", "") for block in blocks) == prior + incoming - len(live)
 
+    def test_eviction_names_its_change_of_sent_history_and_a_fit_names_none(self):
+        """The evicted bytes were already sent: the next observation says who changed them."""
+        from types import SimpleNamespace
+
+        from ouroboros.loop_messages import _append_or_merge_user_content
+        from ouroboros.transcript_prefix import SANCTION_ATTR
+
+        for prior, origin in ((LIVE_IMAGE_BLOCKS_HIGH_WATER, "image_eviction"), (1, None)):
+            slot = SimpleNamespace()
+            messages = [{"role": "user", "content": [_image_block(str(idx))]} for idx in range(prior)]
+            _append_or_merge_user_content(messages, [_image_block("new")], slot=slot)
+            assert getattr(slot, SANCTION_ATTR, None) == origin
+
     def test_placeholder_includes_reviewable_path(self):
         from ouroboros.loop_messages import _evict_stale_image_blocks
 

@@ -125,6 +125,7 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
     placeholder carrying the caption and re-view path: the dialogue HORIZON
     survives while the heavy payload drops (P1 — granularity varies, history
     never silently vanishes). ``incoming`` reserves room for imminent blocks.
+    True when blocks were evicted: the caller names that change of sent history.
     """
     from ouroboros.context_budget import MAX_LIVE_IMAGE_BLOCKS, LIVE_IMAGE_BLOCKS_HIGH_WATER
 
@@ -138,7 +139,7 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
                 image_refs.append((m_idx, b_idx))
     total = len(image_refs) + max(0, int(incoming))
     if total <= LIVE_IMAGE_BLOCKS_HIGH_WATER:
-        return
+        return False
     for m_idx, b_idx in image_refs[:total - MAX_LIVE_IMAGE_BLOCKS]:
         content = messages[m_idx]["content"]
         block = content[b_idx]
@@ -153,6 +154,7 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
             placeholder += f"; re-view: view_image path={source_path}"
         placeholder += "]"
         content[b_idx] = {"type": "text", "text": placeholder}
+    return True
 
 
 def _append_or_merge_user_content(
@@ -167,11 +169,12 @@ def _append_or_merge_user_content(
     own row, and nothing merges into a typed tail, so provenance never has to be
     recovered from text.
     """
-    from ouroboros.transcript_prefix import unsent_in_previous_send
+    from ouroboros.transcript_prefix import sanction_rewrite, unsent_in_previous_send
 
     if isinstance(content, list) and any(
             isinstance(b, dict) and b.get("type") in ("image_url", "image") for b in content):
-        _evict_stale_image_blocks([*messages, {"content": content}])
+        if _evict_stale_image_blocks([*messages, {"content": content}]) and slot is not None:
+            sanction_rewrite(slot, "image_eviction")
     if kind or not (messages and unsent_in_previous_send(slot, messages[-1])
                     and set(messages[-1]) <= {"role", "content"}):
         # Typed words, unknown or sent content and any typed tail stay intact (slot-less producers too).
@@ -669,9 +672,8 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
     ``measured=False`` names the input as unmeasured instead of reusing stale numbers.
     """
     from ouroboros.context_runtime_facts import round_clock_fact
-    from ouroboros.event_usage import event_token_counts
     from ouroboros.nanny_pacing import nanny_burn_fact
-    from ouroboros.transcript_prefix import history_change_text, reasoning_retirement_fact
+    from ouroboros.transcript_prefix import previous_cache_fact, reasoning_retirement_fact
 
     usage = ctx.accumulated_usage
     tool_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
@@ -723,17 +725,7 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
 
     # The mind's own folds stay countable to it (17.10.2026: after 42 folds it told the owner it never folded).
     parts.append(f"own notes in view {sum(1 for row in ctx.messages if (_capsule_metadata(row)[1] or {}).get('authorship') == 'actor')}")
-    previous = usage.get("_last_round_cache_usage") or {}
-    counts = event_token_counts(previous)  # the provider's own report outranks a synthesized billing zero
-    read, total, written = counts["cached_tokens"], counts["prompt_tokens"], counts["cache_write_tokens"]
-    share = (f"{int(read):,}/{int(total):,} tokens ({100 * read / total:.1f}%)"
-             if read is not None and total is not None and total > 0 else "unknown")
-    cache = f"previous usable input cache {share}"
-    if previous:
-        cache += f" [round {previous['round']}, {previous.get('provider') or 'provider unknown'}, {previous.get('model') or 'model unknown'}]"
-        cache += f"; write {int(written):,} tokens" if written is not None else "; write unknown"
-        cache += history_change_text(usage.get("_last_prefix_break"), previous["round"])
-    parts.append(cache)
+    parts.append(previous_cache_fact(usage))
     cost = usage.get("cost")
     parts.append((f"own recorded cost ${float(cost):.2f}" + (" (total not final)" if usage.get("cost_final") is False else ""))
                  if cost is not None else "own cost unknown")

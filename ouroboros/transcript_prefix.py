@@ -279,29 +279,51 @@ def _break_identity(fact: dict) -> tuple:
     return tuple(fact[key] for key in ("round", "index", "kind", "sanctioned_by"))
 
 
-#: Changes of sent history since the running code started, across tasks (the Health line's source).
-HISTORY_CHANGES_PATH = ("state", "sent_history_changes.json")
 _HISTORY_TASKS_KEPT = 32
+_BREAK_KEYS = ("round", "index", "kind", "sanctioned_by", "previous_messages", "current_messages")
+
+
+def history_changes_path(drive_root: Any) -> Path:
+    """Changes of sent history under the running code, across tasks (the Health line's source)."""
+    return Path(drive_root) / "state" / "sent_history_changes.json"
 
 
 def history_change_origin(fact: Mapping[str, Any]) -> str:
     """The stamping seam, else what changed; an unstamped message change says so."""
-    kinds = {"system_rewritten": "system view rebuilt", "tools_changed": "tool set changed"}
+    kinds = {"system_rewritten": "system view rebuilt", "tools_changed": "tool set changed",
+             "no_baseline": "resume without a send record"}
     return str(fact.get("sanctioned_by") or kinds.get(str(fact.get("kind")), "origin not recorded"))
 
 
-def history_change_text(fact: Any, round_idx: Any) -> str:
-    """The facts-line clause for the round's request this change preceded; it states no cost."""
-    if not isinstance(fact, Mapping) or fact.get("round") != round_idx:
+def history_change_text(facts: Any, round_idx: Any) -> str:
+    """The facts-line clause for the round's request a change preceded; it states no cost."""
+    fact = next((item for item in facts or () if isinstance(item, Mapping) and item.get("round") == round_idx), None)
+    if fact is None:
         return ""
-    if fact.get("kind") == "system_rewritten":
-        return "; before that request the system view was rebuilt"
-    if fact.get("kind") == "tools_changed":
-        return "; before that request the tool set changed"
-    if fact.get("kind") == "shrunk":
+    kind = fact.get("kind")
+    if kind in ("system_rewritten", "tools_changed", "no_baseline"):
+        return f"; before that request: {history_change_origin(fact)}"
+    if kind == "shrunk":
         return (f"; before that request sent history shrank from {fact.get('previous_messages')} "
                 f"to {fact.get('current_messages')} messages ({history_change_origin(fact)})")
     return f"; before that request sent message {fact.get('index')} changed ({history_change_origin(fact)})"
+
+
+def previous_cache_fact(usage: Mapping[str, Any]) -> str:
+    """The previous request's cache share as its provider reported it, and a change of sent history before it."""
+    from ouroboros.event_usage import event_token_counts
+
+    previous = usage.get("_last_round_cache_usage") or {}
+    counts = event_token_counts(previous)  # the provider's own report outranks a synthesized billing zero
+    read, total, written = counts["cached_tokens"], counts["prompt_tokens"], counts["cache_write_tokens"]
+    share = (f"{int(read):,}/{int(total):,} tokens ({100 * read / total:.1f}%)"
+             if read is not None and total is not None and total > 0 else "unknown")
+    cache = f"previous usable input cache {share}"
+    if previous:
+        cache += f" [round {previous['round']}, {previous.get('provider') or 'provider unknown'}, {previous.get('model') or 'model unknown'}]"
+        cache += f"; write {int(written):,} tokens" if written is not None else "; write unknown"
+        cache += history_change_text(usage.get("_recent_prefix_breaks"), previous["round"])
+    return cache
 
 
 def history_drive_root(slot: Any) -> Optional[Path]:
@@ -313,10 +335,15 @@ def history_drive_root(slot: Any) -> Optional[Path]:
 
 
 def count_history_change(usage: dict, fact: Mapping[str, Any], *, drive_root: Any = None, task_id: str = "") -> None:
-    """Count every change of sent history once; its sanction names the change, never exempts it."""
+    """Count every change of sent history once; its sanction names the change, never exempts it.
+
+    The facts line describes the previous request after this round's own retirement has
+    run, so the first change of each of the last two rounds is kept."""
     usage["prompt_prefix_breaks"] = int(usage.get("prompt_prefix_breaks") or 0) + 1
-    usage["_last_prefix_break"] = {key: fact.get(key) for key in (
-        "round", "index", "kind", "sanctioned_by", "previous_messages", "current_messages")}
+    recent = [item for item in usage.get("_recent_prefix_breaks") or () if isinstance(item, Mapping)]
+    if not any(item.get("round") == fact.get("round") for item in recent):
+        recent.append({key: fact.get(key) for key in _BREAK_KEYS})
+    usage["_recent_prefix_breaks"] = recent[-2:]
     if drive_root:
         _record_history_change(Path(drive_root), history_change_origin(fact), str(task_id or ""))
 
@@ -335,7 +362,7 @@ def _record_history_change(drive_root: Path, origin: str, task_id: str) -> None:
     code, now = _running_code(), utc_now_iso()
 
     def update(current: dict) -> dict:
-        record = current if current.get("code") == code else {"code": code, "since": now, "origins": {}}
+        record = current if current.get("code") == code else {"code": code, "first": now, "origins": {}}
         row = record.setdefault("origins", {}).setdefault(origin, {"count": 0, "tasks": []})
         row["count"], row["last"] = int(row.get("count") or 0) + 1, now
         if task_id and task_id not in row["tasks"] and len(row["tasks"]) < _HISTORY_TASKS_KEPT:
@@ -343,7 +370,7 @@ def _record_history_change(drive_root: Path, origin: str, task_id: str) -> None:
         return record
 
     try:
-        path = drive_root.joinpath(*HISTORY_CHANGES_PATH)
+        path = history_changes_path(drive_root)
         path.parent.mkdir(parents=True, exist_ok=True)
         update_json_locked(path, update)
     except Exception:
@@ -354,7 +381,7 @@ def history_changes_line(drive_root: Any) -> str:
     """Health fact for the running code: who changed sent history, how often, in how many tasks."""
     from ouroboros.utils import read_json_dict
 
-    record = read_json_dict(Path(drive_root).joinpath(*HISTORY_CHANGES_PATH)) if drive_root else None
+    record = read_json_dict(history_changes_path(drive_root)) if drive_root else None
     origins = (record or {}).get("origins") if (record or {}).get("code") == _running_code() else None
     if not isinstance(origins, dict) or not origins:
         return ""
@@ -363,8 +390,9 @@ def history_changes_line(drive_root: Any) -> str:
         tasks = len(row.get("tasks") or [])
         rows.append(f"{origin} {int(row.get('count') or 0)} in {tasks}{'+' if tasks >= _HISTORY_TASKS_KEPT else ''} "
                     f"task{'s' if tasks != 1 else ''}")
-    return (f"INFO: SENT HISTORY CHANGES since this code ({str(record.get('code'))[:12]}, {str(record.get('since'))[:16]}) "
-            f"— {'; '.join(rows)}. Ordinary steps append; a change makes providers re-read what follows it.")
+    return (f"INFO: SENT HISTORY CHANGES under the running code ({str(record.get('code'))[:12]}, first at "
+            f"{str(record.get('first'))[:16]}) — {'; '.join(rows)}. Ordinary steps append; the round facts name "
+            "each change beside the cache share it preceded.")
 
 
 def reasoning_retirement_fact(usage: dict, round_idx: Any) -> str:

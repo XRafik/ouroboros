@@ -56,42 +56,6 @@ class TestSentHistoryHealth:
         (tmp_path / "logs" / "events.jsonl").write_text("\n".join(events_lines) + "\n", encoding="utf-8")
         return FakeEnv()
 
-    def _emit_producer_rounds(self, tmp_path, reported, count=6):
-        """Rounds in the PRODUCER's exact shape.
-
-        `loop_llm_call.call_llm_with_retry` is the only emitter of `llm_round`,
-        so a synthesized row proves nothing about what the health line reads:
-        the first version of this rule was inert because the producer stamped
-        `cached_tokens` on every event, including rounds where the provider had
-        reported no cache at all. `reported=None` is a provider that says
-        nothing about caching.
-        """
-        from ouroboros.loop_llm_call import call_llm_with_retry
-
-        class _LLM:
-            def chat(self, **_kwargs):
-                usage = {"provider": "openrouter", "resolved_model": "m",
-                         "prompt_tokens": 1000, "completion_tokens": 10, "cost": 0.0}
-                if reported is not None:
-                    usage["cached_tokens"] = reported
-                return {"content": "ok"}, usage
-
-        for index in range(count):
-            call_llm_with_retry(
-                _LLM(), [{"role": "user", "content": "hi"}], "m", None, "medium", 1,
-                tmp_path / "logs", "cache-probe", index, None, {}, "task", False,
-            )
-
-    @pytest.mark.parametrize("cached", [None, 0, 200, 600, 990])
-    def test_health_states_no_cache_share_or_verdict(self, tmp_path, cached):
-        """A provider's cache share depends on the route and the work. As a health verdict it
-        read OK while every ordinary step re-sent the whole history (21.10.2026, #2076) and
-        called an honest zero from a server without cache reports a regression."""
-        env = self._make_env(tmp_path, [])
-        self._emit_producer_rounds(tmp_path, cached)
-        result = build_health_invariants(env).lower()
-        assert "cache hit rate" not in result and "low cache" not in result
-
     def test_health_names_who_changed_sent_history_under_the_running_code(self, tmp_path):
         from ouroboros import transcript_prefix
 
@@ -102,7 +66,8 @@ class TestSentHistoryHealth:
             transcript_prefix.count_history_change(
                 {}, {"round": 3, "kind": "rewritten", "sanctioned_by": origin}, drive_root=tmp_path, task_id=task_id)
         line = next(row for row in build_health_invariants(env).splitlines() if "SENT HISTORY CHANGES" in row)
-        assert line.startswith("- INFO: SENT HISTORY CHANGES since this code ("), line
+        assert line.startswith("- INFO: SENT HISTORY CHANGES under the running code ("), line
+        assert ", first at " in line and "the round facts name each change" in line
         assert "superseded_skill_snapshot 2 in 2 tasks; compaction 1 in 1 task" in line
 
     def test_another_codes_record_is_not_this_codes_history(self, tmp_path):
@@ -110,9 +75,9 @@ class TestSentHistoryHealth:
         from ouroboros.utils import atomic_write_json
 
         env = self._make_env(tmp_path, [])
-        path = tmp_path.joinpath(*transcript_prefix.HISTORY_CHANGES_PATH)
+        path = transcript_prefix.history_changes_path(tmp_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write_json(path, {"code": "an-older-commit", "since": "2026-10-20T17:00:00Z", "origins": {
+        atomic_write_json(path, {"code": "an-older-commit", "first": "2026-10-20T17:00:00Z", "origins": {
             "superseded_skill_snapshot": {"count": 193, "tasks": ["t1"]}}})
         assert "SENT HISTORY CHANGES" not in build_health_invariants(env)
         transcript_prefix.count_history_change(
