@@ -198,7 +198,6 @@ export function scheduleRowHtml(s, expanded = false) {
         origin_owner_paused: 'Original work is paused', owner_restart_in_progress: 'Restart in progress',
         followup_authority_unavailable: 'Original work details unavailable', work_deadline_passed: 'Original hard deadline passed',
         pending_binding_unavailable: 'Fired task awaits verified work binding',
-        followup_result_persistence_unavailable: 'Task record could not be saved',
     };
     const withdrawal = s.withdrawal;
     const statusLabel = !pendingDelete ? status : withdrawal?.work_in_flight === true
