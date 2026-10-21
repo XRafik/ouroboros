@@ -890,6 +890,12 @@ D20 = "Presence"
 "ouroboros/tools/process_facts.py" = "D04"
 "supervisor/telemetry_events.py" = "D08"
 
+# Places, tool effects and the conversation lease (presence vision, 21.10).
+"ouroboros/conversation_lease.py" = "D20"
+"ouroboros/place_guard.py" = "D13"
+"ouroboros/places.py" = "D20"
+"ouroboros/tool_effects.py" = "D04"
+
 [classification]
 # Module placements needing owner review are listed here and starred in
 # docs/DOMAIN_MAP.md. Accepted assignments remain in [modules]; an undecided

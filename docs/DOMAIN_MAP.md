@@ -11,7 +11,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D01 | Agent core & main loop | 50 | 0 |
 | D02 | LLM client, routing & providers | 43 | 0 |
 | D03 | Context assembly, fit & compaction | 22 | 0 |
-| D04 | Tool execution: registry, access & typed results | 22 | 0 |
+| D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
 | D06 | Review stack | 91 | 0 |
 | D07 | Delegation, subagents & Claudexor | 72 | 0 |
@@ -20,15 +20,15 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D10 | Git, update & release machinery | 33 | 0 |
 | D11 | Gateway, server & Web UI | 99 | 0 |
 | D12 | Settings & configuration | 21 | 0 |
-| D13 | Safety, guards & runtime mode | 9 | 0 |
+| D13 | Safety, guards & runtime mode | 10 | 0 |
 | D14 | Skills & extensions | 72 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 29 | 0 |
 | D16 | Observability, usage accounting & cost | 22 | 0 |
 | D17 | Projects, workspaces & task results | 46 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
-| D20 | Presence | 13 | 0 |
-| **total** | | **821** | **0** |
+| D20 | Presence | 15 | 0 |
+| **total** | | **825** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -327,6 +327,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/tool_access_types.py`
 - `ouroboros/tool_access_user_files.py`
 - `ouroboros/tool_capabilities.py`
+- `ouroboros/tool_effects.py`
 - `ouroboros/tool_policy.py`
 - `ouroboros/tools/__init__.py`
 - `ouroboros/tools/arg_feedback.py`
@@ -820,6 +821,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/argv_budget.py`
 - `ouroboros/credential_shapes.py`
 - `ouroboros/git_shell_policy.py`
+- `ouroboros/place_guard.py`
 - `ouroboros/runtime_mode_policy.py`
 - `ouroboros/safety.py`
 - `ouroboros/shell_parse.py`
@@ -1060,6 +1062,8 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 
 ### D20 — Presence
 
+- `ouroboros/conversation_lease.py`
+- `ouroboros/places.py`
 - `ouroboros/presence_admission.py`
 - `ouroboros/presence_authority.py`
 - `ouroboros/presence_bindings.py`

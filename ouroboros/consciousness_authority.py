@@ -98,6 +98,55 @@ def is_consciousness_origin(metadata: Any) -> bool:
     return str(source.get("initiator") or "").strip() == CONSCIOUSNESS_INITIATOR
 
 
+# Why a consciousness turn runs: its own clock, or a focus in a place room.
+# A host fact stamped at the wake's start; descendants never inherit it (they
+# are work the wake started, not the wake).
+WAKE_CAUSE_OWN_CLOCK = "own_clock"
+WAKE_CAUSE_FOCUS = "focus"
+WAKE_CAUSES = (WAKE_CAUSE_OWN_CLOCK, WAKE_CAUSE_FOCUS)
+
+# Whose life a piece of work belongs to: the owner's work or consciousness
+# (own wakes, place focuses and everything they start). Host-minted at root
+# admission and inherited by value; never accepted from tool arguments.
+WORK_KIND_OWNER = "owner"
+WORK_KIND_CONSCIOUSNESS = "consciousness"
+WORK_KINDS = (WORK_KIND_OWNER, WORK_KIND_CONSCIOUSNESS)
+
+
+def wake_cause(metadata: Any) -> str:
+    """The typed wake cause of a consciousness turn, ``""`` for anything else."""
+    source = metadata if isinstance(metadata, Mapping) else {}
+    cause = str(source.get("wake_cause") or "").strip()
+    return cause if cause in WAKE_CAUSES else ""
+
+
+def is_own_clock_wake(metadata: Any) -> bool:
+    """A consciousness turn its own clock started (the census's only "live wake")."""
+    return is_consciousness_origin(metadata) and wake_cause(metadata) == WAKE_CAUSE_OWN_CLOCK
+
+
+def is_focus_wake(metadata: Any) -> bool:
+    """A consciousness turn focused on a place room."""
+    return is_consciousness_origin(metadata) and wake_cause(metadata) == WAKE_CAUSE_FOCUS
+
+
+def work_kind(metadata: Any) -> str:
+    """Whose work this is: ``owner`` only with a positive owner fact, else ``consciousness``.
+
+    Order: the host-minted ``work_kind`` stamp; a consciousness origin; an owner
+    ingress mark. Unknown provenance is not the owner's.
+    """
+    source = metadata if isinstance(metadata, Mapping) else {}
+    stamped = str(source.get("work_kind") or "").strip()
+    if stamped in WORK_KINDS:
+        return stamped
+    if is_consciousness_origin(source):
+        return WORK_KIND_CONSCIOUSNESS
+    if source.get("owner_ingress"):
+        return WORK_KIND_OWNER
+    return WORK_KIND_CONSCIOUSNESS
+
+
 def consciousness_origin_metadata(parent_metadata: Any) -> Dict[str, Any]:
     """The origin keys a task started from a consciousness turn/tree inherits.
 
