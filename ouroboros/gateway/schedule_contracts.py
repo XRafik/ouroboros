@@ -44,7 +44,7 @@ class ScheduleActionResponse(TypedDict, total=False):
     ``changed`` is the durable fact; ``ok`` means the requested lifecycle state
     was achieved and both audit records landed.
     ``status`` names what happened (``updated``, ``withdrawn`` (future dispatch
-    stopped; the restorable row is retained until accepted work settles and
+    stopped; the row is retained until accepted work settles and
     retention expires), ``consumed_not_rearmed``, ``lock_timeout`` (the table
     lock was not acquired within its bound; nothing changed), ``store_unreadable``, ``audit_unavailable``, ``changed_audit_incomplete``),
     and ``operation_id`` pairs the intent and outcome events. Generic restore
