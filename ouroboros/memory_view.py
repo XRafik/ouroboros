@@ -135,7 +135,7 @@ class ViewSpec:
 
 ROLE_DEFAULTS: Mapping[str, ViewSpec] = MappingProxyType({
     "integrator": ViewSpec("integrator"),
-    # a wake: the integrator's view of Main (it has no chat of its own) plus people's words in the other live rooms
+    # A wake sees Main, distinct words from other ordinary rooms, and place pointers.
     "consciousness": ViewSpec("consciousness", live_rooms="lines_with_words"),
     "presence": ViewSpec("presence", origin_words=False, live_rooms="none", marks="room_and_global"),
     "child": ViewSpec("child", room_lanes=False, live_rooms="none", marks="room_and_global", knowledge=False,
@@ -150,7 +150,8 @@ def view_role(task: Mapping[str, Any]) -> str:
     """The view role, first match wins, in ``knowledge.focus_signature``'s order.
 
     A nanny is the one dispatch fact (``_nanny_route_dispatched_for``), then a delegated
-    child, a wake's own ledger category, a Presence turn; everything else integrates.
+    child, an explicit focus cause, a wake's ledger category, and legacy Presence.
+    Everything else integrates.
     The facts are read at the task's top level or under ``metadata``.
     """
     from ouroboros.consciousness_authority import CONSCIOUSNESS_CATEGORY, WAKE_CAUSE_FOCUS, wake_cause
@@ -202,7 +203,7 @@ def _task_ctx(task: Mapping[str, Any]) -> SimpleNamespace:
 
 def view_room_id(task: Mapping[str, Any], ctx: Any, drive_root: Any, *, project_chat_ids: Any,
                  presence: bool = False) -> str:
-    """The current room of a view: ``own_room_chat`` (binding, then chat, then ancestors).
+    """Use the focus room when supplied, then ``own_room_chat`` for other tasks.
 
     A result outside the Projects and Main, or none (the hidden partition, another
     transport chat, a task without a chat), is Main, as the old focused view was; a
