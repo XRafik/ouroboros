@@ -666,8 +666,9 @@ separate future topic from the browser-sandboxed `.wasm` above.
 A skill runs through `skill_exec` only when its exact current bytes are accepted
 (by a fresh executable review verdict or by one of the exact-byte bases below) and
 it is enabled (by the owner, or by an install's turn-on-when-ready request, never
-over an explicit Off). Skill review output is persisted
-to `~/Ouroboros/data/state/skills/<name>/review.json` with a content
+over an explicit Off). A skill review is one wave of the shared review
+mechanism recorded in the review ledger (`surface="skill"`); its verdict is
+projected to `~/Ouroboros/data/state/skills/<name>/review.json` with a content
 hash so an edit to the skill invalidates the previous verdict.
 `review.json`, `enabled.json`, `grants.json`, `install.json`, `owner_edit.json`,
 `update_backup.json` and marketplace/self-authored provenance are skill
@@ -779,14 +780,19 @@ buckets, nested manifests, and path escapes remain refused.
 
 ### Output contract
 
-Reviewers return a JSON array covering every item below.
-Each entry carries `item`, `verdict` (`PASS`/`FAIL`), `severity`
-(`critical`/`advisory`), and `reason`. If one item has multiple distinct
-concrete problems, reviewers may return multiple `FAIL` entries for that
-same item; each distinct root cause must stay visible. If an item has no
-problems, return one `PASS` entry. Do not return duplicate `PASS` entries,
-and do not return `PASS` for an item that also has a `FAIL` — the concrete
-`FAIL` is authoritative.
+Reviewers answer in the common findings-only form of every review
+(`triad_review.REVIEW_JSON_ARRAY_CONTRACT`): a JSON array of PROBLEMS ONLY.
+Each entry carries `item` (exactly one of the names in the table below),
+`verdict` `FAIL`, `severity` (`critical`/`advisory`) and a concrete `reason`
+with the fix. If one item has multiple distinct concrete problems, return one
+entry per root cause; each must stay visible. Return nothing for an item that
+passes or does not apply — no `PASS` entries, no "Not applicable" rows. A
+reviewer that found nothing returns the empty array followed by `NO_FINDINGS`;
+a reviewer that said nothing about an item still counts for what it said. The
+severity guidance below is applied to the findings before the verdict is read:
+a hard trust-boundary item blocks whatever severity the reviewer wrote, an
+advisory-only or unknown item never blocks, and a severity-driven item follows
+the reviewer's word.
 
 ### Checklist items
 
@@ -942,9 +948,11 @@ These are **separate surfaces** with separate prompts and state, drawn from the 
   protects the self-modifying `~/Ouroboros/repo/`. Its attempt state lives in
   `data/state/advisory_review.json`, keyed by staged diff snapshot; its records
   in `data/state/review_ledger/`.
-- Skill review protects the external skills repo. Its state lives in
-  `data/state/skills/<name>/review.json` and is keyed by a content hash
-  of the skill's manifest + payload files.
+- Skill review protects the external skills repo. Its record is a
+  `surface="skill"` entry of the same `data/state/review_ledger/`, keyed by a
+  content hash of the skill's manifest + payload files;
+  `data/state/skills/<name>/review.json` is the run gate's projection of that
+  record.
 
 A blocked skill review must NOT create obligations, commit-readiness
 debt, or any artefact visible to the repo-review pipeline — the two

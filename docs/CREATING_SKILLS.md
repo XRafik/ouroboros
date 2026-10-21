@@ -403,16 +403,25 @@ flowchart LR
   `data/state/skills/<name>/install.json`, outside the payload. ClawHub
   installs also keep their `.clawhub.json` sidecar; skills installed from the
   hub by earlier versions keep `.ouroboroshub.json`.
-- **Review** runs the panel the review mode composes, in parallel, against
-  the Skill Review Checklist (see [`docs/CHECKLISTS.md`](CHECKLISTS.md)):
-  Blocking seats every ticked reviewer; Advisory accepts a panel of at least
-  one ticked reviewer when the narrowing carries its reason; in Cyber Pro the
-  review is evidence for Ouroboros's judgment.
-  The review pack hashes every runtime-reachable file in the skill
-  directory; any later edit stales that critic verdict. Under Advisory, after
-  the first feedback the author may accept a later edit with
+- **Review** is one wave of the shared review mechanism (`skill_review` →
+  `review_change(subject="skill")`, `tools/review_skill.py`): the panel the
+  review mode composes answers the one skill question against the Skill Review
+  Checklist (see [`docs/CHECKLISTS.md`](CHECKLISTS.md)) in the common
+  findings-only form — Blocking seats every ticked reviewer; Advisory accepts a
+  panel of at least one ticked reviewer when the narrowing carries its reason;
+  in Cyber Pro the review is evidence for Ouroboros's judgment. The record is a
+  `surface="skill"` entry of the review ledger; `review.json` is the run gate's
+  projection of it, bound to the content hash of every runtime-reachable file
+  in the skill directory, so any later edit stales that verdict. A review after
+  an edit is change-focused in every mode: reviewers get the manifest, the
+  changed files and a diff since the last verdict, every unchanged file one
+  read away, and judge the whole current skill. Under Advisory, after the first
+  feedback the author may accept a later edit with
   `skill_review(author_disposition="accepted", author_rationale=…)` (the
-  deterministic preflight still runs) instead of buying another panel.
+  deterministic preflight still runs) instead of buying another panel. The tool
+  waits for the panel but hears an addressed owner message: it then returns
+  pending while the reviewers finish, and the same call later collects the
+  verdict at $0.
   `.self_authored.json` is provenance only; self-authored skills use the same
   review, grant, enable, and extension reload flow as other executable skills.
   Reviewers also read how the skill was installed (`install.json`: by the
@@ -1862,10 +1871,12 @@ or repair a skill instead of reading a paraphrase here. Review verdicts are
 `clean`, `warnings`, `blockers`, or `pending`; execution is decided by
 `review_gate.executable_review`.
 Advisory explicit author finish can accept unchanged or corrected bytes after
-feedback, or a returned terminal partial/unavailable review reference, with current
-deterministic preflight. It buys no second critic and retains the original hash,
-status and findings; pending work without feedback is not unavailable. Blocking
-requires fresh reviewer approval. See ARCHITECTURE §13 for the shared runtime gate.
+feedback (a verdict in `review.json` or a settled skill record with findings), or
+the exact `review_reference` (`record_id`/`job_id` + `content_hash`) returned by a
+terminal review that formed no verdict, with current deterministic preflight. It
+buys no second critic and retains the original hash, status and findings; a review
+still running is not unavailable. Blocking requires fresh reviewer approval. See
+ARCHITECTURE §13 for the shared runtime gate.
 
 ## Reference skills
 

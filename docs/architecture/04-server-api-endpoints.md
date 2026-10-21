@@ -29,7 +29,7 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | POST | `/api/skills/{skill}/delete` | |
 | GET | `/api/skills/lifecycle-queue` | |
 | POST | `/api/skills/{skill}/review` | |
-| GET | `/api/skills/{skill}/review-history/{job_id}` | bounded tail window of `review_history.jsonl` |
+| GET | `/api/skills/{skill}/review-history/{job_id}` | the skill's ledger record, else a legacy `review_history.jsonl` tail |
 | POST | `/api/owner/skills/{skill}/attest-review` | owner-only skip of the LLM review; deterministic preflight still runs |
 | POST | `/api/skills/{skill}/grants` | |
 | POST | `/api/skills/{skill}/reconcile` | |
