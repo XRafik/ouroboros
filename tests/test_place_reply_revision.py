@@ -27,11 +27,15 @@ def promoted(parent):
 
 @pytest.mark.parametrize("state", ["silent", "paused", "disconnected"])
 @pytest.mark.parametrize("continuing", [False, True])
-def test_cached_reply_uses_current_state_without_changing_answer(focus, monkeypatch, state, continuing):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_cached_reply_uses_current_state_without_changing_answer(focus, monkeypatch, state, continuing, legacy):
     root, place, admission, event = focus
     task = runner.capture_presence_event(admission, event, drive_root=root)
     metadata = {**task["metadata"], "presence_outcome": "message", "presence_result_text": "Old unsent reply",
                 "presence_output_ref": "same-output"}
+    if legacy:
+        metadata["presence"] = {key: value for key, value in metadata["presence"].items() if key != "place_id"}
+        metadata.pop("focus", None)
     identity = metadata["presence_event_identity"]
     continuation = {"event_identity": identity, "initial": {"outcome": "deferred", "text": "Old unsent reply",
                     "output_ref": "same-output", "work_ref": "child"},

@@ -39,6 +39,20 @@ def reply_carrier(metadata) -> dict:
 def reply_hold(root, metadata, task_id, text: str) -> str:
     """Current host facts only: never generate or buy another safety check on replay."""
     carrier = reply_carrier(metadata)
+    if not carrier and text:
+        from pathlib import Path
+        from ouroboros.places import load_places, places_path
+        from ouroboros.presence_bindings import PRESENCE_BINDINGS_FILENAME
+        presence = metadata.get("presence") or {}
+        event = presence.get("event") or {}
+        binding_id = presence.get("binding_id")
+        # Pre-migration task bytes retain the old id. Resolve it through the
+        # existing place store; isolated legacy readers have no place state.
+        if (binding_id and event.get("conversation_key") and
+                (places_path(root).exists() or (Path(root) / "state" / PRESENCE_BINDINGS_FILENAME).exists())):
+            place = next((p for p in load_places(root) if binding_id in (p.place_id, *p.legacy_binding_ids)), None)
+            carrier = {"place_id": place.place_id if place else binding_id,
+                       "conversation_key": event["conversation_key"], "destination": event.get("destination") or {}}
     if not carrier or not text:
         return ""
     from ouroboros.consciousness_authority import is_observe_origin
