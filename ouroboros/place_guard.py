@@ -64,12 +64,13 @@ def _call_destinations(ctx: Any, name: str, args: Mapping[str, Any], ext_tool: A
         if not _declares_place(connector):
             return effect, targets, [], [], True
         raise _PlacesUnreadable(str(exc)) from exc
-    routing = {key: targets[key] for key in (effect.conversation, effect.thread) if key in targets}
+    routing = {key: targets[key] for key in ("account_id", effect.conversation, effect.thread) if key in targets}
     destinations = [{**routing, key: [value]} for key in (effect.targets or (effect.conversation,))
                     for value in targets.get(key, [])]
     resolved, attributable = [], bool(destinations)
     for destination in destinations or [targets]:
-        place, known = places.place_for_target(root, connector=connector, targets=destination)
+        place, known = places.place_for_target(root, connector=connector, targets=destination,
+                                             conversation=effect.conversation, thread=effect.thread)
         attributable = attributable and known
         if place is not None and place not in resolved:
             resolved.append(place)

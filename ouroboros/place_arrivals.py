@@ -184,3 +184,25 @@ def activity(root, place):
                            f"AND {_PLACE}=? ORDER BY ts DESC LIMIT 1", (place.place_id,)).fetchone()
     return {'unanswered': None if counts is None else sum(counts.values()),
             'last_activity_at': row[0] if row else ''}
+
+
+def account_candidates(root, place_id):
+    """At most 20 people from the newest 50 arrivals: one index seek + 50 rows.
+
+    This is a recent UI suggestion, never owner identity evidence or a history
+    scan. It uses the existing place/time index and stores no second actor list.
+    """
+    if not _dialogue_indexes(root):
+        return []
+    with dialogue_store.transaction(root, write=False) as conn:
+        rows = conn.execute(f"SELECT json_extract(body,'$.sender_session_id') AS actor, "
+                            "json_extract(body,'$.sender_label') AS label, "
+                            "json_extract(body,'$.transport.actor.is_bot') AS bot "
+                            f"FROM dialogue INDEXED BY dialogue_place_recent WHERE {_ARRIVAL} "
+                            f"AND {_PLACE}=? ORDER BY ts DESC LIMIT 50", (place_id,)).fetchall()
+    people = {}
+    for row in rows:
+        actor = str(row['actor'] or '')
+        if actor and not row['bot'] and actor not in people:
+            people[actor] = {'platform_actor_id': actor, 'label': str(row['label'] or actor)}
+    return list(people.values())[:20]

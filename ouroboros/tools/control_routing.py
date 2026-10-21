@@ -337,18 +337,13 @@ def _start_task(
     metadata = getattr(ctx, "task_metadata", {})
     presence_carrier = presence_root_carrier(metadata, task_contract=getattr(ctx, "task_contract", None))
     if presence_carrier:
-        # A public conversation cannot choose a new Project/workspace/source authority; the immutable
-        # ceiling and return destination (a descendant's root: its binding only) follow it by value.
-        evt.update({
-            "project_id": "",
-            "project_name": "",
-            "workspace_root": "",
-            "workspace": "",
-            "source": "",
-            **presence_carrier,
-            "task_contract": dict(getattr(ctx, "task_contract", {}) or {}),
-        })
-        repo_root_note = ""  # Presence runs in its admitted folder, never over the repo
+        contract = dict(getattr(ctx, "task_contract", {}) or {})
+        evt.update({**presence_carrier, "task_contract": contract})
+        if "capability_ceiling" in contract:
+            # Only retained legacy work has an immutable scope ceiling. A new
+            # focus keeps ordinary workspace admission and its return carrier.
+            evt.update({key: "" for key in ("project_id", "project_name", "workspace_root", "workspace", "source")})
+            repo_root_note = ""
     # A promote from a consciousness turn/tree mints a consciousness root: the
     # origin label, ledger category and level ride the event by value; the
     # supervisor stamps them on the new root (worker_promotion) — no presence-style

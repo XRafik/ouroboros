@@ -644,7 +644,7 @@ def _admit_promoted_workspace(evt: dict, ctx: Any, task: dict, *, pid: str, tid:
         workspace_repair_hint,
     )
 
-    if _presence_promotion(evt):
+    if _presence_promotion(evt) and "capability_ceiling" in (task.get("task_contract") or {}):
         # Keep the admitted folder from the inherited contract, never a public
         # event's replacement. Presence retains its canonical shared memory.
         workspace = task["task_contract"].get("workspace") or {}

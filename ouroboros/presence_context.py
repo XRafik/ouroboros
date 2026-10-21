@@ -109,7 +109,7 @@ _OWN_WORK_PAGE = 5
 
 
 def _own_work_section(drive_root: Path, value: Mapping[str, Any], task_id: str) -> str:
-    """The first page of independent work this binding started, from the scoped reader."""
+    """The first page of independent work this place started, from the scoped reader."""
     from ouroboros.tools.recent_tasks import recent_tasks_page
 
     binding = str(value.get("binding_id") or "").strip()
@@ -140,7 +140,7 @@ def _own_work_section(drive_root: Path, value: Mapping[str, Any], task_id: str) 
     ) if gap.get(key)]
     if unread:
         lines.append("(some results are unreadable now: " + "; ".join(unread)
-                     + "; this binding's work may be among them)")
+                     + "; this place's work may be among them)")
     if page.get("error"):
         lines.append(f"(listing unavailable now: {page['error'].get('code')}; page again with recent_tasks)")
     elif page.get("remaining") and focused:
@@ -158,13 +158,13 @@ def _own_work_section(drive_root: Path, value: Mapping[str, Any], task_id: str) 
             "and tell_task to give a live author new facts.\n\n" + "\n".join(lines)
         )
     return (
-        "## Work started from this binding (host-authored facts)\n\n"
-        "Independent work this Presence binding started, from this or another of its conversations, "
+        "## Work started from this place (host-authored facts)\n\n"
+        "Independent work this place started, from this or another of its conversations, "
         "newest first (queued work without a result row leads). Being listed says nothing about whether "
         "its result reached anyone. Where your tools include them, get_task_result(task_id, "
         "presence_scope=\"own_binding\") reads one exactly, tell_task gives it new facts as this "
         "task's own message, and presence_cancel_work requests its cancellation. Work of other "
-        "bindings and the owner's own tasks are not addressable from here.\n\n"
+        "places and the owner's own tasks are not addressable from here.\n\n"
         + "\n".join(lines)
     )
 
@@ -261,7 +261,7 @@ def build_presence_context_section(drive_root: Path, value: Any, task_id: str = 
             "route_meanings": (
                 "current_reply_route is this turn's actual conversation. binding_origin_filter "
                 "selects admitted incoming conversations; a wildcard is not a reply address. "
-                "proactive_destination is the binding's configured endpoint for initiated contact, "
+                "proactive_destination is the place's configured endpoint for initiated contact, "
                 "which may differ from the current conversation. For an initiated cycle, the "
                 "current route already names its target. Use event.actor, event.conversation and "
                 "event.message for the correspondent, room and transport-specific reply details. "
@@ -319,7 +319,7 @@ def build_presence_context_section(drive_root: Path, value: Any, task_id: str = 
     try:
         own_work = _own_work_section(Path(status_root or drive_root), value, task_id)
     except Exception:
-        own_work = "## Work started from this binding (host-authored facts)\n\nUnavailable now; page it with recent_tasks."
+        own_work = "## Work started from this place (host-authored facts)\n\nUnavailable now; page it with recent_tasks."
     if own_work:
         parts.append(own_work)
     parts += [

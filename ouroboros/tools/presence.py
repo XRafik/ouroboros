@@ -82,10 +82,10 @@ def get_tools() -> list[ToolEntry]:
             schema={
                 "name": "presence_cancel_work",
                 "description": (
-                    "Request cancellation of independent work started from this presence "
-                    "binding, in this or another of its conversations (or of this turn's own "
+                    "Request cancellation of independent work started from this "
+                    "place, in this or another of its conversations (or of this turn's own "
                     "children). The result is a request receipt, not proof the work stopped; "
-                    "work of another binding or the owner's own tasks is refused."
+                    "work of another place or the owner's own tasks is refused."
                 ),
                 "parameters": {
                     "type": "object",

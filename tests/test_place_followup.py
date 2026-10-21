@@ -191,12 +191,21 @@ def test_room_and_activity_indexes_are_independent_of_heard_history(focus, monke
     @contextmanager
     def bounded(*args, **kw):
         with original(*args, **kw) as conn:
-            conn.set_progress_handler(lambda: 1, 1500)  # a history scan cannot finish within this bound
-            yield conn
+            calls = 0
+            def progress():
+                nonlocal calls
+                calls += 1
+                return int(calls > 15)
+            conn.set_progress_handler(progress, 100)  # each transaction has its own ~1,500-op budget
+            try:
+                yield conn
+            finally:
+                conn.set_progress_handler(None, 0)
     monkeypatch.setattr(dialogue_store, 'transaction', bounded)
     monkeypatch.setattr(task_store, 'read_document', lambda *a, **kw: pytest.fail('per-row task document load'))
     assert place_activity(root, place) == {'unanswered': 0, 'last_activity_at': '2026-10-21T13:1999'}
     assert len(places.place_room_index(root, place.place_id)) == 1
+    assert place_arrivals.account_candidates(root, place.place_id) == []  # bounded despite 2,000 old arrivals
     monkeypatch.setattr(place_arrivals, '_open_counts', lambda *_: None)
     assert place_activity(root, place)['unanswered'] is None
     assert places.place_room_index(root, place.place_id)[0]['unanswered_count'] is None
