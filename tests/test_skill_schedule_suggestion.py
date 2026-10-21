@@ -58,6 +58,8 @@ def test_context_suggestions_require_current_review_and_enablement(registry, sta
     line = ("Suggests schedule review-0: cron 0 9 * * 1 (Europe/Paris) — "
             "Review the project using this skill. Not scheduled unless adopted.")
     assert (line in section) is (state == "ready")
+    if state == "ready":  # nothing omitted, so no omission note
+        assert "supplies manifest.read." in section and "more suggestions omitted" not in section
     assert not (root / "state" / "scheduled_tasks.json").exists()
 
 

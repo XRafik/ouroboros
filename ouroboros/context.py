@@ -1121,8 +1121,9 @@ def _build_installed_skills_section(env: Any, *, max_lines: int = 100) -> str:
                          f"({_field(suggestion.get('timezone') or 'local', 80)}) — "
                          f"{_field(suggestion.get('description'), 260)}. Not scheduled unless adopted.")
         if suggestions:
-            lines.append(f"  Schedule source: list_skills(name={name!r}) supplies manifest.read; "
-                         f"{skill.get('suggested_schedules_omitted_count', 0)} more suggestions omitted.")
+            omitted = skill.get("suggested_schedules_omitted_count", 0)
+            lines.append(f"  Schedule source: list_skills(name={name!r}) supplies manifest.read"
+                         + (f"; {omitted} more suggestions omitted." if omitted else "."))
         # CPL-7 Model Experience: bounded prose; absent section renders nothing.
         experience = skill.get("model_experience")
         if isinstance(experience, dict):

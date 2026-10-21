@@ -248,7 +248,7 @@ def _project_row(tid: str, row: dict, event: dict, ready: dict, *, delivery: dic
     ])
     notice = completion_notice({**event, **row, "terminal_delivery": delivery})
     excerpt = dialogue._completion_excerpt(row, chat_id=chat_id, salvage_only=True)
-    text = "Done · no message" if quiet else text + "".join(f" {part}" for part in (verdict, excerpt) if part)
+    text = dialogue.QUIET_RUN_HEADLINE if quiet else text + "".join(f" {part}" for part in (verdict, excerpt) if part)
     from ouroboros.dialogue_provenance import presence_provenance_fields
 
     result = {

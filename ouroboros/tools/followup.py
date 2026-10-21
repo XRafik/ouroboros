@@ -351,7 +351,7 @@ def get_tools() -> List[ToolEntry]:
                 "reconsidered. A consumed one-shot re-arms only with a new run_at or a cron. "
                 "disable/delete stop future dispatch; admitted work keeps running. delete withdraws the "
                 "record, restorable for a while and retained until its accepted work settles and retention "
-                "expires. Generic restore cancels withdrawal or enables a paused row; a consumed one-shot "
+                "expires. Generic restore cancels withdrawal (the row comes back enabled, even if paused before) or enables a paused row; a consumed one-shot "
                 "stays consumed. Held restore needs the observed hold_id; an unknown relation must first "
                 "be resolved. Exact hold release preserves enabled/deletion state, pending task identity, "
                 "money/deadline and other holds. Changes belong to a root turn; delegated tasks may "
