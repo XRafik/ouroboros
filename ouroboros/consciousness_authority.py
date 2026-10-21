@@ -1,7 +1,7 @@
 """What a consciousness wake-up may do, and how that authority follows its work.
 
 Three autonomy levels (owner decision В10', PLAN 5.4): ``observe`` researches,
-keeps internal notes and may manage existing schedules while remaining
+keeps internal notes and may read or stop/restore existing schedules while remaining
 resource-narrowed, ``act`` (the default) starts and steers work but may not evolve,
 restart, change settings or touch its own alarm, ``full`` is an owner turn in
 everything the install's runtime mode allows. A wake carries the level it
@@ -43,7 +43,7 @@ ACT_DISABLED: tuple[str, ...] = (
     "toggle_evolution", "request_restart", "set_tool_timeout",
     "toggle_consciousness", "configure_presence",
 )
-# Names Observe keeps even though they appear in the mutation table above,
+# Names Observe keeps even though they have mutating shapes,
 # because each has a real read-only or own-work path that withholding the NAME
 # would destroy along with the mutation. What the name may then be asked to DO
 # is narrowed by ``observe_argument_refusal`` at dispatch, on the arguments.
@@ -56,6 +56,7 @@ OBSERVE_ARGUMENT_NARROWED: frozenset[str] = frozenset({
     # Its own children: starting one is narrowed above, and a mind that may start
     # a child must be able to stop the one it started (the nanny's other half).
     "cancel_task",
+    "manage_schedules",  # reads and lifecycle controls remain; authoring does not
 })
 # Observe withholds every verb that starts work or changes the world beyond
 # this mind's own memory (the table beside ``ROUTING_VERBS``) plus publication.
@@ -223,5 +224,11 @@ def observe_argument_refusal(task_metadata: Any, name: str, args: Mapping[str, A
             return (
                 "⚠️ RESOURCE_CONSTRAINT_BLOCKED: Observe may start a delegated read-only "
                 "research session only; omit root and leave access readonly."
+            )
+    elif tool == "manage_schedules":
+        if str(values.get("action") or "list").strip().lower() == "update":
+            return (
+                "⚠️ RESOURCE_CONSTRAINT_BLOCKED: Observe may list, get, disable, delete or restore "
+                "schedules, not rewrite one; report the change you would make."
             )
     return ""
