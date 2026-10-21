@@ -666,9 +666,8 @@ separate future topic from the browser-sandboxed `.wasm` above.
 A skill runs through `skill_exec` only when its exact current bytes are accepted
 (by a fresh executable review verdict or by one of the exact-byte bases below) and
 it is enabled (by the owner, or by an install's turn-on-when-ready request, never
-over an explicit Off). A skill review is one wave of the shared review
-mechanism recorded in the review ledger (`surface="skill"`); its verdict is
-projected to `~/Ouroboros/data/state/skills/<name>/review.json` with a content
+over an explicit Off). Skill review output is persisted
+to `~/Ouroboros/data/state/skills/<name>/review.json` with a content
 hash so an edit to the skill invalidates the previous verdict.
 `review.json`, `enabled.json`, `grants.json`, `install.json`, `owner_edit.json`,
 `update_backup.json` and marketplace/self-authored provenance are skill
