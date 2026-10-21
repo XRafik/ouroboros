@@ -298,7 +298,7 @@ ouroboros/ — agent core and shared runtime (§6)
   review_pool_migration.py, review_pool_receipts.py — the review-lane → review-pool migration at the settings read seam and its durable receipts (`state/review_migrations/`, the rollback source) (§11.4)
   review_run_isolation.py — contributor review isolation before `config`: private data root, pinned host settings and panel, cumulative cap, attach-only engine (§6 Delegated subagents; Monetary authority and projections)
   review_state.py — Durable commit-review state (`state/advisory_review.json`; old advisory rows are read-only history); re-exports review_state_model.py, review_state_records.py, review_state_custody.py
-  review_records.py, review_verdict.py, review_projection.py, review_evidence_sections.py — panel records, verdict reducers, redacted projections (stored task-acceptance records read tolerantly), evidence section helpers (§6 Result review; Review ledger record)
+  review_records.py, review_doctrine.py, review_verdict.py, review_projection.py, review_evidence_sections.py — panel records, verdict reducers, redacted projections (stored task-acceptance records read tolerantly), evidence section helpers (§6 Result review; Review ledger record)
   review_ledger.py — Durable per-wave review records (`state/review_ledger/<record_id>.json`; §6 Review ledger record)
   review_body_fact.py — Own-body identity and the checklist layer it selects (§6 Change review on any root)
   review_cycles.py — Shared paid-cycle cap SSOT (`OUROBOROS_REVIEW_MAX_CYCLES`); the three per-gate meanings: §6 Review stack (§10 invariant 17)
