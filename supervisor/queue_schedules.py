@@ -485,7 +485,8 @@ def _audit_row(record: Dict[str, Any] | None) -> Dict[str, Any]:
 def _audit_schedule_mutation(*, drive_root: pathlib.Path, operation_id: str, phase: str,
                              actor: str, task_id: str, action: str, schedule_id: str,
                              reason: str, result: str, before: Dict[str, Any] | None = None,
-                             after: Dict[str, Any] | None = None) -> bool:
+                             after: Dict[str, Any] | None = None,
+                             changed_fields: list[str] | None = None) -> bool:
     """Append one bounded schedule audit fact to the EXISTING events log.
 
     Two facts share an ``operation_id``: the INTENT, written before anything is
@@ -501,6 +502,8 @@ def _audit_schedule_mutation(*, drive_root: pathlib.Path, operation_id: str, pha
         "id": str(schedule_id), "schedule_id": str(schedule_id),
         "reason": str(reason), "result": str(result),
     }
+    if changed_fields is not None:
+        event["changed_fields"] = [str(key)[:64] for key in changed_fields[:16]]
     if before is not None:
         event["before"] = _audit_row(before)
     if after is not None:

@@ -150,6 +150,159 @@ def _require_template_effort(template: Dict[str, Any]) -> None:
             raise ScheduleRefused("invalid_template", str(exc)) from exc
 
 
+def _collapse_description_copies(record):
+    """Keep the instruction once; distinct authored descriptions remain intact."""
+    template = record.get("task") or {}
+    text = (record.get("notification") or {}).get("text") if record.get("kind") == "notify" else template.get("text")
+    if isinstance(text, str):
+        if record.get("description") == text:
+            record.pop("description", None)
+        if template.get("description") == text:
+            template.pop("description", None)
+
+
+_PATCH_FIELDS = frozenset({"name", "objective", "context", "trigger", "timezone", "reasoning_effort"})
+
+
+def _patch_value(record, key):
+    if key == "objective":
+        return ((record.get("notification") or {}).get("text") if record.get("kind") == "notify"
+                else (record.get("task") or {}).get("text"))
+    if key in {"context", "reasoning_effort"}:
+        return (record.get("task") or {}).get(key)
+    return record.get(key)
+
+
+def _patched_definition(current, patch):
+    from ouroboros.deadline_utils import parse_deadline_ts
+    from ouroboros.schedule_contract import cron_error, timezone_error
+    from supervisor.followup_policy import normalize_template
+
+    incoming = copy.deepcopy(current)
+    note = incoming.get("kind") == "notify"
+    for key, value in patch.items():
+        if key != "trigger" and not isinstance(value, str):
+            raise ScheduleRefused("invalid_template", f"{key} must be a string")
+        if key == "objective":
+            if not value.strip():
+                raise ScheduleRefused("invalid_template", "objective must not be empty")
+            if note:
+                incoming["notification"] = {**(incoming.get("notification") or {}), "text": value}
+                if value != _patch_value(current, key):
+                    incoming["notification"]["set_at"] = utc_now_iso()
+            else:
+                incoming.setdefault("task", {})["text"] = value
+        elif key in {"context", "reasoning_effort"}:
+            if note:
+                raise ScheduleRefused("invalid_patch", f"{key} applies only to task schedules")
+            incoming.setdefault("task", {})[key] = value
+        else:
+            incoming[key] = copy.deepcopy(value)
+    trigger = incoming.get("trigger")
+    if not isinstance(trigger, dict):
+        raise ScheduleRefused("invalid_template", "trigger must be an object")
+    kind = trigger.get("type")
+    expected = {"type", "run_at"} if kind == "once" else {"type", "expr"}
+    if kind not in {"once", "cron"} or set(trigger) != expected:
+        raise ScheduleRefused("invalid_template", "trigger must be a complete once/run_at or cron/expr object")
+    if error := timezone_error(incoming.get("timezone", "")):
+        raise ScheduleRefused("invalid_template", error)
+    if kind == "once":
+        instant = parse_deadline_ts(str(trigger.get("run_at") or ""))
+        if instant is None:
+            raise ScheduleRefused("invalid_template", "trigger.run_at must be a parseable ISO 8601 instant")
+        if "trigger" in patch:
+            incoming["trigger"] = {"type": "once", "run_at": instant.isoformat()}
+    elif error := cron_error(trigger.get("expr")):
+        raise ScheduleRefused("invalid_template", error)
+    template = normalize_template(incoming)
+    _require_template_effort(template)
+    if not note:
+        incoming["task"] = template
+    changed = sorted(key for key in patch if _patch_value(current, key) != _patch_value(incoming, key))
+    if "trigger" in changed or "timezone" in changed:
+        if kind == "once":
+            old = current.get("trigger") or {}
+            rearm = (_is_consumed_once(current) and "trigger" in patch
+                     and instant != parse_deadline_ts(str(old.get("run_at") or "")))
+            if rearm:
+                incoming.pop("completed_at", None)
+                incoming["enabled"] = True
+            incoming["next_run_at"] = "" if incoming.get("completed_at") else instant.isoformat()
+        else:
+            incoming["next_run_at"] = _schedule_next_run(incoming)
+    return incoming, changed
+
+
+def patch_scheduled_task(schedule_id: str, patch: dict, *, reason: str, actor: str,
+                         task_id: str = "", drive_root=None) -> dict:
+    """Change only supplied authored fields in one audited table write.
+
+    Refusals return a typed no-change result; in particular adoption is staged,
+    so an invalid edit of a legacy row leaves its durable bytes untouched.
+    """
+    from supervisor.schedule_occurrence import remember_claim_basis, fingerprint, _read_back, _unstarted_claim
+
+    wanted = str(schedule_id or "").strip()
+    root = pathlib.Path(drive_root or _store._queue().DRIVE_ROOT)
+    try:
+        if not str(reason or "").strip():
+            raise ScheduleRefused("reason_required", "a reason is required to edit a schedule")
+        if not isinstance(patch, dict) or set(patch) - _PATCH_FIELDS:
+            raise ScheduleRefused("invalid_patch", "patch contains unsupported fields")
+        with schedule_transaction(root):
+            data = load_schedule_store(root)
+            before = next((r for r in data["tasks"] if str(r.get("id") or "") == wanted), None)
+            if before is None:
+                raise ScheduleRefused("not_found", "schedule not found")
+            current = copy.deepcopy(before)
+            adopted = adopt_legacy_skill_row(current)
+            if current.get("delete_requested_at"):
+                raise ScheduleRefused("withdrawn", "this schedule is withdrawn; restore it first")
+            remember_claim_basis(current)
+            _collapse_description_copies(current)
+            incoming, changed_fields = _patched_definition(current, patch)
+            changed = bool(changed_fields or adopted)
+            reconsidered = False
+            if changed:
+                _collapse_description_copies(incoming)
+                if fingerprint(before) != fingerprint(incoming):
+                    incoming.pop("hold", None)
+                    occ = current.get("occurrence") or {}
+                    if occ.get("phase") == "claimed":
+                        try:
+                            reconsidered = _unstarted_claim(occ, _read_back(str(occ.get("task_id") or ""), drive_root=root))
+                        except Exception:
+                            pass  # Unknown receipt: the scan still owns its reconciliation.
+                incoming["updated_at"] = utc_now_iso()
+            else:
+                incoming = copy.deepcopy(before)
+            audit = dict(drive_root=root, operation_id=uuid.uuid4().hex[:12], actor=actor,
+                         task_id=task_id, action="edit", schedule_id=wanted, reason=reason,
+                         changed_fields=changed_fields)
+            adoption = _adoption_audit(root, before) if adopted else None
+            if not _audit_schedule_mutation(phase="intent", result="intended", before=before, **audit):
+                raise ScheduleRefused("audit_unavailable", "the schedule audit log could not be written; nothing was changed")
+            if adoption and not _audit_schedule_mutation(phase="intent", result="intended", before=before, **adoption):
+                _audit_schedule_mutation(phase="outcome", result="audit_unavailable", before=before, **audit)
+                raise ScheduleRefused("audit_unavailable", "schedule adoption audit unavailable; nothing was changed")
+            if changed:
+                data["tasks"] = [incoming if r is before else r for r in data["tasks"]]
+                _write_scheduled_tasks(data, root)
+            recorded = True
+            if adoption:
+                recorded = _audit_schedule_mutation(phase="outcome", result="adopted", before=before, after=incoming, **adoption)
+            status = "updated" if changed else "unchanged"
+            recorded = _audit_schedule_mutation(phase="outcome", result=status, before=before, after=incoming, **audit) and recorded
+            return {**incoming, "status": status, "changed_fields": changed_fields,
+                    "audit": "recorded" if recorded else "incomplete", "reconsidered_claim": reconsidered}
+    except (ScheduleRefused, ScheduleStoreUnreadable) as exc:
+        status = (exc.status if isinstance(exc, ScheduleRefused) else
+                  "lock_timeout" if isinstance(exc, ScheduleLockTimeout) else "store_unreadable")
+        return {"ok": False, "changed": False, "status": status, "schedule_id": wanted,
+                "detail": str(exc), "audit": "not_written"}
+
+
 def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | None = None,
                           actor: str = "", task_id: str = "", reason: str = "",
                           host_followup: dict | None = None,
@@ -234,6 +387,7 @@ def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | 
                 raise
         if existing is None and isinstance(continuation_of, dict):
             incoming["continuation_of"] = dict(continuation_of)
+        _collapse_description_copies(incoming)
         if existing is not None and fingerprint(existing) != fingerprint(incoming):
             incoming.pop("hold", None)
         incoming.setdefault("enabled", True)
@@ -346,6 +500,7 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
                 status = "updated"
             changed = status not in UNCHANGED_STATUSES
             if changed:
+                _collapse_description_copies(current)
                 current["updated_at"] = utc_now_iso()
                 data["tasks"] = tasks
                 _write_scheduled_tasks(data, root)
