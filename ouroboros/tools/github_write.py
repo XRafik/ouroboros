@@ -44,8 +44,11 @@ class _Write:
         self.sent_at = ""
 
     def refuse(self, text: str, code: str = "TOOL_ARG_ERROR", *, no_effect: Optional[bool] = None) -> str:
-        """A typed refusal; unless stated, it attests no effect only while this invocation has launched no gh."""
-        return _refuse(self.ctx, text, code, no_effect=_no_launch_yet() if no_effect is None else no_effect)
+        """A typed refusal. Unless stated, an argument refusal attests no effect only while this public invocation
+        has launched no gh; a TOOL_ERROR comes after a transport answer and attests nothing."""
+        if no_effect is None:
+            no_effect = code == "TOOL_ARG_ERROR" and _no_launch_yet()
+        return _refuse(self.ctx, text, code, no_effect=no_effect)
 
     def number(self) -> Optional[int]:
         target = self.args.get("target")
@@ -432,10 +435,10 @@ def _find(write: _Write, route: str, params: dict, match) -> Optional[dict]:
 def run_write(ctx: ToolContext, method: str = "", repo: str = "", **args: Any) -> str:
     """Dispatch one ``github_write`` call; the registry has already refused unknown arguments."""
     if not isinstance(repo, str):
-        return _refuse(ctx, "⚠️ GH_TARGET_INVALID: repo must be a string; omit it to use the selected Project.", no_effect=True)
+        return _refuse(ctx, "⚠️ GH_TARGET_INVALID: repo must be a string; omit it to use the selected Project.", no_effect=_no_launch_yet())
     method = str(method or "").strip()
     if method not in METHODS:
-        return _refuse(ctx, f"⚠️ TOOL_ARG_ERROR: method must be one of {', '.join(METHODS)}.", no_effect=True)
+        return _refuse(ctx, f"⚠️ TOOL_ARG_ERROR: method must be one of {', '.join(METHODS)}.", no_effect=_no_launch_yet())
     write = _Write(ctx, method, repo, **args)
     return {"comment": _comment, "create_issue": _create_issue, "update": _update, "review": _review,
             "resolve_thread": _resolve_thread, "api": _api}[method](write)
