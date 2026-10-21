@@ -816,6 +816,10 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # own section-2 row; ``ouroboros/card_store.py`` writes all four).
 # 407 -> 408: ``state/panic_source.json`` is diagnostic latest-source evidence
 # (section 2); causal observations also use the existing ``logs/events.jsonl``.
+# 408 -> 407 (managed Node/npm): promotion adds immutable .g-* siblings rather than
+# displacing into node/.old-*; metadata reads use _node_roots instead of spelling
+# node/*-*/managed-node.json. Retained generations and legacy roots share section 4's cx row.
+# 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
 EXPECTED_SCAN_PATHS = 408
 
 # Scanned paths that must always be present — guards the scanner itself

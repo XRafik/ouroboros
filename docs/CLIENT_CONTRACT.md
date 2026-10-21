@@ -622,7 +622,7 @@ The retired hub catalog/preview/install/update/uninstall/publication-clear route
 
 ## 13. Agent accounts
 
-Ouroboros runs connected coding subscriptions through its bundled agent engine, Claudexor. These routes relay the engine. Fields named in the engine's terms (`job`, a maintenance operation, a reset receipt, quota snapshots) are the engine's own API v2 objects, passed through: the core pins the engine release in `ouroboros/claudexor_runtime_pin.json`, and the engine's source is https://github.com/razzant/claudexor. Read the keys the published shapes name, and treat the rest as data.
+Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, maintenance operation, reset receipt, quota snapshots) pass through; Node/npm preparation is host-owned. Pin: `ouroboros/claudexor_runtime_pin.json`; source: https://github.com/razzant/claudexor. Read published shape keys; treat the rest as data.
 
 **Status:**
 - `GET /api/claudexor/status` (`ClaudexorStatusResponse`) is passive: it never starts the engine. `reads.catalog`, `reads.accounts` and `reads.quota` are each `ok` (authoritative, even when empty), `not_read` (never asked) or `failed`. A facet that was not read freshly serves its last value with `facets.<name>.stale: true`. Never read an empty list without `ok` as "no accounts".
@@ -645,10 +645,10 @@ Ouroboros runs connected coding subscriptions through its bundled agent engine, 
 - After a lost answer the outcome is unknown: send the same key and body again, or read the receipt by id.
 
 **Agent tool maintenance:**
-- `GET /api/claudexor/maintenance/harnesses` lists what is installed, tested and available per agent tool, and any operation in progress (rejoin it after a reload). It is passive.
-- `POST /api/claudexor/maintenance/operations` (`{harness, target}`, an `Idempotency-Key` header) installs, updates or rolls back one tool and answers `202` with the operation. It can start the engine. `409` with code `maintenance_already_active` names the running operation in `context.operationId`: follow that one.
-- Poll `GET .../operations/{id}` while `state` is `queued` or `running`, or `termination` is `unconfirmed`. `POST .../operations/{id}/cancel` asks to cancel; the answer is not proof the work stopped.
-- Maintenance refusals are `ClaudexorMaintenanceProblem`: `error` is the engine's problem object (`code`, `message`, `context`), not a sentence. A `503` with `context.acceptance: "unknown"` means the request may have been accepted: send the same key and body again.
+- `GET /api/claudexor/maintenance/harnesses` passively lists installed, tested and available tools and current operations (rejoin after reload).
+- `POST /api/claudexor/maintenance/operations` (`{harness, target}`, `Idempotency-Key` header) installs, updates or rolls back a tool: `202` returns its operation. It can start the engine and prepare Node/npm. `409 maintenance_restart_required` asks for chat-header Restart, then repeat Update; `409/503 maintenance_preparation_failed` reports failure. Optional inspection failure still permits POST.
+- `409 maintenance_already_active`: follow `context.operationId`. Poll `GET .../operations/{id}` while `state` is `queued`/`running` or `termination` is `unconfirmed`. `POST .../operations/{id}/cancel` requests cancellation, without proving termination.
+- `ClaudexorMaintenanceProblem.error` holds engine or host `{code, message, context}`. Preparation's `context.acceptance=not_submitted, scope=this_attempt` cannot resolve an earlier `503 acceptance=unknown`: keep and resend that same key/body.
 
 **The review pool.** `GET /api/review-pool` lists the agent rows that may review work and what one review costs on each. A broken configuration answers a non-empty `config_error` with an empty pool. A readable catalog with no row marked Reviewer also answers an empty pool: the Main model then reviews alone.
 
@@ -714,7 +714,7 @@ Ouroboros runs connected coding subscriptions through its bundled agent engine, 
 ## 16. Errors and unknown outcomes
 
 - **Error bodies** are `ErrorResponse`: `{error}` and, when present, `code` or `reason_code`. A route may add facts beside them (for example `schema_errors`, `task_id` or a skill's current facts). An unexpected failure can also answer `500` as plain text. Statuses beyond the ones a route lists are those `500`s, the auth gate's `401`, and the router's own `404` and `405` for an unknown path or method. Agent-engine routes may also pass the engine's own status through (§13).
-- **An error that is an object.** Agent tool maintenance refusals (`ClaudexorMaintenanceProblem`) carry the engine's problem object in `error`, not a sentence. A client that shows errors should accept both forms and show `error.message` for an object.
+- **Object errors.** Maintenance (`ClaudexorMaintenanceProblem`) returns an engine or host problem in `error`. Accept both strings and objects; show `error.message` for objects.
 - **When an outcome is unknown, never resend a change automatically.** The unknown-outcome answers:
   - `POST /api/tasks` → `status: "unconfirmed"` (resending the same `task_id` is safe; a new id is not);
   - settings writers → `saved: null`;
