@@ -58,7 +58,8 @@ jobs:
           set -euo pipefail
           chmod -R a+rwX "$RUNNER_TEMP/ob688-evidence"
           # No GTK from the builder, no display socket from the runner, no secrets,
-          # no network and no privilege flag. Permit nested unprivileged bwrap.
+          # no network and no privilege flag. Unconfined seccomp only lets a bwrap
+          # attempt, if WebKit made one, be observed rather than refused by Docker.
           docker run --name ob688-desktop-run --rm --network none --shm-size=1g \
             --security-opt seccomp=unconfined \
             -v "$GITHUB_WORKSPACE:/source:ro" -v "$RUNNER_TEMP/ob688-evidence:/evidence" \

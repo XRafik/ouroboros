@@ -273,3 +273,106 @@ def test_desktop_bundle_environment_survives_exec_and_preserves_cli_cwd(tmp_path
     cli.chmod(0o755)
     result = subprocess.run([str(apprun), '--cli'], env=env, cwd=tmp_path, capture_output=True, text=True, check=True)
     assert result.stdout.splitlines() == [str(tmp_path), 'qt', '/caller/lib']
+
+
+def _typelib(dependencies=b'', libraries=b''):
+    """A minimal format-4 typelib whose header fields 36/52 point at C strings."""
+    import struct
+
+    data = bytearray(b'GOBJ\nMETADATA\r\n\x1a' + bytes([4, 0]) + bytes(46))
+    for field, value in ((36, dependencies), (52, libraries)):
+        if value:
+            struct.pack_into('<I', data, field, len(data))
+            data += value + b'\0'
+    return bytes(data)
+
+
+def test_typelib_closure_refuses_dependencies_the_host_would_supply(tmp_path):
+    import runpy
+
+    bundle = runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))
+    requirements = bundle['typelib_requirements']
+    assert requirements(_typelib(b'cairo-1.0|HarfBuzz-0.0|GObject-2.0', b'libpango-1.0.so.0')) == (
+        ['cairo-1.0', 'HarfBuzz-0.0', 'GObject-2.0'], ['libpango-1.0.so.0'])
+    assert requirements(_typelib()) == ([], [])
+    with pytest.raises(RuntimeError, match='Unknown typelib format'):
+        requirements(b'not a typelib' + bytes(64))
+    (tmp_path / 'Pango-1.0.typelib').write_bytes(_typelib(b'HarfBuzz-0.0|GObject-2.0', b'libpango-1.0.so.0'))
+    (tmp_path / 'GObject-2.0.typelib').write_bytes(_typelib(b'', b'libgobject-2.0.so.0'))
+    with pytest.raises(RuntimeError, match=r"Pango-1\.0\.typelib requires typelibs outside the closure: \['HarfBuzz-0\.0'\]"):
+        bundle['typelib_libraries'](tmp_path)
+    (tmp_path / 'HarfBuzz-0.0.typelib').write_bytes(
+        _typelib(b'GObject-2.0', b'libharfbuzz.so.0,libharfbuzz-gobject.so.0'))
+    assert bundle['typelib_libraries'](tmp_path) == [
+        ('GObject-2.0.typelib', 'libgobject-2.0.so.0'), ('HarfBuzz-0.0.typelib', 'libharfbuzz.so.0'),
+        ('HarfBuzz-0.0.typelib', 'libharfbuzz-gobject.so.0'), ('Pango-1.0.typelib', 'libpango-1.0.so.0')]
+    assert 'gir1.2-harfbuzz-0.0' in bundle['PACKAGES']
+
+
+def test_gi_extension_takes_libpython_only_from_its_own_interpreter(tmp_path):
+    import runpy
+
+    linked = runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))['linked_libraries']
+    interpreter = tmp_path / 'python-standalone/lib'
+    interpreter.mkdir(parents=True)
+    ldd = ('\tlinux-vdso.so.1 (0x00007ffc)\n'
+           '\tlibgirepository-1.0.so.1 => /lib/x86_64-linux-gnu/libgirepository-1.0.so.1 (0x00007f01)\n'
+           '\tlibpython3.10.so.1.0 => {}\n'
+           '\t/lib64/ld-linux-x86-64.so.2 (0x00007f02)\n')
+    targets = ('not found', '/usr/lib/x86_64-linux-gnu/libpython3.10.so.1.0 (0x00007f03)')
+    for target in targets:
+        for supplier in (interpreter, None):
+            with pytest.raises(RuntimeError, match='its interpreter does not ship'):
+                linked('_gi.so', ldd.format(target), supplier)
+    (interpreter / 'libpython3.10.so.1.0').write_bytes(b'')
+    for target in targets:
+        # The interpreter's own copy satisfies it; a builder libpython is never shipped.
+        assert linked('_gi.so', ldd.format(target), interpreter) == [
+            ('libgirepository-1.0.so.1', '/lib/x86_64-linux-gnu/libgirepository-1.0.so.1')]
+    with pytest.raises(RuntimeError, match='Unresolved dependency'):
+        linked('_gi.so', '\tlibffi.so.8 => not found\n', interpreter)
+    with pytest.raises(RuntimeError, match='Unresolved dependency'):
+        linked('_gi.so', "/x/_gi.so: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found\n", interpreter)
+
+
+def test_native_recipe_uses_only_the_signed_ordinary_archive():
+    import re
+
+    recipe = (REPO / 'packaging/appimage/native-qualification.Dockerfile').read_text()
+    keyring = '[signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg]'
+    assert re.findall(r"'(deb [^']*)'", recipe) == [
+        f'deb {keyring} http://archive.ubuntu.com/ubuntu jammy main universe',
+        f'deb {keyring} http://archive.ubuntu.com/ubuntu jammy-updates main universe',
+        f'deb {keyring} http://security.ubuntu.com/ubuntu jammy-security main universe']
+    for bypass in ('trusted=yes', 'allow-insecure', 'check-valid-until', 'AllowUnauthenticated', 'snapshot.ubuntu.com'):
+        assert bypass not in recipe
+    # apt-get source cannot fetch the image's superseded versions.
+    assert recipe.index('dist-upgrade') < recipe.index('ca-certificates python3 git curl')
+    builder = recipe.split('FROM common AS builder')[1].split('FROM common AS desktop')[0]
+    release = (REPO / '.github/workflows/ci.yml').read_text().split('Install Linux GTK closure build inputs')[1]
+    for install in (builder, release.split('- name:')[0]):
+        assert 'libwebkit2gtk-4.1-dev gir1.2-webkit2-4.1' in install
+
+
+def test_native_qualifier_records_webkit_sandbox_without_requiring_it():
+    import ast
+    import runpy
+
+    script = REPO / 'scripts/qualify_linux_appimage.py'
+    observe = runpy.run_path(str(script))['sandbox_observation']
+
+    def process(pid, exe, namespace, **environment):
+        return {'pid': pid, 'exe': exe, 'mount_namespace': namespace, 'environment': environment}
+
+    helper = '/x/_internal/linux-gtk/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebProcess'
+    records = [process(1, '/x/python3', 'mnt:[1]'), process(2, helper, 'mnt:[1]'),
+               process(3, '/x/_internal/linux-gtk/bin/bwrap', 'mnt:[2]', WEBKIT_FORCE_SANDBOX='1'),
+               process(4, helper, 'mnt:[2]'),
+               {'pid': 5, 'unreadable': 'denied', 'exe': '', 'maps': '', 'environment': {}}]
+    assert observe(records, 'mnt:[1]') == {
+        'launcher_mount_namespace': 'mnt:[1]',
+        'web_processes': [{'pid': 2, 'mount_namespace': 'mnt:[1]', 'separate_mount_namespace': False},
+                          {'pid': 4, 'mount_namespace': 'mnt:[2]', 'separate_mount_namespace': True}],
+        'sandbox_helpers': ['bwrap'], 'webkit_sandbox_variables': ['WEBKIT_FORCE_SANDBOX']}
+    asserts = [ast.unparse(node) for node in ast.walk(ast.parse(script.read_text())) if isinstance(node, ast.Assert)]
+    assert asserts and not any('mount_namespace' in text or 'ns/mnt' in text for text in asserts)

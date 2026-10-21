@@ -15,6 +15,7 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -22,7 +23,7 @@ import sys
 PACKAGES = (
     "libwebkit2gtk-4.1-0", "gir1.2-webkit2-4.1", "gir1.2-javascriptcoregtk-4.1",
     "gir1.2-gtk-3.0", "gir1.2-soup-3.0", "gir1.2-glib-2.0", "gir1.2-pango-1.0",
-    "gir1.2-atk-1.0", "gir1.2-gdkpixbuf-2.0", "gir1.2-freedesktop",
+    "gir1.2-harfbuzz-0.0", "gir1.2-atk-1.0", "gir1.2-gdkpixbuf-2.0", "gir1.2-freedesktop",
     "libgirepository-1.0-1", "libgtk-3-0", "libgtk-3-common",
     "libgdk-pixbuf-2.0-0", "libgdk-pixbuf2.0-common", "librsvg2-common",
     "glib-networking", "gsettings-desktop-schemas", "gstreamer1.0-plugins-base",
@@ -35,6 +36,9 @@ HOST_LIBRARIES = re.compile(
     r"^(ld-linux.*|lib(c|m|dl|pthread|rt|util|resolv|nss_.*)\.so\..*|"
     r"lib(GL|EGL|GLX|GLdispatch|gbm|drm.*)\.so\..*)$"
 )
+# PyInstaller and python-build-standalone each ship their own libpython.
+INTERPRETER_LIBRARY = re.compile(r"^libpython3\.\d+\.so\.1\.0$")
+TYPELIB_MAGIC = b"GOBJ\nMETADATA\r\n\x1a"
 TRIPLET = "x86_64-linux-gnu"
 
 
@@ -58,6 +62,59 @@ def package_owner(path: str) -> str:
         if result.returncode == 0:
             return result.stdout.split(": ", 1)[0]
     raise RuntimeError(f"Native library has no package provenance: {path}")
+
+
+def linked_libraries(source, linked: str, interpreter: Path | None) -> list[tuple[str, str]]:
+    """Resolved ldd dependencies to ship; anything unresolved fails closed.
+
+    A GI extension naming libpython is satisfied only by the copy its own
+    interpreter ships; a builder libpython is never copied or aliased.
+    """
+    resolved = []
+    for line in linked.splitlines():
+        match = re.match(r"\s*(\S+) => (/\S+|not found)", line)
+        if match and INTERPRETER_LIBRARY.fullmatch(match[1]):
+            if interpreter is None or not (interpreter / match[1]).is_file():
+                raise RuntimeError(f"{source} needs {match[1]}, which its interpreter does not ship")
+        elif "not found" in line:
+            raise RuntimeError(f"Unresolved dependency: {source}\n{linked}")
+        elif match:
+            resolved.append((match[1], match[2]))
+    return resolved
+
+
+def typelib_requirements(data: bytes) -> tuple[list[str], list[str]]:
+    """Header dependencies and shared libraries of a format-4 GI typelib.
+
+    gitypelib-internal.h (gobject-introspection 1.72): Header.dependencies at
+    byte 36 and Header.shared_library at 52 are offsets of C strings.
+    """
+    if data[:16] != TYPELIB_MAGIC or data[16] != 4:
+        raise RuntimeError("Unknown typelib format; the closure check must be requalified")
+
+    def string(field: int) -> str:
+        (offset,) = struct.unpack_from("<I", data, field)
+        return data[offset:data.index(b"\0", offset)].decode() if offset else ""
+
+    return ([name for name in string(36).split("|") if name],
+            [name for name in string(52).split(",") if name])
+
+
+def typelib_libraries(directory: Path) -> list[tuple[str, str]]:
+    """(typelib, library) pairs for a typelib directory that must be closed.
+
+    libgirepository searches GI_TYPELIB_PATH, then its compiled system typelib
+    directories, and requires header dependencies eagerly. A gap here would be
+    filled silently from the builder's or user's /usr, so it is refused.
+    """
+    named = []
+    for typelib in sorted(directory.glob("*.typelib")):
+        dependencies, shared = typelib_requirements(typelib.read_bytes())
+        missing = [name for name in dependencies if not (directory / f"{name}.typelib").is_file()]
+        if missing:
+            raise RuntimeError(f"{typelib.name} requires typelibs outside the closure: {missing}")
+        named += [(typelib.name, name) for name in shared]
+    return named
 
 
 def relocate_webkit(data: bytes) -> tuple[bytes, list[str]]:
@@ -110,6 +167,19 @@ def bundle(internal: Path) -> None:
                 pending.append(source)
         return target
 
+    def ship(name: str, path: Path) -> None:
+        if HOST_LIBRARIES.fullmatch(name):
+            return
+        relative = Path("lib") / TRIPLET / name
+        copy(path, relative)
+        libraries[name] = relative
+        owner = package_owner(str(path))
+        for package in owner.split(", "):
+            packages[package] = output("dpkg-query", "-W", "-f=${Version}", package)
+            copyright = Path("/usr/share/doc") / package.split(":")[0] / "copyright"
+            if copyright.is_file():
+                copy(copyright, Path("share/doc") / package.split(":")[0] / "copyright")
+
     for package in PACKAGES:
         packages[package] = output("dpkg-query", "-W", "-f=${Version}", package)
         for name in output("dpkg-query", "-L", package).splitlines():
@@ -121,33 +191,31 @@ def bundle(internal: Path) -> None:
             elif name in ("/usr/bin/bwrap", "/usr/bin/xdg-dbus-proxy"):
                 copy(source, source.relative_to("/usr"))
 
+    # GI dlopens typelib-named libraries by soname: ship them with the closure.
+    for typelib, name in typelib_libraries(root / "lib" / TRIPLET / "girepository-1.0"):
+        path = Path("/usr/lib") / TRIPLET / name
+        if "/" in name or not path.exists():
+            raise RuntimeError(f"{typelib} names an unshippable library: {name}")
+        ship(name, path)
+
     # GI extensions in the frozen and source interpreters need the same closure.
-    for pattern in ("gi/_gi*.so", "python-standalone/lib/python*/site-packages/gi/_gi*.so"):
+    interpreters = {}
+    for pattern, interpreter in (("gi/_gi*.so", internal),
+                                 ("python-standalone/lib/python*/site-packages/gi/_gi*.so",
+                                  internal / "python-standalone/lib")):
         extensions = list(internal.glob(pattern))
         if not extensions:
             raise RuntimeError(f"GI missing from a shipped interpreter: {pattern}")
         pending.extend(extensions)
+        interpreters.update(dict.fromkeys(extensions, interpreter))
     visited = set()
     while pending:
         source = pending.pop()
         if source in visited:
             continue
         visited.add(source)
-        linked = output("ldd", str(source))
-        if "not found" in linked:
-            raise RuntimeError(f"Unresolved dependency: {source}\n{linked}")
-        for name, path in re.findall(r"^\s*(\S+) => (/\S+) \(", linked, re.M):
-            if HOST_LIBRARIES.fullmatch(name):
-                continue
-            relative = Path("lib") / TRIPLET / name
-            copy(Path(path), relative)
-            libraries[name] = relative
-            owner = package_owner(path)
-            for package in owner.split(", "):
-                packages[package] = output("dpkg-query", "-W", "-f=${Version}", package)
-                copyright = Path("/usr/share/doc") / package.split(":")[0] / "copyright"
-                if copyright.is_file():
-                    copy(copyright, Path("share/doc") / package.split(":")[0] / "copyright")
+        for name, path in linked_libraries(source, output("ldd", str(source)), interpreters.get(source)):
+            ship(name, Path(path))
 
     # Debian copyright files can refer to these rather than carry the full text.
     for license_file in Path('/usr/share/common-licenses').iterdir():

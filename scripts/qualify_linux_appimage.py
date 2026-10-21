@@ -72,7 +72,8 @@ def process_evidence(pid, evidence, filename='processes.json'):
                       'mount_namespace': os.readlink(proc / 'ns/mnt'),
                       'argv': (proc / 'cmdline').read_bytes().decode().split('\0'),
                       'environment': {k: v for k, v in env.items() if k in (
-                          'OUROBOROS_PRESENTATION', 'GI_TYPELIB_PATH', 'LD_LIBRARY_PATH', 'PYWEBVIEW_GUI')},
+                          'OUROBOROS_PRESENTATION', 'GI_TYPELIB_PATH', 'LD_LIBRARY_PATH', 'PYWEBVIEW_GUI',
+                          'WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS', 'WEBKIT_FORCE_SANDBOX')},
                       'maps': maps}
             records.append(record)
         except (FileNotFoundError, ProcessLookupError):
@@ -81,6 +82,20 @@ def process_evidence(pid, evidence, filename='processes.json'):
             records.append({'pid': child, 'unreadable': str(exc), 'exe': '', 'maps': '', 'environment': {}})
     (evidence / filename).write_text(json.dumps(records, indent=2))
     return records
+
+
+def sandbox_observation(records, launcher_namespace):
+    """Record WebKit's own web-process isolation; neither outcome is required.
+
+    WebKitGTK 4.1 sandboxes only after webkit_web_context_set_sandbox_enabled,
+    which pywebview 5.4 never calls (packaging/appimage/README.md).
+    """
+    return {'launcher_mount_namespace': launcher_namespace,
+            'web_processes': [{'pid': r['pid'], 'mount_namespace': r['mount_namespace'],
+                               'separate_mount_namespace': r['mount_namespace'] != launcher_namespace}
+                              for r in records if r['exe'].endswith('/WebKitWebProcess')],
+            'sandbox_helpers': sorted({os.path.basename(r['exe']) for r in records} & {'bwrap', 'xdg-dbus-proxy'}),
+            'webkit_sandbox_variables': sorted({k for r in records for k in r['environment'] if k.startswith('WEBKIT_')})}
 
 
 def one_case(appimage, state, evidence, *, source=False, display=True, native=True, command=None):
@@ -162,15 +177,14 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 (evidence / 'window.txt').write_text(geometry + '\n' + run('xprop', '-id', window))
                 run('import', '-window', window, str(evidence / 'window.png'))
                 records = process_evidence(process.pid, evidence)
+                (evidence / 'webkit-sandbox.json').write_text(json.dumps(
+                    sandbox_observation(records, os.readlink(f'/proc/{launcher_pid}/ns/mnt')), indent=2))
                 for library in ('libgtk-3', 'libwebkit2gtk-4.1', 'libjavascriptcoregtk-4.1', 'libgirepository-1.0', 'libglib-2.0', 'libsoup-3.0'):
                     mapped = [line for r in records for line in r['maps'].splitlines() if library in line]
                     assert mapped and all('/_internal/linux-gtk/' in line for line in mapped), (library, mapped)
                 for helper in ('WebKitWebProcess', 'WebKitNetworkProcess'):
                     matches = [r for r in records if r['exe'].endswith('/' + helper)]
                     assert matches and all('/_internal/linux-gtk/' in r['exe'] for r in matches), helper
-                launcher_namespace = os.readlink(f'/proc/{launcher_pid}/ns/mnt')
-                web_processes = [r for r in records if r['exe'].endswith('/WebKitWebProcess')]
-                assert all(r['mount_namespace'] != launcher_namespace for r in web_processes), 'WebKit sandbox namespace'
                 assert any(r['environment'].get('OUROBOROS_PRESENTATION') == 'desktop_window' for r in records)
                 if source:
                     assert 'python-standalone' in os.readlink(f'/proc/{launcher_pid}/exe')

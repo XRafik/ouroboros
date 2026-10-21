@@ -8,7 +8,13 @@ test "$(uname -sm)" = 'Linux x86_64'
 test -z "$(git status --porcelain --untracked-files=no)"
 export CC=gcc CXX=g++ LDSHARED='gcc -shared' PYTHONDONTWRITEBYTECODE=1
 export UV_PYTHON_DOWNLOADS=never
-mkdir -p "$EVIDENCE"
+mkdir -p "$EVIDENCE/apt-release"
+# The ordinary archive is not a snapshot: keep the signed index state used.
+cp /etc/apt/sources.list /etc/apt/sources.list.d/native-sources.list \
+    /var/lib/apt/lists/*_InRelease "$EVIDENCE/apt-release/"
+# Fail before the long build when a declared closure package is not installed.
+python3 -I -c 'import runpy, subprocess; subprocess.run(["dpkg-query", "-W",
+    *runpy.run_path("scripts/bundle_linux_gtk.py")["PACKAGES"]], check=True)' > "$EVIDENCE/closure-packages.tsv"
 git rev-parse HEAD > "$EVIDENCE/source-sha.txt"
 git rev-parse HEAD^{tree} > "$EVIDENCE/source-tree.txt"
 sha256sum pyproject.toml uv.lock requirements-runtime.lock Ouroboros.spec \
