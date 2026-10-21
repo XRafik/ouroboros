@@ -564,18 +564,25 @@ Status, owner action, and urgent notification are separate product concepts:
   task as a proxy.
 
 Activity schedule rows use the same factual status rule: `active`, `disabled`,
-`suppressed`, `consumed once · history` and `deletion pending` describe
-lifecycle state, while the adjacent Disable/Enable, Restore and Delete controls
-state the owner action. A consumed one-shot is history whether its task
-succeeded or failed; the status never implies a result. Retained rows (consumed
-and suppressed) collapse into one disclosure rather than padding the standing
-list or disappearing: history the owner can still open, read and act on. A
-suppressed skill row keeps Restore so the owner can ask for it back; a consumed
-one keeps only Delete, since Enable on a schedule that cannot fire again would
-be a lie. A deleted row still finishing work it already accepted stays in the
-standing list and says what it waits for. Where generic Restore can cancel the
-pending deletion, the button says Cancel deletion, not Enable; an exact hold
-release stays separate and preserves the deletion intent.
+`consumed once · history`, `withdrawn` and `deletion pending · work in flight`
+describe lifecycle state, while the adjacent Disable/Enable, Restore and Delete
+controls state the owner action. Lifecycle and the last run's outcome are
+separate facts: the outcome line says the settled word as stored (`completed`,
+`failed`, `cancelled`), `ran · no message` for a quiet run, or `outcome not
+observed yet` until the scheduler has read the settled result; it never says
+running, and only the host's own observation writes `previous run still open`.
+A consumed one-shot is history whether its task succeeded or failed; the status
+never implies a result. A row is headed by its name; the instruction stays
+readable and expands by touch, and a waiting row says why inline, never in a
+hover-only tooltip. Retained rows (consumed and withdrawn) collapse into one
+History & withdrawn disclosure rather than padding the standing list or
+disappearing: history the owner can still open, read and act on. A withdrawn
+row says who withdrew it, when and why, and keeps Restore through the retention
+window; Restore cancels the withdrawal and never re-arms a one-shot that already
+fired. A consumed row keeps only Delete, since Enable on a schedule that cannot
+fire again would be a lie. A withdrawn row still finishing work it already
+accepted stays in the standing list and says so; an exact hold release (Restore
+hold) stays separate and preserves the withdrawal.
 
 A record of what the owner did earlier is history, not status. A skill's
 OuroborosHub submission (the version it sent and its PR link) lives in the
@@ -1547,7 +1554,7 @@ Expanded ordinary cards disclose earlier Files, timeline, Reviews and children
 in collapsible sections using their original content, never duplicate cards.
 A Project portal still reaches that content through its room.
 
-**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
+**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. A quiet scheduled run (it finished without a message) keeps its internal result and a terse `Done · no message` row in its own room; it creates no Main completion summary and sends no finish notification, while a host notice it carries stays visible. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved result-review PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 
@@ -2325,7 +2332,8 @@ to interrupt you. Judge it by use and turn it off if it is too chatty.
 **What never notifies.** Progress, a transient failure, one tool's error and a
 reviewer's finding are not notifications; they stay in the transcript. A child
 task never notifies the owner: it escalates to its parent, and only the parent's
-own message or the root's terminal can ring. Machine partitions — the hidden
+own message or the root's terminal can ring, and a run that finished quietly
+(`quiet_effective`) does not, unless it publishes a host notice. Machine partitions — the hidden
 chat and agent-to-agent traffic — never reach a banner. A Project's room
 notifies once this client knows it; any other ordinary conversation, including
 one arriving over an external transport, is treated as the owner's exactly as
