@@ -462,10 +462,10 @@ class BackgroundConsciousness:
                 "places_brief": [{key: place.get(key) for key in ("place_id", "label", "state", "unanswered")}
                                  for place in places] if places is not None else None}
 
-    def details_snapshot(self) -> Dict[str, Any]:
+    def details_snapshot(self, requested_enabled: bool | None) -> Dict[str, Any]:
         """The full read-only panel; the state endpoint keeps its small snapshot."""
-        from ouroboros.consciousness_view import place_views, recent_wakes
-        snapshot = self.status_snapshot()
+        from ouroboros.consciousness_view import describe_consciousness_state, place_views, recent_wakes
+        snapshot = describe_consciousness_state(self.status_snapshot(), requested_enabled)
         places = place_views(self._drive_root)
         return {**snapshot, "places": places, "recent_wakes": recent_wakes(self._drive_root, places),
                 "recent_wakes_coverage": "wake turns among the 50 newest task rows"}
