@@ -364,7 +364,7 @@ def test_nonclean_outcome_publishes_a_host_notice_never_the_internal_words(wake,
     pending, stored = emit(wake, text, usage, trace, bus=bus)
     shown = sends(pending)
     assert len(shown) == 1 and shown[0]["role"] == "system", "one host-authored row, not the model's voice"
-    assert shown[0]["text"].startswith("⚠️ This wake chose to finish without a message, but it ended")
+    assert shown[0]["text"].startswith("⚠️ This run chose to finish without a message, but it ended")
     assert f"ended {status} " in shown[0]["text"] and shown[0]["terminal_origin"] == "host_notice"
     # Speech is every chat send, live or buffered, and every owed outbox row (tool-call activity is not speech).
     spoken = json.dumps([shown, sends(drained(bus)), owed_rows(wake.root)], ensure_ascii=False)
@@ -595,7 +595,7 @@ def test_forced_rail_retaining_quiet_bytes_publishes_only_the_host_notice(wake, 
     pending, stored = emit(wake, text, usage, trace, bus=bus)
     shown = sends(pending)
     assert len(shown) == 1 and shown[0]["role"] == "system" and shown[0]["terminal_origin"] == "host_notice"
-    assert shown[0]["text"].startswith("⚠️ This wake chose to finish without a message, but it ended")
+    assert shown[0]["text"].startswith("⚠️ This run chose to finish without a message, but it ended")
     assert f"({reason})" in shown[0]["text"] and "ended ok" not in shown[0]["text"]
     spoken = _spoken(wake, pending, bus)
     assert owed_rows(wake.root) and (not internal or internal not in spoken), "the notice is owed, never the words"
@@ -629,7 +629,7 @@ def test_forced_retention_of_stale_quiet_bytes_stays_internal(wake, monkeypatch)
     assert text == INTERNAL and usage.get("wake_silent") is True
     pending, stored = emit(wake, text, usage, trace, bus=bus)
     shown = sends(pending)
-    assert len(shown) == 1 and shown[0]["text"].startswith("⚠️ This wake chose to finish without a message")
+    assert len(shown) == 1 and shown[0]["text"].startswith("⚠️ This run chose to finish without a message")
     assert INTERNAL not in _spoken(wake, pending, bus)
     assert "STALE-EVIDENCE NOTICE" in stored["terminal_host_notice"] and stored["result"] == INTERNAL
 
@@ -647,7 +647,7 @@ def _host_notice_only(wake, text, usage, trace, bus, internal, reason):
     pending, stored = emit(wake, text, usage, trace, bus=bus)
     shown = sends(pending)
     assert len(shown) == 1 and shown[0]["role"] == "system" and shown[0]["terminal_origin"] == "host_notice"
-    assert shown[0]["text"].startswith("⚠️ This wake chose to finish without a message") and reason in shown[0]["text"]
+    assert shown[0]["text"].startswith("⚠️ This run chose to finish without a message") and reason in shown[0]["text"]
     spoken = _spoken(wake, pending, bus)
     assert "empty response" not in spoken and (not internal or internal not in spoken)
     assert stored["result"] == internal and stored.get("wake_silent") is True
