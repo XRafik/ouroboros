@@ -544,7 +544,7 @@ def focus_source_projection(
     return {**payload, **current, **({"reason": reason} if reason else {})}
 
 
-def host_acceptance_source(drive_root: Any, task_id: str, digest: str) -> tuple:
+def host_acceptance_source(drive_root: Any, task_id: str, digest: str, *, anchor: Any = None) -> tuple:
     """``(ref, bytes)`` of this physical author's own HOST acceptance record, named by digest.
 
     These records are history: the retired task acceptance wrote them and nothing
@@ -563,12 +563,16 @@ def host_acceptance_source(drive_root: Any, task_id: str, digest: str) -> tuple:
     # this author's known retained drives can supply a not-yet-canonical file.
     from ouroboros.evidence_packs import handle_info
 
-    roots = [drive_root, *retained_task_roots(drive_root, task_id)]
-    stored = next((info for root in roots if (info := handle_info(root, task_id, path)) is not None), None)
+    root = pathlib.Path(drive_root).resolve() if anchor is not None else drive_root
+    anchor = pathlib.Path(anchor).resolve() if anchor is not None else None
+    stored = handle_info(root, task_id, path, anchor=anchor)
+    if stored is None:
+        stored = next((info for child in retained_task_roots(root, task_id)
+                       if (info := handle_info(child, task_id, path, anchor=anchor)) is not None), None)
     if stored is None:
         raise FileNotFoundError(path)
     ref = {"kind": "task_source", "root": "artifact_store", "path": path, "size": stored["size"], "sha256": digest}
-    raw = read_actor_source_bytes(drive_root, task_id, ref)
+    raw = read_actor_source_bytes(root, task_id, ref, anchor=anchor)
     run = json.loads(raw)
     request = run.get("request") if isinstance(run, dict) else None
     if (not isinstance(request, dict) or run.get("authority") != "host_root"

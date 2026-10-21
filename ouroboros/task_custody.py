@@ -66,6 +66,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import copy
+import errno
 import hashlib
 import json
 import logging
@@ -198,15 +199,39 @@ def task_mail_lock(drive_root: Any, task_id: str, *, timeout_sec: float = 5.0) -
     return _task_lock(drive_root, task_id, "mail", timeout_sec)
 
 
-def own_child_drives(canonical_root: Any, task_id: str) -> List[pathlib.Path]:
-    """TASK's own execution drives from the host layout alone, never created.
+def recorded_execution_drive(row: Dict[str, Any], drive: pathlib.Path) -> bool:
+    """Canonical admission/copy-back facts, compared lexically before child IO.
 
-    No result field names them, so a forged row cannot widen what a read or a
-    settlement touches; a drive reached through a symlink is not own.
+    A writable task scratch directory is not evidence that it hosts a task store.
+    Callers must supply the canonical row, never a row read from that directory.
+    """
+    metadata = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
+    return any(pathlib.Path(str(source[key])) == drive for source in (row, metadata)
+               for key in ("child_drive_root", "headless_child_drive_root", "drive_root") if source.get(key))
+
+
+def own_child_drives(canonical_root: Any, task_id: str, *,
+                     store_row: Optional[Dict[str, Any]] = None) -> List[pathlib.Path]:
+    """TASK's physical child layouts, never created; metadata needs canonical proof.
+
+    ``store_row`` filters before directory IO when discovering SQLite stores.
+    Without it, callers discover only file custody: task scratch may hold bytes,
+    but its existence cannot authorize a database read. No row widens the layouts.
     """
     canonical, tid = pathlib.Path(canonical_root).resolve(strict=False), validate_task_id(task_id)
     drives = (canonical / HEADLESS_TASKS_DIR / tid / "data", canonical / TASK_DRIVES_DIR / tid)
-    return [drive for drive in drives if drive.is_dir() and drive.resolve(strict=False) == drive]
+    from ouroboros.confined_files import confined_directory
+
+    found = []
+    for drive in drives:
+        if store_row is not None and not recorded_execution_drive(store_row, drive):
+            continue
+        try:
+            with confined_directory(canonical, drive.relative_to(canonical).parts):
+                found.append(drive)
+        except OSError:
+            continue
+    return found
 
 
 def task_artifact_stores(canonical_root: Any, task_id: str) -> List[pathlib.Path]:
@@ -216,8 +241,7 @@ def task_artifact_stores(canonical_root: Any, task_id: str) -> List[pathlib.Path
     stores = [canonical / _ARTIFACTS_DIR / tid]
     for drive in own_child_drives(canonical, tid):
         store = drive / _ARTIFACTS_DIR / tid
-        if store.resolve(strict=False) == store:
-            stores.append(store)
+        stores.append(store)  # location only; every read descends from canonical_root
     return stores
 
 
@@ -581,20 +605,28 @@ def store_artifact_view(canonical_root: Any, task_id: str, recorded: List[Dict[s
     weaker one. Its LOCATION is the canonical store's copy when one is listed there, else
     the child's. Pure: nothing is hashed, copied or registered."""
     from ouroboros.artifacts import collect_task_artifact_records, merge_artifact_records
+    from ouroboros.confined_files import lexical_relative, open_confined_file, read_confined_json
 
     stores = task_artifact_stores(canonical_root, task_id)
+    anchor = pathlib.Path(canonical_root).resolve()
     claims: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}  # rel -> [(store index, row)]
     order: List[str] = []
     free: List[Dict[str, Any]] = []
 
     def claim(row: Dict[str, Any], *, free_ok: bool) -> None:
         located = next(((index, rel) for index, store in enumerate(stores)
-                        if (rel := store_relpath(store, row.get("path")))), None)
+                        if (rel := lexical_relative(store, row.get("path")))), None)
         if located is None:
             if free_ok:
                 free.append(row)
             return
         index, rel = located
+        try:
+            handle, _ = open_confined_file(anchor, (*stores[index].relative_to(anchor).parts, *rel.split("/")))
+            handle.close()
+        except OSError as exc:
+            if exc.errno in {errno.ELOOP, errno.EMLINK, errno.ENOTDIR}:
+                return  # A linked placement is not an own-store row; a missing identity stays visible.
         if rel not in claims:
             order.append(rel)
         claims.setdefault(rel, []).append((index, row))
@@ -604,16 +636,16 @@ def store_artifact_view(canonical_root: Any, task_id: str, recorded: List[Dict[s
             claim(dict(row), free_ok=True)
     for store, rows in (child_rows or {}).items():
         for row in rows:
-            if isinstance(row, dict) and store_relpath(store, row.get("path")):
+            if isinstance(row, dict) and lexical_relative(store, row.get("path")):
                 claim(dict(row), free_ok=False)
     for index, store in enumerate(stores):
-        try:
-            registered = _registrations(store)
-        except _Retained:
-            registered = {}
+        document = read_confined_json(anchor, (*store.relative_to(anchor).parts, ".artifact_manifest.json"))
+        registered = (document or {}).get("artifacts")
+        registered = registered if isinstance(registered, dict) else {}
         for name, row in registered.items():
-            claim({**row, "path": str(store / name)}, free_ok=False)
-        for row in collect_task_artifact_records(store.parents[2], task_id, measure=False):
+            if isinstance(row, dict):
+                claim({**row, "path": str(store / name)}, free_ok=False)
+        for row in collect_task_artifact_records(store.parents[2], task_id, measure=False, anchor=anchor):
             claim(row, free_ok=False)
 
     rows: List[Dict[str, Any]] = []

@@ -55,9 +55,19 @@ def retained_child_root(canonical: pathlib.Path, child: pathlib.Path, task_id: s
         parts = relative.parts
         layout = ((len(parts) == 4 and parts[:2] == ("state", "headless_tasks") and parts[3] == "data")
                   or (len(parts) == 2 and parts[0] == "task_drives"))
-        if not layout or child.resolve() != child or not child.is_dir():
+        if not layout:
             return False
         owner = parts[2] if len(parts) == 4 else parts[1]
+        if task_id and task_id != owner:
+            # Prove a retry's execution placement from canonical facts BEFORE
+            # touching scratch or reading the alleged occupant's store.
+            from ouroboros.task_store import read_document
+            from ouroboros.task_custody import recorded_execution_drive
+            if not recorded_execution_drive(read_document(canonical, task_id) or {}, child):
+                return False
+        from ouroboros.confined_files import confined_directory
+        with confined_directory(canonical, parts):
+            pass
         if not task_id or task_id == owner:
             return True
         # A timeout successor may occupy the original drive. Its own durable
@@ -83,25 +93,25 @@ def retained_task_roots(canonical: pathlib.Path, task_id: str) -> list[pathlib.P
     return list(dict.fromkeys(path for path in candidates if retained_child_root(root, path, task_id)))
 
 
-def read_retained_task_source(root, task_id, ref):
+def read_retained_task_source(root, task_id, ref, *, anchor=None):
     """Resolve retained execution or retry-predecessor bytes with the same verifier."""
     from ouroboros.artifacts import read_actor_source_bytes
 
-    for source_root, owner in _source_locations(root, task_id):
+    for source_root, owner in _source_locations(root, task_id, anchor=anchor):
         try:  # loose or packed at this placement; damage is explicit, absence tries the next one
-            return read_actor_source_bytes(source_root, owner, ref, retained=False)
+            return read_actor_source_bytes(source_root, owner, ref, retained=False, anchor=anchor)
         except FileNotFoundError:
             continue
     raise FileNotFoundError(f"actor source unavailable: {ref['path']}")
 
 
-def _source_locations(root, task_id):
+def _source_locations(root, task_id, *, anchor=None):
     """Own sources first, then the reaper's exact, reciprocal retry links; no scan/copy."""
     from ouroboros.task_results import load_task_result, validate_task_id
 
     root, owner, seen = pathlib.Path(root), validate_task_id(task_id), set()
-    start = load_task_result(root, owner, strict=True) or {}
-    canonical = pathlib.Path(start.get("budget_drive_root") or root)
+    start = (load_task_result(root, owner, strict=True) or {}) if anchor is None else {}
+    canonical = pathlib.Path(anchor if anchor is not None else start.get("budget_drive_root") or root)
     while owner not in seen:
         seen.add(owner)
         if root != canonical:

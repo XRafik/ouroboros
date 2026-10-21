@@ -932,9 +932,11 @@ def api_task_artifact(request: Request):
     except ValueError as exc:
         return json_error(str(exc), 400)
     name = str(request.path_params.get("name") or "").strip()
-    if not name or "/" in name or "\\" in name or name in {".", ".."} or ".." in pathlib.PurePosixPath(name).parts:
+    if plain_segments(name) != [name]:
         return json_error("artifact name must be a simple filename", 400)
     source, relpath = request.query_params.get("source"), request.query_params.get("relpath")
+    if source and not plain_segments(source):
+        return json_error("task source is unavailable or does not match its recorded identity", 404)
     if relpath is not None and (source or plain_segments(relpath)[-1:] != [name]):
         return json_error("relpath must be store-relative plain segments ending in the name, without source",
                           400, reason_code="artifact_relpath_invalid", task_id=task_id, artifact=name)

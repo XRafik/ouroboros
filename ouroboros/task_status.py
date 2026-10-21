@@ -1187,11 +1187,11 @@ def effective_task_result(
         from ouroboros.outcomes import artifact_bundle_from_result
         from ouroboros.task_custody import own_child_drives, store_artifact_view
 
-        # A pure view (TZ-1 A): recorded rows, the task's OWN child stores' recorded rows
-        # (their identity survives a suppressed cancelled child result) and stat-only
-        # listings; nothing is copied, hashed or registered here.
+        # Canonical admission/copy-back facts authorize child store reads, never
+        # scratch existence. Keep child claims even after cancellation; this view
+        # copies, hashes and registers nothing.
         child_rows = {}
-        for drive in own_child_drives(drive_root, task_id):
+        for drive in own_child_drives(drive_root, task_id, store_row=result):
             rows = (load_task_result(drive, task_id) or {}).get("artifacts")
             child_rows[drive / "task_results" / "artifacts" / task_id] = rows if isinstance(rows, list) else []
         recorded = [item for item in (merged.get("artifacts") or []) if isinstance(item, dict)]
