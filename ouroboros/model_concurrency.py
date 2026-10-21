@@ -1,7 +1,11 @@
 """Fair physical-call admission shared by the processes of one installation.
 
-The configured cap (default three, <=0 disables) belongs to a resolved provider,
-credential and endpoint, across models and roles. Callers bind their deadline with
+The configured cap (default three, <=0 disables) belongs to one model on a resolved
+provider, credential and endpoint, across roles and every process of the installation.
+Routes the managed Claudexor engine serves are not queued here: that one daemon is
+already the shared admission point for its accounts (quota-aware routing and
+rotation), and a host cap would only shrink an install's parallel work to the cap
+across all its models. Callers bind their deadline with
 ``model_call_scope``; adapters take ``model_call_slot(route=target)`` INSIDE the
 physical sender, so retries, tools, backoff and abandoned logical waits own no slot.
 
@@ -82,11 +86,12 @@ def _cap() -> int:
 
     default = SETTINGS_DEFAULTS.get("OUROBOROS_MODEL_MAX_CONCURRENCY", 3)
     # Capacity belongs to the install, not an older task's frozen settings.
-    # Every process observes an owner cap change through the same document.
+    # Every process observes an owner cap change through the same document; an
+    # unreadable document falls back to the process's own value, never refuses a call.
     try:
         saved = read_settings_json_verified(SETTINGS_PATH)
-    except (OSError, ValueError) as error:
-        raise ModelSlotUnavailable("Provider capacity settings unavailable") from error
+    except (OSError, ValueError):
+        saved = None
     value = (saved or {}).get("OUROBOROS_MODEL_MAX_CONCURRENCY",
                              runtime_setting("OUROBOROS_MODEL_MAX_CONCURRENCY", default))
     try:
@@ -110,6 +115,11 @@ def model_call_scope(model: str, use_local: bool = False, deadline_ts: float | N
         _DEADLINE.reset(token)
 
 
+def _managed(route: dict | None) -> bool:
+    """A route the managed Claudexor engine serves (its daemon arbitrates accounts itself)."""
+    return isinstance(route, dict) and str(route.get("provider") or "") == "claudexor"
+
+
 def _route_digest(model: str, use_local: bool, route: dict | None) -> str:
     if route is None:
         if use_local:
@@ -123,11 +133,8 @@ def _route_digest(model: str, use_local: bool, route: dict | None) -> str:
     endpoint = str(route.get("base_url") or "").strip().rstrip("/")
     if provider == "local" and not endpoint:
         endpoint = f"http://127.0.0.1:{runtime_setting('LOCAL_MODEL_PORT', 8766)}/v1"
-    # Managed Auto resolves accounts inside the engine. All pins and Auto share
-    # its source bucket, otherwise Auto and a pin could overbook the same account.
-    account = ({} if provider == "claudexor" else
-               {key: str(route.get(key) or "") for key in ("api_key", "user", "password", "credential_profile_id")})
-    identity = [provider, str(route.get("source") or ""), endpoint, account]
+    account = {key: str(route.get(key) or "") for key in ("api_key", "user", "password", "credential_profile_id")}
+    identity = [provider, str(route.get("source") or ""), endpoint, account, str(model or "")]
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
@@ -248,7 +255,7 @@ def model_call_slot(model: str, use_local: bool = False, deadline_ts: float | No
     ``route`` is the adapter's resolved target, never a requested model alias.
     The owning sender must exit this context, even if its caller stops waiting.
     """
-    if not enabled():
+    if _managed(route) or not enabled():
         yield
         return
     waiter = _Waiter(model, use_local, deadline_ts, route, cancel_event, check)
@@ -273,7 +280,7 @@ def model_call_slot(model: str, use_local: bool = False, deadline_ts: float | No
 async def model_call_slot_async(model: str, use_local: bool = False, deadline_ts: float | None = None,
                                 *, route: dict | None = None, check: Callable | None = None):
     """Same queue with cancellable async waits, with no orphan acquiring thread."""
-    if not enabled():
+    if _managed(route) or not enabled():
         yield
         return
     waiter = _Waiter(model, use_local, deadline_ts, route, None, check)

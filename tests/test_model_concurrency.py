@@ -202,20 +202,46 @@ def test_disabled_is_passthrough(monkeypatch, isolated_queue):
         assert len(_records(isolated_queue, "slot")) == 1
 
 
-def test_routes_share_models_but_separate_credentials_endpoints_and_providers(monkeypatch, isolated_queue):
+def test_one_model_shares_its_route_and_every_other_identity_separates(monkeypatch, isolated_queue):
     monkeypatch.setenv("OUROBOROS_MODEL_MAX_CONCURRENCY", "1")
     monkeypatch.setenv("OUROBOROS_MODEL_SLOT_MAX_WAIT_SEC", "1")
     with mc.model_call_slot("main", route=ROUTE):
         with pytest.raises(mc.ModelSlotTimeout):
-            with mc.model_call_slot("checker", route={**ROUTE, "base_url": ROUTE["base_url"] + "/"}):
-                pytest.fail("same route escaped by model name")
-        for key, value in [("api_key", "other-fake"), ("base_url", "https://other.invalid/v1"), ("provider", "other")]:
-            with mc.model_call_slot("main", route={**ROUTE, key: value}):
+            with mc.model_call_slot("main", route={**ROUTE, "base_url": ROUTE["base_url"] + "/"}):
+                pytest.fail("the same model on the same route escaped by an endpoint spelling")
+        for model, key, value in [("checker", "provider", "test"), ("main", "api_key", "other-fake"),
+                                  ("main", "base_url", "https://other.invalid/v1"), ("main", "provider", "other")]:
+            with mc.model_call_slot(model, route={**ROUTE, key: value}):
                 assert len(_records(isolated_queue, "slot")) == 2
     for path in (isolated_queue / "state").rglob("*"):
         assert "fake-secret" not in str(path)
         if path.is_file():
             assert b"fake-secret" not in path.read_bytes()
+
+
+def test_managed_engine_routes_are_not_queued_by_the_host(monkeypatch, isolated_queue):
+    """Claudexor's one daemon arbitrates its accounts: the host cap never shrinks that parallel work."""
+    monkeypatch.setenv("OUROBOROS_MODEL_MAX_CONCURRENCY", "1")
+    monkeypatch.setenv("OUROBOROS_MODEL_SLOT_MAX_WAIT_SEC", "1")
+    managed = {"provider": "claudexor", "source": "managed", "credential_profile_id": ""}
+    with mc.model_call_slot("main", route=managed):
+        with mc.model_call_slot("main", route=managed):
+            assert _records(isolated_queue, "slot") == []
+    # A direct route at the same cap still queues (the guard is not off).
+    with mc.model_call_slot("main", route=ROUTE):
+        with pytest.raises(mc.ModelSlotTimeout):
+            with mc.model_call_slot("main", route=ROUTE):
+                pytest.fail("a direct route escaped its cap")
+
+
+def test_unreadable_settings_fall_back_to_the_process_cap(monkeypatch, isolated_queue):
+    from ouroboros import settings_integrity
+    monkeypatch.setattr(settings_integrity, "read_settings_json_verified",
+                        lambda path: (_ for _ in ()).throw(ValueError("unverified")))
+    monkeypatch.setenv("OUROBOROS_MODEL_MAX_CONCURRENCY", "2")
+    assert mc._cap() == 2
+    with mc.model_call_slot("main", route=ROUTE):
+        assert len(_records(isolated_queue, "slot")) == 1
 
 
 def test_cap_changes_drain_existing_holders_and_wake_old_waiters(isolated_queue, processes):
