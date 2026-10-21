@@ -101,7 +101,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         "persist_queue_snapshot", "restore_invalid_depth_admission", "sort_pending",
     })),
     "supervisor/queue_timeouts.py": ("supervisor/queue.py", "_queue", frozenset({
-        "DRIVE_ROOT", "FINALIZATION_GRACE_SEC", "HEARTBEAT_STALE_SEC", "PENDING",
+        "BUDGET_ROOT_FENCES", "DRIVE_ROOT", "FINALIZATION_GRACE_SEC", "HEARTBEAT_STALE_SEC", "PENDING",
         "QUEUE_MAX_RETRIES", "RUNNING", "_enforce_task_timeouts_locked", "_expire_pending_deadlines_locked",
         "_ensure_reaper_started", "_has_live_descendant", "_has_pending_descendant",
         "_is_descendant_of", "_queue_lock", "_reap_queue",
@@ -356,7 +356,8 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         '_finalize_task_services', '_force_plan_decision', '_force_plan_disclosure',
         '_force_plan_reminder', '_forced_delegation_note', '_forced_fallback_result',
         '_forced_orphan_note', '_forced_unaccepted_binding', '_handle_model_wait_control', '_live_delivery_candidate',
-        '_load_direct_child_results', '_prepare_forced_prompt', '_project_child_result_dispositions',
+        '_load_direct_child_results', '_last_assistant_text', '_prepare_forced_prompt', '_project_child_result_dispositions',
+        'provider_no_call_source',
         '_publish_delivery_candidate', '_record_forced_finalization', '_release_for_owner_followup',
         '_replace_delivery_candidate', '_resolve_forced_delivery_control_body', '_retire_main_reasoning',
         '_server_web_allowed_by_task', '_service_finalization_evidence',
