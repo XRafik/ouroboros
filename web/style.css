@@ -6407,12 +6407,10 @@ button.skills-mark { cursor: pointer; min-height: 0; }
     gap: 12px;
 }
 
-/* Confirm/input/alert dialogs must stay usable over EVERY overlay — the
-   reconnect shade sits at 1000 (the Panic confirm is the canonical case: it
-   must be clickable while the socket is down). Content modals
-   (:where(.marketplace-modal-backdrop), 90) deliberately stay under the
-   shade — their actions need a live connection anyway. Overlay scale:
-   modals 90 · toasts/menus 120 · reconnect 1000 · dialogs 1100. */
+/* Confirm/input/alert dialogs must stay usable over EVERY overlay (the Panic
+   confirm is the canonical case: it must be clickable while the socket is
+   down; no veil covers the app then, owner 20.10 Q4). Overlay scale:
+   modals 90 · toasts/menus 120 · dialogs 1100. */
 .confirm-dialog-backdrop {
     z-index: 1100;
 }
