@@ -59,16 +59,17 @@ test('a deleted row still owing work stays in the standing list after reload', (
     assert.doesNotMatch(independent, / · next /, 'a deleted row announces no next run');
 });
 
-test('the exact hold release stays reachable on a pending-delete continuation', () => {
+test('a held withdrawal offers only the exact hold release until the hold is gone', () => {
     const held = { ...consumedPending, followup_hold: { hold_id: 'h-1', reason: 'origin_stopped' }, hold_persisted: true };
     const html = scheduleRowHtml(held);
     assert.match(html, /data-action="restore" data-hold-id="h-1">Restore hold</);
-    assert.match(html, /data-action="restore">Restore</, 'withdrawal cancellation is separate from exact hold release');
+    assert.doesNotMatch(html, /data-action="restore">Restore</, 'a generic Restore over a hold could only be refused');
     assert.doesNotMatch(html, />Enable</);
+    assert.match(scheduleRowHtml(consumedPending), /data-action="restore">Restore</, 'released, the withdrawal is restorable');
     const unknown = scheduleRowHtml({ ...held, relation: 'unknown' });
     assert.match(unknown, /resolve relationship in conversation/);
     assert.doesNotMatch(unknown, /data-hold-id=/);
-    assert.match(unknown, /data-action="restore">Restore</);
+    assert.doesNotMatch(unknown, /data-action="restore">Restore</);
 });
 
 test('withdrawal history and Restore follow explicit facts, including unknown work in flight', () => {

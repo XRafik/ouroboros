@@ -221,13 +221,13 @@ def _patched_definition(current, patch):
         incoming["task"] = template
     changed = sorted(key for key in patch if _patch_value(current, key) != _patch_value(incoming, key))
     if "trigger" in changed or "timezone" in changed:
+        old = current.get("trigger") or {}
+        # A fired one-shot given a new instant or a cron is a live promise again.
+        if _is_consumed_once(current) and "trigger" in patch and (
+                kind == "cron" or instant != parse_deadline_ts(str(old.get("run_at") or ""))):
+            incoming.pop("completed_at", None)
+            incoming["enabled"] = True
         if kind == "once":
-            old = current.get("trigger") or {}
-            rearm = (_is_consumed_once(current) and "trigger" in patch
-                     and instant != parse_deadline_ts(str(old.get("run_at") or "")))
-            if rearm:
-                incoming.pop("completed_at", None)
-                incoming["enabled"] = True
             incoming["next_run_at"] = "" if incoming.get("completed_at") else instant.isoformat()
         else:
             incoming["next_run_at"] = _schedule_next_run(incoming)

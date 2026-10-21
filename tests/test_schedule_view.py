@@ -26,7 +26,8 @@ def test_only_legacy_generated_names_are_displayed_as_the_objective(name, expect
     view = decorate(original, NOW)
     assert view["display_name"] == expected and view["name"] == name
     assert original == before
-    assert view["kind"] == "task" and view["timezone"] == "local"
+    # A blank zone stays blank for consumers that name it (Activity: the server zone).
+    assert view["kind"] == "task" and view["timezone"] == ""
     assert view["destination"] == {"chat_id": 42, "project_id": "project"}
     assert "outcome" not in view and "previous_run_open" not in view
 
@@ -62,6 +63,8 @@ def test_withdrawal_reports_only_known_work_facts(facts, expected):
     view = decorate(original, NOW)
     assert view["withdrawal"] == {"at": "then", "by": "owner", "reason": "finished",
                                   "work_in_flight": expected, "restorable": True}
+    held = {**original, "followup_hold": {"hold_id": "h-1", "reason": "origin_stopped"}}
+    assert decorate(held, NOW)["withdrawal"]["restorable"] is False  # only the exact release applies
     original["completed_at"] = "done"
     assert decorate(original, NOW)["withdrawal"]["restorable"] is False
     original.pop("delete_requested_at")

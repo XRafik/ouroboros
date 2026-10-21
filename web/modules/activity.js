@@ -190,13 +190,14 @@ export function scheduleRowHtml(s, expanded = false) {
         followup_authority_unavailable: 'Original work details unavailable', work_deadline_passed: 'Original hard deadline passed',
         pending_binding_unavailable: 'Fired task awaits verified work binding',
     };
+    const followupWait = s.waiting_detail?.followup_wait || s.followup_wait;
     const withdrawal = s.withdrawal;
     const statusLabel = !pendingDelete ? status : withdrawal?.work_in_flight === true
         ? 'deletion pending · work in flight' : withdrawal?.restorable === true
             ? 'withdrawn · restorable' : withdrawal ? 'withdrawn' : 'deletion pending';
     const destination = s.destination || s.task || {};
     const address = `${destination.project_id ? ` · project ${esc(destination.project_id)}` : ''}${destination.chat_id != null ? ` · chat ${esc(destination.chat_id)}` : ''}`;
-    const sub = `${note ? 'reminder · ' : s.kind === 'task' ? 'task · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)} · ${esc(relation)}${binding}${address}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}${hold.detail ? `: ${esc(hold.detail)}` : ''}` : ''}${s.followup_wait && !s.waiting_detail ? ` · ${esc(explanations[s.followup_wait] || s.followup_wait)}` : ''}${s.completed_at ? ' · already fired' : ''}${s.skill ? ` · from skill ${esc(s.skill)}` : ''}${waiting}${failed}`;
+    const sub = `${note ? 'reminder · ' : s.kind === 'task' ? 'task · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)} · ${esc(relation)}${binding}${address}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}${hold.detail ? `: ${esc(hold.detail)}` : ''}` : ''}${followupWait ? ` · ${esc(explanations[followupWait] || followupWait)}` : ''}${s.completed_at ? ' · already fired' : ''}${s.skill ? ` · from skill ${esc(s.skill)}` : ''}${waiting}${failed}`;
     const withdrawalDetail = withdrawal ? [
         withdrawal.at ? `withdrawn ${scheduleInstantHtml(withdrawal.at, { includeYear: true })}` : '',
         withdrawal.by ? `by ${esc(withdrawal.by)}` : '',
@@ -210,9 +211,9 @@ export function scheduleRowHtml(s, expanded = false) {
             : !s.hold_persisted
                 ? '<span class="activity-tag">hold persistence pending</span>'
                 : `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="restore" data-hold-id="${esc(hold.hold_id || '')}">Restore hold</button>`;
-    // Restore cancels withdrawal, including for consumed one-shots; the server
-    // keeps their consumed receipt. Exact hold release is a separate action.
-    const canRestore = withdrawal ? withdrawal.restorable === true : !hold.hold_id && !(once && s.completed_at);
+    // Restore cancels a withdrawal the server calls restorable (not fired, not held);
+    // exact hold release is a separate action.
+    const canRestore = !hold.hold_id && (withdrawal ? withdrawal.restorable === true : !(once && s.completed_at));
     const restoreWithdrawal = canRestore
         ? `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="restore">Restore</button>` : '';
     const lifecycle = pendingDelete

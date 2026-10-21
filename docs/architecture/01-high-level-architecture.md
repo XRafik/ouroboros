@@ -556,7 +556,7 @@ ouroboros/ — agent core and shared runtime (§6)
     project_journal.py — journal/workpad read and write, `update_focus`, journal_tail_digest; foreign project reads for roots, foreign writes refused; `mirror_tree_coordination_to_journal`
     presence.py — configure_presence (the place verb: list, inspect, state, wakes, notes, folder, model, owner accounts) and presence_cancel_work
     task_tree.py — tree_note/tree_read (storage SSOT: task_tree_ledger.py)
-    followup.py — the agent's two schedule tools over `state/scheduled_tasks.json`: `manage_schedules` (root-only audited get/update/disable/delete/restore) and `schedule_followup` (`notify=true` leaves a note)
+    followup.py — the agent's two schedule tools over `state/scheduled_tasks.json`: `manage_schedules` (list/get; root-only audited update/disable/delete/restore) and `schedule_followup` (`notify=true` leaves a note)
     join_ledger.py — Child-result absorption: validates lineage and exact hashes; dispositions integrated/irrelevant/deferred; `CHILD_RESULT_STALE`; keeps peek_task/discard_child_result
     delegate.py — Delegation facade verbs `delegate_start` (with `retry_of`), `delegate_wait`, `delegate_cancel`, `delegate_answer`, `delegate_message`; the host pre-start rides the same wrapper (§6 Delegated subagents)
     delegate_integration.py — Delegated mutation authority, snapshots and terminal capture; skill-payload CAS apply with extension reconciliation (§6 Snapshots, capture and disposition)

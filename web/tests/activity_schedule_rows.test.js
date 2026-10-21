@@ -48,6 +48,12 @@ test('waiting details are inline for the projected and legacy rows', () => {
     assert.doesNotMatch(scheduleRowHtml(standing), /waiting:/);
     assert.match(scheduleRowHtml({ ...standing, followup_hold: { reason: 'origin_stopped', detail: 'Owner paused it' } }),
         /Original work stopped or restarted: Owner paused it/);
+    // A follow-up waiting on its original work, as the projection sends it (no occurrence hold).
+    const paused = { ...standing, waiting_detail: { reason: '', detail: '', followup_wait: 'origin_owner_paused' } };
+    assert.match(scheduleRowHtml(paused), / · Original work is paused/);
+    assert.doesNotMatch(scheduleRowHtml(paused), /waiting:/, 'a follow-up wait is not an occurrence hold');
+    assert.doesNotMatch(scheduleRowHtml({ ...paused, waiting_detail: { reason: '', detail: '', followup_wait: '' } }),
+        /Original work/);
 });
 
 test('kind, zone and destination are visible without inventing missing addresses', () => {

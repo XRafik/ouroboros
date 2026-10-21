@@ -228,3 +228,14 @@ def test_tool_schema_exposes_patch_fields_without_widening_the_lifecycle_door():
     assert schema["additionalProperties"] is False and schema["required"] == ["action"]
     assert not {"anyOf", "oneOf", "allOf"}.intersection(schema)
     assert queue.SCHEDULE_ACTIONS == {"disable", "delete", "restore"}
+
+
+def test_a_naive_run_at_beside_a_timezone_is_refused_as_on_creation(registry):
+    path = registry._ctx.drive_root / "state/scheduled_tasks.json"
+    before = path.read_bytes()
+    refused = _call(registry, "update", reason="Move it", run_at="2099-01-01T12:00:00", timezone="Europe/Moscow")
+    assert refused.status != "ok" and "FOLLOWUP_TIMEZONE_WITH_RUN_AT" in refused.text
+    assert path.read_bytes() == before
+    accepted = _call(registry, "update", reason="Move it", run_at="2099-01-01T12:00:00+03:00", timezone="Europe/Moscow")
+    assert accepted.status == "ok", accepted.text
+    assert _stored(registry)["trigger"] == {"type": "once", "run_at": "2099-01-01T09:00:00+00:00"}

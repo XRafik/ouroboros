@@ -204,6 +204,11 @@ def _update_schedule(ctx: ToolContext, root: Any, schedule_id: str, reason: str,
                 f"ERROR: FOLLOWUP_EFFORT_INVALID: {exc}. Nothing changed.")))
         if effort:
             patch["reasoning_effort"] = effort
+    if patch.get("timezone") and _naive_instant(patch.get("run_at", "")):
+        return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
+            f"ERROR: FOLLOWUP_TIMEZONE_WITH_RUN_AT: run_at={patch['run_at']!r} carries no UTC offset and "
+            "timezone applies only to recurring cron schedules. Put the offset into run_at "
+            "(example: 2026-08-19T12:20:00+03:00) and omit timezone. Nothing changed.")))
     if "run_at" in patch:
         patch["trigger"] = {"type": "once", "run_at": patch.pop("run_at")}
     elif "cron" in patch:

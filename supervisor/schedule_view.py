@@ -21,7 +21,7 @@ def decorate(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
     objective = str(template.get("text") or template.get("description") or row.get("description") or "")
     first_line = objective.splitlines()[0].strip() if objective else ""
     out.update(display_name=first_line[:96] if _LEGACY_NAME.fullmatch(name) and first_line else name,
-               kind="note" if note else "task", timezone=str(row.get("timezone") or "local"),
+               kind="note" if note else "task", timezone=str(row.get("timezone") or ""),
                destination={"chat_id": template.get("chat_id"), "project_id": template.get("project_id")})
     last_id = str(row.get("last_task_id") or "")
     cached = row.get("last_outcome") or {}
@@ -40,7 +40,7 @@ def decorate(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
             False if observed else None)
         out["withdrawal"] = {"at": row["delete_requested_at"], "by": row.get("delete_requested_by", ""),
                              "reason": row.get("delete_reason", ""), "work_in_flight": work_in_flight,
-                             "restorable": not consumed}
+                             "restorable": not consumed and not row.get("followup_hold")}
     return out
 
 
@@ -50,7 +50,7 @@ def _entry(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
     view = decorate(row, now)
     trigger = row.get("trigger") or {}
     entry = {"id": row.get("id"), "name": view["display_name"][:96], "status": schedule_lifecycle_status(row),
-             "timezone": view["timezone"], "next_run_at": row.get("next_run_at") or ""}
+             "timezone": view["timezone"] or "local", "next_run_at": row.get("next_run_at") or ""}
     once = trigger.get("type") == "once"
     entry["run_at" if once else "cron"] = trigger.get("run_at" if once else "expr", "")
     if view.get("outcome"):

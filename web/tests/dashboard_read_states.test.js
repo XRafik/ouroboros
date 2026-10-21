@@ -270,8 +270,10 @@ test('Activity delete requires confirmation and reports the withdrawal receipt',
 test('Activity keeps the retained-history disclosure and focus the owner left open', async (t) => {
     const { mount, routes, ws, calls } = setup(t);
     emptyActivity(routes);
-    const tasks = lifecycleSchedules.map((row) => row.id !== 'withdrawn' ? row : { ...row,
-        relation: 'related', followup_hold: { hold_id: 'hold-1', reason: 'origin_stopped' }, hold_persisted: true });
+    // A held withdrawal offers only its exact release; the unheld one offers Restore.
+    const tasks = [...lifecycleSchedules, { id: 'held', name: 'Held promise', enabled: false, status: 'delete_pending',
+        withdrawal: { restorable: false, work_in_flight: false }, trigger: { type: 'cron', expr: '* * * * *' },
+        relation: 'related', followup_hold: { hold_id: 'hold-1', reason: 'origin_stopped' }, hold_persisted: true }];
     routes.set(schedulesUrl, response({ tasks }));
     const activity = initActivity({ mount, ws });
     await activity.refresh();

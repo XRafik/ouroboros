@@ -95,10 +95,10 @@ async def api_schedules_upsert(request: Request) -> JSONResponse:
         enabled = _enabled_value(body)
         if isinstance(enabled, str):
             return json_error(enabled, 400)
-        # Only the fields the owner authors here. Provenance, run history, the
-        # consumed receipt and a skill row's suppression marker belong to the
-        # runtime and are merged from the CURRENT row inside the write lock —
-        # reading them here would merge a snapshot that is already stale.
+        # Only the fields the owner authors here. Provenance, run history and the
+        # consumed receipt belong to the runtime and are merged from the CURRENT
+        # row inside the write lock — reading them here would merge a snapshot
+        # that is already stale.
         record = {
             "id": str(body.get("id") or "").strip(),
             "name": str(body.get("name") or body.get("id") or "scheduled-task").strip(),
