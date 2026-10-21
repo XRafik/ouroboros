@@ -1058,11 +1058,15 @@ def kill_process_on_port(port: int) -> None:
     """Kill any process listening on the given TCP port."""
     try:
         if IS_WINDOWS:
-            res = _hidden_run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
-            listeners = [
-                line.split()[-1] for line in res.stdout.splitlines()
-                if f":{port}" in line and "LISTENING" in line and line.split()
-            ]
+            # The socket table, not netstat's text: netstat translates its state column
+            # (no "LISTENING" on a Russian Windows) and prints in a code page the ANSI
+            # decoder cannot read. psutil is a declared Windows dependency.
+            import psutil
+
+            listeners = list(dict.fromkeys(  # a dual-stack listener has an IPv4 and an IPv6 row
+                conn.pid for conn in psutil.net_connections(kind="tcp")
+                if conn.status == psutil.CONN_LISTEN and conn.laddr and conn.laddr.port == port and conn.pid
+            ))
         else:
             # -sTCP:LISTEN scopes the sweep to the listener (a bare tcp:PORT
             # selector also matches ESTABLISHED client sockets — on browser

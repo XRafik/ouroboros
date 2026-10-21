@@ -397,12 +397,22 @@ def _cleanup_recorded_server_process(reason: str = "preflight") -> list[int]:
     return []
 
 
+_server_record_retire_lock = threading.Lock()
+
+
 def _cleanup_recorded_server_group_for_pid(pid: int, reason: str = "agent_exit") -> bool:
     """Retire the record of a captured child this launcher has already reaped (both callers wait first).
 
     Nothing is signalled: once the root is reaped, its PID and group id are names a later process may
     hold, so a group that still has members is reported, never killed. Workers end through their parent
-    lifeline, ledgered children through the next generation's custody sweep."""
+    lifeline, ledgered children through the next generation's custody sweep. Both callers (stop_agent and
+    the lifecycle thread) take one lock: on Windows a read beside a delete fails with a sharing violation,
+    and the second caller then finds the record already retired."""
+    with _server_record_retire_lock:
+        return _retire_recorded_server_group(pid, reason)
+
+
+def _retire_recorded_server_group(pid: int, reason: str) -> bool:
     try:
         record_path = _server_process_record_path()
         if not record_path.exists():
