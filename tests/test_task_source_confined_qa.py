@@ -9,7 +9,6 @@ import json
 import os
 import statistics
 import time
-from hashlib import sha256
 from pathlib import Path
 
 import pytest
@@ -27,6 +26,19 @@ def _packed(root, task="wanted"):
         "kind": packs.CHECKPOINT, "path": ref["path"], "source": loose}])
     loose.unlink()
     return ref, raw, loose, pack, sidecar
+
+
+def _finish_stream_lease(pack):
+    """Close the existing reader's open stream on PACK; its warm placement index stays.
+
+    Windows refuses to unlink a file another handle holds (WinError 32). The oracle
+    compares placement authority; the cursor cache restats the pack before any read."""
+    with packs._READERS_LOCK:
+        leases = [packs._READERS.pop(key) for key in list(packs._READERS) if Path(key) == pack]
+    for lease in leases:
+        if lease._stream is not None:
+            lease._stream.close()
+            lease._stream = None
 
 
 def _outcome(call):
@@ -63,6 +75,7 @@ def test_confined_and_existing_source_fallback_outcomes(tmp_path, fault, metadat
         kwargs = {"anchor": anchor} if confined else {}
         if warm:
             reader(root, "wanted", ref["path"], **kwargs)
+            _finish_stream_lease(pack)
         if fault == "loose_good":
             loose.write_bytes(raw)
         if fault in {"loose_bad", "bad_loose_missing_pack"}:
@@ -200,3 +213,92 @@ def test_trusted_placement_selection_cannot_reopen_swapped_pack_directory(tmp_pa
     with pytest.raises(OSError):
         packs.handle_bytes(root, "wanted", ref["path"], anchor=root)
     assert selected == [pack]
+
+
+@pytest.mark.parametrize("placement", ["headless", "legacy"])
+def test_configured_alias_anchor_keeps_admitted_child_placement_authority(tmp_path, placement):
+    """Canonical rows spell the child through the owner's linked data root; the reader
+    descends the physical root, and admission still matches, so a warm placement
+    survives a damaged sidecar exactly as it does without the alias."""
+    from tests.test_task_download_confinement import TASK, _http, _junction_or_link, _url
+
+    physical, anchor = tmp_path / "physical", tmp_path / "configured"
+    physical.mkdir()
+    _junction_or_link(anchor, physical)
+    root = _placement(anchor, placement, TASK)
+    ref, raw, _loose, pack, _ = _packed(root, TASK)
+    write_task_result(anchor, TASK, "completed", completion_observations={"source_ref": ref})
+    assert packs.handle_bytes(root, TASK, ref["path"]) == raw  # the existing reader warms the index
+    _finish_stream_lease(pack)
+    (packs.packs_dir(root) / packs.sidecar_name(TASK, 1)).write_text("{")
+    assert artifacts.read_actor_source_bytes(anchor, TASK, ref, anchor=anchor) == raw
+    with _http(anchor) as client:
+        response = client.get(_url(Path(ref["path"]).name), params={"source": ref["path"]})
+    assert (response.status_code, response.content) == (200, raw)
+
+
+def _occupied_origin_drive(tmp_path, layout, alias):
+    """A timeout successor that ran in its predecessor's drive (``retained_child_root``)."""
+    from ouroboros import headless
+    from tests.test_task_download_confinement import _junction_or_link
+
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    anchor = tmp_path / "configured"
+    if alias:
+        _junction_or_link(anchor, physical)
+    else:
+        anchor = physical
+    origin, successor = "retry-origin", "retry-successor"
+    drive = (headless.prepare_task_drive(anchor, origin, "empty") if layout == "headless"
+             else anchor / "task_drives" / origin)
+    drive.mkdir(parents=True, exist_ok=True)
+    write_task_result(anchor, origin, "completed", retry_task_id=successor)
+    return anchor, drive, origin, successor
+
+
+@pytest.mark.parametrize("alias", [True, False], ids=["configured-alias", "physical-root"])
+@pytest.mark.parametrize("kind", ["loose", "packed"])
+@pytest.mark.parametrize("layout", ["headless", "legacy"])
+def test_retry_successor_reads_its_sources_in_the_named_predecessor_drive(tmp_path, layout, kind, alias):
+    """The successor's canonical row names the occupied drive in the configured spelling;
+    only that trusted root prefix is re-spelled, and the occupant must still bind itself."""
+    from tests.test_task_download_confinement import _http
+
+    anchor, drive, origin, successor = _occupied_origin_drive(tmp_path, layout, alias)
+    if kind == "packed":
+        ref, raw, *_ = _packed(drive, successor)
+    else:
+        raw = b'{"observation":"successor bytes"}'
+        ref = artifacts.store_actor_source_bytes(drive, successor, category="tool_results", source_id="result",
+                                                 data=raw, extension="json")
+    write_task_result(anchor, successor, "completed", child_drive_root=str(drive), timeout_retry_from=origin,
+                      original_task_id=origin, completion_observations={"source_ref": ref})
+    with pytest.raises(FileNotFoundError):  # a directory name alone binds no occupant
+        artifacts.read_actor_source_bytes(anchor, successor, ref, anchor=anchor)
+    write_task_result(drive, successor, "completed", result="ran in the original drive")
+    assert artifacts.read_actor_source_bytes(anchor, successor, ref, anchor=anchor) == raw
+    with _http(anchor) as client:
+        response = client.get(f"/api/tasks/{successor}/artifacts/{Path(ref['path']).name}",
+                              params={"source": ref["path"]})
+    assert (response.status_code, response.content) == (200, raw)
+
+
+def test_a_named_predecessor_drive_link_is_never_followed(tmp_path):
+    """Re-spelling the configured root never resolves the named drive itself."""
+    from ouroboros import source_retention
+    from tests.test_task_download_confinement import _junction_or_link
+
+    anchor, drive, origin, successor = _occupied_origin_drive(tmp_path, "legacy", True)
+    elsewhere = anchor / "task_drives" / "elsewhere"
+    raw = b'{"observation":"bytes behind a link"}'
+    ref = artifacts.store_actor_source_bytes(elsewhere, successor, category="tool_results", source_id="result",
+                                             data=raw, extension="json")
+    write_task_result(elsewhere, successor, "completed", result="occupant behind the link")
+    drive.rmdir()
+    _junction_or_link(drive, elsewhere)
+    write_task_result(anchor, successor, "completed", child_drive_root=str(drive), timeout_retry_from=origin,
+                      original_task_id=origin, completion_observations={"source_ref": ref})
+    assert source_retention.retained_task_roots(anchor, successor) == []
+    with pytest.raises(FileNotFoundError):
+        artifacts.read_actor_source_bytes(anchor, successor, ref, anchor=anchor)

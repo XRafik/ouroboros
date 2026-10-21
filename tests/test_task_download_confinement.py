@@ -9,6 +9,8 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -25,7 +27,7 @@ import uvicorn
 from ouroboros import artifacts, confined_files, evidence_packs
 from ouroboros.gateway import task_archive
 from ouroboros.task_custody import own_child_drives, store_artifact_view, task_artifact_stores
-from ouroboros.task_results import write_task_result
+from ouroboros.task_results import load_task_result, write_task_result
 from tests.test_task_file_serving import TASK, _client, _split_child
 
 
@@ -125,6 +127,44 @@ def test_real_http_host_configured_root_junction_is_accepted(tmp_path):
     with _http(alias) as client:
         response = client.get(_url(ref["path"]))
         assert (response.status_code, response.content) == (200, b"owner configured root")
+
+
+def test_real_http_configured_alias_root_produces_and_serves_recorded_identities(tmp_path):
+    """The owner's data root is a link; producers and server both use that spelling."""
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    _junction_or_link(tmp_path / "data", physical)
+    data, child, store = _split_child(tmp_path)  # every producer records the configured spelling
+    rows = load_task_result(child, TASK)["artifacts"]
+    next(row for row in rows if row.get("relpath") == "reports/b/summary.txt")["errors"] = ["copy failed"]
+    write_task_result(child, TASK, "completed", artifacts=rows)
+    artifacts.store_task_artifact_bytes(data, TASK, "ready.txt", b"configured root")
+    (artifacts.task_artifact_dir_path(data, TASK) / "notes.txt").write_bytes(b"canonical capture")
+    canonical = [row for row in artifacts.collect_task_artifact_records(data, TASK) if row["name"] == "notes.txt"]
+    write_task_result(data, TASK, "running", artifacts=canonical)
+    admitted = own_child_drives(data, TASK, store_row=load_task_result(data, TASK))
+    assert admitted == [physical.resolve() / child.relative_to(data)]
+    with _http(data) as client:
+        ready = client.get(_url("ready.txt"))
+        assert (ready.status_code, ready.content) == (200, b"configured root")
+        assert ready.headers["x-ouroboros-artifact-identity"] == "verified"
+        notes = client.get(_url("notes.txt"))
+        assert (notes.status_code, notes.headers["x-ouroboros-artifact-identity"]) == (200, "verified")
+        detail = client.get(f"/api/tasks/{TASK}").json()
+        listed = sorted(row.get("relpath") or row["name"] for row in detail["artifacts"])
+        assert listed == ["notes.txt", "ready.txt", "reports/a/summary.txt", "reports/b/summary.txt"], listed
+        failed = next(row for row in detail["artifacts"] if row.get("relpath") == "reports/b/summary.txt")
+        assert failed["errors"] == ["copy failed"]
+        archive = detail["artifact_archives"]["reports"]
+        assert (archive["files"], archive["excluded"]) == (1, 1)
+        archived = client.get(_url("reports.zip"), params={"archive": "reports"})
+        with zipfile.ZipFile(io.BytesIO(archived.content)) as zipped:
+            assert zipped.namelist() == ["reports/a/summary.txt"]  # the failed capture stays out
+        nested = client.get(_url("summary.txt"), params={"relpath": "reports/a/summary.txt"})
+        assert (nested.status_code, nested.headers["x-ouroboros-artifact-identity"]) == (200, "verified")
+        (store / "reports/a/summary.txt").write_bytes(b"other")
+        changed = client.get(_url("summary.txt"), params={"relpath": "reports/a/summary.txt"})
+        assert (changed.status_code, changed.json()["reason_code"]) == (409, "artifact_identity_changed")
 
 
 def test_real_http_unicode_filename_keeps_exact_bytes(tmp_path):
@@ -255,6 +295,14 @@ def test_windows_selector_parser_portable_logic_only(monkeypatch):
     assert confined_files.relative_parts(native_name) == [native_name]
     assert confined_files.plain_name(native_name) == ""  # existing upload byte limit
     assert confined_files.relative_parts("🧪" * 128) == []
+    # Windows walk entries keep the Win32 naming rules that every path consumer uses.
+    for value in ("a\\b", "x:y", "a/b", "", ".", "..", "nul\x00", "数" * 256, "NUL.txt", "file.", "COM¹.bin"):
+        assert not confined_files.native_name(value), value
+    assert confined_files.native_name(native_name)
+    monkeypatch.setattr(confined_files, "IS_WINDOWS", False)
+    for value in ("a\\b", "x:y", "NUL", "file. "):  # one POSIX entry each
+        assert confined_files.native_name(value), value
+    assert confined_files.relative_parts("a\\b") == []  # the HTTP selector still refuses it
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="NTFS name longer than POSIX UTF-8 byte limit")
@@ -310,13 +358,66 @@ def test_held_parent_rename_cannot_redirect_the_read(tmp_path):
     (root / "parent/value").write_bytes(b"held bytes")
     (outside / "value").write_bytes(b"EXTERNAL-CANARY")
     with confined_files.confined_directory(root, ["parent"]) as directory:
-        try:
-            (root / "parent").rename(root / "moved")
-        except PermissionError:
-            assert sys.platform == "win32", "unexpected rename refusal"
-        else:
-            assert sys.platform != "win32", "Windows directory handle must deny delete sharing"
-            _junction_or_link(root / "parent", outside)
+        # Like a POSIX dirfd, a held walk directory shares rename on every platform;
+        # the held object, not the name it had, stays the authority for its opens.
+        (root / "parent").rename(root / "moved")
+        _junction_or_link(root / "parent", outside)
         handle, _ = directory.open("value")
         with handle:
             assert handle.read() == b"held bytes"
+        assert directory.entries() == [("value", False)]
+
+
+def test_held_walk_directories_do_not_block_removal_and_release_cleanly(tmp_path):
+    root = tmp_path / "root"
+    (root / "store/sub").mkdir(parents=True)
+    (root / "store/sub/value").write_bytes(b"held bytes")
+    with confined_files.confined_directory(root, ["store", "sub"]) as directory:
+        assert directory.entries() == [("value", False)]
+        # Another reader or the reaper removes what this walk holds; the hold refuses nothing.
+        (root / "store/sub/value").unlink()
+        (root / "store/sub").rmdir()
+        with pytest.raises(OSError):
+            directory.open("value")  # a removed directory addresses nothing new
+    shutil.rmtree(root / "store")  # released: nothing of the walk is still held
+    assert not (root / "store").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX entry names and special files")
+def test_posix_native_names_are_captured_and_special_entries_skipped(tmp_path, monkeypatch):
+    from ouroboros.task_finalization import rescued_files_fact
+
+    data = tmp_path / "data"
+    store = artifacts.task_artifact_dir_path(data, TASK, create=True)
+    (store / "deep/a\\b").mkdir(parents=True)
+    (store / "win\\style.txt").write_bytes(b"one POSIX name")
+    (store / "deep/a\\b/x.txt").write_bytes(b"nested")
+    os.mkfifo(store / "pipe")
+    os.mkfifo(store / "deep/pipe")
+    monkeypatch.chdir(store)  # a socket path must stay short
+    with socket.socket(socket.AF_UNIX) as server:
+        server.bind("sock")
+        expected = ["deep/a\\b/x.txt", "win\\style.txt"]
+        for measure in (True, False):
+            rows = artifacts.collect_task_artifact_records(data, TASK, measure=measure, strict=True)
+            assert sorted(row.get("relpath") or row["name"] for row in rows) == expected, measure
+        fact = rescued_files_fact(TASK, [store])
+        assert (fact["state"], fact["count"]) == ("positive", 2)
+        captured = artifacts.collect_task_artifact_records(data, TASK)
+        write_task_result(data, TASK, "completed", artifacts=captured)
+        view = store_artifact_view(data, TASK, captured)
+        assert sorted(row.get("relpath") or row["name"] for row in view) == expected
+        assert all(row.get("sha256") for row in view), "a recorded identity is kept, never re-listed"
+        assert confined_files.relative_parts("win\\style.txt") == []  # HTTP selectors are unchanged
+        with _http(data) as client:
+            assert client.get(_url("win%5Cstyle.txt")).status_code == 400
+        locked = store / "deep/locked"
+        locked.mkdir()
+        locked.chmod(0)
+        try:
+            if os.geteuid() != 0:  # a real I/O failure still keeps the strict listing from vouching
+                with pytest.raises(PermissionError):
+                    artifacts.collect_task_artifact_records(data, TASK, measure=False, strict=True)
+                assert rescued_files_fact(TASK, [store])["state"] == "unknown"
+        finally:
+            locked.chmod(0o700)

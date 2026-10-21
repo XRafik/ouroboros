@@ -18,6 +18,7 @@ $Suite = @(
     'tests/test_delegated_activity_source.py', 'tests/test_chat_attachments.py', 'tests/test_chat_upload.py',
     'tests/test_evidence_pack_fixes.py', 'tests/test_evidence_packs.py',
     'tests/test_materialize_artifacts_contract.py', 'tests/test_source_retention_links.py', 'tests/test_platform_guard.py',
+    'tests/test_task_summary.py',
     'tests/test_headless_task_api.py::test_task_api_enqueue_workspace_creates_child_drive',
     'tests/test_tool_access_matrix_closure.py::test_the_closure_added_no_write_like_operation_anywhere'
 )

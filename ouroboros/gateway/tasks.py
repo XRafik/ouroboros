@@ -40,6 +40,7 @@ from ouroboros.gateway.task_archive import (
     chat_media_identity, directory_archives, plain_segments, serve_directory_archive, serve_task_file,
     task_artifact_location, recorded_identity, serve_task_source,
 )
+from ouroboros.confined_files import root_spellings
 from ouroboros.task_custody import task_artifact_stores
 from ouroboros.headless import (
     ARTIFACTS_DIR,
@@ -944,16 +945,16 @@ def api_task_artifact(request: Request):
     if (archive := request.query_params.get("archive")) is not None:
         return serve_directory_archive(drive_root, task_id, name, archive,
                                        other_selectors=source is not None or relpath is not None)
-    stores = task_artifact_stores(drive_root, task_id)
+    stores, spellings = task_artifact_stores(drive_root, task_id), root_spellings(drive_root)
     path = None if relpath is not None else artifact_store.resolve_chat_media_path(drive_root, task_id, name)
     if path is not None:  # content-addressed chat media: the canonical store, bytes that hash to the name
-        media = task_artifact_location(stores[:1], path)
+        media = task_artifact_location(stores[:1], path, spellings)
         return (serve_task_file(drive_root, stores[0], media[2], name, chat_media_identity(name), task_id=task_id)
                 if media else json_error("artifact not found", 404, task_id=task_id, artifact=name))
     registered = artifact_store.registered_task_artifact(drive_root, task_id, name) if relpath in (None, name) else None
     # A registered immutable top-level file needs one identity check, not a result projection.
     fast = bool(not source and registered and registered.get("immutable")
-                and (at := task_artifact_location(stores, registered.get("path"))) and at[2] == name)
+                and (at := task_artifact_location(stores, registered.get("path"), spellings)) and at[2] == name)
     result = {} if fast else (load_effective_task_result(drive_root, task_id) or {})
     if not result and not registered:
         return json_error("task not found", 404)
@@ -962,7 +963,7 @@ def api_task_artifact(request: Request):
     rows = [] if fast else [row for row in result.get("artifacts") or [] if isinstance(row, dict) and (
         relpath is not None or str(row.get("name") or pathlib.Path(str(row.get("path") or "")).name) == name)]
     located = [(at, order, row) for order, row in enumerate(rows + ([registered] if registered else []))
-               if (at := task_artifact_location(stores, row.get("path")))]
+               if (at := task_artifact_location(stores, row.get("path"), spellings))]
     matches = [item for item in located if item[0][2] == (relpath or name)]
     nested = sorted({item[0][2] for item in located if "/" in item[0][2]})
     if relpath is None and not matches and len(nested) > 1:

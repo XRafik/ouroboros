@@ -2,13 +2,14 @@
 
 A task's files live in its own stores only (``task_custody.task_artifact_stores``: the
 canonical store, then each own child drive's); a recorded path is attributed to one of
-them once (``_task_artifact_location``), and the bytes that leave are then read from ONE
-open descriptor reached by a confined descent from the host-configured canonical
+them once, lexically (``task_artifact_location``; a path recorded through the configured
+root's spelling is re-spelled onto its physical directory), and the bytes that leave are
+then read from ONE open descriptor reached by a confined descent from the host-configured canonical
 root. ``confined_files`` opens each plain component relative to a held directory:
 POSIX no-follow descriptors or Windows NT RootDirectory/DONT_REPARSE handles.
 Descendant symlinks, junctions and nonregular files are refused; the configured
-root itself may be a legitimate junction. Admission facts authorize child metadata
-stores before their path-based SQLite reader; scratch existence is not admission.
+root itself may be a legitimate junction. On this route, admission facts authorize a
+child's metadata store before its path-based SQLite reader; scratch existence is not admission.
 Payload reads never reopen a checked pathname. A captured file (an immutable row,
 content-addressed chat media
 whose name is its sha256, or a delegated run's retained journal range named by its digest)
@@ -52,7 +53,7 @@ from starlette.responses import Response, StreamingResponse
 
 from ouroboros import artifacts as artifact_store
 from ouroboros.confined_files import (DIR_FLAGS, CONFINED_OPEN_AVAILABLE, IS_WINDOWS, confined_directory,
-                                     lexical_relative, open_regular_at, relative_parts)
+                                     lexical_relative, open_regular_at, relative_parts, root_spellings)
 from ouroboros.gateway._helpers import json_error
 from ouroboros.task_custody import task_artifact_stores
 from ouroboros.task_status import load_effective_task_result
@@ -76,10 +77,11 @@ _SVG_POLICY = {"content-security-policy": "sandbox", "x-content-type-options": "
 Route = Tuple[pathlib.Path, List[str]]  # (directory opened by absolute path, segments below it)
 
 
-def task_artifact_location(stores: List[pathlib.Path], raw_path: Any) -> Optional[tuple]:
-    """Attribute lexically; only the subsequent held walk may touch descendants."""
+def task_artifact_location(stores: List[pathlib.Path], raw_path: Any, spellings: Any = ()) -> Optional[tuple]:
+    """Attribute lexically (``spellings``: ``root_spellings`` of the canonical root the
+    stores were built from); only the subsequent held walk may touch descendants."""
     return next(((index, pathlib.Path(raw_path), relative) for index, store in enumerate(stores)
-                 if (relative := lexical_relative(store, raw_path))), None)
+                 if (relative := lexical_relative(store, raw_path, spellings))), None)
 
 
 def plain_segments(relpath: Any) -> List[str]:
@@ -171,14 +173,15 @@ def directory_archives(stores: List[pathlib.Path], rows: Any, *, anchor: Any = N
     """Per top-level result directory, what ``?archive=<dir>`` would stream now: ``files``/``size``
     of its members from one confined no-follow stat each (no hashing), the recorded rows it leaves
     out (``excluded``) and ``available`` iff it has a member (never where the platform cannot confine)."""
-    anchor = pathlib.Path(anchor).resolve(strict=False) if anchor is not None else None
+    spellings = root_spellings(anchor) if anchor is not None else ()
+    anchor = spellings[0] if spellings else None
     view: Dict[str, Dict[str, Any]] = {}
     picked: Dict[str, Tuple[tuple, int]] = {}
     with _Parents() as parents:
         for order, row in enumerate(rows if isinstance(rows, list) else []):
             if not isinstance(row, dict):
                 continue
-            location = task_artifact_location(stores, row.get("path"))
+            location = task_artifact_location(stores, row.get("path"), spellings)
             relpath = location[2] if location else str(row.get("relpath") or "")
             parts = plain_segments(relpath)
             if len(parts) < 2:
@@ -204,12 +207,13 @@ def _archive_members(stores: List[pathlib.Path], rows: Any, directory: str, *,
                      anchor: Any) -> List[Tuple[str, Route, Dict[str, Any]]]:
     """``(member name, route, row)`` of every eligible recorded file under DIRECTORY that a
     confined stat finds, once per relpath (canonical store first), sorted by name."""
-    anchor = pathlib.Path(anchor).resolve(strict=False)
+    spellings = root_spellings(anchor)
+    anchor = spellings[0]
     prefix, base = directory + "/", (directory.rsplit("/", 1)[0] + "/" if "/" in directory else "")
     picked: Dict[str, Tuple[tuple, Route, Dict[str, Any]]] = {}
     with _Parents() as parents:
         for order, row in enumerate(rows if isinstance(rows, list) else []):
-            location = task_artifact_location(stores, row.get("path")) if isinstance(row, dict) else None
+            location = task_artifact_location(stores, row.get("path"), spellings) if isinstance(row, dict) else None
             if location is None or not location[2].startswith(prefix) or not _eligible(row):
                 continue
             route = _route(anchor, stores[location[0]], location[2])

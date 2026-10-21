@@ -13,7 +13,9 @@ from ouroboros.tools.registry import ToolContext
 from ouroboros.tools.registry import ToolRegistry
 from ouroboros.task_results import write_task_result
 from tests.test_task_download_confinement import _http, _url, TASK
-from tests.test_tool_access_matrix_closure import world  # noqa: F401 (isolated fixture)
+from tests import test_tool_access_matrix_closure as _closure
+
+world = _closure.world  # the closure suite's isolated fixture object, registered here by name
 
 
 def test_artifact_write_binding_cannot_select_child_store_or_ancestors(world):

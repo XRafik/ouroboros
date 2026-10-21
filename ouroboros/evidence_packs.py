@@ -502,13 +502,20 @@ def _confined_handle(root: Any, task_id: str, rel_path: str, anchor: Any, *, inf
     Physical scratch custody alone never admits a pathname-opened SQLite index.
     Such retained sources use confined sidecars without granting store authority.
     """
-    from ouroboros.confined_files import confined_directory, open_confined_file, relative_parts
+    from ouroboros.confined_files import (
+        confined_directory,
+        open_confined_file,
+        physical_path,
+        relative_parts,
+        root_spellings,
+    )
     from ouroboros.task_results import validate_task_id
 
     task_id = validate_task_id(task_id)
     if not relative_parts(rel_path):
         raise ValueError("invalid checkpoint path")
-    anchor, root = pathlib.Path(anchor), pathlib.Path(root)
+    spellings = root_spellings(anchor)  # ANCHOR as configured; its rows record that spelling
+    anchor, root = spellings[0], physical_path(spellings, pathlib.Path(root).absolute())
     loose = _handle_path(root, task_id, rel_path)
     digest, failure = pathlib.PurePosixPath(rel_path).stem.rsplit("-", 1)[-1], None
     try:
@@ -531,7 +538,7 @@ def _confined_handle(root: Any, task_id: str, rel_path: str, anchor: Any, *, inf
     from ouroboros.task_custody import recorded_execution_drive
     from ouroboros.task_store import read_document
 
-    if root == anchor or recorded_execution_drive(read_document(anchor, task_id) or {}, root):
+    if root == anchor or recorded_execution_drive(read_document(anchor, task_id) or {}, root, spellings):
         located = _locate(root, task_id=task_id, rel_path=rel_path)
         if located is not None:
             return ({"size": int(located[1]["size"]), "sha256": located[1]["sha256"], "loose": False}

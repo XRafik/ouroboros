@@ -48,8 +48,10 @@ def active_walk():
 
 def retained_child_root(canonical: pathlib.Path, child: pathlib.Path, task_id: str = "") -> bool:
     """Only the installation's physical child layouts confer fallback custody."""
-    canonical = pathlib.Path(canonical).resolve()
-    child = pathlib.Path(child)
+    from ouroboros.confined_files import physical_path, root_spellings
+
+    spellings = root_spellings(canonical)  # a configured child keeps its layout checks
+    canonical, child = spellings[0], physical_path(spellings, child)
     try:
         relative = child.relative_to(canonical)
         parts = relative.parts
@@ -63,7 +65,7 @@ def retained_child_root(canonical: pathlib.Path, child: pathlib.Path, task_id: s
             # touching scratch or reading the alleged occupant's store.
             from ouroboros.task_store import read_document
             from ouroboros.task_custody import recorded_execution_drive
-            if not recorded_execution_drive(read_document(canonical, task_id) or {}, child):
+            if not recorded_execution_drive(read_document(canonical, task_id) or {}, child, spellings):
                 return False
         from ouroboros.confined_files import confined_directory
         with confined_directory(canonical, parts):
@@ -81,16 +83,21 @@ def retained_child_root(canonical: pathlib.Path, child: pathlib.Path, task_id: s
 
 def retained_task_roots(canonical: pathlib.Path, task_id: str) -> list[pathlib.Path]:
     """Read-only source candidates for the task's own retained execution bytes."""
-    root = pathlib.Path(canonical).resolve()
+    from ouroboros.confined_files import physical_path, root_spellings
+
+    spellings = root_spellings(canonical)
+    root = spellings[0]
     candidates = [root / "state" / "headless_tasks" / task_id / "data", root / "task_drives" / task_id]
     try:
         from ouroboros.task_store import read_document
         row = read_document(root, task_id) or {}
-        candidates.extend(pathlib.Path(row[key]) for key in ("child_drive_root", "headless_child_drive_root")
+        # Rows name drives in the configured spelling: one physical candidate each.
+        candidates.extend(physical_path(spellings, row[key])
+                          for key in ("child_drive_root", "headless_child_drive_root")
                           if isinstance(row.get(key), str) and row[key])
     except Exception:
         pass
-    return list(dict.fromkeys(path for path in candidates if retained_child_root(root, path, task_id)))
+    return list(dict.fromkeys(path for path in candidates if retained_child_root(canonical, path, task_id)))
 
 
 def read_retained_task_source(root, task_id, ref, *, anchor=None):
@@ -107,14 +114,17 @@ def read_retained_task_source(root, task_id, ref, *, anchor=None):
 
 def _source_locations(root, task_id, *, anchor=None):
     """Own sources first, then the reaper's exact, reciprocal retry links; no scan/copy."""
+    from ouroboros.confined_files import physical_path, root_spellings
     from ouroboros.task_results import load_task_result, validate_task_id
 
     root, owner, seen = pathlib.Path(root), validate_task_id(task_id), set()
     start = (load_task_result(root, owner, strict=True) or {}) if anchor is None else {}
     canonical = pathlib.Path(anchor if anchor is not None else start.get("budget_drive_root") or root)
+    # An anchor stays as configured for its row facts; one physical root is read once.
+    spellings = root_spellings(anchor) if anchor is not None else ()
     while owner not in seen:
         seen.add(owner)
-        if root != canonical:
+        if physical_path(spellings, root) != physical_path(spellings, canonical):
             yield root, owner
         yield canonical, owner
         yield from ((child, owner) for child in retained_task_roots(canonical, owner))

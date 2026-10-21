@@ -5,6 +5,10 @@ at a time. POSIX uses dirfd/no-follow; Windows uses NtCreateFile RootDirectory,
 OBJ_DONT_REPARSE and handle type checks, with NtQueryDirectoryFile enumeration.
 Only the configured root may follow an owner-provided junction. Descendants are
 never resolved or reopened by absolute path. A returned file owns its descriptor.
+Like a POSIX dirfd, a held walk directory shares rename and delete: others may
+move or remove it, and relative opens still address the held object. Walk names
+follow this platform's entry rule (``native_name``); HTTP selectors keep the
+stricter cross-platform ``relative_parts``.
 
 The existing ``open_regular_file`` single-name upload contract is unchanged:
 
@@ -71,16 +75,42 @@ def relative_parts(value: Any) -> list[str]:
                                    or not _plain_spelling(part) for part in parts) else parts
 
 
-def lexical_relative(root: Any, path: Any) -> str:
+def native_name(name: Any) -> bool:
+    """One directory entry name this platform's file APIs address as itself: POSIX
+    refuses only ``/`` and NUL; Windows keeps its Win32 naming rules (no separator,
+    stream, device name, trailing dot or space), as its HTTP selectors do."""
+    if not isinstance(name, str) or name in {"", ".", ".."} or "/" in name or "\x00" in name:
+        return False
+    return not IS_WINDOWS or relative_parts(name) == [name]
+
+
+def root_spellings(root: Any) -> Tuple[pathlib.Path, ...]:
+    """A host-configured ROOT as reads descend from it (physical), then as producers
+    recorded it (configured) when that differs. Only this trusted root is resolved."""
+    configured = pathlib.Path(root).absolute()
+    physical = configured.resolve()
+    return (physical,) if physical == configured else (physical, configured)
+
+
+def physical_path(spellings: Any, path: Any) -> pathlib.Path:
+    """PATH recorded through the configured root, re-spelled lexically under the physical one."""
+    candidate = pathlib.Path(str(path or ""))
+    for alias in tuple(spellings)[1:]:
+        if candidate.is_absolute() and candidate.is_relative_to(alias):
+            return spellings[0].joinpath(candidate.relative_to(alias))
+    return candidate
+
+
+def lexical_relative(root: Any, path: Any, spellings: Any = ()) -> str:
     """Attribute an absolute recorded path without touching any descendant."""
-    candidate, base = pathlib.Path(str(path or "")), pathlib.Path(root)
+    candidate, base = physical_path(spellings, path), pathlib.Path(root)
     if not candidate.is_absolute() or ".." in candidate.parts:
         return ""
     try:
         text = candidate.relative_to(base).as_posix()
     except ValueError:
         return ""
-    return text if relative_parts(text) else ""
+    return text if all(native_name(part) for part in text.split("/")) else ""
 
 
 class ConfinedDirectory:
@@ -92,7 +122,7 @@ class ConfinedDirectory:
     def __init__(self, root: Any = None, *, _parent: Any = None, _name: str = "") -> None:
         self.api = _parent.api if _parent is not None else (_Win32Files.load() if IS_WINDOWS else None)
         self.handle = None
-        if _parent is not None and relative_parts(_name) != [_name]:
+        if _parent is not None and not native_name(_name):
             raise OSError(errno.EINVAL, "not a plain directory component")
         if self.api:
             handle = (self.api.open_relative(_parent.handle, _name, directory=True) if _parent is not None
@@ -117,7 +147,7 @@ class ConfinedDirectory:
         return ConfinedDirectory(_parent=self, _name=name)
 
     def open(self, name: str) -> Tuple[BinaryIO, os.stat_result]:
-        if relative_parts(name) != [name]:
+        if not native_name(name):
             raise OSError(errno.EINVAL, "not a plain file component")
         if not self.api:
             return open_regular_at(self.handle, name)
@@ -137,12 +167,13 @@ class ConfinedDirectory:
             raise
 
     def entries(self, *, include_links: bool = False) -> list[tuple[str, bool]]:
-        """Names and directory hints; opens recheck kind. Metadata can observe refused links."""
+        """Directories and regular files with directory hints; opens recheck kind. Links,
+        FIFOs, sockets and devices are no walk's material. Metadata can observe them all."""
         if self.api:
             return self.api.entries(self.handle, include_links=include_links)
         with os.scandir(self.handle) as entries:
             return [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in entries
-                    if include_links or not entry.is_symlink()]
+                    if include_links or entry.is_dir(follow_symlinks=False) or entry.is_file(follow_symlinks=False)]
 
 
 @contextlib.contextmanager
@@ -157,7 +188,7 @@ def confined_directory(root: Any, parts: Any = ()):
 
 def open_confined_file(root: Any, parts: Any) -> Tuple[BinaryIO, os.stat_result]:
     parts = list(parts)
-    if not parts or any(relative_parts(part) != [part] for part in parts):
+    if not parts or not all(native_name(part) for part in parts):
         raise OSError(errno.EINVAL, "invalid confined file selector")
     with confined_directory(root, parts[:-1]) as directory:
         return directory.open(parts[-1])
@@ -353,8 +384,9 @@ class _Win32Files:
 
     def open_root(self, path: str) -> int:
         """Only the host-configured anchor follows junctions, once, on acquisition."""
+        # Walk handles share delete like a POSIX dirfd; only the upload proof (``open``) denies it.
         handle = self._create(path, self.FILE_LIST_DIRECTORY | self.FILE_READ_ATTRIBUTES,
-                              self.SHARE_READ | self.SHARE_WRITE, None, self.OPEN_EXISTING,
+                              self.SHARE_READ | self.SHARE_WRITE | self.SHARE_DELETE, None, self.OPEN_EXISTING,
                               self.FLAG_BACKUP_SEMANTICS, None)
         if handle in (None, self._invalid):
             raise self._error("CreateFileW(root)")
@@ -366,7 +398,7 @@ class _Win32Files:
             raise
 
     def open_relative(self, parent: int, name: str, *, directory: bool) -> int:
-        if relative_parts(name) != [name]:
+        if not native_name(name):
             raise OSError(errno.EINVAL, "not a plain Windows component")
         ctypes = self._ctypes
         self.require_plain(parent, directory=True)
@@ -377,8 +409,7 @@ class _Win32Files:
                                       0x40 | 0x1000, None, None)  # CASE_INSENSITIVE | DONT_REPARSE
         handle, io = ctypes.c_void_p(), self._io_status()
         status = self._nt_create(ctypes.byref(handle), 0x100000 | 0x80 | 0x1, ctypes.byref(attributes),
-                                 ctypes.byref(io), None, 0,
-                                 self.SHARE_READ | self.SHARE_WRITE | (0 if directory else self.SHARE_DELETE),
+                                 ctypes.byref(io), None, 0, self.SHARE_READ | self.SHARE_WRITE | self.SHARE_DELETE,
                                  1, 0x20 | 0x200000 | (0x1 if directory else 0x40), None, 0)
         # FILE_OPEN, SYNCHRONOUS_IO_NONALERT, OPEN_REPARSE_POINT, DIRECTORY/NON_DIRECTORY_FILE.
         if status < 0:
@@ -416,7 +447,7 @@ class _Win32Files:
                 if length % 2 or offset + 64 + length > len(raw):
                     raise OSError("invalid directory name extent")
                 name = raw[offset + 64:offset + 64 + length].decode("utf-16-le", "surrogatepass")
-                if relative_parts(name) == [name] and (include_links or not attributes & self.ATTRIBUTE_REPARSE_POINT):
+                if native_name(name) and (include_links or not attributes & self.ATTRIBUTE_REPARSE_POINT):
                     result.append((name, bool(attributes & self.ATTRIBUTE_DIRECTORY)))
                 if not following:
                     break

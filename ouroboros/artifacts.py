@@ -724,17 +724,16 @@ def read_actor_source_bytes(
         raise ValueError("actor source ref has an unexpected kind")
     if ref.get("root") != "artifact_store":
         raise ValueError("actor source ref has an unexpected root")
-    from ouroboros.confined_files import open_confined_file, relative_parts
+    from ouroboros.confined_files import open_confined_file, physical_path, relative_parts, root_spellings
 
     parts = relative_parts(ref.get("path"))
     rel = pathlib.PurePosixPath(*parts)
     if not parts or parts[0] != _SOURCE_HANDLES_SUBDIR:
         raise ValueError("actor source ref has an invalid path")
     placement, root = pathlib.Path(drive_root), None
-    if anchor is not None:
-        trusted = pathlib.Path(anchor).absolute()
-        root = trusted.resolve()
-        placement = root if placement.absolute() == trusted else placement.absolute()
+    if anchor is not None:  # placement readers below receive the configured anchor
+        spellings = root_spellings(anchor)
+        root, placement = spellings[0], physical_path(spellings, placement.absolute())
         target = task_artifact_dir_path(placement, task_id, create=False).joinpath(*rel.parts)
     else:  # Existing internal callers retain their placement-cache and scope/error contracts.
         base = task_artifact_dir_path(placement, task_id, create=False).resolve(strict=False)
@@ -747,7 +746,7 @@ def read_actor_source_bytes(
     from ouroboros.evidence_packs import handle_bytes
     try:
         if rel.parts[:2] == ("source_handles", "context_checkpoints"):
-            raw = handle_bytes(placement, task_id, rel.as_posix(), anchor=root)
+            raw = handle_bytes(placement, task_id, rel.as_posix(), anchor=anchor)
         elif root is not None:
             handle, _ = open_confined_file(root, target.relative_to(root).parts)
             with handle:
@@ -758,7 +757,7 @@ def read_actor_source_bytes(
         if not retained:
             raise
         from ouroboros.source_retention import read_retained_task_source
-        return read_retained_task_source(placement, task_id, ref, anchor=root)
+        return read_retained_task_source(placement, task_id, ref, anchor=anchor)
     try:
         expected_size = int(ref["size"])
     except (KeyError, TypeError, ValueError) as exc:
