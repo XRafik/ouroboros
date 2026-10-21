@@ -60,10 +60,12 @@ def _normalize_task(task, fences, changes):
                     hold, selected_by=hold["selected_by"], selected_at=hold.get("selected_at", ""), by=by)
             elif not current and task.get("root_task_id", task.get("id")) != task.get("id"):
                 task["_budget_pause_hold"] = stop_record(_AWAITING, held_at=hold.get("held_at", ""), by=by)
-        elif prose or hold.get("detail") == "root_resume_generation_stale":
+        elif hold.get("detail") == "root_resume_generation_stale":
             # U1/#2067 copied an already released cause over a current Pause.
             if not current:
                 task["_budget_pause_hold"] = stop_record(_AWAITING, held_at=hold.get("held_at", ""), by=by)
+        elif prose:
+            pass  # Actor text is history; only a current marker/fence can stop work.
         elif reason_policy(reason)["cause"] == "refusal":
             refuse_continuation(task, hold)
         else:

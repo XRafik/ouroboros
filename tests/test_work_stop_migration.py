@@ -39,6 +39,24 @@ def test_old_copied_reason_never_overrules_current_pause(reason, has_current):
     assert normalize_snapshot(snap, [doc]) == [] and snap == once
 
 
+@pytest.mark.parametrize("has_current", [True, False])
+def test_prose_alone_is_archived_without_inventing_a_stop(has_current):
+    text = "Ouroboros: the owner asked to pause before updating"
+    task = {"id": "root", "_budget_pause_hold": {"reason": text}}
+    document = {"task_id": "root", "status": "scheduled"}
+    if has_current:
+        task["_budget_pause"] = _pause()
+        document["owner_pause"] = {"state": "requested", "fence_id": "current"}
+    snapshot = _snapshot(task)
+    changes = normalize_snapshot(snapshot, [document])
+    stop = current_stop(task, {"owner": document.get("owner_pause")})
+    assert (stop["cause"] if stop else None) == ("pause" if has_current else None)
+    assert "_budget_pause_hold" not in task
+    assert {"task_id": "root", "action": "actor_text_archived", "text": text} in changes
+    once = copy.deepcopy(snapshot)
+    assert normalize_snapshot(snapshot, [document]) == [] and snapshot == once
+
+
 def test_selected_members_keep_only_q9_bindings_and_new_pause_discards_old_selection():
     binding = {"fence_id": "f", "root_task_id": "root", "selected_by": "root", "selected_at": "then",
                "root_resume_basis": "durable", "root_grant_id": "g", "root_resume_generation": 2}

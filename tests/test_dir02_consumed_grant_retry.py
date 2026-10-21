@@ -1,11 +1,11 @@
 # tests/test_dir02_consumed_grant_retry.py
+import json
 import queue as stdqueue
 from types import SimpleNamespace
 
 import pytest
 
 from ouroboros import budget_pause as bp, owner_pause, working_checkpoint as wc
-from ouroboros.task_results import load_task_result
 from supervisor import events_budget as eb, queue, worker_health, workers
 from supervisor.owner_pause_control import request_owner_pause
 from tests._budget_pause_exact_helpers import _loop_ctx
@@ -24,7 +24,7 @@ pytestmark = pytest.mark.serial
 
 
 @pytest.mark.parametrize("return_first", [False, True],
-                         ids=["same-attempt-fenced", "later-attempt-retry"])
+                         ids=["same-attempt-working", "later-attempt-retry"])
 def test_consumed_g1_selection_after_recovery(
         host, monkeypatch, clock, reaper, return_first):
     plan = _fresh_plan(monkeypatch)
@@ -82,6 +82,8 @@ def test_consumed_g1_selection_after_recovery(
     meta = workers.RUNNING["held"]
     dead_attempt = meta["attempt"]
     assert (dead_attempt != exact["task_attempt"]) is return_first
+    saved = json.loads(wc.checkpoint_path(host.root, "held", dead_attempt).read_text())
+    assert saved["working"]["boundary"] == ("post_batch" if return_first else "resumed")
     workers.WORKERS[0] = _make_worker(busy_task_id="held", exitcode=1)
     jobs = stdqueue.Queue()
     monkeypatch.setattr(queue, "_reap_queue", jobs)
@@ -98,13 +100,6 @@ def test_consumed_g1_selection_after_recovery(
     job = jobs.get_nowait()
     assert job["kind"] == "confirmed_dead_worker" and job["meta"] is meta
     worker_health.recover_confirmed_dead_worker(job)
-
-    if not return_first:
-        result = load_task_result(host.root, "held")
-        assert result["reason_code"] == "worker_crash_budget_pausing", result
-        assert not any(t["id"] == "held" for t in host.pending)
-        assert eb.budget_hold_fact(next(t for t in host.pending if t["id"] == child_id))
-        return
 
     retry = next(t for t in host.pending if t["id"] == "held")
     assert retry["_attempt"] == dead_attempt + 1

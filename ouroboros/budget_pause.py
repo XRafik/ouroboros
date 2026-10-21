@@ -1531,10 +1531,9 @@ def budget_pause_restore_refusal(root: Any, task: Dict[str, Any]) -> str:
     durable authority behind the locator (unreadable, terminal, a different
     pause id, no source, an unreadable source) — never a cancellation and never
     a reason to drop the row: the caller HOLDS it, typed and visible, so the
-    saved pause stays where the owner can see it. Stop/Panic and the no-resume
-    flag are NOT restore refusals: they are Resume refusals, read at grant time
-    by the same gate that reads them live, so a flag that clears later never
-    leaves a perfectly restorable pause held for nothing.
+    saved pause stays where the owner can see it. Release authority belongs to
+    current_stop at Resume; boot translates installation inputs into work stops.
+    Neither makes an otherwise readable continuation source unrestorable.
     """
     from ouroboros.artifacts import read_actor_source_bytes
     from ouroboros.task_results import _TRULY_TERMINAL_STATUSES, load_task_result
