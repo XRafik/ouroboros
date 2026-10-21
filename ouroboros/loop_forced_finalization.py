@@ -827,7 +827,7 @@ def _call_forced_model_once(
 
     if admitted_request is None and _loop()._retire_main_reasoning(ctx):
         from ouroboros.transcript_prefix import append_reasoning_retirement_fact
-        append_reasoning_retirement_fact(ctx.accumulated_usage, ctx.round_idx, ctx.messages)
+        append_reasoning_retirement_fact(ctx.accumulated_usage, getattr(ctx, "round_idx", None), ctx.messages)
     owner_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
     # The admitted send reuses the lookahead's one measurement (``task_pacing.prepared_wrapup_candidate``);
     # a direct, drift or owner-refresh send measures its own final input afresh.
@@ -1246,7 +1246,7 @@ def _forced_final_answer(
     _loop()._retire_main_reasoning(ctx)
     _loop()._append_or_merge_user_message(ctx.messages, prompt)
     from ouroboros.transcript_prefix import append_reasoning_retirement_fact
-    append_reasoning_retirement_fact(ctx.accumulated_usage, ctx.round_idx, ctx.messages)
+    append_reasoning_retirement_fact(ctx.accumulated_usage, getattr(ctx, "round_idx", None), ctx.messages)
     extracted = ""
     response_meta: Dict[str, Any] = {}
     attempt = 0

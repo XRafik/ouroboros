@@ -358,8 +358,8 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         '_forced_orphan_note', '_forced_unaccepted_binding', '_handle_model_wait_control', '_live_delivery_candidate',
         '_load_direct_child_results', '_prepare_forced_prompt', '_project_child_result_dispositions',
         '_publish_delivery_candidate', '_record_forced_finalization', '_release_for_owner_followup',
-        '_replace_delivery_candidate', '_resolve_forced_delivery_control_body', '_server_web_allowed_by_task',
-        '_service_finalization_evidence',
+        '_replace_delivery_candidate', '_resolve_forced_delivery_control_body', '_retire_main_reasoning',
+        '_server_web_allowed_by_task', '_service_finalization_evidence',
         'call_llm_with_retry',
     })),
     "ouroboros/loop_messages.py": ("ouroboros/loop.py", "_loop", frozenset({
@@ -376,7 +376,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         "_reconcile_transport_wait", "_run_cross_model_fallback_chain",
         "_context_overflow_retries", "_dispatch_round_model", "_emit_checkpoint_event",
         "_measure_round_main_fit", "_output_exhausted_notice", "_rebind_context_fit_plan",
-        "_server_web_allowed_by_task", "_task_deadline_epoch", "call_llm_with_retry",
+        "_retire_main_reasoning", "_server_web_allowed_by_task", "_task_deadline_epoch", "call_llm_with_retry",
         "last_physical_attempt_capture", "seal_task_transcript",
     })),
     "ouroboros/loop_nudges.py": ("ouroboros/loop.py", "_loop", frozenset({
