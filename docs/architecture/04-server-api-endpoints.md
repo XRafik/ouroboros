@@ -1,14 +1,14 @@
 # 4. Server API Endpoints
 
-Registry of browser, CLI and Host Service routes. `gateway/router.py` owns Route objects; the table mirrors them (shapes: `GET /api/contract`), with tests for omissions in either direction.
+Browser/CLI routes: `gateway/router.py`; Host Service: §12. Tests check this table in both directions. Shapes: `GET /api/contract`.
 
 `OUROBOROS_NETWORK_PASSWORD` gates non-loopback HTTP and WebSocket access; loopback bypasses it. Health, login/logout and GET/HEAD of the selected public `/auth/` assets stay reachable. A trusted proxy supplies client/TLS facts (`FORWARDED_ALLOW_IPS`; DEPLOYMENT). Browser sessions use an expiring HttpOnly HMAC cookie, `Secure` only under TLS. A pre-accept 4401 WebSocket close appears as a refused handshake (1006); an HTTP 401 confirms sign-out and opens `/auth/login?next=`, resending nothing. Without a password, remote access stays open by operator choice.
 
 `server_web.ServedUI` applies `OUROBOROS_UI_DIR` (§7) once per generation for `/`, `/static/*` and optional directory pages `onboarding.html` and `auth/index.html`. The same record reaches the outer auth gate, the builtin index's response-only owner marker and `StateResponse.served_ui` (source, not asset digest). Selected files are trusted and unrewritten; invalid main selection falls back with a reason. `/onboarding` and `/auth/login` choose whole selected or builtin pages; `?builtin=1` forces recovery, including through authentication. `/auth/*` publishes only the selected public login bundle; login/logout operations precede it. Missing assets never mix clients. Builtin `/onboarding/static/*` and the author kit remain independent. Topology, recovery and client-owned releases: CLIENT_CONTRACT §2–4.
 
-File-browser routes are contributed by `gateway/files.py::file_browser_routes()`; envelopes and their parity: §11. The loopback Host Service is a separate token-authenticated app assembled by `gateway/host_service.py::create_host_service_app`, not a second public owner API (§12).
+Files routes: `gateway/files.py::file_browser_routes()` (envelopes/parity: §11). `gateway/host_service.py::create_host_service_app` builds the separate token-authenticated loopback Host Service, not a public owner API (§12).
 
-Every path-addressed `/api/files/*` operation resolves its requested `path` and refuses when the resolution leaves the configured file root. In-root symlinks stay usable; out-of-root symlinks may be listed with `is_symlink: true` but cannot be read, written, downloaded, deleted or traversed. A chat attachment (`/api/files/download?upload=<id>`) names no path: a separate confined authority opens it by stored id via `chat_uploads.open_upload` inside `data/uploads`, independent of the Files root.
+`/api/files/*` path operations resolve `path` and refuse escapes from the configured root. In-root symlinks stay usable; out-of-root symlinks may be listed with `is_symlink: true` but cannot be read, written, downloaded, deleted or traversed. Chat attachments (`/api/files/download?upload=<id>`) use stored ids, not paths: the separate `chat_uploads.open_upload` authority confines them to `data/uploads`, independently of the Files root.
 
 | Method | Path | Note |
 |---|---|---|
@@ -81,7 +81,7 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | GET | `/api/claudexor/account-resets/{operation_id}` | receipt inspection (§3) |
 | POST | `/api/claudexor/wake` | |
 | GET | `/api/claudexor/maintenance/harnesses` | passive inspection |
-| POST | `/api/claudexor/maintenance/operations` | 202 operation handle |
+| POST | `/api/claudexor/maintenance/operations` | 202 handle; Node/npm preparation: 409 `maintenance_restart_required`, 409/503 `maintenance_preparation_failed`; `not_submitted` covers this attempt only (§6) |
 | GET | `/api/claudexor/maintenance/operations/{operation_id}` | retained engine facts |
 | POST | `/api/claudexor/maintenance/operations/{operation_id}/cancel` | acknowledgement does not prove termination |
 | POST | `/api/claudexor/login` | |
