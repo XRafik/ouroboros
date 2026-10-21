@@ -1,5 +1,5 @@
-# Experiment-only branch. Never merge this workflow into a product branch.
-# Manual, secret-free native feasibility probe; not product or release qualification.
+# Experiment-only branch. NEVER merge this workflow into a product branch.
+# Native passive metadata observer; no services/drivers are stopped in this run.
 name: Windows 1297 feasibility experiment
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ jobs:
   native-probe:
     if: github.ref == 'refs/heads/probe/windows-confinement-1aff'
     runs-on: windows-2022
-    timeout-minutes: 10
+    timeout-minutes: 6
     steps:
       - uses: actions/checkout@v4
         with:
@@ -20,14 +20,20 @@ jobs:
         with:
           python-version: '3.11'
           architecture: x64
-      - name: Native primitive probe; skips remain incomplete
+      - name: Calibrated UNC metadata observation; incomplete stays red
         shell: pwsh
+        timeout-minutes: 5
         run: |
-          & ./.platform-probe/rerun-disposable-windows.ps1 -AcknowledgeDisposableRunner -StopServerForSinks -StopServerDriversForSinks
+          & ./.platform-probe/unc-etw/run_windows.ps1 -Candidate ./.platform-probe/windows_relative_probe.py -RunDirectory "$env:RUNNER_TEMP/unc1297-etw-r1"
+          exit $LASTEXITCODE
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: windows-1297-feasibility
-          path: ${{ env.probe1297_evidence }}
+          name: windows-1297-unc-etw
+          path: |
+            ${{ runner.temp }}/unc1297-etw-r1/build.log
+            ${{ runner.temp }}/unc1297-etw-r1/run.jsonl
+            ${{ runner.temp }}/unc1297-etw-r1/run.stderr.log
+            ${{ runner.temp }}/unc1297-etw-r1/evidence/*.jsonl
           if-no-files-found: error
           retention-days: 14
