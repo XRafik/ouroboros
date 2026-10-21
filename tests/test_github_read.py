@@ -28,7 +28,7 @@ def _rest(payload, *, link_next="", status=200):
     return head + "\r\n" + json.dumps(payload)
 
 
-def _call(argv):
+def _call(argv, kwargs=None):
     """The parts of one ``gh api`` argv: route, method, hostname, fields and whether headers were asked."""
     parts = SimpleNamespace(route="", method="GET", hostname="", include=False, fields={}, graphql="", input=False)
     rest = list(argv[2:])
@@ -42,7 +42,7 @@ def _call(argv):
             parts.hostname = rest.pop(0)
         elif item == "--input":
             parts.input, _ = True, rest.pop(0)
-        elif item in ("-f", "-F"):
+        elif item in "-F":
             key, _sep, value = rest.pop(0).partition("=")
             if key == "query":
                 parts.graphql = value
@@ -52,6 +52,9 @@ def _call(argv):
             parts.route = "graphql"
         else:
             parts.route = item
+    if parts.route == "graphql" and kwargs and kwargs.get("input"):
+        envelope = json.loads(kwargs["input"])
+        parts.graphql, parts.fields = envelope["query"], envelope["variables"]
     return parts
 
 
@@ -84,7 +87,9 @@ def gh(monkeypatch, tmp_path):
 
     def run(argv, **kwargs):
         world.calls.append((argv, kwargs))
-        answer = world.answer(_call(argv) if argv[1] == "api" else SimpleNamespace(route=" ".join(argv[1:3])), argv, kwargs)
+        if argv[1:5] == ["repo", "view", "--json", "nameWithOwner"]:
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"nameWithOwner": "owner/selected"}), stderr="")
+        answer = world.answer(_call(argv, kwargs) if argv[1] == "api" else SimpleNamespace(route=" ".join(argv[1:3])), argv, kwargs)
         if isinstance(answer, tuple):
             return SimpleNamespace(returncode=answer[0], stdout="", stderr=answer[1])
         return SimpleNamespace(returncode=0, stdout=answer, stderr="")
@@ -150,8 +155,8 @@ def test_get_pr_facets_use_rest_pages_graphql_threads_and_the_diff_subcommand(gh
         if p.route == "repos/{owner}/{repo}/pulls/7":
             return json.dumps(_pr(7, additions=3, deletions=1, changed_files=1, mergeable=True, body="desc"))
         if p.route == "graphql":
-            assert p.fields["owner"] == ("-F", "{owner}") and p.fields["name"] == ("-F", "{repo}")
-            assert p.fields["number"] == ("-F", "7") and p.fields["first"] == ("-F", "30") and "after" not in p.fields
+            assert p.fields["owner"] == "owner" and p.fields["name"] == "selected"
+            assert p.fields["number"] == 7 and p.fields["first"] == 30 and p.fields["after"] is None
             return json.dumps({"data": {"repository": {"pullRequest": {"reviewThreads": {
                 "totalCount": 1, "pageInfo": {"hasNextPage": False, "endCursor": "Y3Vyc29y"},
                 "nodes": [{"id": "PRRT_1", "isResolved": False, "isOutdated": False, "path": "a.py", "line": 3, "startLine": None,
@@ -224,8 +229,8 @@ def test_explicit_repo_is_substituted_into_routes_with_its_host(gh):
     gh.answer = lambda p, argv, kw: json.dumps({"data": {"repository": {"discussion": None}}})
     text = gh.read(method="get", kind="discussion", target=5, repo="owner/selected")
     assert "discussion #5 was not found" in text
-    fields = _call(gh.calls[-1][0]).fields
-    assert fields["owner"] == ("-f", "owner") and fields["name"] == ("-f", "selected")
+    fields = _call(*gh.calls[-1]).fields
+    assert fields["owner"] == "owner" and fields["name"] == "selected"
 
 
 # ---- list --------------------------------------------------------------------------------------------
@@ -328,13 +333,13 @@ def test_list_reviews_need_a_pull_request(gh):
 
 def test_list_discussions_and_their_comments_with_replies_are_graphql_pages(gh):
     def answer(p, argv, kw):
-        assert p.route == "graphql" and p.fields["owner"] == ("-F", "{owner}")
+        assert p.route == "graphql" and p.fields["owner"] == "owner"
         if "discussions(" in p.graphql:
-            assert p.fields["first"] == ("-F", "2") and p.fields["after"] == ("-f", "abc")
+            assert p.fields["first"] == 2 and p.fields["after"] == "abc"
             return json.dumps({"data": {"repository": {"discussions": {"totalCount": 9, "pageInfo": {"hasNextPage": True, "endCursor": "def"}, "nodes": [
                 {"id": "D_1", "number": 1, "title": "A", "url": "u", "createdAt": "t", "updatedAt": "2026-10-05", "author": {"login": "x"},
                  "category": {"name": "General"}, "isAnswered": False, "comments": {"totalCount": 1}, "body": "hello"}]}}}})
-        assert p.fields["number"] == ("-F", "1")
+        assert p.fields["number"] == 1
         return json.dumps({"data": {"repository": {"discussion": {"comments": {"totalCount": 1, "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": [
             {"id": "DC_1", "databaseId": 10, "body": "c", "author": {"login": "y"}, "createdAt": "t", "updatedAt": "t", "url": "u", "isAnswer": False,
              "replies": {"totalCount": 51, "nodes": [{"id": "DC_2", "databaseId": 11, "body": "r", "author": {"login": "z"}, "createdAt": "t", "url": "u"}]}}]}}}}})
@@ -364,8 +369,8 @@ def test_search_discussions_is_a_graphql_search_without_repository_variables(gh)
          "isAnswered": False, "comments": {"totalCount": 0}, "repository": {"nameWithOwner": "owner/selected"}}]}}})
     line, payload = _payload(gh.read(method="search", kind="discussion", query="roadmap", repo="owner/selected"))
     assert line == "github_read search discussion in owner/selected: 1 item(s) of 1 for 'roadmap repo:owner/selected'"
-    fields = _call(gh.calls[0][0]).fields
-    assert "owner" not in fields and fields["q"] == ("-f", "roadmap repo:owner/selected") and payload["items"][0]["repo"] == "owner/selected"
+    fields = _call(*gh.calls[0]).fields
+    assert "owner" not in fields and fields["q"] == "roadmap repo:owner/selected" and payload["items"][0]["repo"] == "owner/selected"
 
 
 # ---- checks ------------------------------------------------------------------------------------------
@@ -383,6 +388,27 @@ def test_checks_is_the_existing_reader_registered_as_a_method(gh, monkeypatch, t
 
 
 # ---- api ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("query_value", ["repo:owner/selected is:open", "mutation { deleteIssue(input:{id:1}) { clientMutationId } }"])
+def test_graphql_envelope_preserves_document_and_variable_types(gh, query_value):
+    document = "query($query:String!){search(query:$query,type:ISSUE,first:1){issueCount}}"
+    variables = {"query": query_value, "input": {"body": "hello", "enabled": True}, "ids": ["I_1", "I_2"],
+                 "after": None, "weight": 1.25}
+    gh.answer = lambda p, argv, kw: json.dumps({"data": {"search": {"issueCount": 1}}})
+    _line, payload = _payload(gh.read(method="api", graphql=document, variables=variables, repo="github.example/owner/selected"))
+    argv, kw = gh.calls[0]
+    assert argv == ["gh", "api", "graphql", "--input", "-", "--hostname", "github.example"]
+    assert json.loads(kw["input"]) == {"query": document, "variables": variables}
+    assert payload["data"]["data"]["search"]["issueCount"] == 1
+
+
+def test_graphql_bound_repository_variables_use_the_selected_project_slug(gh):
+    gh.answer = lambda p, argv, kw: json.dumps({"data": {"repository": {"id": "R_1"}}})
+    gh.read(method="api", graphql="query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}")
+    assert gh.calls[0][0] == ["gh", "repo", "view", "--json", "nameWithOwner"]
+    assert json.loads(gh.calls[1][1]["input"])["variables"] == {"owner": "owner", "name": "selected"}
+    assert all(kw["cwd"] == str(gh.cwd) for _argv, kw in gh.calls)
+
+
 def test_api_sends_get_routes_and_graphql_queries_only(gh):
     gh.answer = lambda p, argv, kw: json.dumps([{"event": "labeled"}])
     line, payload = _payload(gh.read(method="api", route="repos/{owner}/{repo}/issues/7/timeline?per_page=100", repo="owner/selected"))
@@ -390,16 +416,16 @@ def test_api_sends_get_routes_and_graphql_queries_only(gh):
     assert gh.calls[0][0] == ["gh", "api", "repos/owner/selected/issues/7/timeline?per_page=100"] and payload["data"] == [{"event": "labeled"}]
     gh.answer = lambda p, argv, kw: json.dumps({"data": {"viewer": {"login": "me"}}})
     _line, payload = _payload(gh.read(method="api", graphql="query { viewer { login } }"))
-    assert payload["data"] == {"data": {"viewer": {"login": "me"}}} and "owner" not in _call(gh.calls[-1][0]).fields
+    assert payload["data"] == {"data": {"viewer": {"login": "me"}}} and "owner" not in _call(*gh.calls[-1]).fields
     _line, payload = _payload(gh.read(method="api", graphql="query($owner:String!,$name:String!){repository(owner:$owner,name:$name){id}}", variables={"x": 1}))
-    assert _call(gh.calls[-1][0]).fields == {"owner": ("-F", "{owner}"), "name": ("-F", "{repo}"), "x": ("-F", "1")}
+    assert _call(*gh.calls[-1]).fields == {"owner": "owner", "name": "selected", "x": 1}
     for document in ("mutation { addReaction(input:{}) { clientMutationId } }", "mutation Add($id:ID!) { x }", "query Q { a }\nmutation M { b }"):
         text = gh.read(method="api", graphql=document)
         assert text.startswith("⚠️ GH_API_READ_ONLY") and "github_write(method='api'" in text
     assert gh.read(method="api", route="POST repos/x/y/issues").startswith("⚠️ GH_API_READ_ONLY")
     assert gh.read(method="api").startswith("⚠️ TOOL_ARG_ERROR: api takes exactly one of route")
     assert gh.read(method="api", route="user", graphql="query{x}").startswith("⚠️ TOOL_ARG_ERROR: api takes exactly one of route")
-    assert len([argv for argv, _ in gh.calls]) == 3  # the refusals sent nothing
+    assert len(gh.routes()) == 3  # three API sends; bound slug resolution is a separate read
 
 
 # ---- shape, detail, fields, artifacts ------------------------------------------------------------------

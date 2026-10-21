@@ -27,7 +27,9 @@ def gh(monkeypatch, tmp_path):
 
     def run(argv, **kwargs):
         world.calls.append((argv, kwargs))
-        answer = world.answer(_call(argv) if argv[1] == "api" else SimpleNamespace(route=" ".join(argv[1:3])), argv, kwargs)
+        if argv[1:5] == ["repo", "view", "--json", "nameWithOwner"]:
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"nameWithOwner": "owner/selected"}), stderr="")
+        answer = world.answer(_call(argv, kwargs) if argv[1] == "api" else SimpleNamespace(route=" ".join(argv[1:3])), argv, kwargs)
         if isinstance(answer, Exception):
             raise answer
         if isinstance(answer, tuple):
@@ -80,9 +82,9 @@ def test_comment_reply_to_answers_inline_in_the_review_thread(gh):
 def test_comment_on_a_discussion_resolves_its_node_then_sends_the_mutation(gh):
     def answer(p, argv, kw):
         if "discussion(number" in p.graphql:
-            assert p.fields["number"] == ("-F", "5") and p.fields["owner"] == ("-F", "{owner}")
+            assert p.fields["number"] == 5 and p.fields["owner"] == "owner"
             return json.dumps({"data": {"repository": {"discussion": {"id": "D_5"}}}})
-        assert "addDiscussionComment" in p.graphql and p.fields["discussionId"] == ("-f", "D_5") and p.fields["replyToId"] == ("-f", "DC_1")
+        assert "addDiscussionComment" in p.graphql and p.fields["discussionId"] == "D_5" and p.fields["replyToId"] == "DC_1"
         return json.dumps({"data": {"addDiscussionComment": {"comment": {"id": "DC_9", "databaseId": 9, "url": "u", "body": "thanks",
                                                                           "createdAt": "2026-10-22T09:00:00Z", "author": {"login": "ouroboros-agent"}}}}})
     gh.answer = answer
@@ -151,8 +153,8 @@ def test_review_submits_the_event_body_and_inline_comments(gh):
 def test_resolve_thread_is_a_graphql_mutation_read_back_by_its_state(gh, state, mutation, resolved):
     gh.answer = lambda p, argv, kw: json.dumps({"data": {mutation: {"thread": {"id": "PRRT_1", "isResolved": resolved}}}})
     line, receipt = _receipt(gh.write(method="resolve_thread", target="PRRT_1", state=state, repo="owner/selected"))
-    parts = _call(gh.calls[0][0])
-    assert mutation in parts.graphql and parts.fields == {"id": ("-f", "PRRT_1")}
+    parts = _call(*gh.calls[0])
+    assert mutation in parts.graphql and parts.fields == {"id": "PRRT_1"}
     assert receipt["effect"] == f"review_thread.{mutation.removesuffix('ReviewThread')}" and receipt["id"] == "PRRT_1"
     assert receipt["readback"]["verified"] and receipt["at"] == NOW and receipt["at_source"].startswith("local send time")
     assert line == f"github_write resolve_thread → owner/selected thread PRRT_1: confirmed at {NOW}"
@@ -170,7 +172,7 @@ def test_api_sends_rest_mutations_and_graphql_mutations_and_names_the_effect(gh)
     _line, receipt = _receipt(gh.write(method="api", graphql="mutation($id:ID!){addReaction(input:{subjectId:$id,content:THUMBS_UP}){reaction{id content}}}",
                                        variables={"id": "IC_1"}))
     assert receipt["effect"] == "mutation addReaction" and receipt["id"] == "R_1"
-    assert _call(gh.calls[-1][0]).fields == {"id": ("-f", "IC_1")}
+    assert _call(*gh.calls[-1]).fields == {"id": "IC_1"}
     text = gh.write(method="api", graphql="query { viewer { login } }")
     assert "sends mutations; a query goes through github_read(method='api'" in text and gh.result.meta["operation_outcome"] == "completed_no_effect"
     assert gh.write(method="api", http_method="GET", route="user").startswith("⚠️ TOOL_ARG_ERROR: http_method must be one of")

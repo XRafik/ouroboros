@@ -311,8 +311,9 @@ def _gh_graphql(ctx: ToolContext, document: str, variables: dict, *, repo: str, 
                 timeout: int = 30) -> GhResult:
     """One GraphQL call under the public repository binding; ``$owner``/``$name`` name the repository.
 
-    Bound Project: gh's ``{owner}``/``{repo}`` placeholders in typed fields; explicit repo: literal values."""
-    args = ["api", "graphql", "-f", f"query={document}"]
+    The document and variables travel in one JSON envelope, preserving every variable's type."""
+    args = ["api", "graphql", "--input", "-"]
+    values = dict(variables or {})
     host = ""
     if repo:
         parts = _split_repo(repo)
@@ -320,16 +321,19 @@ def _gh_graphql(ctx: ToolContext, document: str, variables: dict, *, repo: str, 
             return _target_refusal(ctx, "⚠️ GH_TARGET_INVALID: repo must be [HOST/]OWNER/REPO; omit it to use the selected Project.")
         host, owner, name = parts
         if repo_vars:
-            args.extend(["-f", f"owner={owner}", "-f", f"name={name}"])
+            values = {"owner": owner, "name": name, **values}
     elif repo_vars:
-        args.extend(["-F", "owner={owner}", "-F", "name={repo}"])
-    for key, value in (variables or {}).items():
-        if value is None:
-            continue
-        args.extend(["-F", f"{key}={json.dumps(value)}"] if isinstance(value, (bool, int)) else ["-f", f"{key}={value}"])
+        from ouroboros.tools.github_read import _Read
+
+        slug, error = _Read(ctx, "api", repo).slug()
+        if error:
+            return GhResult(False, error, None, None, "target")
+        owner, name = slug.split("/", 1)
+        values = {"owner": owner, "name": name, **values}
     if host:
         args.extend(["--hostname", host])
-    return _gh_run(args, ctx, timeout=timeout, repo=repo)
+    return _gh_run(args, ctx, timeout=timeout, repo=repo,
+                   input_data=json.dumps({"query": document, "variables": values}))
 
 
 def _pr_merge(ctx: ToolContext, number: int, expected_head_sha: str, method: str,
