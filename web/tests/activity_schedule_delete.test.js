@@ -99,7 +99,7 @@ test('a legacy note keeps its name, shows its words and offers the same lifecycl
     assert.doesNotMatch(html, /title="Call/);
     assert.match(html, /<span class="activity-sub">reminder · one-shot · at\/after /);
     assert.match(html, /data-act="schedule-toggle" data-id="followup-t1-abc123" data-action="disable">Disable</);
-    assert.match(html, /data-act="schedule-delete" data-id="followup-t1-abc123" data-managed="" data-note="1">Delete</);
+    assert.match(html, /data-act="schedule-delete" data-id="followup-t1-abc123" data-note="1">Delete</);
     const task = scheduleRowHtml({ ...note, kind: undefined });
     assert.match(task, /<span class="activity-name" data-i18n-authored>Reminder of task t1<\/span>/, 'a task row keeps its schedule name');
     assert.match(task, /data-note="">Delete</);
