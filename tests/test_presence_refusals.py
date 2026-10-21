@@ -645,6 +645,7 @@ def test_inline_turn_recovers_lost_response_without_replaying_event(tmp_path, mo
     monkeypatch.setattr(call_mod, "_sleep_within_deadline", lambda sec, _deadline, **_kw: (sleeps.append(sec), True)[1])
     monkeypatch.setattr("ouroboros.presence_runner._write_unresolved_notice",
                         lambda _root, task_id: notices.append(task_id))
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_kw: (True, ""))
 
     def spoken():
         rows = dialogue_test.chat_rows(tmp_path)
@@ -654,9 +655,12 @@ def test_inline_turn_recovers_lost_response_without_replaying_event(tmp_path, mo
         """Every send records the host state it left from: what ran and what was spoken before it."""
 
         def chat(self, **kwargs):
+            assert self.calls < 2, "the recovered author must select completion without another send"
             sends.append({"messages": [dict(row) for row in kwargs["messages"]],
                           "tools_executed": list(executed), "spoken": spoken()})
-            return super().chat(**kwargs)
+            response, usage = super().chat(**kwargs)
+            return {**response, "tool_calls": [{"id": "finish-recovered", "type": "function", "function": {
+                "name": "finish_task", "arguments": json.dumps({"action": "finish", "answer": "done"})}}]}, usage
 
     llm = ObservedLLM(tmp_path, lambda: httpx.ReadError("socket died after dispatch"), "ok")
     captured = {}
@@ -703,7 +707,7 @@ def test_inline_turn_recovers_lost_response_without_replaying_event(tmp_path, mo
     assert sends[1]["messages"][0] == sends[0]["messages"][0]
     recovery = [str(row.get("content") or "") for row in sends[1]["messages"] if "[Transport recovery]" in str(row.get("content"))]
     assert len(recovery) == 1 and attempts[0]["attempt_id"] in recovery[0]
-    assert [send["tools_executed"] for send in sends] == [[], []] and executed == []
+    assert [send["tools_executed"] for send in sends] == [[], []] and executed == ["finish_task"]
     assert [send["spoken"] for send in sends] == [[], []] and spoken() == ["done"]
     assert sleeps == []  # no Presence-only same-request paid repeat
     api_errors = _events(tmp_path / "logs", "llm_api_error")
