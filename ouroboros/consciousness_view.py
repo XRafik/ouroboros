@@ -124,14 +124,41 @@ def roots_text(rows) -> str:
     return "; ".join(f'{row["task_id"]}: {row["title"]} ({row["cause_label"]})' for row in rows) or "none"
 
 
+def first_reply_at(drive_root, task_id: str) -> str | None:
+    """Earliest confirmed receipt or automatic release, using this task's dialogue index.
+
+    Authored mode-0 replies prove release, not provider delivery. Failed/uncertain
+    receipts, drafts and task summaries prove neither. Read pages, never a global log.
+    """
+    from ouroboros import dialogue_store
+    from ouroboros.deadline_utils import parse_deadline_ts
+
+    first = None
+    for stored in dialogue_store.iter_probes(drive_root, "chat", [("task_id", task_id)]):
+        row = stored.row
+        transport = row.get("transport") or {}
+        delivery = transport.get("delivery") or {}
+        receipt = row.get("type") == "presence_delivery" and delivery.get("state") in {"accepted", "delivered"}
+        released = (row.get("direction") == "out" and str(row.get("source") or "").startswith("presence:")
+                    and delivery.get("state") == "authored")
+        if row.get("task_id") != task_id or not (receipt or released):
+            continue
+        stamp = str(delivery.get("reported_at") or row.get("ts") or "")
+        instant = parse_deadline_ts(stamp)
+        if instant is not None and (first is None or instant < first[0]):
+            first = instant, stamp
+    return first[1] if first else None
+
+
 def recent_wakes(drive_root, places) -> list[dict]:
     """Wake facts among the 50 newest task rows, with explicit snapshot coverage.
 
-    The indexed timestamp selection bounds both reading and decoding. Missing
-    timing/check evidence stays absent; no log scan or parallel history store.
+    Task selection is bounded; reply rows use the dialogue task index and checks
+    the five-chip task record. Missing historical evidence stays absent.
     """
     from ouroboros.consciousness_authority import wake_cause
     from ouroboros.cost_projection import cost_projection
+    from ouroboros.consciousness_wake import _clip_preview
     from ouroboros.task_store import documents_by_ids, newest_ids
 
     ids = newest_ids(drive_root, limit=50)
@@ -147,9 +174,9 @@ def recent_wakes(drive_root, places) -> list[dict]:
         place_id = str(focus.get("place_id") or "")
         rows.append({"task_id": task_id, "cause": cause, "place_id": place_id,
                      "place_label": cause_label(f"place:{place_id}", places or ()) if place_id else "",
-                     "started_at": row.get("started_at"), "first_reply_at": row.get("first_reply_at"),
-                     "finished_at": row.get("finished_at"), "outcome": row.get("status", "unknown"),
+                     "started_at": row.get("started_at"), "first_reply_at": first_reply_at(drive_root, task_id),
+                     "finished_at": row.get("finished_at"), "outcome": metadata.get("presence_outcome") or row.get("status", "unknown"),
                      "accounted_upper_bound_usd": cost_projection(row)["accounted_upper_bound_usd"],
                      "unmetered": bool(row.get("unknown_unmetered")),
-                     "checks": row.get("safety_checks", []), "summary": str(row.get("result") or "")})
+                     "checks": row.get("safety_checks", []), "summary": _clip_preview(row.get("result"))})
     return rows

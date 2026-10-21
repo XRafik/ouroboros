@@ -8,6 +8,47 @@ from ouroboros.utils import utc_now_iso
 
 log = logging.getLogger(__name__)
 
+_CHECK_CHIPS = ("checked", "warned", "sent_despite", "held", "not_checked")
+_CHECK_TOOL_CHARS = 160
+
+
+def _record_task_checks(ctx: Optional[Any], event: Dict[str, Any]) -> None:
+    """Keep one display fact per chip in the existing task, never retry authority.
+
+    Five entries at most, with bounded tool names; the full audit stays in events.
+    The task store merges under its write lock, so parallel checks cannot lose chips
+    or overwrite a terminal transition. Missing tasks are never manufactured here.
+    """
+    task_id = str(event.get("task_id") or "")
+    if not task_id:
+        return
+    kind = event.get("type")
+    chips = {"safety_sent_despite_check": ("sent_despite",), "safety_hold": ("held",),
+             "safety_mode_skip": ("not_checked",), "safety_declared_read_skip": ("not_checked",)}.get(kind, ())
+    if kind == "safety_verdict":
+        chips = tuple(dict.fromkeys("checked" if verdict["status"] == "SAFE" else "warned"
+                                   for verdict in event.get("verdicts", ()) if verdict.get("status")))
+    if not chips:
+        return
+    from ouroboros.task_store import patch_document
+    from ouroboros.tool_access import canonical_data_root
+
+    root = canonical_data_root(ctx) if getattr(ctx, "drive_root", None) else _safety_drive_root(ctx)
+    tool = str(event.get("tool") or "")[:_CHECK_TOOL_CHARS]
+
+    def merge(current):
+        if not current:
+            return None
+        previous = current.get("safety_checks") or []
+        checks = {item["chip"]: item for item in previous if item.get("chip") in _CHECK_CHIPS}
+        for chip in chips:
+            checks.setdefault(chip, {"chip": chip, "tool": tool})
+        result = list(checks.values())
+        return {**current, "safety_checks": result} if result != previous else None
+
+    patch_document(root, task_id, merge)
+
+
 def _safety_drive_root(ctx: Optional[Any]) -> pathlib.Path:
     """Where this safety call's observability records belong.
 
@@ -63,6 +104,10 @@ def _emit_durable_safety_event(ctx: Optional[Any], event: Dict[str, Any]) -> Non
         "ts": utc_now_iso(),
         **event,
     }
+    try:
+        _record_task_checks(ctx, payload)
+    except Exception:
+        log.error("failed to retain task safety checks for %s", payload["task_id"], exc_info=True)
     try:
         drive_logs = getattr(ctx, "drive_logs", None) if ctx is not None else None
         if callable(drive_logs):

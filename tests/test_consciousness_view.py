@@ -57,15 +57,81 @@ def test_prompt_carries_labels_counts_and_one_allowance():
 @pytest.mark.parametrize("money,amount", [({}, None), ({"accounted_upper_bound_usd": 2.5}, 2.5),
                                         ({"accounted_upper_bound_usd": 2.5, "cost_usd": 3.0}, 3.0)])
 def test_recent_wakes_read_a_bounded_existing_index(monkeypatch, tmp_path, money, amount):
-    from ouroboros import task_store
+    from ouroboros import dialogue_store, task_store
     calls = []
     monkeypatch.setattr(task_store, "newest_ids", lambda root, *, limit: calls.append(limit) or ["focus", "owner", "own"])
     documents = {"focus": {"metadata": {"wake_cause": "focus", "focus": {"place_id": "mail"}}, "status": "completed", **money},
                  "owner": {"metadata": {}}, "own": {"metadata": {"wake_cause": "own_clock"}}}
     monkeypatch.setattr(task_store, "documents_by_ids", lambda root, ids: documents)
+    monkeypatch.setattr(dialogue_store, "iter_probes", lambda *a, **kw: iter(()))
     rows = view.recent_wakes(tmp_path, [{"place_id": "mail", "label": "Inbox"}])
     assert calls == [50] and [row["task_id"] for row in rows] == ["focus", "own"]
     assert rows[0]["place_label"] == "Inbox" and rows[0]["first_reply_at"] is None
     assert rows[0]["accounted_upper_bound_usd"] == amount
     assert rows[1]["accounted_upper_bound_usd"] is None
     assert all("cost_usd" not in row for row in rows)
+
+
+@pytest.mark.parametrize("outcome", ["message", "silent", "tool_delivered", "deferred", ""])
+def test_focus_outcome_and_bounded_single_line_preview(monkeypatch, tmp_path, outcome):
+    from ouroboros import dialogue_store, task_store
+    from ouroboros.consciousness_wake import _clip_preview
+
+    text = "First line\n" + "several words\t" * 400
+    document = {"metadata": {"wake_cause": "focus", "presence_outcome": outcome},
+                "status": "completed", "result": text}
+    monkeypatch.setattr(task_store, "newest_ids", lambda *a, **kw: ["wake"])
+    monkeypatch.setattr(task_store, "documents_by_ids", lambda *a: {"wake": document})
+    monkeypatch.setattr(dialogue_store, "iter_probes", lambda *a, **kw: iter(()))
+    row = view.recent_wakes(tmp_path, [])[0]
+    assert row["outcome"] == (outcome or "completed")
+    assert row["summary"] == _clip_preview(text) and len(row["summary"]) < 120
+    assert "\n" not in row["summary"] and "\t" not in row["summary"] and "chars omitted" in row["summary"]
+    document["result"] = "Short answer"
+    assert view.recent_wakes(tmp_path, [])[0]["summary"] == "Short answer"
+
+
+def test_reply_time_reads_only_exact_task_rows_and_uses_earliest_instant(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from ouroboros import dialogue_store
+
+    def receipt(task, at, state):
+        return SimpleNamespace(row={"task_id": task, "ts": at, "type": "presence_delivery",
+                                   "transport": {"delivery": {"state": state}}})
+
+    rows = [receipt("wake", "2026-10-21T10:00:05Z", "failed"),
+            receipt("wake", "2026-10-21T10:00:10Z", "uncertain"),
+            receipt("child", "2026-10-21T10:00:11Z", "delivered")]
+    calls = []
+    def probes(root, stream, keys):
+        calls.append((root, stream, keys))
+        return iter(rows)
+    monkeypatch.setattr(dialogue_store, "iter_probes", probes)
+    assert view.first_reply_at(tmp_path, "wake") is None
+    rows += [receipt("wake", "2026-10-21T10:00:30Z", "delivered"),
+             receipt("wake", "2026-10-21T13:00:20+03:00", "accepted")]
+    assert view.first_reply_at(tmp_path, "wake") == "2026-10-21T13:00:20+03:00"
+    assert calls == [(tmp_path, "chat", [("task_id", "wake")])] * 2
+
+
+def test_durable_automatic_release_and_receipts_survive_result_updates(tmp_path):
+    from ouroboros import dialogue_store
+    from ouroboros.task_results import write_task_result
+    from tests._store_shared import seed_result
+
+    seed_result(tmp_path, "wake", {"status": "running", "metadata": {"wake_cause": "focus"},
+                                  "started_at": "2026-10-21T10:00:00Z"})
+    outgoing = {"task_id": "wake", "ts": "2026-10-21T10:00:15Z", "direction": "out", "chat_id": -7,
+                "source": "presence:mail", "text": "answer", "transport": {"delivery": {"state": "authored"}}}
+    # A result/draft is not a released automatic reply.
+    dialogue_store.append(tmp_path, "chat", {**outgoing, "source": "task", "type": "task_summary"})
+    assert view.recent_wakes(tmp_path, [])[0]["first_reply_at"] is None
+    dialogue_store.append(tmp_path, "chat", outgoing)
+    assert view.recent_wakes(tmp_path, [])[0]["first_reply_at"] == outgoing["ts"]
+    # A tool receipt may arrive later with an earlier host-reported instant.
+    dialogue_store.append(tmp_path, "chat", {**outgoing, "type": "presence_delivery", "source": "skill:mail",
+        "ts": "2026-10-21T10:00:30Z", "transport": {"delivery": {
+            "state": "accepted", "reported_at": "2026-10-21T10:00:10Z"}}})
+    write_task_result(tmp_path, "wake", "completed", metadata={"wake_cause": "focus", "presence_outcome": "message"})
+    row = view.recent_wakes(tmp_path, [])[0]
+    assert row["first_reply_at"] == "2026-10-21T10:00:10Z" and row["outcome"] == "message"
