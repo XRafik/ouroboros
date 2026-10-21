@@ -186,7 +186,8 @@ def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | 
                           actor: str = "", task_id: str = "", reason: str = "",
                           host_followup: dict | None = None,
                           continuation_of: Optional[Dict[str, Any]] = None,
-                          new_resource_intent: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                          new_resource_intent: Optional[Dict[str, Any]] = None,
+                          writer_kind: str = "consciousness", writer_metadata: Any = None) -> Dict[str, Any]:
     """Create or replace a scheduled task record.
 
     Returns the stored row plus an ``audit`` field: ``recorded`` when both audit
@@ -206,6 +207,9 @@ def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | 
         incoming = {key: value for key, value in dict(record).items() if key not in OCCURRENCE_FIELDS}
         schedule_id = str(incoming.get("id") or "").strip() or uuid.uuid4().hex[:8]
         incoming["id"] = schedule_id
+        incoming["writer_kind"] = "owner" if writer_kind == "owner" else "consciousness"
+        from ouroboros.consciousness_authority import consciousness_origin_metadata
+        incoming["writer_origin"] = consciousness_origin_metadata({**(writer_metadata or {}), "work_kind": writer_kind})
         existing = next((item for item in tasks if str(item.get("id") or "") == schedule_id), None)
         from supervisor.followup_policy import HOST_FIELDS, origin_of, normalize_template, policy_view, control_guard
         # Host-only keyword is never populated from a template or public payload.
@@ -289,7 +293,8 @@ def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | 
 def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
                           actor: str, task_id: str = "",
                           drive_root: pathlib.Path | None = None,
-                          expected_hold_id: str = "", relation: str = "") -> Dict[str, Any]:
+                          expected_hold_id: str = "", relation: str = "",
+                          writer_kind: str = "consciousness", writer_metadata: Any = None) -> Dict[str, Any]:
     """Apply one owner-governed future-dispatch mutation, audited intent-first.
 
     Affects DISPATCH only: a task already admitted from this schedule keeps
@@ -334,7 +339,8 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
             if operation == "restore" and (expected_hold_id or resolved or current.get("followup_hold") or
                     (not _is_consumed_once(current) and policy_view(root, data, current).get("hold"))):
                 return restore_followup(root, data, current, expected_hold_id=expected_hold_id,
-                                        resolved=resolved, actor=actor, task_id=task_id, reason=reason)
+                                        resolved=resolved, actor=actor, task_id=task_id, reason=reason,
+                                        writer_kind=writer_kind, writer_metadata=writer_metadata)
             before = dict(current)
             from supervisor.schedule_occurrence import remember_claim_basis
 
@@ -432,6 +438,9 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
             changed = status not in UNCHANGED_STATUSES
             if changed:
                 if not removed:
+                    from ouroboros.consciousness_authority import consciousness_origin_metadata
+                    current["writer_kind"] = "owner" if writer_kind == "owner" else "consciousness"
+                    current["writer_origin"] = consciousness_origin_metadata({**(writer_metadata or {}), "work_kind": writer_kind})
                     current["updated_at"] = utc_now_iso()
                 data["tasks"] = tasks
                 _write_scheduled_tasks(data, root)

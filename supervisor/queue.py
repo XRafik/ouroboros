@@ -290,6 +290,10 @@ def enqueue_task(
     outside the consciousness concurrency cap; money (the allowance) still applies.
     ``timeout_retry``: the reaper's own retry admission (``apply_budget_root_admission_fence``)."""
     t = dict(task)
+    from ouroboros.consciousness_authority import work_kind
+    metadata = dict(t.get("metadata") or {})
+    metadata["work_kind"] = work_kind(metadata)
+    t["metadata"] = metadata
     if not restoring_snapshot:
         t.pop("_project_scope_none", None)  # Only this host admission can attest absence.
         t.pop("_consciousness_continuation", None)  # never a caller-supplied marker

@@ -777,10 +777,10 @@ def _task_from_schedule(record: Dict[str, Any], *, task_id: str = "") -> Dict[st
         if task.get("deadline_at"):
             task["task_contract"]["deadline_at"] = task["deadline_at"]
     bind_task(_queue().DRIVE_ROOT, task, record)
+    from ouroboros.consciousness_authority import stamp_scheduled_work
+    stamp_scheduled_work(task, record, raw_metadata)
     task["task_contract"] = build_task_contract(apply_consciousness_authority(task))
     workspace = task["task_contract"]["workspace"]
-    # Presence-bound work (a speaker's follow-up, or one acting for a descendant's binding)
-    # runs in the folder its inherited contract admitted, with canonical shared memory.
     if presence_metadata_binding(metadata) is not None and workspace["root"]:
         task.update(
             workspace_root=workspace["root"], workspace_mode=workspace["mode"],

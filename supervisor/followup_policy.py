@@ -469,7 +469,8 @@ def task_binding(root, record):
     return copy.deepcopy(binding)
 
 
-def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, task_id, reason):
+def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, task_id, reason,
+                     writer_kind="consciousness", writer_metadata=None):
     """Release precisely a durable, observed generation; never enable other holds."""
     from supervisor import queue_schedules as store
     with control_guard(root, current):
@@ -499,6 +500,9 @@ def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, 
                     "running_or_queued": store._schedule_running_or_queued(current["id"], root),
                     "audit": "recorded" if recorded else "incomplete"}
         after = copy.deepcopy(current)
+        from ouroboros.consciousness_authority import consciousness_origin_metadata
+        after["writer_kind"] = "owner" if writer_kind == "owner" else "consciousness"
+        after["writer_origin"] = consciousness_origin_metadata({**(writer_metadata or {}), "work_kind": writer_kind})
         if resolved:
             if relation_kind(current) != "unknown":
                 raise store.ScheduleRefused("relationship_immutable", "only an unknown relationship can be resolved")

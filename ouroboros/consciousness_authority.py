@@ -140,27 +140,61 @@ def work_kind(metadata: Any) -> str:
     stamped = str(source.get("work_kind") or "").strip()
     if stamped in WORK_KINDS:
         return stamped
-    if is_consciousness_origin(source):
+    if is_consciousness_origin(source) or any(source.get(key) for key in (
+        "presence", "presence_binding_authority", "presence_root_carrier",
+    )):
         return WORK_KIND_CONSCIOUSNESS
-    if source.get("owner_ingress"):
+    if source.get("owner_ingress") or source.get("origin_message_ref") or source.get("origin_suppressed"):
         return WORK_KIND_OWNER
     return WORK_KIND_CONSCIOUSNESS
 
 
-def consciousness_origin_metadata(parent_metadata: Any) -> Dict[str, Any]:
-    """The origin keys a task started from a consciousness turn/tree inherits.
+def consciousness_origin_metadata(parent_metadata: Any, *, started_root: bool = False) -> Dict[str, Any]:
+    """Copy host origin by value, never the wake identity itself.
 
-    Empty for any other parent. The child is a *started* root, so its ledger
-    category is ``consciousness_task``; the level rides along so the child's
-    own build derives the same ``disabled_tools``/``runtime_mode_cap``.
+    Children keep the root's kind/cause; independent roots use ``started``.
+    Only a root occasioned by an addressed, confirmed-owner request changes kind.
+    The focus itself remains consciousness.
     """
-    if not is_consciousness_origin(parent_metadata):
-        return {}
-    return {
+    from copy import deepcopy
+
+    source = parent_metadata if isinstance(parent_metadata, Mapping) else {}
+    kind = work_kind(source)
+    focus = source.get("focus") or {}
+    if (started_root and is_focus_wake(source) and focus.get("addressed") is True
+            and (focus.get("actor") or {}).get("owner_confirmed") is True):
+        kind = WORK_KIND_OWNER
+    inherited = {"work_kind": kind}
+    for key in ("focus", "schedule_writer_kind", "origin_wake_task_id"):
+        if key in source:
+            inherited[key] = deepcopy(source[key])
+    if wake_cause(source):
+        inherited["origin_wake_task_id"] = str(source.get("task_id") or source.get("origin_wake_task_id") or "")
+    if kind == WORK_KIND_OWNER:
+        return inherited
+    inherited["consciousness_cause"] = "started" if started_root else str(source.get("consciousness_cause") or wake_cause(source) or "started")
+    if not is_consciousness_origin(source):
+        return inherited
+    return {**inherited,
         "initiator": CONSCIOUSNESS_INITIATOR,
         "usage_category": CONSCIOUSNESS_TASK_CATEGORY,
-        "consciousness_autonomy": normalize_level(parent_metadata.get("consciousness_autonomy")),
+        "consciousness_autonomy": normalize_level(source.get("consciousness_autonomy")),
     }
+
+
+def stamp_scheduled_work(task: Dict[str, Any], record: Mapping[str, Any], raw_metadata: Mapping[str, Any]) -> None:
+    """Apply the last host writer's origin; template stamps are never authority."""
+    from ouroboros.schedule_contract import RESERVED_TEMPLATE_FIELDS
+    writer_kind = record.get("writer_kind")
+    if writer_kind not in {"owner", "consciousness"}:
+        legacy = {k: v for k, v in raw_metadata.items() if k not in RESERVED_TEMPLATE_FIELDS}
+        writer_kind = work_kind({"owner_ingress": record.get("source") == "owner", **legacy})
+    from copy import deepcopy
+    if "writer_origin" in record:
+        for key in ("initiator", "usage_category", "consciousness_autonomy", "consciousness_cause", "origin_wake_task_id", "focus"):
+            task["metadata"].pop(key, None)
+    task["metadata"].update(deepcopy(record.get("writer_origin") or {}))
+    task["metadata"].update(work_kind=writer_kind, schedule_writer_kind=writer_kind)
 
 
 def apply_consciousness_authority(task: Dict[str, Any]) -> Dict[str, Any]:

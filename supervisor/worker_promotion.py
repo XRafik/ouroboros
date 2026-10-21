@@ -456,7 +456,8 @@ def promote_chat_to_task(evt: dict, ctx: Any) -> dict:
     if origin:
         # A root consciousness started keeps its origin/category/level by value (В9':
         # ordinary Main flow, no presence-style project/workspace/source stripping).
-        task["actor_id"] = "consciousness"
+        if origin.get("initiator") == "consciousness":
+            task["actor_id"] = "consciousness"
         task.setdefault("metadata", {}).update(origin)
         apply_consciousness_authority(task)
     inherited_attachment_manifest = _pool()._apply_presence_promotion_authority(

@@ -267,7 +267,7 @@ def _request_deep_self_review(ctx: ToolContext, reason: str, reviewer: str = "")
     # admission door and its spend stays inside the consciousness allowance.
     ctx.pending_events.append({"type": "deep_self_review_request", "reason": reason, "reviewer": reviewer,
                                "model": identity, "ts": utc_now_iso(),
-                               **consciousness_origin_metadata(getattr(ctx, "task_metadata", None))})
+                               **consciousness_origin_metadata({**(getattr(ctx, "task_metadata", None) or {}), "task_id": str(getattr(ctx, "task_id", "") or "")}, started_root=True)})
     return (f"Deep self-review requested (reviewer: {reviewer or 'Main'}, runs on {identity}). "
             "It will be queued and executed asynchronously.")
 
@@ -559,7 +559,7 @@ def _toggle_evolution(ctx: ToolContext, enabled: bool, objective: str = "") -> s
         "ts": utc_now_iso(),
         # A Full-level consciousness turn/tree names itself: the campaign and its
         # cycle tasks then stay inside the consciousness allowance (PLAN 5.14 п.7).
-        **consciousness_origin_metadata(getattr(ctx, "task_metadata", None)),
+        **consciousness_origin_metadata({**(getattr(ctx, "task_metadata", None) or {}), "task_id": str(getattr(ctx, "task_id", "") or "")}, started_root=True),
     })
     state_str = "ON" if enabled else "OFF"
     return f"OK: evolution mode toggled {state_str}."
