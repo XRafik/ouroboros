@@ -45,7 +45,15 @@ test('what wakes it, with who added each item; more from the connector\'s sugges
     const offers = [...html.matchAll(/data-place-act="add-wake" data-fact="(\w+)"/g)].map((m) => m[1]);
     assert.deepEqual(offers, ['group_dm', 'my_thread'], 'only suggestions not yet listed');
     assert.match(strip(placeSheetBodyHtml(mail)), /Every message carried over/);
-    assert.match(placeSheetBodyHtml(community), /While this place is not Active, nothing here wakes it\./);
+    assert.match(placeSheetBodyHtml(slack), /Everything else here is heard and waits for its own clock\./);
+});
+
+test('Silent still wakes for its list and holds what it would say or change; Paused is not woken', () => {
+    const silent = placeSheetBodyHtml(community);
+    assert.match(silent, /Silent: these still wake it to read and think; what it would say or change here is held\./);
+    assert.doesNotMatch(silent, /nothing here wakes it/);
+    assert.match(placeSheetBodyHtml(mail), /While this place is not Active, nothing here wakes it\./);
+    assert.doesNotMatch(placeSheetBodyHtml({ ...mail, state: 'gone' }), /wakes it\.|its own clock\./, 'an unreadable state claims nothing');
 });
 
 test('your accounts here: confirmed ones with Remove, Add mine asks for the account, people seen offer «This is me»', () => {
@@ -58,6 +66,19 @@ test('your accounts here: confirmed ones with Remove, Add mine asks for the acco
     const seen = { ...community, accountCandidates: [{ actorId: 'U77', label: 'Anton R' }] };
     assert.match(placeSheetBodyHtml(seen), /data-actor="U77" data-actor-label="Anton R">This is me</);
     assert.match(html, /Anyone else here, whatever name they use, is talked to like anyone/);
+});
+
+test('Add mine names the identifier the place\'s service knows you by', () => {
+    const help = (place) => placeSheetBodyHtml(place, { adding: true }).match(/<div class="ui-field-help" id="place-account-help">([^<]*)<\/div>/)?.[1];
+    assert.equal(help(slack), 'Your member ID (U…).');
+    assert.equal(help(community), 'Your numeric user ID.');
+    assert.equal(help(mail), 'Your email address.', 'a mail place (imap)');
+    assert.equal(help({ ...mail, provider: 'email' }), 'Your email address.');
+    assert.equal(help({ ...slack, provider: 'agentrq' }), 'The account ID this service uses.');
+    const form = placeSheetBodyHtml(slack, { adding: true });
+    assert.match(form, /<label for="place-account-id">Your account here<\/label>\s*<input class="ui-control" id="place-account-id" data-place-draft="actorId"[^>]*aria-describedby="place-account-help">\s*<div class="ui-field-help" id="place-account-help">/,
+        'the help sits under its own field');
+    assert.doesNotMatch(placeSheetBodyHtml(slack), /place-account-help/, 'only while adding');
 });
 
 test('notes keep their authors: the owner\'s in the owner\'s voice, Ouroboros\'s own as its own', () => {

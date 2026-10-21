@@ -1,7 +1,8 @@
 // The second check's one control: a row-level mark «Re-checks flagged actions» on the Agents rows that can
-// re-check (an enabled API model row with Packet delivery, read from the saved roster). At most one row
-// carries it. The mark is a draft like the other Settings fields; Save writes it through the owner checker
-// transaction (settings_safety.js → /api/owner/safety-model), never through a generic save.
+// re-check (an enabled API model row with Packet delivery, read from the saved roster), and on the row already
+// marked even when it cannot run now, so the owner can untick it. At most one row carries it. The mark is a
+// draft like the other Settings fields; Save writes it in the roster through the owner checker transaction
+// (settings_safety.js → /api/owner/safety-model), never through a generic save.
 
 const state = { eligible: new Set(), saved: '', draft: null, known: false };
 
@@ -12,19 +13,20 @@ const escapeAttr = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => (
 export const recheckDraft = () => state.draft;
 export const recheckSaved = () => state.saved;
 const marked = () => (state.draft === null ? state.saved : state.draft);
+const shown = (id) => state.eligible.has(id) || (Boolean(id) && id === state.saved);
 
-/** The mark in an Agents row's head; hidden on rows the server does not list as eligible. */
+/** The mark in an Agents row's head; hidden on rows that can neither re-check nor carry the saved mark. */
 export function recheckMarkHtml(row, ordinal = 1) {
     const id = String(row?.subagent_id || '');
     if (!id) return '';
     const key = String(row?._uiKey || id);
-    return `<label class="available-subagent-recheck" data-recheck-row="${escapeAttr(id)}"${state.eligible.has(id) ? '' : ' hidden'}><input class="ui-checkbox" type="checkbox" id="s-recheck-${escapeAttr(key)}" data-recheck-mark="${escapeAttr(id)}" aria-label="Subagent ${Number(ordinal) || 1} re-checks flagged actions"${marked() === id ? ' checked' : ''}> Re-checks flagged actions</label>`;
+    return `<label class="available-subagent-recheck" data-recheck-row="${escapeAttr(id)}"${shown(id) ? '' : ' hidden'}><input class="ui-checkbox" type="checkbox" id="s-recheck-${escapeAttr(key)}" data-recheck-mark="${escapeAttr(id)}" aria-label="Subagent ${Number(ordinal) || 1} re-checks flagged actions"${marked() === id ? ' checked' : ''}> Re-checks flagged actions</label>`;
 }
 
 function paint(root) {
     root?.querySelectorAll?.('[data-recheck-row]').forEach((label) => {
         const id = label.dataset.recheckRow;
-        label.hidden = !state.eligible.has(id);
+        label.hidden = !shown(id);
         const box = label.querySelector('[data-recheck-mark]');
         if (box) box.checked = marked() === id;
     });

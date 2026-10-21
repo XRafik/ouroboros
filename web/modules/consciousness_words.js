@@ -90,14 +90,26 @@ export const authorWord = (author) => AUTHOR_WORDS[author] || (author ? `added b
 export const placeStateWord = (state) => placeStateOf(state)?.word || 'state unknown';
 
 /**
- * A place row's one status sentence: «active · wakes for direct messages, mentions and replies»; a Silent or
- * Paused place says only its state (its wake list does not wake it now). Unanswered messages are a count.
+ * A place row's one status sentence: «active · wakes for direct messages, mentions and replies». A Silent place
+ * keeps its list (it still wakes there to read and think; what it would say or change is held); a Paused place
+ * says only its state. Unanswered messages are a count.
  */
 export function placeStatusText(place) {
     const parts = [placeStateWord(place?.state)];
-    if (place?.state === 'active') parts.push(wakesForText(place.wakes));
+    if (place?.state === 'active' || place?.state === 'silent') parts.push(wakesForText(place.wakes));
     if (Number.isInteger(place?.unanswered) && place.unanswered > 0) parts.push(`${place.unanswered} unanswered`);
     return parts.filter(Boolean).join(' · ');
+}
+
+// The identifier a service knows its people by, for «Add mine» (from the place's provider).
+const ACCOUNT_ID_WORDS = Object.freeze({ slack: 'your member ID (U…)', telegram: 'your numeric user ID' });
+const EMAIL_PROVIDERS = new Set(['email', 'e-mail', 'mail', 'gmail', 'imap', 'smtp']);
+
+/** «your member ID (U…)» on Slack, «your numeric user ID» on Telegram, «your email address» for mail; else the plain words. */
+export function accountIdText(provider) {
+    const key = String(provider || '').trim().toLowerCase();
+    if (EMAIL_PROVIDERS.has(key)) return 'your email address';
+    return ACCOUNT_ID_WORDS[key] || 'the account ID this service uses';
 }
 
 /** How much of the service a place covers, from its record (a connector's own scope word wins). */

@@ -83,11 +83,22 @@ export function settingsPlaceRowHtml(place) {
     </button></li>`;
 }
 
-export function settingsPlacesHtml({ places = null, error = '' } = {}) {
+/** «Could not move an old connection: <detail>. Connect it again.», each distinct sentence once. */
+export function migrationProblemLines(problems = []) {
+    const lines = problems.map((problem) => {
+        const why = (problem.detail || problem.code.replace(/_/g, ' ')).trim().replace(/\.+$/, '');
+        return `Could not move an old connection${why ? `: ${why}` : ''}. Connect it again.`;
+    });
+    return [...new Set(lines)];
+}
+
+export function settingsPlacesHtml({ places = null, error = '', problems = [] } = {}) {
     if (error) return `<p class="settings-inline-note" data-tone="warn">${escapeHtml(error)}</p>`;
     if (!places) return '<p class="settings-inline-note">Reading places…</p>';
-    if (!places.length) return '<p class="settings-inline-note">No place yet. Connect one to let it hear and act there.</p>';
-    return `<ul class="consciousness-place-rows">${places.map(settingsPlaceRowHtml).join('')}</ul>`;
+    // What the places migration could not carry over; said here only, never on the Dashboard.
+    const moved = migrationProblemLines(problems).map((line) => `<p class="settings-inline-note" data-tone="warn">${escapeHtml(line)}</p>`).join('');
+    if (!places.length) return `${moved}<p class="settings-inline-note">No place yet. Connect one from an installed connector.</p>`;
+    return `${moved}<ul class="consciousness-place-rows">${places.map(settingsPlaceRowHtml).join('')}</ul>`;
 }
 
 /** «Uses Main», or the consciousness slot's model as the Models tab names it. */
@@ -112,8 +123,9 @@ export function bindConsciousnessSettings(root, { read = readPlaces, state = nul
     if (!host || !list) return () => {};
     const section = host.closest('.form-section') || host;
     let places = null;
+    let problems = [];
     let generation = 0;
-    const paint = (view) => { list.innerHTML = settingsPlacesHtml(view); };
+    const paint = (view) => { list.innerHTML = settingsPlacesHtml({ problems, ...view }); };
     const visible = () => (!state || state.activePage === 'settings') && root.dataset.activeSettingsTab === 'behavior';
     async function refresh() {
         const current = ++generation;
@@ -121,6 +133,7 @@ export function bindConsciousnessSettings(root, { read = readPlaces, state = nul
             const data = await read();
             if (current !== generation) return;
             places = data.places;
+            problems = data.migrationProblems || [];
             paint({ places });
         } catch (error) {
             if (current === generation) paint({ places, error: `Places could not be read: ${error?.message || error}` });

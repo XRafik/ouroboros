@@ -49,6 +49,7 @@ def settings_gateway(tmp_path, monkeypatch):
     from starlette.testclient import TestClient
     from ouroboros import config as cfg
     from ouroboros.gateway import settings as gateway
+    from ouroboros.gateway import safety_settings
 
     data = tmp_path / "settings-data"
     data.mkdir()
@@ -59,19 +60,25 @@ def settings_gateway(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     cfg.reset_runtime_mode_baseline_for_tests()
 
+    apply_settings_to_env = cfg.apply_settings_to_env
+
     def project(settings):
         environment = {}
-        cfg.apply_settings_to_env(settings, environ=environment)
+        apply_settings_to_env(settings, environ=environment)
         for key, value in environment.items():
             monkeypatch.setenv(key, value)
 
     monkeypatch.setattr(gateway, "_apply_settings_to_env", project)
+    # The owner checker transaction projects through the config module itself.
+    monkeypatch.setattr(cfg, "apply_settings_to_env", lambda settings, environ=None: (
+        project(settings) if environ is None else apply_settings_to_env(settings, environ=environ)))
     monkeypatch.setattr(gateway, "_start_supervisor_if_needed_for_request", lambda *a: False)
     monkeypatch.setattr(gateway, "_apply_settings_save_side_effects", lambda *a: [])
     monkeypatch.setattr(gateway, "_has_started_agent_tasks", lambda: False)
     app = Starlette(routes=[
         Route("/api/settings", gateway.api_settings_get, methods=["GET"]),
         Route("/api/settings", gateway.api_settings_post, methods=["POST"]),
+        Route("/api/owner/safety-model", safety_settings.api_owner_safety_model, methods=["POST"]),
         Route("/api/review-pool", gateway.api_review_pool),
     ])
     app.state.drive_root = data
@@ -96,6 +103,7 @@ def _serve_through(ui, gateway, writes):
         route.fulfill(status=response.status_code, content_type="application/json", body=response.text)
 
     ui["page"].route("**/api/settings", endpoint)
+    ui["page"].route("**/api/owner/safety-model", endpoint)
     ui["page"].route("**/api/review-pool", endpoint)
     # Keep discovery empty, and the generated proposal unavailable: the catalog on the
     # page is exactly the one the settings read showed.

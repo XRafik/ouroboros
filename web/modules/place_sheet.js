@@ -10,7 +10,7 @@ import { renderSegmentedField } from './page_header.js';
 import { chipHtml, skillIconHtml } from './skill_presentation.js';
 import { connectPlace, disconnectPlace, PLACES_CHANGED_EVENT, readPlaces, updatePlace } from './consciousness_api.js';
 import {
-    PLACE_STATES, SILENT_CARD, authorWord, capitalized, listWords, placeScopeText, placeStateOf, wakeFactWord,
+    PLACE_STATES, SILENT_CARD, accountIdText, authorWord, capitalized, listWords, placeScopeText, placeStateOf, wakeFactWord,
 } from './consciousness_words.js';
 
 /** The one «Connect a place» control (Dashboard and Settings draw this, never their own); a press opens the flow. */
@@ -46,6 +46,14 @@ function stateHtml(place, ui) {
         ${silent ? `<p class="place-silent-card" role="note">${escapeHtml(`${state.note} ${SILENT_CARD}`)}</p>` : ''}`;
 }
 
+// What the wake list does in each state: Silent still wakes it (it reads and thinks; what it would say or change
+// there is held), Paused does not. An unreadable state claims nothing.
+const WAKE_NOTES = {
+    active: 'Everything else here is heard and waits for its own clock.',
+    silent: 'Silent: these still wake it to read and think; what it would say or change here is held.',
+    paused: 'While this place is not Active, nothing here wakes it.',
+};
+
 function wakesHtml(place) {
     const listed = new Set(place.wakes.map((item) => item.fact));
     const items = place.wakes.map((item) => `<li class="place-wake-item">
@@ -58,11 +66,9 @@ function wakesHtml(place) {
             <span class="place-sheet-note">Also wake it for:</span>
             ${offers.map((fact) => `<button type="button" class="btn btn-default btn-sm" data-place-act="add-wake" data-fact="${escapeHtml(fact)}">${escapeHtml(capitalized(wakeFactWord(fact)))}</button>`).join('')}
         </div>` : '';
-    const note = place.state === 'active'
-        ? 'Everything else here is heard and waits for its own clock.'
-        : 'While this place is not Active, nothing here wakes it.';
+    const note = WAKE_NOTES[place.state] || '';
     return `${items ? `<ul class="place-wake-list">${items}</ul>` : '<p class="place-sheet-note">Nothing here wakes it at once.</p>'}
-        ${add}<p class="place-sheet-note">${escapeHtml(note)}</p>`;
+        ${add}${note ? `<p class="place-sheet-note">${escapeHtml(note)}</p>` : ''}`;
 }
 
 function accountsHtml(place, ui) {
@@ -79,7 +85,9 @@ function accountsHtml(place, ui) {
             <div class="harness-account-actions"><button type="button" class="btn btn-default btn-sm" data-place-act="confirm" data-actor="${escapeHtml(account.actorId)}" data-actor-label="${escapeHtml(account.label)}">This is me</button></div>
         </div>`).join('');
     const form = ui.adding ? `<div class="place-account-form">
-            <label class="ui-field">Your account here<input class="ui-control" data-place-draft="actorId" value="${escapeHtml(ui.drafts.actorId || '')}" spellcheck="false" autocomplete="off"></label>
+            <div class="ui-field"><label for="place-account-id">Your account here</label>
+                <input class="ui-control" id="place-account-id" data-place-draft="actorId" value="${escapeHtml(ui.drafts.actorId || '')}" spellcheck="false" autocomplete="off" aria-describedby="place-account-help">
+                <div class="ui-field-help" id="place-account-help">${escapeHtml(`${capitalized(accountIdText(place.provider))}.`)}</div></div>
             <label class="ui-field">Name (optional)<input class="ui-control" data-place-draft="actorLabel" value="${escapeHtml(ui.drafts.actorLabel || '')}" spellcheck="false" autocomplete="off"></label>
             <div class="place-sheet-actions"><button type="button" class="btn btn-default btn-sm" data-place-act="confirm-typed">This is me</button><button type="button" class="btn btn-ghost btn-sm" data-place-act="cancel-add">Cancel</button></div>
         </div>` : '<div class="place-sheet-actions"><button type="button" class="btn btn-ghost btn-sm" data-place-act="add-mine">Add mine</button></div>';
