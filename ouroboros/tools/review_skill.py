@@ -413,6 +413,14 @@ Judge the current bytes you were given, never a path on disk that may have moved
 critical finding on a concrete file, symbol or manifest field inside the package that you can quote.
 The checklist's own severity rules decide which items block: name the item exactly; say what is wrong
 and how to fix it (file/symbol/change)."""
+# Declared tool effects (places, #2141): read beside the checklist by every seat, part of the stable half.
+_TOOL_EFFECT_RULE = """\
+Under permissions_honesty, compare each manifest tools: declaration with its
+implementation: effect read means no external mutation, message means words to
+people, write includes mixed operations (absent or unknown also means write).
+Check that target names every destination argument, including To/Cc/Bcc, and
+conversation/thread name the actual routing arguments. Caller-selected effect
+arguments cannot attest a read. Place connectors must declare every tool."""
 
 _OUTPUT_RULE = """\
 Rules of this answer: report PROBLEMS ONLY. Each element names one checklist item in `item` (exactly one of
@@ -461,7 +469,7 @@ def _brief(rubric: str, governance: Any, subject: FrozenSkillSubject, *, drive_r
 
     # The packet dispatcher heads the stable half with "## REVIEW INSTRUCTIONS" itself (review_multi_model).
     stable = "\n\n".join(part for part in (
-        _PREAMBLE, "## Checklist (source of truth — follow it literally)", rubric,
+        _PREAMBLE, "## Checklist (source of truth — follow it literally)", rubric, _TOOL_EFFECT_RULE,
         governance.stable_inline, governance.selected_inline, governance.navigation) if str(part or "").strip())
     dynamic_parts = [
         "## Skill identity",

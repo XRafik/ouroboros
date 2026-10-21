@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Mapping, O
 
 if TYPE_CHECKING:
     from ouroboros.context_anchor import InputAnchor
+    from ouroboros.physical_attempt_context import PhysicalAttemptContext
 
 from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
@@ -108,6 +109,7 @@ class MainFitMeasurement:
     # (``capacity_total_tokens`` is then None and ``window_reading_tokens`` keeps the stated number).
     accepted_input_tokens: Optional[int] = None
     window_reading_tokens: Optional[int] = None
+    view_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,7 @@ class ContextFitPlan:
     evidence_source: str = ""
     nano_projection: Optional[ContextFitProjection] = None
     core: Optional["ContextCore"] = None  # the capture a new route re-renders the memory view from
+    view_kind: str = ""
 
     def reproject_for_route(self, *, window_tokens: int, known_window: bool, ratio: float, output_reserve: int,
                             tool_schemas: Optional[List[Dict[str, Any]]], start_mode: Optional[str] = None,
@@ -527,6 +530,7 @@ def _route_calibration_ratio(
     route_fp: str,
     model: str,
     estimate_tokens: Optional[int] = None,
+    *, view_kind: str = "",
 ) -> float:
     """Fresh comparable-input exact-route/model witness, never an orphan maximum.
 
@@ -538,7 +542,8 @@ def _route_calibration_ratio(
         )
 
         root = drive_root if drive_root is not None else canonical_evidence_root()
-        return float(resolve_main_token_density(root, route_fp, model, estimate_tokens=estimate_tokens)[0])
+        return float(resolve_main_token_density(root, route_fp, model, estimate_tokens=estimate_tokens,
+                                               view_kind=view_kind)[0])
     except Exception:
         log.debug("Fresh route token calibration unavailable", exc_info=True)
         return 1.0
@@ -593,7 +598,7 @@ def measure_main_fit(
     raw_input = int(estimate_context_prompt_tokens(messages, tools, provider=plan.provider, reasoning_effort=reasoning_effort))
     density, basis = ((float(anchor.density), "fresh_route_usage") if anchor is not None else
                       resolve_main_token_density(canonical_evidence_root(), plan.route_fp, plan.model,
-                                                 estimate_tokens=raw_input))
+                                                 estimate_tokens=raw_input, view_kind=plan.view_kind))
     estimated_input = int(math.ceil(raw_input * density))
     ceiling = int(plan.output_reserve_tokens or 0)
     nano = profile.endswith("_nano")
@@ -615,6 +620,7 @@ def measure_main_fit(
     margin = reclaim_low_water_margin(target, capacity) if deficit > 0 else 0
     goal = deficit + margin
     measurement = MainFitMeasurement(
+        view_kind=plan.view_kind,
         route_fp=str(plan.route_fp or ""),
         round_id=str(round_id or ""),
         profile=profile,
@@ -833,6 +839,10 @@ def build_context_fit_plan(
         preferred=preferred, tool_schemas=tool_schemas, window_tokens=int(evidence.window_tokens or 0),
         known_window=known_window, output_reserve=output_reserve)
     governance = {form: _governance_blocks(env, core, mode=form) for form in ("max", "low")}
+    from ouroboros.memory_view import view_role
+
+    role = view_role({**task, "metadata": task.get("metadata") or meta})
+    view_kind = {"consciousness": "own_wake", "presence": "focus", "integrator": "owner_turn"}.get(role, role)
     # Size the cold starting view before selecting a witness, just as round one does.
     contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=1.0)
     ratio = _route_calibration_ratio(
@@ -844,6 +854,7 @@ def build_context_fit_plan(
              {"role": "user", "content": user_content}, *json.loads(core.supplementary_messages_json)],
             list(select_tool_schemas(tool_schemas or [], context_mode=initial_mode).schemas),
             provider=str(route.get("provider") or "")),
+        view_kind=view_kind,
     )
     if ratio != 1.0:
         contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio)
@@ -934,6 +945,7 @@ def build_context_fit_plan(
         sort_keys=True,
     )
     return ContextFitPlan(
+        view_kind=view_kind,
         core_sha256=hashlib.sha256(core_payload.encode("utf-8")).hexdigest(),
         preferred_mode=preferred,
         initial_mode=initial_mode,
@@ -957,4 +969,23 @@ def build_context_fit_plan(
         } if route["provider"] == "claudexor" else {},
         evidence_source=str(getattr(evidence, "source", "") or ""),
         core=core,
+    )
+
+
+def _physical_context_for_fit(disposition: Any) -> PhysicalAttemptContext:
+    from ouroboros.usage_accounting import PhysicalAttemptContext
+
+    measurement = disposition.measurement
+    return PhysicalAttemptContext(
+        view_kind=measurement.view_kind,
+        profile=measurement.profile,
+        rendered_mode=measurement.rendered_mode,
+        measurement_basis=measurement.measurement_basis,
+        route_fp=measurement.route_fp,
+        round_id=measurement.round_id,
+        target_total_tokens=measurement.target_total_tokens,
+        capacity_total_tokens=measurement.capacity_total_tokens,
+        context_target_miss=disposition.action == "send_target_miss",
+        automatic_pass_used=disposition.automatic_pass_used,
+        measurement_density=measurement.measurement_density,
     )

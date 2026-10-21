@@ -822,10 +822,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
 # 408 -> 409: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
 # the switch helper (body adoption row).
+# 409 -> 414: the place seam (one path the inherited pin missed) plus focus, the gate directory and its
+# author-census member family, documented in section 2.
 # The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
 # accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
-# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 409 -> 404.
-EXPECTED_SCAN_PATHS = 404
+# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 414 -> 409.
+EXPECTED_SCAN_PATHS = 409
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
