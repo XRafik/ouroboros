@@ -231,6 +231,42 @@ def test_api_sends_rest_mutations_and_graphql_mutations_and_names_the_effect(gh)
 
 
 # ---- expect --------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("args", [
+    {"method": "comment", "kind": "discussion", "target": 7, "body": "x"},
+    {"method": "resolve_thread", "target": "PRRT_1"},
+    {"method": "api", "route": "repos/{owner}/{repo}/issues/7", "http_method": "PATCH"},
+    {"method": "create_issue", "title": "T"},
+])
+def test_unsupported_expect_is_typed_and_never_sent(gh, args):
+    text = gh.write(**args, expect={"state": "open"})
+    assert "cannot check it" in text and not gh.calls
+    assert gh.result.code == "TOOL_ARG_ERROR" and gh.result.meta["operation_outcome"] == "completed_no_effect"
+
+
+@pytest.mark.parametrize("method", github_write.METHODS)
+def test_unknown_expect_key_is_never_ignored(gh, method):
+    gh.write(method=method, target=7, body="x", title="T", expect={"expected_head_sha": SHA})
+    assert gh.result.code == "TOOL_ARG_ERROR" and "unknown expect key" in gh.result.text and not gh.calls
+
+
+@pytest.mark.parametrize("current", ["open", "closed"])
+def test_api_checks_an_explicit_issue_target_before_mutating(gh, current):
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7, state=current))
+    text = gh.write(method="api", target=7, kind="issue", http_method="PATCH", route="repos/{owner}/{repo}/issues/7",
+                    input={"title": "T"}, expect={"state": "open"})
+    assert gh.sent()[0][:2] == ("GET", "repos/{owner}/{repo}/issues/7")
+    if current == "open":
+        assert _receipt(text)[1]["outcome"] == "confirmed" and [s[0] for s in gh.sent()] == ["GET", "PATCH"]
+    else:
+        assert "GH_EXPECTATION_FAILED" in text and len(gh.sent()) == 1
+
+
+def test_other_misplaced_optional_arguments_still_do_not_refuse(gh):
+    gh.answer = lambda p, argv, kw: json.dumps(_comment(1, body="x"))
+    _line, receipt = _receipt(gh.write(method="comment", target=7, body="x", state="closed", title="unused", expect={}))
+    assert receipt["outcome"] == "confirmed" and gh.sent()[0][2] == {"body": "x"}
+
+
 def test_expect_refuses_before_sending_when_the_target_moved(gh):
     gh.answer = lambda p, argv, kw: json.dumps(_pr(7, updated_at="2026-10-22T08:00:00Z"))
     text = gh.write(method="comment", target=7, body="x", expect={"head_sha": "d" * 40, "state": "open"})

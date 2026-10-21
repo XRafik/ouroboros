@@ -163,7 +163,7 @@ def _expectation(write: _Write, number: int) -> str:
     expect = write.args.get("expect") or {}
     if not isinstance(expect, dict):
         return write.refuse("⚠️ TOOL_ARG_ERROR: expect must be an object with head_sha, state and/or updated_at.")
-    wanted = {k: str(v) for k, v in expect.items() if k in ("head_sha", "state", "updated_at") and v}
+    wanted = {k: str(v) for k, v in expect.items()}
     if not wanted:
         return ""
     res = _gh_api(write.ctx, f"repos/{{owner}}/{{repo}}/{'pulls' if 'head_sha' in wanted else 'issues'}/{number}", repo=write.repo)
@@ -176,6 +176,25 @@ def _expectation(write: _Write, number: int) -> str:
     if moved:
         return _refuse(write.ctx, "⚠️ GH_EXPECTATION_FAILED: #" + str(number) + ": " + "; ".join(moved)
                        + ". Nothing was sent; read it again before writing.", "TOOL_ERROR", no_effect=True)
+    return ""
+
+
+def _validate_expect(write: _Write) -> str:
+    """Every supplied precondition must have an interpretation before any request is sent."""
+    expect = write.args.get("expect")
+    if expect is None:
+        return ""
+    if not isinstance(expect, dict):
+        return write.refuse("⚠️ TOOL_ARG_ERROR: expect must be an object with head_sha, state and/or updated_at.")
+    unknown = set(expect) - {"head_sha", "state", "updated_at"}
+    if unknown:
+        return write.refuse("⚠️ TOOL_ARG_ERROR: unknown expect key(s): " + ", ".join(sorted(unknown)) + ".")
+    supported = write.method in ("update", "review") or (write.method == "comment" and write.args.get("kind") != "discussion")
+    if write.method == "api":
+        supported = write.number() is not None and write.args.get("kind") in (None, "", "issue", "pr")
+    if expect and not supported:
+        return write.refuse("⚠️ TOOL_ARG_ERROR: expect requires an issue/PR target on comment, update, review or api; "
+                            f"{write.method} with this target cannot check it.")
     return ""
 
 
@@ -368,6 +387,8 @@ def _api(write: _Write) -> str:
     route, document = str(write.args.get("route") or "").strip(), str(write.args.get("graphql") or "").strip()
     if bool(route) == bool(document):
         return write.refuse("⚠️ TOOL_ARG_ERROR: api takes exactly one of route (with http_method and input) or graphql (a mutation document).")
+    if error := _expectation(write, write.number()):
+        return error
     if document:
         if _graphql_operations(document) != {"mutation"}:
             return write.refuse("⚠️ TOOL_ARG_ERROR: github_write(method='api', graphql=...) sends mutations; a query goes through "
@@ -470,6 +491,8 @@ def run_write(ctx: ToolContext, method: str = "", repo: str = "", **args: Any) -
     if method not in METHODS:
         return _refuse(ctx, f"⚠️ TOOL_ARG_ERROR: method must be one of {', '.join(METHODS)}.", no_effect=_no_launch_yet())
     write = _Write(ctx, method, repo, **args)
+    if error := _validate_expect(write):
+        return error
     return {"comment": _comment, "create_issue": _create_issue, "update": _update, "review": _review,
             "resolve_thread": _resolve_thread, "api": _api}[method](write)
 
@@ -489,7 +512,7 @@ SCHEMA: Dict[str, Any] = {
         "resolve_thread = resolve or unresolve a review thread by its node id (from github_read get include=['threads']); "
         "api = any REST mutation (http_method, route, input) or GraphQL mutation (graphql, variables) GitHub offers and "
         "no method covers yet — the receipt names it as 'METHOD route' or 'mutation Name'. expect={head_sha, state, "
-        "updated_at} refuses before sending when the target changed since it was read. Merging is pr_merge."
+        "updated_at} checks issue/PR targets and refuses before sending if changed or unsupported. Merging is pr_merge."
     ),
     "parameters": {"type": "object", "properties": {
         "method": {"type": "string", "enum": list(METHODS),
