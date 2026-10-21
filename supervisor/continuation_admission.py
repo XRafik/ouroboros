@@ -374,6 +374,7 @@ def _work_identity(q: Any, predecessor: str, result: Dict[str, Any]) -> tuple[st
 def _successor_task(q: Any, predecessor: str, result: Dict[str, Any], binding: Dict[str, Any],
                     verdict: Dict[str, Any], sources: Dict[str, Any], admission: Dict[str, Any]) -> Dict[str, Any]:
     from ouroboros.owner_continue import owner_corpus_rows, recorded_system_checkout, work_order_text
+    from ouroboros.consciousness_authority import consciousness_origin_metadata
 
     authority_source: Dict[str, Any] = {}
     try:
@@ -428,6 +429,7 @@ def _successor_task(q: Any, predecessor: str, result: Dict[str, Any], binding: D
         **({"deadline_at": deadline_at} if deadline_at else {}),
         **{key: binding[key] for key in ("workspace_root", "workspace_mode") if binding.get(key)},
         "metadata": {
+            **consciousness_origin_metadata(metadata),
             **({"project_id": binding["project_id"]} if binding.get("project_id") else {}),
             **({"model_role": model_role} if model_role else {}),
             **({"resource_intent": dict(intent)} if isinstance(intent, dict) and intent.get("kind") else {}),

@@ -1277,7 +1277,7 @@ def check_safety(
     from ouroboros.tool_effects import effect_of
     effect = effect_of(tool_name, ctx=ctx, is_mcp=tool_name.startswith("mcp_"))
     speech = tool_name == "place_reply" or effect.effect == "message"
-    if tool_name == "manage_schedules" and arguments.get("action") in {"create", "update"}:
+    if tool_name == "manage_schedules" and arguments.get("action") in {"create", "update", "restore"}:
         policy = POLICY_CHECK
     if effect.declared and effect.effect == "read":
         _emit_durable_safety_event(ctx, {"type": "safety_declared_read_skip", "tool": tool_name,
