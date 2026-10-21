@@ -816,7 +816,10 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # own section-2 row; ``ouroboros/card_store.py`` writes all four).
 # 407 -> 408: ``state/panic_source.json`` is diagnostic latest-source evidence
 # (section 2); causal observations also use the existing ``logs/events.jsonl``.
-EXPECTED_SCAN_PATHS = 409
+# 408 -> 410: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
+# the switch helper (body adoption row), and ``task_results/artifacts/*/evolution-*.json``, the local
+# evolution export (covered by the ``task_results/artifacts/<id>/**`` row).
+EXPECTED_SCAN_PATHS = 410
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
