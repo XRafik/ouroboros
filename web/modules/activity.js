@@ -148,6 +148,22 @@ function scheduleTextHtml(s, note, expanded) {
     </details>`;
 }
 
+function scheduleRunHtml(s) {
+    const outcome = s.outcome;
+    const parts = [];
+    if (outcome?.state === 'pending_observation') {
+        parts.push('last run: outcome not observed yet');
+    } else if (outcome?.state) {
+        const quiet = outcome.quiet === true && outcome.notice !== true;
+        const state = quiet && outcome.state === 'completed' ? 'ran · no message' : outcome.state;
+        parts.push(`last run: ${esc(state)}${outcome.ended_at ? ` · ${scheduleInstantHtml(outcome.ended_at, { includeYear: true })}` : ''}${outcome.line && !quiet ? ` · ${outcome.notice ? 'notice: ' : ''}${esc(outcome.line)}` : ''}`);
+    }
+    if (s.previous_run_open) {
+        parts.push(`previous run still open${s.previous_run_open.task_id ? `: ${esc(s.previous_run_open.task_id)}` : ''}`);
+    }
+    return parts.map((line) => `<span class="activity-sub">${line}</span>`).join('');
+}
+
 export function scheduleRowHtml(s, expanded = false) {
     const managed = isSkillManaged(s);
     const trigger = s.trigger || {};
@@ -223,6 +239,7 @@ export function scheduleRowHtml(s, expanded = false) {
             <span class="activity-name" data-i18n-authored>${esc(s.display_name || s.name || s.id || 'schedule')}</span>
             ${scheduleTextHtml(s, note, expanded)}
             <span class="activity-sub">${sub}</span>
+            ${scheduleRunHtml(s)}
         </div>
         <div class="activity-row-actions">${lifecycle}
            <button type="button" class="btn btn-xs btn-danger" data-act="schedule-delete" data-id="${id}" data-managed="${managed ? '1' : ''}" data-note="${note ? '1' : ''}">Delete</button></div>

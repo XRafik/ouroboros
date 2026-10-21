@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 globalThis.document = globalThis.document || { createElement: () => ({}) };
-const { scheduleRowHtml } = await import('../modules/activity.js');
+const { scheduleInstantHtml, scheduleRowHtml } = await import('../modules/activity.js');
 
 const standing = { id: 'daily', name: 'Daily check', enabled: true,
     trigger: { type: 'cron', expr: '0 9 * * *' }, relation: 'independent' };
@@ -57,4 +57,42 @@ test('kind, zone and destination are visible without inventing missing addresses
     assert.match(html, /project p&lt;1&gt; · chat 0/);
     assert.match(scheduleRowHtml({ ...standing, task: { chat_id: 4 } }), / · chat 4/);
     assert.doesNotMatch(scheduleRowHtml(standing), / · (project|chat) /);
+});
+
+test('last-run outcomes keep settled words and use the canonical end time', () => {
+    const ended = '2027-01-15T09:00:00Z';
+    for (const state of ['completed', 'failed', 'cancelled', 'handed_off']) {
+        const html = scheduleRowHtml({ ...standing, last_run_at: '2027-01-14T08:00:00Z',
+            outcome: { task_id: 't1', state, ended_at: ended, line: 'Result <checked>' } });
+        assert.ok(html.includes(`last run: ${state} · ${scheduleInstantHtml(ended, { includeYear: true })}`));
+        assert.match(html, /Result &lt;checked&gt;/);
+        assert.doesNotMatch(html, /2027-01-14|running/);
+    }
+    const untimed = scheduleRowHtml({ ...standing, last_run_at: ended,
+        outcome: { state: 'completed', ended_at: null } });
+    assert.match(untimed, /last run: completed<\/span>/);
+    assert.doesNotMatch(untimed, /<time/);
+});
+
+test('quiet completion hides internal words while a notice-bearing run shows its notice', () => {
+    const quiet = { state: 'completed', quiet: true, notice: false, line: 'Internal words' };
+    const html = scheduleRowHtml({ ...standing, outcome: quiet });
+    assert.match(html, /last run: ran · no message/);
+    assert.doesNotMatch(html, /Internal words/);
+    const notice = scheduleRowHtml({ ...standing,
+        outcome: { ...quiet, quiet: false, notice: true, line: 'Unsettled <review>' } });
+    assert.match(notice, /last run: completed · notice: Unsettled &lt;review&gt;/);
+    assert.doesNotMatch(notice, /no message|delivered/);
+    const failed = scheduleRowHtml({ ...standing, outcome: { ...quiet, state: 'failed' } });
+    assert.match(failed, /last run: failed/);
+    assert.doesNotMatch(failed, /ran · no message/);
+});
+
+test('unobserved outcomes never imply liveness; only the explicit open-run fact says it is open', () => {
+    const row = { ...standing, last_task_id: 't1', outcome: { state: 'pending_observation', task_id: 't1' } };
+    assert.match(scheduleRowHtml(row), /last run: outcome not observed yet/);
+    assert.doesNotMatch(scheduleRowHtml(row), /running|previous run still open/);
+    assert.match(scheduleRowHtml({ ...row, previous_run_open: { task_id: 't<1>', since: '2027-01-15T09:00:00Z' } }),
+        /previous run still open: t&lt;1&gt;/);
+    assert.doesNotMatch(scheduleRowHtml({ ...standing, last_task_id: 't1' }), /last run:|running|previous run still open/);
 });
