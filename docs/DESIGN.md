@@ -626,15 +626,17 @@ still-working task. A failed child keeps a compact factual `Failed` marker
 inside its parent while the root continues under its own authoritative status.
 Internal reason codes belong in details and diagnostics, not compact headlines:
 a card that shows a cause says it in the owner's words while the record keeps
-the machine code, and a cause with no sentence yet stays raw rather than
-borrowing a wrong one. The rails that end a task are such causes: the loop's
-forced finalization (round limit, deadline, grace window, context, unabsorbed
-children) and the supervisor's timeout reaper (maximum running time, deadline,
-idle silence) keep their typed codes on the record and the incident key, and the
+the machine code. In root ending summaries, episodes and Main completion rows, a typed cause
+without a sentence reads "The recorded reason has no description yet", with
+its exact code in accessible details. Authored warning prose and raw host text
+stay intact; never infer meaning from spelling. The loop's forced-finalization rails
+(round limit, deadline, grace window, context, unabsorbed children) and the
+supervisor's timeout reaper (maximum running time, deadline, idle silence)
+keep typed codes on the record and incident key, and the
 card, the reaper's grace toast, kill notice and salvage line, and the loop's own
 fallback text all say the one sentence from the shared table
 (`project_dialogue.TASK_CAUSE_PHRASES`, whose browser twin lives in
-`log_events.js`). The routing receipt under an owner message is such a surface:
+`task_reason_words.js`). The routing receipt under an owner message is such a surface:
 a refused addressing act carries the host-composed `cause` sentence
 (`project_dialogue.routing_refusal_cause`, one host table for the receipt line,
 the System row and the picker toast), a landed act carries none, and an unknown
@@ -916,7 +918,9 @@ runtime's state, Main's Project lifecycle, or words signed by their author (a
 reminder, a skill notice). It is one short typed mark in owner words, never a
 paragraph or text written for a model. `tests/test_host_message_voice.py` keeps
 every host type stamped as a literal at its send site in one of these classes, with
-its counted producer sites.
+its counted producer sites. Room status carries connection loss; reconnecting adds
+no feed row or counter in Main or a Project (`tests/test_reconnect_feed_browser.py`).
+Only the first open after a reload onto changed code shows `Restart complete`.
 
 Language follows the same line. The install's interface language
 (`OUROBOROS_UI_LANGUAGE`, Settings → Appearance → Language) translates chrome
@@ -959,8 +963,8 @@ Main's empty-chat greeting speaks in neither voice: it is host copy in a quiet
 bubble, a history row or a model reply (`web/modules/welcome_preference.js`). It
 appears only after a successful recent history read whose own window reports
 complete coverage, over a feed with no message or task card (the typing indicator
-and the ephemeral reconnect notice are chrome, by the same rule that gives an empty
-feed its history loading state). Every later read withdraws it while in flight, so
+and the ephemeral `Restart complete` row are chrome, by the same rule that gives an
+empty feed its history loading state). Every later read withdraws it while in flight, so
 that loading state, then any failure, shows instead; only a complete answer brings
 it back, and it leaves with the first message or task card. Project rooms never
 show it.
@@ -1545,7 +1549,7 @@ Expanded ordinary cards disclose earlier Files, timeline, Reviews and children
 in collapsible sections using their original content, never duplicate cards.
 A Project portal still reaches that content through its room.
 
-**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice and the Project reference. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
+**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved result-review PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 

@@ -816,10 +816,16 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # own section-2 row; ``ouroboros/card_store.py`` writes all four).
 # 407 -> 408: ``state/panic_source.json`` is diagnostic latest-source evidence
 # (section 2); causal observations also use the existing ``logs/events.jsonl``.
+# 408 -> 407 (managed Node/npm): promotion adds immutable .g-* siblings rather than
+# displacing into node/.old-*; metadata reads use _node_roots instead of spelling
+# node/*-*/managed-node.json. Retained generations and legacy roots share section 4's cx row.
+# 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
+# 408 -> 409: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
+# the switch helper (body adoption row).
 # The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
 # accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
-# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 408 -> 403.
-EXPECTED_SCAN_PATHS = 403
+# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 409 -> 404.
+EXPECTED_SCAN_PATHS = 404
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

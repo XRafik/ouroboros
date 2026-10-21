@@ -433,9 +433,9 @@ class ToolRegistry:
         ``verify_and_record`` is normally an acting/workspace code tool because its
         other contract kinds execute commands or inspect deliverables.  An
         actor-first configured session needs one exceptional, non-shell use: a
-        typed ``delegation_zero_run`` receipt when its selected leaf is still
-        pending.  Keep that exception bound to the private host bootstrap marker;
-        the handler applies the same check again at execution time.
+        typed ``delegation_zero_run`` receipt before a physical leaf exists.
+        Restoring cognition clears auto-start activity, not this eligibility.
+        The private host marker binds the exception; the handler proves custody.
         """
         if name in LOCAL_READONLY_SUBAGENT_TOOL_NAMES | schema_selection_tools_for_context(self._ctx):
             return True
@@ -446,10 +446,6 @@ class ToolRegistry:
             isinstance(bootstrap, dict)
             and not bool(bootstrap.get("physical_started"))
             and not bool(bootstrap.get("zero_run_receipt_recorded"))
-            and (
-                bool(bootstrap.get("exact_start_pending", True))
-                or str(bootstrap.get("zero_run_evidence_status") or "") == "unknown"
-            )
         )
 
     def initial_tool_names(self) -> frozenset[str]:
