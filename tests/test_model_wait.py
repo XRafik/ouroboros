@@ -441,6 +441,8 @@ def test_permanent_switch_uses_existing_owner_writer_once(live_wait, monkeypatch
 
     root, _transport, _client, controller, _events, decide = live_wait
     monkeypatch.setattr(config, "SETTINGS_PATH", root / "settings.json")
+    # This owner decision edits Light; changing the inherited Supervisor uses its dedicated owner door.
+    (root / "settings.json").write_text(json.dumps({"OUROBOROS_MODEL_SAFETY": "fixed/checker"}))
     row = {"wait_id": "wait-one", "revision": 1, "task_attempt": 1, "state": "waiting", "role": "light"}
     model_wait.mutate_wait(root, "task-one", "wait-one", lambda _: row)
     controller.waits["wait-one"] = dict(row)
@@ -502,6 +504,8 @@ def test_invalid_persistent_choice_and_failed_revalidation_do_not_wedge_action(l
 
     root, _transport, _client, controller, _events, decide = live_wait
     monkeypatch.setattr(config, "SETTINGS_PATH", root / "settings.json")
+    # This owner decision edits Light; changing the inherited Supervisor uses its dedicated owner door.
+    (root / "settings.json").write_text(json.dumps({"OUROBOROS_MODEL_SAFETY": "fixed/checker"}))
     row = {"wait_id": "wait-one", "revision": 1, "task_attempt": 1, "state": "waiting", "role": "light"}
     model_wait.mutate_wait(root, "task-one", "wait-one", lambda _: row)
     body = _action_for({**row, "task_id": "task-one"}, "switch", model="openai::model",
