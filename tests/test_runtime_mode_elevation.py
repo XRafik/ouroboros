@@ -29,6 +29,7 @@ import os
 import pathlib
 
 import pytest
+from tests._safety_fixtures import disable_safety, clear_safety_provider_env as _clear_safety_provider_env
 
 
 # ---------------------------------------------------------------------------
@@ -65,18 +66,6 @@ def isolated_settings(tmp_path, monkeypatch):
 def _seed_disk(settings_path: pathlib.Path, payload: dict) -> None:
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     settings_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-
-def _clear_safety_provider_env(monkeypatch) -> None:
-    """Keep post-check tests from depending on live safety LLM credentials."""
-    for key in (
-        "OPENROUTER_API_KEY",
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "OPENAI_COMPATIBLE_API_KEY",
-        "CLOUDRU_FOUNDATION_MODELS_API_KEY",
-    ):
-        monkeypatch.delenv(key, raising=False)
 
 
 # ---------------------------------------------------------------------------
@@ -341,8 +330,7 @@ def test_write_file_preserves_ordinary_content_json(tmp_path, monkeypatch, body)
     drive_root = tmp_path / "data"
     drive_root.mkdir()
     monkeypatch.setattr(cfg, "DATA_DIR", drive_root, raising=True)
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
-    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    disable_safety(monkeypatch)
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     ctx = _make_drive_ctx(tmp_path)
     ctx.repo_dir.mkdir()
@@ -1675,8 +1663,7 @@ def test_run_shell_writes_skill_state_examples(shape, filename, tmp_path, monkey
     payload = tmp_path / "payload.json"
     payload.write_text('{"status":"pass","enabled":true}', encoding="utf-8")
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
-    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    disable_safety(monkeypatch)
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     if os.name == "nt":
         # ``bash`` on hosted Windows resolves to WSL, which has no distro in
@@ -1816,8 +1803,7 @@ def test_run_shell_waits_for_a_helper_writing_a_skill_state_example(tmp_path, mo
         "child.wait(timeout=5)\n"
     )
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
-    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    disable_safety(monkeypatch)
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     result = reg.execute("run_command", {"cmd": [sys.executable, "-c", parent_code, str(drive_root), child_code]})
     assert "exit_code=0" in result, result
@@ -1837,8 +1823,7 @@ def test_detached_helper_does_not_make_printed_words_a_skill_state_mutation(tmp_
         "print('state skills')\n"
     )
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
-    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    disable_safety(monkeypatch)
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     result = reg.execute("run_command", {"cmd": [sys.executable, "-c", code]})
     assert "exit_code=0" in result and "state skills" in result, result

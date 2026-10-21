@@ -35,3 +35,53 @@ def supervisor(monkeypatch, tmp_path):
     monkeypatch.setattr(safety, "_safety_model_call", call)
     yield SimpleNamespace(module=safety, ctx=ctx, calls=calls, events=events, replies=replies, values=values, modes=modes)
     safety._PRIOR_VERDICTS.clear()
+
+
+def disable_safety(monkeypatch):
+    """Keep unrelated dispatch tests independent of both assessment levels."""
+    for key in ("OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"):
+        monkeypatch.setenv(key, "off")
+
+
+def pin_safety_model():
+    """Let defaults tests change provider access without changing their checker."""
+    from ouroboros.gateway.owner_settings import _owner_update_settings, fields_on_saved_document
+    _owner_update_settings(fields_on_saved_document({"OUROBOROS_MODEL_SAFETY": "fixture/checker"}),
+                           allow_safety_lowering=True)
+
+
+def owner_registry(tmp_path):
+    from ouroboros.tools.registry import ToolRegistry
+
+    registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
+    registry._ctx.task_metadata = {"work_kind": "owner"}
+    return registry
+
+
+def clear_safety_provider_env(monkeypatch) -> None:
+    """Keep post-check tests from depending on live safety LLM credentials."""
+    for key in (
+        "OPENROUTER_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_COMPATIBLE_API_KEY",
+        "CLOUDRU_FOUNDATION_MODELS_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture
+def settings_install(tmp_path, monkeypatch):
+    """An isolated data root; no provider key, model slot or legacy alias leaks in from the shell."""
+    from ouroboros import config as cfg, review_pool_migration as m
+
+    data = tmp_path / "data"
+    data.mkdir()
+    path = data / "settings.json"
+    monkeypatch.setattr(cfg, "DATA_DIR", data)
+    monkeypatch.setattr(cfg, "SETTINGS_PATH", path)
+    for key in (*cfg.SETTINGS_DEFAULTS, "OUROBOROS_MODEL_FALLBACK"):
+        monkeypatch.delenv(key, raising=False)
+    m._MIGRATIONS_SEEN.clear()
+    yield path
+    m._MIGRATIONS_SEEN.clear()

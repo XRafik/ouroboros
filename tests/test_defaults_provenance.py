@@ -31,6 +31,9 @@ from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
+from tests._safety_fixtures import pin_safety_model, settings_install as install_fixture
+install = install_fixture
+
 from ouroboros import config as cfg
 from ouroboros import review_pool_migration as m
 from ouroboros.provider_models import ANTHROPIC_DIRECT_DEFAULTS, OPENAI_DIRECT_DEFAULTS
@@ -41,21 +44,6 @@ SLOTS = ("OUROBOROS_MODEL", "OUROBOROS_MODEL_LIGHT", "OUROBOROS_MODEL_FALLBACKS"
 ANTHROPIC = (ANTHROPIC_DIRECT_DEFAULTS["main"], ANTHROPIC_DIRECT_DEFAULTS["light"], ANTHROPIC_DIRECT_DEFAULTS["fallback"])
 OPENAI = (OPENAI_DIRECT_DEFAULTS["main"], OPENAI_DIRECT_DEFAULTS["light"], OPENAI_DIRECT_DEFAULTS["fallback"])
 SHIPPED = tuple(SETTINGS_DEFAULTS[key] for key in SLOTS)
-
-
-@pytest.fixture
-def install(tmp_path, monkeypatch):
-    """An isolated data root; no provider key, model slot or legacy alias leaks in from the shell."""
-    data = tmp_path / "data"
-    data.mkdir()
-    path = data / "settings.json"
-    monkeypatch.setattr(cfg, "DATA_DIR", data)
-    monkeypatch.setattr(cfg, "SETTINGS_PATH", path)
-    for key in (*cfg.SETTINGS_DEFAULTS, "OUROBOROS_MODEL_FALLBACK"):
-        monkeypatch.delenv(key, raising=False)
-    m._MIGRATIONS_SEEN.clear()
-    yield path
-    m._MIGRATIONS_SEEN.clear()
 
 
 def _write(path, document):
@@ -194,9 +182,7 @@ def test_a_settings_save_that_does_not_edit_a_slot_does_not_author_it(install, m
     shown = apply_runtime_provider_defaults(cfg.load_settings())[0]
     assert tuple(shown[key] for key in SLOTS) == SHIPPED
     # Keep this defaults test independent of the owner-only inherited-checker ratchet.
-    from ouroboros.gateway.owner_settings import _owner_update_settings, fields_on_saved_document
-    _owner_update_settings(fields_on_saved_document({"OUROBOROS_MODEL_SAFETY": "fixture/checker"}),
-                           allow_safety_lowering=True)
+    pin_safety_model()
     response = TestClient(_settings_app(monkeypatch)).post("/api/settings", json={
         "OPENROUTER_API_KEY": "", "ANTHROPIC_API_KEY": "sk-ant-present-key",
         **{key: shown[key] for key in SLOTS}})
@@ -278,9 +264,7 @@ def test_an_unrelated_settings_save_leaves_a_never_configured_catalog_to_the_rea
     checked = []
     monkeypatch.setattr(settings_mod, "_unrecognised_review_models", lambda models: checked.append(models) or [])
     _write(install, {"ANTHROPIC_API_KEY": "sk-ant-present-key"})
-    from ouroboros.gateway.owner_settings import _owner_update_settings, fields_on_saved_document
-    _owner_update_settings(fields_on_saved_document({"OUROBOROS_MODEL_SAFETY": "fixture/checker"}),
-                           allow_safety_lowering=True)
+    pin_safety_model()
     client = _settings_client(monkeypatch)
     for changes in ({"TOTAL_BUDGET": "25"},
                     {"OPENAI_API_KEY": "sk-openai-present-key", "ANTHROPIC_API_KEY": "", "OUROBOROS_MODEL": OPENAI[0]}):
@@ -335,9 +319,7 @@ def test_an_authored_catalog_stays_the_owners_through_a_main_and_access_change(i
     assert response.status_code == 200, response.text
     read = client.get("/api/settings").json()
     assert read["_meta"]["available_subagents"]["automatic"] is False, "saved, so Settings says Saved"
-    from ouroboros.gateway.owner_settings import _owner_update_settings, fields_on_saved_document
-    _owner_update_settings(fields_on_saved_document({"OUROBOROS_MODEL_SAFETY": "fixture/checker"}),
-                           allow_safety_lowering=True)
+    pin_safety_model()
     response = client.post("/api/settings", json={
         "OPENAI_API_KEY": "sk-openai-present-key", "ANTHROPIC_API_KEY": "", "OUROBOROS_MODEL": OPENAI[0],
         SUBAGENTS: read[SUBAGENTS]})
@@ -353,9 +335,7 @@ def test_an_operator_catalog_stays_the_environments_through_a_settings_save(inst
         "route": {"kind": "api_model", "target_id": "anthropic::claude-operator"}}]}, indent=1)
     monkeypatch.setenv(SUBAGENTS, operator)
     _write(install, {"ANTHROPIC_API_KEY": "sk-ant-present-key"})
-    from ouroboros.gateway.owner_settings import _owner_update_settings, fields_on_saved_document
-    _owner_update_settings(fields_on_saved_document({"OUROBOROS_MODEL_SAFETY": "fixture/checker"}),
-                           allow_safety_lowering=True)
+    pin_safety_model()
     client = _settings_client(monkeypatch)
     response = client.post("/api/settings", json={
         "OPENAI_API_KEY": "sk-openai-present-key", SUBAGENTS: client.get("/api/settings").json()[SUBAGENTS]})
