@@ -1116,7 +1116,17 @@ def close_absent_run(drive_root: Any, gateway: Any, custody: RunCustody, reason:
 
 def settle_run(drive_root: Any, gateway: Any, custody: RunCustody, detail: Dict[str, Any]) -> Dict[str, Any]:
     """Compatibility settlement for the panel/control owners; collection separates cleanup."""
-    from ouroboros.delegate_collection import record_terminal_money
+    from ouroboros.delegate_collection import observe_run, record_terminal_money
+
+    # Cancellation already paid for this exact read-back. Preserve it before
+    # money/retirement, including a repeated settlement: the body can collect
+    # it after the engine disappears. Never fetch output or wait for capture on
+    # the stop path; an unavailable source is a gap, not a reason to delay Stop.
+    if not custody.review_owned:
+        try:
+            observe_run(drive_root, custody, detail)
+        except Exception:
+            log.warning("Terminal observation was not retained for %s", custody.run_id, exc_info=True)
 
     if custody.settled:
         return {"settled": True, "ledger_recorded": custody.ledger_recorded,

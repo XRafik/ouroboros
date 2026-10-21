@@ -582,6 +582,8 @@ _TRUNCATION_DECISIONS: dict[str, tuple[bool, str]] = {
     "teardown_unconfirmed": (False, "gateway/tasks.py: an HTTP 202 Stop acknowledgement; the recorded intent is still being finished, never a task outcome"),
     "artifact_unavailable": (False, "gateway/task_archive.py: confined single-file read unavailable; HTTP refusal, not a task terminal"),
     "artifact_unverified": (False, "gateway/task_archive.py: single-file drift or capture verification failure; HTTP refusal, not a task terminal"),
+    "wrap_up_document_invalid": (False, "gateway/task_archive.py: the Wrap up document selector combined with relpath or source; HTTP 400, not a task terminal"),
+    "wrap_up_document_unavailable": (False, "gateway/task_archive.py: no Wrap up receipt by that name and Stop, or its on-read document could not be written; HTTP 404/503, not a task terminal"),
     "upload_unavailable": (False, "gateway/files.py: a chat attachment is missing or not a regular file; HTTP 404, not a task terminal"),
     "upload_unreadable": (False, "gateway/files.py: a chat attachment's confined read failed; HTTP 503, not a task terminal"),
     "history_source_unavailable": (False, "gateway/history_paging.py: readable recent projection with explicit source gap; no task attempt was truncated"),
