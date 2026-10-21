@@ -72,6 +72,26 @@ def cause_label(cause: str, places=()) -> str:
     return next((str(p["label"]) for p in places if p.get("place_id") == place_id), place_id)
 
 
+_CATEGORY_CAUSES = {"consciousness": "own", "consciousness_task": "started"}
+
+
+def root_cause(txn, root_id: str) -> str:
+    """Read immutable attribution, or the unstamped historical root's category."""
+    binding = txn.binding("consciousness", root_id)
+    if binding:
+        return str(binding.get("cause") or "")
+    # Prefer the root task itself: import inserts current rows by last sequence,
+    # so the first physical row in its tree can be a child that finished earlier.
+    first = txn.conn.execute(
+        "SELECT category, json_extract(extra, '$.consciousness_cause') FROM attempts INDEXED BY attempts_task "
+        "WHERE task_id = ? AND root_task_id = ? ORDER BY rowid LIMIT 1", (root_id, root_id)).fetchone()
+    if first is None:
+        first = txn.conn.execute(
+            "SELECT category, json_extract(extra, '$.consciousness_cause') FROM attempts "
+            "WHERE root_task_id = ? ORDER BY rowid LIMIT 1", (root_id,)).fetchone()
+    return str(first[1] or _CATEGORY_CAUSES.get(first[0], "")) if first else ""
+
+
 def stamp_root_cause(txn, row: dict) -> None:
     """Keep the first root's cause across children, transitions and late receipts.
 
@@ -83,17 +103,8 @@ def stamp_root_cause(txn, row: dict) -> None:
     root_id = str(row.get("root_task_id") or "")
     if not root_id:
         return
-    binding = txn.binding("consciousness", root_id)
-    cause = str((binding or {}).get("cause") or row.get("consciousness_cause") or "")
-    if not cause:
-        # attempts_root includes rowid: this reads one row without sorting the tree.
-        first = txn.conn.execute(
-            "SELECT category, json_extract(extra, '$.consciousness_cause') FROM attempts "
-            "WHERE root_task_id = ? ORDER BY rowid LIMIT 1", (root_id,)).fetchone()
-        if first:
-            cause = str(first[1] or {"consciousness": "own", "consciousness_task": "started"}.get(first[0], ""))
-    if not cause:
-        cause = {"consciousness": "own", "consciousness_task": "started"}.get(row.get("category"), "")
+    cause = root_cause(txn, root_id) or str(row.get("consciousness_cause") or
+                                        _CATEGORY_CAUSES.get(row.get("category"), ""))
     if cause in {"own", "started"} or cause.startswith("place:") and cause[6:]:
         row["consciousness_cause"] = cause
 

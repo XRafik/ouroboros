@@ -222,6 +222,40 @@ def test_unrelated_request_never_inherits_bound_cause(data_root, monkeypatch):
     assert all("consciousness_cause" not in row for row in _ledger_rows(data_root))
 
 
+@pytest.mark.parametrize("category,cause", [("consciousness", "own"), ("consciousness_task", "started")])
+def test_unstamped_historical_root_keeps_its_cause_across_new_descendants(data_root, monkeypatch, category, cause):
+    import json
+    from ouroboros.usage_ledger import LEDGER_REL
+
+    _at(monkeypatch, T0 - HOUR)
+    _settle(data_root, cost=1.0, cost_final=True, task_id="root", root_task_id="root", category=category)
+    _settle(data_root, cost=2.0, cost_final=True, task_id="old-child", root_task_id="root", category="consciousness_task")
+    usage_store.export_journal(data_root)
+    path = data_root / LEDGER_REL
+    history = [json.loads(line) for line in path.read_text().splitlines()]
+    # A historical parent can finish after its child. Import then inserts the
+    # child's current row first; physical tree order must not decide its cause.
+    history.sort(key=lambda row: row.get("task_id") == "root" and row.get("state") == "settled")
+    for seq, row in enumerate(history, 1):
+        row.pop("consciousness_cause", None)
+        row["seq"] = seq
+    path.write_text("".join(json.dumps(row) + "\n" for row in history))
+    usage_store.migrate_from_journal(data_root)
+    with usage_store.read(data_root) as txn:
+        assert txn.conn.execute("SELECT task_id FROM attempts ORDER BY rowid LIMIT 1").fetchone()[0] == "old-child"
+    window = allowance.allowance_window(data_root, now=T0)
+    assert [(part["cause"], part["usd"]) for part in window["spend_by_cause"]] == [(cause, 3.0)]
+    with ua.usage_scope(ua.UsageScope(drive_root=data_root, root_task_id="root",
+                                    consciousness_cause="started" if cause == "own" else "own")):
+        _settle(data_root, cost=1.0, cost_final=True, task_id="new-child", root_task_id="root", category="subagent")
+    rows = _ledger_rows(data_root)
+    assert next(row for row in rows if row["task_id"] == "new-child")["consciousness_cause"] == cause
+    assert all("consciousness_cause" not in row for row in rows if row["task_id"] in {"root", "old-child"})
+    window = allowance.allowance_window(data_root, now=T0)
+    assert [(part["cause"], part["usd"]) for part in window["spend_by_cause"]] == [(cause, 4.0)]
+    assert window["settled_usd"] == 4.0
+
+
 def test_owner_commissioned_scope_does_not_charge_consciousness():
     from ouroboros.usage_origin import task_usage_scope
     metadata = {"work_kind": "owner", "initiator": "consciousness", "usage_category": "consciousness_task",

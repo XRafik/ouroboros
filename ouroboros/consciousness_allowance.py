@@ -35,7 +35,7 @@ from typing import Any, Dict, Optional
 from ouroboros._usage_rows import _summary, row_ts_epoch
 from ouroboros.runtime_limits import get_consciousness_daily_usd
 from ouroboros.usage_ledger import _drive_root
-from ouroboros.usage_origin import cause_label
+from ouroboros.usage_origin import cause_label, root_cause
 
 CONSCIOUSNESS_CATEGORIES = frozenset({"consciousness", "consciousness_task"})
 MONEY_ROW_KINDS = frozenset({"attempt", "subscription_session", "external_unmetered"})
@@ -51,8 +51,9 @@ def _window_rows(txn: Any, now_ts: float) -> tuple:
         "SELECT DISTINCT root_task_id, category, json_extract(extra, '$.consciousness_cause') AS cause "
         "FROM attempts WHERE category IN ('consciousness', 'consciousness_task') "
         f"AND ts_last_epoch >= ? AND root_task_id != '' AND {_MONEY_KIND}", (now_ts - ROOT_HORIZON_SEC,)))
-    causes = {record[0]: record[2] or ("own" if record[1] == "consciousness" else "started")
-              for record in discovered}
+    defaults = {record[0]: record[2] or ("own" if record[1] == "consciousness" else "started")
+                for record in discovered}
+    causes = {root: root_cause(txn, root) or fallback for root, fallback in defaults.items()}
     roots = sorted(causes)
     rows: list = []
     for root in roots:
@@ -85,7 +86,7 @@ def allowance_window(
     summary = _summary([row for _ts, row in window])
     by_cause: dict = {}
     for _ts, row in window:
-        cause = str(row.get("consciousness_cause") or root_causes[row["root_task_id"]])
+        cause = root_causes[row["root_task_id"]]
         by_cause.setdefault(cause, []).append(row)
     spend_by_cause = []
     for cause, members in sorted(by_cause.items()):
