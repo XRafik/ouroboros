@@ -401,6 +401,19 @@ def _wave_cost(costs: List[Dict[str, Any]]) -> Dict[str, Any]:
             "seats": {kind: sum(1 for cost in costs if cost["kind"] == kind) for kind in ("usd", "subscription", "unknown")}}
 
 
+def _doctrine_panel(record: Dict[str, Any]) -> Dict[str, Any]:
+    """Pass the author-check facts through. A record without them stays unchanged."""
+    decision = record.get("author_decision")
+    if not isinstance(decision, dict):
+        return {}
+    from ouroboros.review_doctrine import EVIDENCE_KIND, FACT_KIND, LANDING_KEY, public_card_decision
+
+    if not any(isinstance(decision.get(key), dict) for key in (FACT_KIND, EVIDENCE_KIND, LANDING_KEY)):
+        return {}
+    public = public_card_decision(decision)
+    return {"author_decision": public} if public else {}
+
+
 def ledger_record_panel(record: Dict[str, Any]) -> Dict[str, Any]:
     """One review-ledger record (``review_ledger.build_wave_record``) as a card panel:
     the record's ``panel`` facts (who sat and why) and every seat's answer per brief
@@ -440,6 +453,7 @@ def ledger_record_panel(record: Dict[str, Any]) -> Dict[str, Any]:
         "panel_facts": facts, "actors": actors, "superseded": False,
         "source_ref": {"kind": "review_ledger_record", "path": f"state/{LEDGER_SUBDIR}/{record_id}.json"},
         **({"cost": _wave_cost(costs)} if pooled else {}),
+        **_doctrine_panel(record),
     }
 
 

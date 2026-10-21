@@ -899,8 +899,11 @@ def test_author_continuation_notes_its_decision_on_the_answered_record(candidate
                                    author_disposition={"disposition": "accepted", "rationale": "Known tradeoff."})
     assert len(calls) == 1 and f"review_record_id: {reference['review_record_id']}" in second
     record = rl.load_record(rl.ledger_root(ctx), reference["review_record_id"])
-    assert record["revision"] == 2 and record["verdict"]["aggregate"] == "FAIL"
+    assert record["revision"] == 3 and record["verdict"]["aggregate"] == "FAIL"
     assert record["author_decision"]["disposition"] == "accepted" and record["author_decision"]["rationale"] == "Known tradeoff."
+    assert record["author_decision"]["landing"]["landed"] is True
+    assert "evidence_at_decision" not in record["author_decision"]
+    assert "review_replaced_by_subagents" not in record["author_decision"]
     assert len(rl.recent_records(rl.ledger_root(ctx), ctx.task_id, 5)) == 1, "author continuation buys no record"
     assert _attempt_rows(ctx)[-1].status == "succeeded" and _attempt_rows(ctx)[-1].review_record_id == reference["review_record_id"]
 

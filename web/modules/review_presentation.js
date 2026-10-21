@@ -5,7 +5,7 @@ import { escapeHtmlAttr, sinceLocalTime } from './utils.js';
 import { isStoreMigrating, taskSourceDownloadUrl } from './api_client.js';
 import { harnessIdentityMarkup } from './harness_presentation.js';
 import { reconcileReviewMarkup } from './review_dom_patch.js';
-import { actorAwaiting, actorUnresolved, formatReviewProjection } from './review_record_card.js';
+import { actorAwaiting, actorUnresolved, authorDoctrineLines, formatReviewProjection } from './review_record_card.js';
 import { planRecordEngaged, planRecordGroup } from './plan_record_presentation.js';
 export { formatReviewProjection } from './review_record_card.js';
 
@@ -595,15 +595,8 @@ function planWaveDetail(wave) {
     }
     if (wave.findings_texts_truncated) lines.push('Some finding texts were truncated at capture.');
     if (wave.spec_body_truncated) lines.push('Spec body was truncated at capture.');
-    const author = wave.author_disposition;
-    if (author && typeof author === 'object' && text(author.disposition)) {
-        lines.push(
-            `Author ${author.action === 'stop' ? 'stop' : 'finish'}: ${text(author.disposition)}${text(author.reviewer_signal) ? ` · reviewer signal=${text(author.reviewer_signal)}` : ''}`
-            + `${text(author.rationale) ? ` · ${text(author.rationale)}` : ''}`
-            + `${text(author.subject_hash) ? ` · subject_hash=${text(author.subject_hash)}` : ''}`
-            + `${text(author.source) ? ` · source=${text(author.source)}` : ''}`,
-        );
-    }
+    const authorLine = authorDispositionText(wave.author_disposition);
+    if (authorLine) lines.push(authorLine);
     return lines.filter(Boolean).join('\n');
 }
 
@@ -779,6 +772,7 @@ function authorDispositionText(author, label = '') {
         text(author.rationale),
         text(author.subject_hash) ? `subject_hash=${text(author.subject_hash)}` : '',
         text(author.source) ? `source=${text(author.source)}` : '',
+        ...authorDoctrineLines(author),
     ].filter(Boolean).join(' · ');
 }
 
