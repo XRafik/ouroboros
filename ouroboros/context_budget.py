@@ -369,6 +369,7 @@ IMAGE_BLOCK_CHAR_EQUIVALENT = 4_400
 # visual history for compare-two-screens reasoning; 5 costs at most ~2.2K extra
 # estimated tokens per request and only when that many images are actually live.
 MAX_LIVE_IMAGE_BLOCKS = 5
+# Owner decision 2026-10-21: batch eviction above 10 back to the 5-image floor of 2026-07-29.
 LIVE_IMAGE_BLOCKS_HIGH_WATER = 10
 
 # --- Scratchpad size thresholds (SSOT; previously scattered literals) -------

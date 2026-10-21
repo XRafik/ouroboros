@@ -75,7 +75,8 @@ export function taskCheckpointLabel(evt = {}) {
     }
     const folded = Number(evt.reclaimed_tokens);
     if (kind === 'prompt_prefix_break' && evt.reasoning_retired) {
-        return `Earlier reasoning not replayed (${evt.reasoning_retired.turns} turns, ${evt.reasoning_retired.blocks} blocks)`;
+        const turns = evt.reasoning_retired.turns;
+        return `Earlier reasoning not replayed (${turns} turn${turns === 1 ? '' : 's'})`;
     }
     if (kind === 'context_view' && evt.status === 'applied' && folded > 0) {
         return `Ouroboros folded its context (−${folded.toLocaleString('en-US')} tokens)`;
@@ -88,7 +89,6 @@ export function taskCheckpointLabel(evt = {}) {
  *  it measured and the threshold it crossed (its payload carries no round, so a round could
  *  not tell 50% from 25%); a wait is its episode and phase; any other is its number or round. */
 export function taskCheckpointIdentity(evt = {}) {
-    if (evt.checkpoint_kind === 'prompt_prefix_break' && evt.reasoning_retired) return `${evt.task_id || ''}:reasoning_retired`;
     if (Object.hasOwn(WAIT_LABELS, evt.checkpoint_kind)) return `${evt.episode_id || evt.ts || ''}:${evt.phase}`;
     if (evt.milestone || evt.budget_axis) return `${evt.budget_axis || ''}:${evt.milestone || ''}`;
     return evt.checkpoint_number || evt.round || '';
@@ -97,7 +97,6 @@ export function taskCheckpointIdentity(evt = {}) {
 export function checkpointHasProgressRow(evt = {}) {
     // These exact producer paths already emit a visible host progress note.
     return (!evt.checkpoint_kind && Number(evt.checkpoint_number) > 0)
-        || (evt.checkpoint_kind === 'prompt_prefix_break' && evt.progress_row_emitted === true)
         || (evt.checkpoint_kind === 'context_reclaim_manual'
             && ['checkpoint_failed', 'summarizer_failed', 'binding_mismatch'].includes(evt.status));
 }

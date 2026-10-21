@@ -9,13 +9,11 @@ import { ElementStub, installDom, restoreDom, walkCard } from './chat_dom_fixtur
 
 const TASK = 'reasoning-task';
 const stamp = index => `2026-10-21T08:00:0${index}Z`;
-const text = count => `Earlier reasoning not replayed after ${count} conversation changes (${count * 2} turns, ${count * 3} blocks).`;
+const text = count => `Earlier reasoning not replayed after ${count} history change${count === 1 ? '' : 's'} (${count * 2} turns).`;
 const checkpoint = (count, main = true) => ({
     type: 'task_checkpoint', task_id: TASK, checkpoint_kind: 'prompt_prefix_break', round: count,
     reasoning_retired: { index: 2, cause: 'messages', turns: 2, blocks: 3 }, ts: stamp(count),
-    ...(main ? { progress_row_emitted: true } : {
-        system_type: 'task_checkpoint', text: text(count), card_row: 'timeline', card_row_id: `${TASK}:reasoning_retired`,
-    }),
+    ...(main ? { progress_row_emitted: true } : {}),
 });
 const progress = count => ({
     role: 'system', system_type: 'host_progress', is_progress: true, narration: false, task_id: TASK,
@@ -24,16 +22,18 @@ const progress = count => ({
 const stored = (row, index) => ({ ...row, history_id: `progress:${index}`,
     history_position: { source: 'progress', offset: index } });
 
-test('retirement checkpoints stay labelled in Logs while the progress row owns the Main timeline', () => {
-    for (const count of [1, 2]) {
-        const event = checkpoint(count);
+test('Main and helper retirement checkpoints are labelled only in Logs', () => {
+    for (const main of [true, false]) {
+        const event = checkpoint(1, main);
         const view = summarizeChatLiveEvent(event);
         assert.equal(view.visible, false);
         assert.equal(view.promote, false);
         assert.equal(view.human, false);
         assert.equal(view.terminal, false);
         assert.equal('receipt' in view, false);
-        assert.equal(summarizeLogEvent(event).headline, 'Earlier reasoning not replayed (2 turns, 3 blocks)');
+        assert.equal(summarizeLogEvent(event).headline, 'Earlier reasoning not replayed (2 turns)');
+        event.reasoning_retired.turns = 1;
+        assert.equal(summarizeLogEvent(event).headline, 'Earlier reasoning not replayed (1 turn)');
     }
     const ordinary = { type: 'task_checkpoint', task_id: TASK, checkpoint_kind: 'prompt_prefix_break', round: 3 };
     assert.equal(summarizeChatLiveEvent(ordinary).visible, true);
@@ -63,7 +63,7 @@ test('the one retirement row keeps its latest cumulative count across ordered an
     }
 });
 
-function fixture(t, history = []) {
+function fixture(t) {
     const handlers = new Map();
     const rendered = [];
     const html = Object.getOwnPropertyDescriptor(ElementStub.prototype, 'innerHTML');
@@ -72,7 +72,7 @@ function fixture(t, history = []) {
         html.set.call(this, value);
     } });
     const env = installDom(async url => ({ ok: true, json: async () => String(url).startsWith('/api/chat/history')
-        ? { messages: history, window: { complete: true } } : { active_direct_turns: [] } }));
+        ? { messages: [], window: { complete: true } } : { active_direct_turns: [] } }));
     document.body = new ElementStub('body', document);
     const instance = createChatInstance({
         ws: { on(type, handler) { handlers.set(type, handler); return () => handlers.delete(type); },
@@ -88,14 +88,14 @@ function fixture(t, history = []) {
     });
     const feed = document.byId.get('chat-messages');
     return {
-        instance, feed, card: () => walkCard(feed, TASK),
+        feed, card: () => walkCard(feed, TASK),
         latestRetirement: () => rendered.findLast(value => value.includes('Earlier reasoning not replayed')) || '',
         log: row => handlers.get('log')({ chat_id: 1, data: { chat_id: 1, ...row } }),
         progress: row => handlers.get('chat')({ chat_id: 1, ...row }),
     };
 }
 
-test('live Main retirement updates stay in one task row without chat bubbles or toasts', t => {
+test('only Main updates one task row; interleaved helper checkpoints do not reset its count', t => {
     const f = fixture(t);
     f.progress({ role: 'assistant', is_progress: true, narration: true, task_id: TASK,
         text: 'Inspecting context', content: 'Inspecting context', ts: stamp(0) });
@@ -104,31 +104,10 @@ test('live Main retirement updates stay in one task row without chat bubbles or 
     for (const count of [1, 2]) {
         f.progress(progress(count));
         f.log(checkpoint(count));
+        f.log(checkpoint(1, false));
         assert.equal(timeline.children.length, before + 1);
         assert.ok(f.latestRetirement().includes(text(count)));
         assert.equal(f.feed.querySelectorAll('.chat-bubble').filter(row => !row.classList.contains('typing-bubble')).length, 0);
         assert.equal(document.body.querySelectorAll('.toast').length, 0);
     }
-});
-
-test('a helper checkpoint reuses its one row when live events are followed by durable history', async t => {
-    const start = { role: 'assistant', is_progress: true, narration: true,
-        task_id: TASK, text: 'Inspecting context', content: 'Inspecting context', ts: stamp(0) };
-    const history = [stored(start, 0), ...[2, 1].map(count => stored({
-        role: 'system', is_progress: true, ...checkpoint(count, false),
-    }, count))];
-    const f = fixture(t, history);
-    f.progress(start);
-    const timeline = f.card().querySelector('.chat-live-timeline');
-    const before = timeline.children.length;
-    for (const count of [1, 2]) {
-        f.log(checkpoint(count, false));
-        assert.ok(f.latestRetirement().includes(text(count)));
-    }
-    assert.equal(timeline.children.length, before + 1);
-    await f.instance.refreshHistory({ revision: 1 });
-    assert.equal(f.card().querySelector('.chat-live-timeline').children.length, before + 1);
-    assert.ok(f.latestRetirement().includes(text(2)));
-    assert.equal(f.feed.querySelectorAll('.chat-bubble').filter(row => !row.classList.contains('typing-bubble')).length, 0);
-    assert.equal(document.body.querySelectorAll('.toast').length, 0);
 });

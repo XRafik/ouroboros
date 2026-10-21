@@ -421,10 +421,9 @@ class NativeToolRoundReviewExecutor(ReviewSlotExecutor):
             self._round_source_refs.append(ref)
         self._last_persisted_round = self._rounds_used
 
-    def _observe_sent_view(self, messages: list, schemas: list, *, answered: bool = True) -> None:
+    def _observe_sent_view(self, messages: list, schemas: list) -> None:
         from ouroboros.tools.compact_context import record_context_view
-        if answered:
-            record_context_view(self._inspection_ctx, messages, schemas)
+        record_context_view(self._inspection_ctx, messages, schemas)
         for receipt in self._tool_receipts:
             receipt["delivered"] = True
         from ouroboros.delegate_output import acknowledge_staged_output_delivery
@@ -777,7 +776,7 @@ class NativeToolRoundReviewExecutor(ReviewSlotExecutor):
                             # came back: its receipt keys and custody must not
                             # read as a zero-send refusal.
                             self._rounds_used, last_send_chars = round_idx, transcript_chars  # a dispatched send IS the last one
-                            self._observe_sent_view(messages, schemas, answered=False)
+                            self._observe_sent_view(messages, schemas)
                             invoke_review_paid_stamp(self.assignment.dispatch_stamp)
                         observe_failed_review_send(self.usage_observer, exc)
                         if isinstance(exc, (BudgetExceeded, BillingAuthorityUnavailable, ControlAuthorityUnavailable)) and shape == "report" and last_content:

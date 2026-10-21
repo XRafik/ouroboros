@@ -1,18 +1,16 @@
-"""Append-only transcript invariant between the sends of one loop execution.
+"""Shared prefix identity, signed-reasoning retirement and send-boundary reporting.
 
-Between two sends of one loop execution the transcript is append-only: every
-send is a prefix extension of the previous send.  The loop observes the
-transcript each round actually dispatched; the seams that rewrite it on purpose
-(compaction: the automatic main-fit reclaim, the manual reclaim, the authored
-context view) stamp ``sanction_rewrite`` so the next observation names them,
-while a context-fit reprojection after a real overflow rewrites sent bytes too
-and is recorded as an ordinary break.
-OpenAI-family caches (Codex backend, OpenAI API, OpenRouter->OpenAI) reuse a
-previous request only when it is a byte-prefix of the next; a replaced tail or
-a rewritten earlier message discards the conversation cache (issue #906,
-measured 2026-09-14). The same comparison retires provider-signed reasoning
-after a changed prefix, before preparing or pricing a send. An answered send
-is the baseline; restored slots reuse their existing context observation.
+Pure digest/comparison helpers use only stdlib. Retirement delegates artifact
+custody; reporting imports loop_messages/context_budget only at call time,
+after initialization: loop_messages also consumes this module. Keep that
+boundary explicit rather than treating this module as a stdlib-only observer.
+
+Append-only sends preserve OpenAI-family prefix caching (#906, 2026-09-14).
+Sanctioned compaction names deliberate rewrites; other changes remain ordinary
+breaks. The same identity retires signed reasoning before preparation/pricing.
+Main records answered sends; review records every checked, dispatched attempt.
+Restored slots reuse their context observation. Helpers report only to Logs;
+Main additionally owns one updating task row and all sends carry the model fact.
 """
 
 from __future__ import annotations
@@ -133,6 +131,9 @@ def message_digest(message: Mapping[str, Any]) -> str:
 
     A string equals one text block; outer whitespace and empty text blocks do
     not count. Cache markers, private keys and reasoning are not the prefix.
+    Known limits: _public_value recursively ignores _* and cache_control inside
+    structured content, including nested input; images ignore detail/media_type.
+    Canonical tool arguments/results are text, whose nested keys remain visible.
     """
     payload = {
         "role": str(message.get("role") or ""),
@@ -164,6 +165,16 @@ def unsent_in_previous_send(slot: Any, message: Any) -> bool:
     return isinstance(previous, list) and message_digest(message) not in previous
 
 
+def _break_details(index: int, cause: str, previous_count: int, sanction: Any) -> dict:
+    """One owner of break classification and sanctioned-rewrite attribution."""
+    if cause == "messages":
+        kind = ("shrunk" if index >= previous_count else
+                "tail_replaced" if index == previous_count - 1 else "rewritten")
+    else:
+        kind = {"system": "system_rewritten", "tools": "tools_changed", "no_baseline": "no_baseline"}[cause]
+    return {"kind": kind, "sanctioned_by": sanction if cause == "messages" else None}
+
+
 def observe_send(
     slot: Any,
     messages: Sequence[Mapping[str, Any]],
@@ -189,8 +200,9 @@ def observe_send(
     setattr(slot, "_reasoning_retirement_break", None)
     previous = getattr(slot, DIGEST_ATTR, None)
     before_tools = getattr(slot, TOOLS_DIGEST_ATTR, None)
+    current_tools = tools_digest(tools)
     setattr(slot, DIGEST_ATTR, current)
-    setattr(slot, TOOLS_DIGEST_ATTR, tools_digest(tools))
+    setattr(slot, TOOLS_DIGEST_ATTR, current_tools)
     sanction = sanctioned_by or getattr(slot, SANCTION_ATTR, None)
     setattr(slot, SANCTION_ATTR, None)
     if not isinstance(previous, list):
@@ -199,26 +211,21 @@ def observe_send(
         (i for i in range(min(len(previous), len(current))) if previous[i] != current[i]),
         None,
     )
-    if before_tools is not None and before_tools != tools_digest(tools):
-        kind, index, sanction = "tools_changed", 0, None
+    if before_tools is not None and before_tools != current_tools:
+        cause, index = "tools", 0
     elif index is None:
         if len(current) >= len(previous):
             return None
-        kind, index = "shrunk", len(previous)
-    elif index == 0:
-        kind, sanction = "system_rewritten", None  # compaction never touches the system row
-    elif index == len(previous) - 1:
-        kind = "tail_replaced"
+        cause, index = "messages", len(previous)
     else:
-        kind = "rewritten"
+        cause = "system" if index == 0 else "messages"
     fact = {
         "checkpoint_kind": CHECKPOINT_KIND,
         "round": round_idx,
         "index": index,
-        "kind": kind,
         "previous_messages": len(previous),
         "current_messages": len(current),
-        "sanctioned_by": sanction,
+        **_break_details(index, cause, len(previous), sanction),
     }
     return None if reported == _break_identity(fact) else fact
 
@@ -235,11 +242,11 @@ def _baseline(slot: Any) -> tuple:
 
 
 def retire_unbound_reasoning(slot: Any, messages: List[Dict[str, Any]], tools: Any) -> Optional[Dict[str, Any]]:
-    """Retire bound reasoning from the first change to the last answered send.
+    """Retire bound reasoning from the first change to the recorded send.
 
     Cold continuations already carry messages and schemas in their context
     observation. Without either baseline nothing vouches for the signatures.
-    Repeated preparation is idempotent and never advances the answered baseline.
+    Repeated preparation is idempotent and never advances the recorded baseline.
     """
     previous, before_tools = _baseline(slot)
     if not isinstance(previous, list):
@@ -273,17 +280,23 @@ def reasoning_retirement_fact(usage: dict, round_idx: Any) -> str:
     fact = usage.get("_reasoning_retired_round") or {}
     if fact.get("round") != round_idx or not fact.get("turns"):
         return ""
-    return (f"Earlier reasoning not replayed: the conversation changed at message {fact['index']} ({fact['cause']}); "
-            f"signed reasoning of {fact['turns']} later turns was removed before this request; "
-            "visible text, tool calls and results are unchanged.")
+    reason = {"system": "the system view was rebuilt", "tools": "the tool set changed",
+              "no_baseline": "the task resumed without a record of its last request"}.get(fact["cause"], "")
+    if fact.get("sanctioned_by") == "compaction":
+        reason = "context folded"
+    explanation = f" ({reason})" if reason else ""
+    return (f"Earlier reasoning not replayed: an earlier part of this conversation changed{explanation}; "
+            f"your signed reasoning from {fact['turns']} later turn{'s' if fact['turns'] != 1 else ''} was removed before this request; "
+            "your visible text, tool calls and results are unchanged.")
 
 
 def prepare_reasoning_for_send(slot: Any, messages: list, tools: Any, *, round_idx: Any,
                                usage: dict, context: Any = None) -> Optional[dict]:
-    """Retire on the canonical view and publish one checkpoint plus one updating task row.
+    """Retire and record one Logs checkpoint; only Main supplies a round context.
 
     Reporting happens before dispatch, including on a later failed send. The
     answered-send observer consumes the same break identity without emitting it twice.
+    A Main round context also supplies its callback for the one updating task row.
     """
     fact = retire_unbound_reasoning(slot, messages, tools)
     if fact is None:
@@ -295,39 +308,38 @@ def prepare_reasoning_for_send(slot: Any, messages: list, tools: Any, *, round_i
                        ("reasoning_retired_blocks", fact["blocks"])):
         usage[key] = int(usage.get(key) or 0) + count
     earlier = usage.get("_reasoning_retired_round") or {}
-    current = {**fact, "round": round_idx}
+    previous, _ = _baseline(slot)
+    details = _break_details(fact["index"], fact["cause"], len(previous) if isinstance(previous, list) else 0,
+                             getattr(slot, SANCTION_ATTR, None))
+    current = {**fact, "round": round_idx, "sanctioned_by": details["sanctioned_by"]}
     if earlier.get("round") == round_idx:
         current.update(turns=earlier["turns"] + fact["turns"], blocks=earlier["blocks"] + fact["blocks"])
         if earlier["index"] < fact["index"]:
-            current.update(index=earlier["index"], cause=earlier["cause"])
+            current.update(index=earlier["index"], cause=earlier["cause"], sanctioned_by=earlier.get("sanctioned_by"))
     usage["_reasoning_retired_round"] = current
-    previous, _ = _baseline(slot)
-    kind = {"system": "system_rewritten", "tools": "tools_changed", "no_baseline": "no_baseline"}.get(fact["cause"])
-    if kind is None:
-        kind = "tail_replaced" if fact["index"] == len(previous) - 1 else "rewritten"
     checkpoint = {"checkpoint_kind": CHECKPOINT_KIND, "round": round_idx, "index": fact["index"],
-                  "kind": kind, "previous_messages": len(previous) if isinstance(previous, list) else None,
-                  "current_messages": len(messages), "sanctioned_by": getattr(slot, SANCTION_ATTR, None)
-                  if fact["cause"] == "messages" else None, "reasoning_retired": fact}
+                  "previous_messages": len(previous) if isinstance(previous, list) else None,
+                  "current_messages": len(messages), **details, "reasoning_retired": fact}
     if not checkpoint["sanctioned_by"]:
         usage["prompt_prefix_breaks"] = int(usage.get("prompt_prefix_breaks") or 0) + 1
     if slot is not None:
         slot._reasoning_retirement_break = _break_identity(checkpoint)
-    context = context if context is not None else slot
+    main_context = context
+    context = main_context if main_context is not None else slot
     task_id = str(getattr(context, "task_id", "") or "")
-    text = (f"Earlier reasoning not replayed after {usage['reasoning_retired']} conversation changes "
-            f"({usage['reasoning_retired_turns']} turns, {usage['reasoning_retired_blocks']} blocks).")
-    row = {"card_row": "timeline", "card_row_id": f"{task_id}:reasoning_retired"}
-    progress = getattr(context, "emit_progress", None) or getattr(slot, "_reasoning_retirement_progress", None)
+    progress = (getattr(main_context, "emit_progress", None) or getattr(slot, "_reasoning_retirement_progress", None)
+                if main_context is not None else None)
     if callable(progress):
-        progress(text, **row)
+        changes, turns = usage["reasoning_retired"], usage["reasoning_retired_turns"]
+        text = (f"Earlier reasoning not replayed after {changes} history change{'s' if changes != 1 else ''} "
+                f"({turns} turn{'s' if turns != 1 else ''}).")
+        progress(text, card_row="timeline", card_row_id=f"{task_id}:reasoning_retired")
         checkpoint["progress_row_emitted"] = True
-    else:
-        # Non-Main actors have no progress callback; the checkpoint itself owns the row.
-        checkpoint.update(system_type="task_checkpoint", text=text, **row)
     drive_logs = getattr(context, "drive_logs", None)
-    if drive_logs is None and getattr(slot, "drive_root", None):
-        drive_logs = Path(slot.drive_root) / "logs"
+    if callable(drive_logs):
+        drive_logs = drive_logs()
+    elif main_context is None or drive_logs is None:
+        drive_logs = Path(slot.drive_root) / "logs" if getattr(slot, "drive_root", None) else None
     _emit_checkpoint_event(getattr(context, "event_queue", None), task_id, drive_logs, checkpoint)
     return fact
 

@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import json
+import queue
 from types import SimpleNamespace
 
 import pytest
 
 from ouroboros import loop, loop_forced_finalization as forced, task_pacing
-from ouroboros.transcript_prefix import observe_send
+from ouroboros.transcript_prefix import observe_send, retire_unbound_reasoning
+from tests._dialogue import chat_rows, progress_rows
 from tests.test_consolidator_context_fit import fit as _consolidation_fit
 from tests.test_native_review_context_facts import _executor
 from tests.test_native_tool_round_executor import _ScriptedLLM, _tool_call, _VERDICT
@@ -115,6 +118,64 @@ def test_forced_final_retires_before_appending_its_prompt_and_measuring(tmp_path
     assert ctx.accumulated_usage.get("reasoning_retired", 0) == int(changed)
 
 
+class _ReachedSecondForcedSend(BaseException):
+    """Stop after the real forced owner-refresh path has prepared its second send."""
+
+
+@pytest.mark.parametrize("images,incoming_image,remaining,retired", [
+    (10, False, 10, False), (9, True, 10, False), (10, True, 5, True),
+])
+def test_forced_owner_refresh_rechecks_reasoning_after_real_image_delivery(
+    tmp_path, monkeypatch, images, incoming_image, remaining, retired,
+):
+    from tests.test_live_image_delivery import pixels
+
+    ctx = _prepared_context(tmp_path, changed=False)
+    encoded = base64.b64encode(pixels()).decode()
+    image = {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}}
+    ctx.messages.insert(2, {"role": "user", "content": [copy.deepcopy(image) for _ in range(images)]})
+    observe_send(ctx.tools._ctx, ctx.messages[:-2], round_idx=1, tools=TOOLS)
+    ctx.incoming_messages = queue.Queue()
+    sent, measured = [], []
+
+    def measure(_ctx, messages):
+        measured.append(copy.deepcopy(messages))
+
+    def chat(_llm, messages, *_args, **_kwargs):
+        sent.append(copy.deepcopy(messages))
+        if len(sent) == 2:
+            raise _ReachedSecondForcedSend()
+        incoming = {"text": "Use the new owner input in the final answer."}
+        if incoming_image:
+            incoming.update(image_base64=encoded, image_mime="image/png")
+        ctx.incoming_messages.put(incoming)
+        return {"role": "assistant", "content": "First draft."}, 0.0
+
+    monkeypatch.setattr(forced, "_forced_physical_context", measure)
+    monkeypatch.setattr(loop, "_delivery_evidence_state", lambda *_a, **_kw: None)
+    monkeypatch.setattr(loop, "_finalize_forced_services", lambda *_a, **_kw: None)
+    monkeypatch.setattr(forced, "_forced_subject_prompt", lambda *_a, **_kw: "")
+    monkeypatch.setattr(loop, "call_llm_with_retry", chat)
+    with pytest.raises(_ReachedSecondForcedSend):
+        forced._forced_final_answer(ctx, prompt="Give the final answer.", fallback_text="fallback",
+                                    reason_code="round_limit", _prompt_prepared=True)
+    assert bound_rows(sent[0]) == [3, 5, 7]
+    live_images = [block for row in sent[1] if isinstance(row.get("content"), list)
+                   for block in row["content"] if isinstance(block, dict)
+                   and block.get("type") in {"image", "image_url"}]
+    assert len(live_images) == remaining
+    assert bound_rows(sent[1]) == bound_rows(measured[1]) == ([] if retired else [3, 5, 7])
+    assert "[FORCED_OWNER_REFRESH]" in json.dumps(sent[1])
+    assert ctx.accumulated_usage.get("reasoning_retired", 0) == int(retired)
+    facts = [row["content"] for row in sent[1] if isinstance(row.get("content"), str)
+             and "Earlier reasoning not replayed:" in row["content"]]
+    assert len(facts) == int(retired)
+    if retired:
+        assert "[CONTEXT_FACTS]" in facts[0]
+        assert "your signed reasoning from 3 later turns" in facts[0]
+        assert "your visible text, tool calls and results are unchanged" in facts[0]
+
+
 @pytest.mark.parametrize("changed", [False, True])
 def test_wrapup_retires_before_send_projection_measurement_and_pricing(tmp_path, monkeypatch, changed):
     from ouroboros import loop_llm_call
@@ -191,52 +252,95 @@ def _signed_call(name, arguments, call_id):
             "tool_calls": [_tool_call(name, arguments, call_id)]}
 
 
+def _helper_retirement_logs(context, count):
+    from ouroboros.tools.registry import ToolContext
+
+    assert isinstance(context, ToolContext) and callable(context.drive_logs)
+    path = context.drive_logs() / "events.jsonl"
+    rows = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    retired = [row for row in rows if row.get("reasoning_retired")]
+    assert len(retired) == count
+    for row in retired:
+        assert row["type"] == "task_checkpoint" and row["checkpoint_kind"] == "prompt_prefix_break"
+        assert row["task_id"] == context.task_id
+        assert not {"system_type", "text", "card_row", "card_row_id", "progress_row_emitted"} & row.keys()
+    assert progress_rows(context.drive_root) == []
+    assert chat_rows(context.drive_root) == []
+    return retired
+
+
+@pytest.mark.parametrize("surface", ["multi_model_review", "deep_self_review"])
 @pytest.mark.parametrize("fold", [False, True])
-def test_native_review_uses_the_previous_answered_view_before_chat(tmp_path, fold):
+def test_native_review_retires_before_chat_and_records_only_logs(tmp_path, fold, surface):
     second = (_signed_call("compact_context", {"working_note": "The source remains in its checkpoint.", "keep_unit_ids": []}, "fold")
               if fold else _signed_call("read_file", {"path": "source.txt"}, "read-again"))
     llm = _ScriptedLLM([
         _signed_call("read_file", {"path": "source.txt"}, "read"), second, {"content": _VERDICT},
     ])
     executor = _executor(tmp_path, llm)
+    executor.assignment.request.surface = surface
     result = executor.execute()
     assert result.raw_text == _VERDICT and len(llm.calls) == 3
     assert len(bound_rows(llm.calls[1]["messages"])) == 1
     assert len(bound_rows(llm.calls[2]["messages"])) == (0 if fold else 2)
     assert result.usage.get("reasoning_retired", 0) == int(fold)
+    _helper_retirement_logs(executor._inspection_ctx, int(fold))
     if fold:
         assert executor._view_receipt["status"] == "applied"
         assert "Earlier reasoning not replayed:" in json.dumps(llm.calls[2]["messages"])
 
 
-def test_failed_native_send_keeps_the_answered_baseline_even_with_dispatch_custody(tmp_path):
+@pytest.mark.parametrize("changed", [False, True])
+def test_failed_native_send_records_the_checked_view_for_metadata_and_later_binding(tmp_path, changed):
+    from ouroboros.context_compaction import context_reclaim_transcript_sha256
+    from ouroboros.review_native_episode import _wire_size
+
     error = RuntimeError("The provider did not answer.")
     error.physical_attempt_capture = SimpleNamespace(state="settled")
 
     class RefusingLLM(_ScriptedLLM):
         def chat(self, **kwargs):
-            if self.calls:
+            if len(self.calls) == 2:
                 self.calls.append({**kwargs, "messages": copy.deepcopy(kwargs["messages"])})
                 raise error
             return super().chat(**kwargs)
 
-    llm = RefusingLLM([_signed_call("read_file", {"path": "source.txt"}, "read")])
+    llm = RefusingLLM([
+        _signed_call("read_file", {"path": "source.txt"}, "read-1"),
+        _signed_call("read_file", {"path": "source.txt"}, "read-2"),
+    ])
     executor = _executor(tmp_path, llm)
     with pytest.raises(RuntimeError) as raised:
         executor.execute()
     assert raised.value is error
-    assert len(llm.calls) == 2
-    assert executor._inspection_ctx._last_context_observation["messages"] == llm.calls[0]["messages"]
-    assert executor._inspection_ctx._last_context_observation["messages"] != llm.calls[1]["messages"]
+    assert len(llm.calls) == 3
+    latest = llm.calls[-1]
+    observed = executor._inspection_ctx._last_context_observation
+    assert observed["messages"] == latest["messages"] != llm.calls[-2]["messages"]
+    assert observed["tool_schemas"] == latest["tools"]
+    usage = executor._episode_usage
+    assert usage["native_rounds"] == 3
+    assert usage["native_context"]["view_revision"] == context_reclaim_transcript_sha256(latest["messages"])
+    assert usage["native_context"]["serialized_chars"] == usage["native_transcript_chars"] == _wire_size(
+        latest["messages"], latest["tools"])
+    assert usage["native_context"]["previous_request"]["round"] == 2
+    replay = copy.deepcopy(latest["messages"])
+    assert bound_rows(replay) == [2, 4]
+    if changed:
+        replay[3]["content"] = "The earlier read result changed after dispatch."
+    fact = retire_unbound_reasoning(executor._inspection_ctx, replay, latest["tools"])
+    assert fact == ({"index": 3, "cause": "messages", "turns": 1, "blocks": 1} if changed else None)
+    assert bound_rows(replay) == ([2] if changed else [2, 4])
 
 
 @pytest.mark.parametrize("changed", [False, True])
-def test_waiting_native_review_retires_against_its_answered_observation(tmp_path, monkeypatch, changed):
+def test_waiting_native_review_retires_against_its_sent_observation(tmp_path, monkeypatch, changed):
     from ouroboros.tools.compact_context import record_context_view
+    from ouroboros.tools.registry import ToolContext
 
     executor = _executor(tmp_path, _ScriptedLLM([]), sources=False)
     messages = history()
-    executor._inspection_ctx = SimpleNamespace(task_id="native-reprepare", drive_root=tmp_path)
+    executor._inspection_ctx = ToolContext(repo_dir=tmp_path, drive_root=tmp_path / "data", task_id="native-reprepare")
     record_context_view(executor._inspection_ctx, messages[:6], TOOLS)
     if changed:
         messages[3]["content"] = "The earlier tool result was rewritten."
@@ -247,6 +351,7 @@ def test_waiting_native_review_retires_against_its_answered_observation(tmp_path
     assert prepared["messages"] is messages
     assert bound_rows(messages) == ([2] if changed else [2, 4, 6])
     assert executor._episode_usage.get("reasoning_retired", 0) == int(changed)
+    _helper_retirement_logs(executor._inspection_ctx, int(changed))
 
 
 def _knowledge(tmp_path):
@@ -275,18 +380,16 @@ def test_consolidator_retires_after_authored_compaction_before_observed_chat(tmp
     assert len(bound_rows(llm.calls[1]["messages"])) == 1
     assert len(bound_rows(llm.calls[2]["messages"])) == (0 if fold else 2)
     assert usage.get("reasoning_retired", 0) == int(fold)
+    _helper_retirement_logs(knowledge.context, int(fold))
     if fold:
         assert "Earlier reasoning not replayed:" in json.dumps(llm.calls[2]["messages"])
         result = next(row["content"] for row in llm.calls[2]["messages"] if row.get("tool_call_id") == "fold")
         assert json.loads(result)["context_view"]["status"] == "applied"
 
 
-def test_consolidator_timeline_accumulates_retirements_across_answered_rounds(tmp_path, monkeypatch, consolidation_fit):
+def test_consolidator_accumulates_usage_and_separate_log_facts_across_answered_rounds(tmp_path, consolidation_fit):
     from ouroboros import consolidator
 
-    events = []
-    monkeypatch.setattr("ouroboros.loop_messages._emit_checkpoint_event",
-                        lambda _queue, _task, _logs, data: events.append(data))
     knowledge = _knowledge(tmp_path)
     llm = _ScriptedLLM([
         _signed_call("read_file", {"path": "source.txt"}, "read-1"),
@@ -298,13 +401,9 @@ def test_consolidator_timeline_accumulates_retirements_across_answered_rounds(tm
     content, usage = consolidator._call_consolidation_llm(llm, "Summarize the source.", "Probe", knowledge=knowledge)
     assert content == "Summary of the source." and len(llm.calls) == 5
     assert usage["reasoning_retired"] == usage["reasoning_retired_turns"] == usage["reasoning_retired_blocks"] == 2
-    events = [event for event in events if event.get("reasoning_retired")]
-    assert len(events) == 2
-    assert [event["card_row_id"] for event in events] == ["light-binding:reasoning_retired"] * 2
-    assert [event["text"] for event in events] == [
-        "Earlier reasoning not replayed after 1 conversation changes (1 turns, 1 blocks).",
-        "Earlier reasoning not replayed after 2 conversation changes (2 turns, 2 blocks).",
-    ]
+    events = _helper_retirement_logs(knowledge.context, 2)
+    assert [event["round"] for event in events] == [3, 5]
+    assert all(event["reasoning_retired"]["turns"] == event["reasoning_retired"]["blocks"] == 1 for event in events)
 
 
 def test_unanswered_consolidator_send_does_not_replace_the_answered_baseline(tmp_path, consolidation_fit):

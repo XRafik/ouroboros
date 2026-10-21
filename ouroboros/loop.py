@@ -58,7 +58,7 @@ from ouroboros.loop_tool_execution import (
 )
 from ouroboros.loop_llm_call import TRANSPORT_DEATHS_KEY, call_llm_with_retry, emit_llm_usage_event, forced_response_is_incomplete, forced_response_parts, provider_no_call_source  # noqa: F401 -- the loop module keeps its historical import surface for the L-B leaves
 from ouroboros.transcript_prefix import observe_send as _observe_transcript_send
-from ouroboros.transcript_prefix import retire_main_reasoning as _retire_unbound_reasoning  # noqa: F401 -- shared send boundary
+from ouroboros.transcript_prefix import retire_main_reasoning as _retire_main_reasoning  # noqa: F401 -- shared send boundary
 from ouroboros.delegate_hold import (
     close_hold as _delegate_hold_close,
     hold_step as _delegate_hold_step,
