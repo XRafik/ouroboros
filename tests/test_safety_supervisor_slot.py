@@ -152,4 +152,3 @@ def test_generic_http_save_cannot_replace_inherited_checker(settings_root, monke
         allowed = client.post("/api/settings", json={"OUROBOROS_MODEL_HEAVY": "unrelated"})
         assert allowed.status_code == 200
         assert json.loads(path.read_text())["OUROBOROS_MODEL_HEAVY"] == "unrelated"
-

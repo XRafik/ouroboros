@@ -84,5 +84,3 @@ def get_safety_mode(kind: str = "owner") -> str:
     key = "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE" if kind == "consciousness" else "OUROBOROS_SAFETY_MODE"
     default_val = str(cfg.SETTINGS_DEFAULTS[key])
     return cfg.normalize_safety_mode(cfg.runtime_setting(key, default_val) or default_val)
-
-
