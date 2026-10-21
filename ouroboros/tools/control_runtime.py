@@ -834,19 +834,18 @@ def _finish_task(ctx: ToolContext, action: str, answer: str | None = None,
                  answer_sha256: str | None = None, rationale: str = "",
                  acceptance_subject: dict | None = None, pending_review: str | None = None,
                  silent: bool = False) -> str:
-    """Stage an author act; only a wake's own direct turn can choose silence."""
+    """Stage an author act; an own-clock or focused direct turn may choose silence."""
     allow_empty = False
     if silent:
         if action != "finish":
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent requires action=finish"))
-        from ouroboros.consciousness_authority import CONSCIOUSNESS_CATEGORY, is_consciousness_origin
+        from ouroboros.consciousness_authority import is_focus_wake, is_own_clock_wake
         metadata = getattr(ctx, "task_metadata", None)
         if not bool(getattr(ctx, "is_direct_chat", False)):
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn"))
-        if not (is_consciousness_origin(metadata)
-                and str((metadata or {}).get("usage_category") or "") == CONSCIOUSNESS_CATEGORY):
+        if not (is_own_clock_wake(metadata) or is_focus_wake(metadata)):
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn, "
                      "not on the tasks it started or any other turn"))

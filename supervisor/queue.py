@@ -551,20 +551,28 @@ def ensure_control_task_result(task_id: str) -> Dict[str, Any]:
 
 
 def live_consciousness_root_count() -> int:
-    """Live PENDING+RUNNING roots that consciousness started (its origin marker on the
-    task metadata; subagents are their root's business). Sibling of ``queue_has_task_type``."""
-    def _counts(task: Any) -> bool:
-        return (
-            isinstance(task, dict)
-            and str(task.get("delegation_role") or "root") == "root"
-            and is_consciousness_origin(task.get("metadata"))
-            and not task.get("_consciousness_continuation")  # a named continuation is not spontaneous
-        )
+    """Count exactly the independent autonomous roots shown to the mind."""
+    return len(live_consciousness_roots())
 
-    live = sum(1 for task in PENDING if _counts(task))
-    return live + sum(
-        1 for meta in RUNNING.values() if isinstance(meta, dict) and _counts(meta.get("task"))
-    )
+
+def live_consciousness_roots() -> list[dict]:
+    """Live roots by provenance; wakes, children and technical continuations consume no slot."""
+    from ouroboros.consciousness_authority import WORK_KIND_CONSCIOUSNESS, wake_cause, work_kind
+
+    with _queue_lock:
+        tasks = [*PENDING, *(meta.get("task") or {} for meta in RUNNING.values())]
+        counted = {}
+        for task in tasks:
+            metadata = task.get("metadata") or {}
+            task_id = str(task.get("id") or "")
+            if (not task_id or str(task.get("delegation_role") or "root") != "root"
+                    or task.get("parent_task_id") or task.get("_consciousness_continuation")
+                    or wake_cause(metadata) or work_kind(metadata) != WORK_KIND_CONSCIOUSNESS):
+                continue
+            counted[task_id] = {"task_id": task_id, "title": str(task.get("title") or task.get("suggested_name") or task_id),
+                                "consciousness_cause": str(metadata.get("consciousness_cause") or "started"),
+                                "origin_wake_task_id": str(metadata.get("origin_wake_task_id") or "")}
+        return list(counted.values())
 
 
 def _consciousness_root(task: Dict[str, Any]) -> bool:
