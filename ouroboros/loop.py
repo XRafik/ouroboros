@@ -58,6 +58,7 @@ from ouroboros.loop_tool_execution import (
 )
 from ouroboros.loop_llm_call import TRANSPORT_DEATHS_KEY, call_llm_with_retry, emit_llm_usage_event, forced_response_is_incomplete, forced_response_parts, provider_no_call_source  # noqa: F401 -- the loop module keeps its historical import surface for the L-B leaves
 from ouroboros.transcript_prefix import observe_send as _observe_transcript_send
+from ouroboros.transcript_prefix import retire_main_reasoning as _retire_main_reasoning  # noqa: F401 -- shared send boundary
 from ouroboros.delegate_hold import (
     close_hold as _delegate_hold_close,
     hold_step as _delegate_hold_step,
@@ -373,7 +374,7 @@ def _record_transcript_prefix(ctx, messages, round_idx, accumulated_usage,
     from ouroboros.context_input_selection import capture_historical_inputs
 
     capture_historical_inputs(ctx)
-    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx)
+    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx, tools=tool_schemas)
     if not fact:
         return
     _emit_checkpoint_event(event_queue, task_id, drive_logs, fact)
@@ -448,17 +449,21 @@ def _resume_continuation(tools: Any, carriers: tuple, messages: list, trace: dic
     """
     saved, saved_pause, saved_working = carriers
     if saved:
-        return (*resume_native_loop(tools, saved, messages, trace, usage, seen), cost_ceiling, True, False, False)
-    if saved_pause:
+        resumed = (*resume_native_loop(tools, saved, messages, trace, usage, seen), cost_ceiling, True, False, False)
+    elif saved_pause:
         resumed = resume_paused_loop(tools, saved_pause, messages, trace, usage, seen,
                                      budget_remaining_usd=budget_remaining_usd)
         no_tool = saved_pause.get("resume_point", {}).get("budget_tail") == "no_tool"
-        return (*resumed, _resolve_task_cost_ceiling(tools._ctx, budget_remaining_usd), not no_tool, no_tool, no_tool)
-    if saved_working:
+        resumed = (*resumed, _resolve_task_cost_ceiling(tools._ctx, budget_remaining_usd), not no_tool, no_tool, no_tool)
+    elif saved_working:
         *resumed, tool_tail = working_checkpoint.resume_from_working(tools, saved_working, messages, trace, usage, seen)
         no_tool = not tool_tail and (saved_working.get("working") or {}).get("boundary") == working_checkpoint.RESUMED
-        return (*resumed, _resolve_task_cost_ceiling(tools._ctx, budget_remaining_usd), tool_tail, no_tool, not tool_tail)
-    return (*route, cost_ceiling, False, False, False)
+        resumed = (*resumed, _resolve_task_cost_ceiling(tools._ctx, budget_remaining_usd), tool_tail, no_tool, not tool_tail)
+    else:
+        resumed = (*route, cost_ceiling, False, False, False)
+    from ouroboros.subagent_bootstrap import append_startup_receipt
+    append_startup_receipt(tools._ctx, messages, getattr(tools._ctx, "_configured_startup_wake", ""), seen)
+    return resumed
 
 
 def _load_working_recovery(ctx: Any, messages: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -467,6 +472,8 @@ def _load_working_recovery(ctx: Any, messages: List[Dict[str, Any]]) -> Dict[str
 
     try:
         state = load_recovery(ctx)
+        if not state and getattr(ctx, "working_recovery", None) is not None:
+            raise ValueError("working recovery locator is unusable")
         if state:
             consume_recovery(ctx, state["_working_handoff"])  # captured: the replaced source retires
         return state
@@ -506,6 +513,7 @@ def run_llm_loop(
         llm_trace[VIEW_TRACE_KEY] = dict(ctx.memory_view_facts)
     accumulated_usage: Dict[str, Any] = {"_task_attempt": getattr(ctx, "task_attempt", None)}
     ctx._accumulated_usage = accumulated_usage
+    ctx._reasoning_retirement_progress = emit_progress
     invalidate_task_cache_splits(task_id or getattr(ctx, "task_id", ""))  # rebuilt attempt = new prefix
     max_retries = 3
     saved = load_owner_wait(ctx)
