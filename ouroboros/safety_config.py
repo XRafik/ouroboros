@@ -9,8 +9,11 @@ def safety_configuration(settings: dict) -> tuple:
     from ouroboros.settings_scales import normalize_safety_mode
     from ouroboros.model_slots import (normalize_model_role_options, MODEL_ACCOUNTS_KEY,
                                      MODEL_CONTEXT_WINDOWS_KEY, MODEL_PROCESSING_PREFERENCES_KEY)
+    from ouroboros.server_runtime import authored_model_slots, propose_unauthored_model_slots, apply_runtime_provider_defaults
 
     values = {**SETTINGS_DEFAULTS, **settings}
+    propose_unauthored_model_slots(values, authored_model_slots(settings))
+    values = apply_runtime_provider_defaults(values)[0]
     slot = "safety" if str(values.get("OUROBOROS_MODEL_SAFETY") or "").strip() else "light"
     if slot == "light" and not str(values.get("OUROBOROS_MODEL_LIGHT") or "").strip():
         slot = "main"

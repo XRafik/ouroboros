@@ -375,9 +375,6 @@ def _merge_settings_payload(current: Dict[str, Any], body: Dict[str, Any]) -> Di
         if looks_masked_settings_secret(text_key, value):
             continue
         merged[text_key] = value
-    from ouroboros.config import safety_configuration
-    if not runtime_mode_at_least(get_runtime_mode(), "cyber_pro") and safety_configuration(current) != safety_configuration(merged):
-        raise PermissionError("The resolved Safety Supervisor is owner-controlled; use /api/owner/safety-model.")
     return merged
 
 
@@ -1342,6 +1339,9 @@ def _api_settings_post_locked(request: Request, body: Any) -> JSONResponse:
         unauthored = (repropose_unedited_slots(current, document, body, shown)
                       | repropose_unedited_catalog(current, document, body, shown))
         current, provider_defaults_changed, provider_default_keys = apply_runtime_provider_defaults(current)
+        from ouroboros.config import safety_configuration
+        if not runtime_mode_at_least(current_runtime_mode, "cyber_pro") and safety_configuration(old_effective_settings) != safety_configuration(current):
+            raise PermissionError("The resolved Safety Supervisor is owner-controlled; use /api/owner/safety-model.")
         if str(current.get("LOCAL_MODEL_SOURCE", "") or "").strip() and not has_startup_ready_provider(current):
             return unsaved_error("Local-only setups must route at least one model to the local runtime.", 400)
         # A catalog save retires the former review lanes: the pool replaces them.

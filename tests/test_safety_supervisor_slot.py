@@ -77,6 +77,23 @@ def test_only_resolved_route_is_guarded(settings_root):
     assert json.loads(path.read_text())["OUROBOROS_MODEL_LIGHT"] == "different-light"
 
 
+def test_provider_defaults_cannot_replace_an_unauthored_checker(settings_root):
+    config, path = settings_root
+    path.write_text(json.dumps({"OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full"}))
+    before = path.read_bytes()
+    with pytest.raises(PermissionError):
+        config.save_settings({"ANTHROPIC_API_KEY": "fixture-key"})
+    assert path.read_bytes() == before
+    from ouroboros.browser_policy import _is_owner_settings_self_elevation_post
+    request = SimpleNamespace(url="http://localhost/api/settings", method="POST", post_data='{"ANTHROPIC_API_KEY":"fixture-key"}')
+    assert _is_owner_settings_self_elevation_post(request)
+    _owner_write_settings({"OUROBOROS_MODEL_SAFETY": "fixed/checker"},
+                         allow_safety_lowering=True, authored_keys=("OUROBOROS_MODEL_SAFETY",))
+    assert not _is_owner_settings_self_elevation_post(request)
+    config.save_settings({**config.load_settings(), "ANTHROPIC_API_KEY": "fixture-key"})
+    assert json.loads(path.read_text())["ANTHROPIC_API_KEY"] == "fixture-key"
+
+
 def test_owner_endpoints_keep_mode_response_shape_and_audit(settings_root):
     config, path = settings_root
     from ouroboros.gateway import safety_settings as endpoints

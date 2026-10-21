@@ -294,12 +294,16 @@ def _is_owner_settings_self_elevation_post(request: Any) -> bool:
         body = str(request.post_data or "").lower()
     except Exception:
         return False
-    from ouroboros.config import load_settings, safety_configuration
+    from ouroboros import config
+    from ouroboros.server_runtime import repropose_unedited_slots
     import json
     try:
         proposed = json.loads(request.post_data or "{}")
-        current = load_settings()
-        if safety_configuration(current) != safety_configuration({**current, **proposed}):
+        current = config.load_settings()
+        candidate = {**current, **proposed}
+        document = config._settings_integrity.read_settings_json_verified(config.SETTINGS_PATH) or {}
+        repropose_unedited_slots(candidate, document, proposed, current)
+        if config.safety_configuration(current) != config.safety_configuration(candidate):
             return True
     except (TypeError, ValueError):
         return True

@@ -858,10 +858,10 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
     if draft_error:
         return unsaved_error(draft_error, 400, code="invalid_available_subagents")
 
-    # BEFORE the read: a write landing between the two makes the derived document NEWER than the
-    # fingerprint, so the locked precondition refuses (the one ordering that fails closed). The
-    # whole document is written back, so without this a concurrent owner write would be silently
-    # undone while the owner is told the save succeeded (the owner endpoints' staleness digest).
+    # Complete startup migrations before capturing freshness; our own migration is not a concurrent edit.
+    from ouroboros.config import load_settings
+    await asyncio.to_thread(load_settings)
+    # The fingerprint still precedes the deciding read: concurrent owner changes must refuse the save.
     read_fingerprint = settings_document_digest()
     old_settings, current, error = _prepared_settings(body)
     if error:
