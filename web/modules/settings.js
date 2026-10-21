@@ -34,7 +34,7 @@ import { extensionActionStatus } from './extension_status_text.js';
 import { bindLanguageSettings } from './settings_language.js';
 import { resetSecretReveals } from './settings_secrets.js';
 import { syncPolicyState } from './settings_policy.js';
-import { applySafetySettings, bindSafetySettings, safetyOwnerDraft, saveSafetyOwnerChanges } from './settings_safety.js';
+import { applySafetySettings, bindSafetySettings, checkerSaveEffect, checkerTabsText, safetyOwnerDraft, saveSafetyChecker, saveSafetyOwnerChanges } from './settings_safety.js';
 import { applyConsciousnessSettings, bindConsciousnessSettings } from './settings_consciousness.js';
 
 let markSettingsDirty = () => {};
@@ -1348,14 +1348,15 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
         const body = collectBody();
         loadSequence += 1;
         const sentRevision = draftRevision;
+        const subagentsChanged = subagentSettingsFingerprint(body.OUROBOROS_SUBAGENTS)
+            !== subagentSettingsFingerprint(currentSettings?.OUROBOROS_SUBAGENTS);
         const ownerDraft = {
             runtime: byId('s-runtime-mode').value || 'advanced',
             autoGrant: Boolean(byId('s-auto-grant-reviewed-skills').checked),
             context: byId('s-context-mode').value || 'max',
-            safety: safetyOwnerDraft(page, body),
+            // Takes the checker's changed keys (Models, Agents) out of `body`; they are written first, below.
+            safety: safetyOwnerDraft(page, body, currentSettings),
         };
-        const subagentsChanged = subagentSettingsFingerprint(body.OUROBOROS_SUBAGENTS)
-            !== subagentSettingsFingerprint(currentSettings?.OUROBOROS_SUBAGENTS);
 
         // Phase 1 of the save: the button goes busy and the status says so.
         // Capability probes on review-route changes make a save take seconds;
@@ -1365,7 +1366,9 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
         setButtonBusy(saveButton, true);
         setStatus('Saving…', 'muted');
         let saved = false;
+        let checkerSaved = false;
         try {
+            checkerSaved = await saveSafetyChecker(ownerDraft.safety);
             const data = await apiClient.saveSettings(body);
             if (data?.status !== 'saved') {
                 const error = new Error(data?.error || 'The server did not confirm the settings save.');
@@ -1405,8 +1408,9 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
             const ownerError = runtimeModeError || autoGrantError || contextModeError || safety.error;
             const draftKept = ownerError || sentRevision !== draftRevision || !(await loadSettings({ awaitEnrichment: false }));
             syncAutoGrantBridgeState();
-            let statusMsg = settingsSaveEffectText(data);
-            let statusType = data.restart_required && !data.no_changes ? 'warn' : 'ok';
+            const effect = checkerSaveEffect(data, ownerDraft.safety);
+            let statusMsg = settingsSaveEffectText(effect);
+            let statusType = effect.restart_required && !effect.no_changes ? 'warn' : 'ok';
             if (subagentsChanged && data.agent_task_running) {
                 statusMsg += '. Available subagents take effect for new child tasks; '
                     + 'the current task keeps its existing routes';
@@ -1455,7 +1459,7 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
                 ? `Settings were saved, but a later step failed: ${e.message}. Your draft is kept.`
                 : saveOutcomeUnknown
                     ? `Save outcome unknown: ${e.message}. Your draft is kept. Reload Settings to check before saving again.`
-                    : `Settings were not saved: ${e.message}. Your draft is kept.`, 'warn');
+                    : `${checkerSaved ? `Changes in ${checkerTabsText(ownerDraft.safety)} were saved; the other settings were not` : 'Settings were not saved'}: ${e.message}. Your draft is kept.`, 'warn');
         } finally {
             settingsSaving = false;
             setButtonBusy(saveButton, false);

@@ -222,17 +222,21 @@ export async function saveSafetyRules(rules) {
     return ownerAnswer(await jsonPost('/api/owner/safety-rules', { rules: String(rules ?? '') }), 'Your rules');
 }
 
-/** One owner transaction for the resolved checker: the Safety Supervisor model and/or the Agents roster. */
-async function saveCheckerSettings(settings, what) {
-    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), what);
-}
+/**
+ * The settings only the owner's checker transaction may change (`gateway/safety_settings.py`
+ * SAFETY_MODEL_KEYS): the Safety Supervisor slot and the slots an empty one inherits (Light, then Main),
+ * their Local flags and per-slot options, and the Agents roster, where the second-check row is marked.
+ * Outside Cyber Pro the generic settings save refuses any change to the checker they resolve.
+ */
+export const SAFETY_MODEL_KEYS = Object.freeze([
+    'OUROBOROS_MODEL_SAFETY', 'OUROBOROS_MODEL_LIGHT', 'OUROBOROS_MODEL', 'USE_LOCAL_LIGHT', 'USE_LOCAL_MAIN',
+    'OUROBOROS_MODEL_ACCOUNTS', 'OUROBOROS_MODEL_CONTEXT_WINDOWS', 'OUROBOROS_MODEL_PROCESSING_PREFERENCES',
+    'OUROBOROS_SUBAGENTS',
+]);
 
-/** The Safety Supervisor model; empty inherits the Light model. A local model carries the ` (local)` label. */
-export async function saveSafetyModel(model, useLocal = undefined) {
-    let value = String(model ?? '').trim();
-    if (useLocal === false) value = value.replace(/ \(local\)$/, '');
-    if (value && useLocal === true && !value.endsWith(' (local)')) value = `${value} (local)`;
-    return saveCheckerSettings({ OUROBOROS_MODEL_SAFETY: value }, 'The Safety Supervisor model');
+/** One owner transaction for any of SAFETY_MODEL_KEYS; a refusal throws the server's sentence. */
+export async function saveCheckerSettings(settings) {
+    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), 'The model settings');
 }
 
 /** The Agents roster as saved (`OUROBOROS_SUBAGENTS`, a JSON string or object), or null when unreadable. */
@@ -243,19 +247,17 @@ export function parseRoster(raw) {
     } catch { return null; }
 }
 
-/** Mark one Agents row (or none, with '') as the row that re-checks flagged actions, in the saved roster. */
-export async function saveSafetyRecheck(rowId, settings = {}) {
-    const roster = parseRoster(settings.OUROBOROS_SUBAGENTS);
-    if (!roster) throw new Error('The Agents roster could not be read, so the second check was not saved.');
-    const items = roster.items.map((item) => ({ ...item, rechecks_flags: Boolean(rowId) && text(item?.subagent_id) === rowId }));
-    return saveCheckerSettings({ OUROBOROS_SUBAGENTS: { ...roster, items } }, 'The second check');
+/** The roster with one row (or none, with '') marked as the row that re-checks flagged actions. */
+export function markRecheckRow(roster, rowId) {
+    return { ...roster, items: roster.items.map((item) => ({ ...item, rechecks_flags: Boolean(rowId) && text(item?.subagent_id) === rowId })) };
 }
 
-/** The second-check facts read from the saved roster: the marked row, the rows that may be marked
- *  (an enabled API model row with Packet delivery) and whether a replay measured it (never, yet). */
+/** The second-check facts read from the saved roster: the marked row and why it does not run (`row_disabled`,
+ *  `delegation_off`), the rows that may be marked (an enabled API model row with Packet delivery) and whether a
+ *  replay measured it (never, yet). */
 export function recheckFromSettings(settings = {}) {
     const roster = parseRoster(settings.OUROBOROS_SUBAGENTS);
-    if (!roster) return { known: false, rowId: '', eligibleRows: [], measured: false };
+    if (!roster) return { known: false, rowId: '', offReason: '', eligibleRows: [], measured: false };
     const items = roster.items.filter(object);
     const eligible = items.filter((item) => text(item.route?.kind).toLowerCase() === 'api_model'
         && text(item.delivery || 'native').toLowerCase() === 'packet' && item.enabled !== false);
@@ -263,6 +265,8 @@ export function recheckFromSettings(settings = {}) {
     return {
         known: true,
         rowId: marked ? text(marked.subagent_id) : '',
+        // The host consults only an enabled marked row, and only while the roster's Delegation is on.
+        offReason: !marked ? '' : marked.enabled === false ? 'row_disabled' : roster.enabled === false ? 'delegation_off' : '',
         eligibleRows: [...new Set(eligible.map((item) => text(item.subagent_id)).filter(Boolean))],
         measured: false,
     };

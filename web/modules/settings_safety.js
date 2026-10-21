@@ -1,15 +1,20 @@
 // Settings › Behavior › Safety Supervisor: two coverage levels over one checker — "Your work" (what the owner
 // asked for) and "Consciousness" (what Ouroboros does on its own, places included) — the checker and second-check
-// facts, and the owner's rules. Every value here is owner-only: the generic settings save never carries it; Save
-// writes each changed one through its audited owner endpoint (consciousness_api.js), after the generic save.
+// facts, and the owner's rules. Every value here is owner-only: the generic settings save never carries it. Save
+// writes the checker's settings (from Models and Agents) through one owner transaction BEFORE the generic save,
+// and each changed level and the rules through their audited owner endpoints after it (consciousness_api.js).
 import { renderSegmentedField } from './page_header.js';
 import { escapeHtmlAttr as escapeHtml } from './utils.js';
 import { apiClient } from './api_client.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { settingsWriteFailure, syncEffortSegments } from './settings_controls.js';
 import { parseModelSource } from './route_editor_primitives.js';
-import { saveSafetyLevel, saveSafetyModel, saveSafetyRecheck, saveSafetyRules, recheckFromSettings } from './consciousness_api.js';
-import { SAFETY_KINDS, SAFETY_LEVELS, SAFETY_RANK, safetyLevelOf } from './consciousness_words.js';
+import { modelRoleMap } from './model_roles.js';
+import { subagentSettingsFingerprint } from './subagents_settings.js';
+import {
+    SAFETY_MODEL_KEYS, markRecheckRow, parseRoster, recheckFromSettings, saveCheckerSettings, saveSafetyLevel, saveSafetyRules,
+} from './consciousness_api.js';
+import { SAFETY_KINDS, SAFETY_LEVELS, SAFETY_RANK, listWords, safetyLevelOf } from './consciousness_words.js';
 import { bindRecheckMarks, recheckDraft, recheckSaved, syncRecheckState } from './safety_recheck.js';
 
 export const CONSCIOUSNESS_SAFETY_KEY = 'OUROBOROS_CONSCIOUSNESS_SAFETY_MODE';
@@ -72,6 +77,8 @@ export function secondCheckText(recheck, settings = {}) {
             ? 'Second check: Off. No Agents row can re-check yet: it needs an API model row with Packet delivery.'
             : 'Second check: Off';
     }
+    if (recheck.offReason === 'row_disabled') return 'Second check: Off (the marked row is disabled)';
+    if (recheck.offReason === 'delegation_off') return 'Second check: Off (Delegation is off in Agents)';
     return `Second check: ${agentRowHandle(recheck.rowId, settings)} re-checks flagged actions`;
 }
 
@@ -94,8 +101,9 @@ function paintLines(root, settings) {
     set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · ${settingsLinkHtml('models', 'Change in Models')}`);
     set('[data-safety-second-check]', `${escapeHtml(secondCheckText(recheck, settings))}${recheck.known
         ? ` · ${settingsLinkHtml('agents', 'Change in Agents')}` : ''}`);
+    // Said wherever the second check is offered, the default Off included: no replay has measured it.
     const unmeasured = root.querySelector('[data-safety-unmeasured]');
-    if (unmeasured) unmeasured.hidden = !(recheck.rowId && !recheck.measured);
+    if (unmeasured) unmeasured.hidden = !(recheck.known && !recheck.measured);
     syncRecheckState(recheck, root);
 }
 
@@ -133,20 +141,76 @@ export function applySafetySettings(root, settings = {}) {
     void refreshSafetySkipCounter(root);
 }
 
+const MODEL_ROLE_MAPS = new Set(['OUROBOROS_MODEL_ACCOUNTS', 'OUROBOROS_MODEL_CONTEXT_WINDOWS', 'OUROBOROS_MODEL_PROCESSING_PREFERENCES']);
+const sortedJson = (map) => JSON.stringify(Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))));
+
+/** One checker value as Save compares it with the loaded document: a model string, a Local flag, a per-slot map. */
+function checkerValueText(key, value) {
+    if (key === 'OUROBOROS_SUBAGENTS') return subagentSettingsFingerprint(value);
+    if (MODEL_ROLE_MAPS.has(key)) return sortedJson(modelRoleMap(value));
+    if (key.startsWith('USE_LOCAL_')) return String(value === true || /^(true|1|yes|on)$/i.test(String(value ?? '').trim()));
+    return String(value ?? '').trim();
+}
+
 /**
- * The owner-only draft: both levels, the rules, the second-check row, and the Safety Supervisor model as the
- * Models editor collected it into the generic body (`body`), so one Save writes it through its owner endpoint.
+ * Take the checker's changes out of the generic body: every key of SAFETY_MODEL_KEYS whose draft differs from the
+ * loaded document, the roster carrying the second-check mark. Outside Cyber Pro the generic save refuses any
+ * change to the checker they resolve (the Safety Supervisor slot, else Light, else Main), so they travel in one
+ * owner transaction instead; an unchanged key stays where it was and is never sent there. Returns
+ * `{settings, saved}` (the keys to send, the sentence once saved) or null.
  */
-export function safetyOwnerDraft(root, body = {}) {
+export function takeCheckerChanges(body, current = {}, mark = recheckDraft()) {
+    const settings = {};
+    for (const key of SAFETY_MODEL_KEYS) {
+        if (key !== 'OUROBOROS_SUBAGENTS' && key in body
+            && checkerValueText(key, body[key]) !== checkerValueText(key, current[key])) settings[key] = body[key];
+    }
+    const markChanged = mark !== null && mark !== recheckSaved();
+    const roster = parseRoster(body.OUROBOROS_SUBAGENTS ?? (markChanged ? current.OUROBOROS_SUBAGENTS : null));
+    const nextRoster = roster && markChanged ? markRecheckRow(roster, mark) : roster;
+    if (nextRoster && checkerValueText('OUROBOROS_SUBAGENTS', nextRoster) !== checkerValueText('OUROBOROS_SUBAGENTS', current.OUROBOROS_SUBAGENTS)) {
+        settings.OUROBOROS_SUBAGENTS = nextRoster;
+        delete body.allow_empty_review_pool;  // the roster's own save flag leaves with it
+    }
+    const keys = Object.keys(settings);
+    if (!keys.length) return null;
+    keys.forEach((key) => { delete body[key]; });
+    const model = String(settings[SAFETY_MODEL_KEY] ?? '');
+    const saved = [
+        SAFETY_MODEL_KEY in settings ? (model ? `Safety Supervisor model saved as ${modelName(model)}.` : 'Safety Supervisor uses the Light model.') : '',
+        markChanged && settings.OUROBOROS_SUBAGENTS ? (mark ? 'Second check saved.' : 'Second check turned off.') : '',
+    ];
+    return { settings, saved: saved.filter(Boolean).join(' ') };
+}
+
+/**
+ * The owner-only draft: both levels, the rules, and the checker's changes, which this takes OUT of the generic
+ * body (`body`, as collected) so Save writes them first through their owner transaction (`saveSafetyChecker`).
+ */
+export function safetyOwnerDraft(root, body = {}, current = {}) {
     return {
         yourWork: root.querySelector('#s-safety-mode')?.value || 'full',
         consciousness: root.querySelector('#s-consciousness-safety-mode')?.value || 'full',
         rules: root.querySelector('#s-safety-rules')?.value ?? null,
-        recheck: recheckDraft(),
-        model: SAFETY_MODEL_KEY in body ? String(body[SAFETY_MODEL_KEY] ?? '') : null,
-        useLocal: typeof body.USE_LOCAL_SAFETY === 'boolean' ? body.USE_LOCAL_SAFETY : undefined,
+        checker: takeCheckerChanges(body, current),
     };
 }
+
+/** Save's first write: the checker's changes in one owner transaction; a refusal throws the server's sentence. */
+export async function saveSafetyChecker(draft) {
+    if (!draft?.checker) return false;
+    await saveCheckerSettings(draft.checker.settings);
+    return true;
+}
+
+/** «Models», «Agents» or «Models and Agents»: where the changes the checker transaction saved were made. */
+export function checkerTabsText(draft) {
+    const keys = Object.keys(draft?.checker?.settings || {});
+    return listWords([keys.some((key) => key !== 'OUROBOROS_SUBAGENTS') ? 'Models' : '', keys.includes('OUROBOROS_SUBAGENTS') ? 'Agents' : '']);
+}
+
+/** The generic save's answer as the whole Save's effect: the checker's keys, saved first, apply on the next task. */
+export const checkerSaveEffect = (data, draft) => (draft?.checker ? { ...data, no_changes: false, next_task_changed: true } : data);
 
 async function confirmLowering(kindLabel, current, next, askOwner) {
     const ok = await askOwner({
@@ -160,12 +224,12 @@ async function confirmLowering(kindLabel, current, next, askOwner) {
 }
 
 /**
- * Write each changed owner-only value through its endpoint, in order: the two levels (lowering asks first),
- * the rules, the Safety Supervisor model, the second-check row. Returns what was saved, what failed and
- * whether any outcome is unknown; one failure never stops the others.
+ * After the generic save, write each changed level and the rules through their endpoints, in order: the two
+ * levels (lowering asks first), then the rules. Returns what was saved (the checker's sentence, saved before the
+ * generic save, leads), what failed and whether any outcome is unknown; one failure never stops the others.
  */
 export async function saveSafetyOwnerChanges(draft, current = {}, { askOwner = openConfirmDialog } = {}) {
-    const saved = [];
+    const saved = draft.checker?.saved ? [draft.checker.saved] : [];
     const errors = [];
     let unknown = false;
     const run = async (label, step) => {
@@ -192,21 +256,6 @@ export async function saveSafetyOwnerChanges(draft, current = {}, { askOwner = o
     }
     if (draft.rules !== null && SAFETY_RULES_KEY in current && draft.rules !== String(current[SAFETY_RULES_KEY] ?? '')) {
         await run('Your rules', async () => { await saveSafetyRules(draft.rules); return 'Your rules saved.'; });
-    }
-    const localChanged = typeof draft.useLocal === 'boolean'
-        && draft.useLocal !== ['true', true].includes(current.USE_LOCAL_SAFETY);
-    if (draft.model !== null && SAFETY_MODEL_KEY in current
-            && (draft.model !== String(current[SAFETY_MODEL_KEY] ?? '') || localChanged)) {
-        await run('The Safety Supervisor model', async () => {
-            await saveSafetyModel(draft.model, draft.useLocal);
-            return draft.model ? `Safety Supervisor model saved as ${modelName(draft.model)}.` : 'Safety Supervisor uses the Light model.';
-        });
-    }
-    if (draft.recheck !== null && draft.recheck !== recheckSaved()) {
-        await run('The second check', async () => {
-            await saveSafetyRecheck(draft.recheck, current);
-            return draft.recheck ? 'Second check saved.' : 'Second check turned off.';
-        });
     }
     return { saved: saved.join(' '), error: errors.join(' '), unknown };
 }
