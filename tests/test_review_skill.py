@@ -360,6 +360,28 @@ def test_the_skills_page_review_is_the_same_wave_under_the_owner_panel_and_the_c
     assert row["panel"]["assigned"] == ["t1"] and row["executions"]
 
 
+def test_a_reused_lifecycle_review_names_its_record_in_the_chat_row_and_the_card_reads_the_record(harness):
+    """astra R1-5: a second lifecycle review of unchanged bytes reuses the retained record under a FRESH job id.
+    The chat row carries both, the history projection passes the record id through, and the detail reader
+    resolves it; the second job id alone resolves nothing (which is why the card asks by record)."""
+    from ouroboros.gateway.extensions import _skill_review_history_detail_sync
+    from ouroboros.gateway.history import _collect_chat_rows
+
+    h = harness
+    first = _lifecycle(h, source="skills", reviewers=["t1"], reason="small payload")
+    second = _lifecycle(h, source="skills", reviewers=["t1"], reason="small payload")
+    assert first["status"] == "clean" and second["reused"] is True and len(h.sends) == 1, second["error"]
+    assert second["record_id"] == first["record_id"] and second["job_id"] != first["job_id"]
+    rows, _quota = _collect_chat_rows(h.drive / "logs" / "chat.jsonl", h.drive / "archive", 10, lambda _c, _e: True, {})
+    reviews = [row for row in rows if row.get("system_type") == "skill_review"]
+    assert [(row["job_id"], row["record_id"]) for row in reviews] == [
+        (first["job_id"], first["record_id"]), (second["job_id"], first["record_id"])]
+    detail = _skill_review_history_detail_sync(h.drive, "weather", reviews[1]["record_id"])
+    assert detail.get("status") == "clean" and detail["job_status"] == "completed" and detail["markdown"], detail
+    assert _skill_review_history_detail_sync(h.drive, "weather", second["job_id"]) == {
+        "error": "no review history for skill", "status_code": 404}
+
+
 def test_a_hub_install_reviews_in_the_background_and_settles_the_kept_update_after_the_wave(harness):
     """``start_review`` (a Hub install, ``check=review``): the same wave on a background thread under the
     marketplace context; the kept update snapshot is settled only once the wave is over, with the digest

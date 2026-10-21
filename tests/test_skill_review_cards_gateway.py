@@ -579,6 +579,7 @@ def test_chat_history_passes_skill_review_reference_fields(tmp_path):
         "status": "clean",
         "content_hash": "abc123def4567890",
         "job_id": "skill-job-1",
+        "record_id": "rec-20260815-0001",
         "group_id": "task:root-1:alpha",
         "presentation_owner_task_id": "root-1",
         "root_task_id": "root-1",
@@ -617,6 +618,7 @@ def test_chat_history_passes_skill_review_reference_fields(tmp_path):
     assert reference["system_type"] == "skill_review"
     assert reference["skill"] == "alpha"
     assert reference["job_id"] == "skill-job-1"
+    assert reference["record_id"] == "rec-20260815-0001", "the ledger record the card asks for (a reused review keeps it)"
     assert reference["status"] == "clean"
     assert reference["content_hash"] == "abc123def4567890"
     assert reference["review_round"] == 2
@@ -629,6 +631,6 @@ def test_chat_history_passes_skill_review_reference_fields(tmp_path):
     assert reference["source"] == "skills"
     # Legacy skill_review rows expose empty reference fields (frontend keeps
     # exactly today's local expansion for them).
-    assert legacy["skill"] == "" and legacy["job_id"] == ""
+    assert legacy["skill"] == "" and legacy["job_id"] == "" and legacy["record_id"] == ""
     # Non-skill-review rows do not grow the new keys at all.
     assert "skill" not in plain and "job_id" not in plain

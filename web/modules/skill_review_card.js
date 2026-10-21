@@ -2,12 +2,20 @@
  * Skill Review chat cards (node-tested).
  *
  * Since a776639f the producer writes ONE compact reference line per review
- * terminal into chat.jsonl; the full evidence lives in the skill's durable
- * review_history.jsonl. Rows carrying the exact-job reference (skill + job_id)
- * lazily fetch the server-rendered block from
- * GET /api/skills/{skill}/review-history/{job_id}; rows without it (legacy
- * full-text rows) keep local expansion of their own text.
+ * terminal into chat.jsonl; the full evidence lives in the skill's review
+ * ledger record (rows of an earlier version: its review_history.jsonl). Rows
+ * carrying the exact reference (skill + record_id, or job_id for rows of an
+ * earlier version) lazily fetch the server-rendered block from
+ * GET /api/skills/{skill}/review-history/{record_id | job_id}; rows without
+ * it (legacy full-text rows) keep local expansion of their own text. A reused
+ * review carries a fresh job id but the retained record, so the record id is
+ * the reference the reader resolves.
  */
+
+/** The id the detail route resolves: the ledger record when the row names one, else the lifecycle job. */
+function detailId(ref) {
+    return ref.recordId || ref.jobId;
+}
 
 import { apiFetch } from './api_client.js';
 import { escapeHtmlAttr, renderMarkdown } from './utils.js';
@@ -41,6 +49,7 @@ export function renderSkillReviewDisclosure(text, ref = null, deps = {}) {
     const jobRef = ref && ref.skill && ref.jobId ? ref : null;
     const refAttrs = jobRef
         ? ` data-skill-review-skill="${escapeHtmlAttr(jobRef.skill)}" data-skill-review-job="${escapeHtmlAttr(jobRef.jobId)}"`
+            + (jobRef.recordId ? ` data-skill-review-record="${escapeHtmlAttr(jobRef.recordId)}"` : '')
         : '';
     return `
         <div class="skill-review-disclosure" data-skill-review-disclosure data-expanded="0"${refAttrs}>
@@ -65,7 +74,7 @@ export function renderSkillReviewDisclosure(text, ref = null, deps = {}) {
  * explicitly replaces an error entry. Errors stay honest and inline.
  */
 function detailStoreKey(ref) {
-    return `${ref.skill}\u0000${ref.jobId}`;
+    return `${ref.skill}\u0000${detailId(ref)}`;
 }
 
 async function responseJson(resp) {
@@ -147,7 +156,7 @@ export async function loadSkillReviewDetail(full, ref, deps = {}) {
     renderDetailState(full, entry, render, onDomWrite);
     entry.promise = (async () => {
         try {
-            const url = `/api/skills/${encodeURIComponent(ref.skill)}/review-history/${encodeURIComponent(ref.jobId)}`;
+            const url = `/api/skills/${encodeURIComponent(ref.skill)}/review-history/${encodeURIComponent(detailId(ref))}`;
             const resp = await fetchImpl(url, { cache: 'no-store' });
             const data = await responseJson(resp);
             if (!resp.ok) {
@@ -175,7 +184,8 @@ export async function loadSkillReviewDetail(full, ref, deps = {}) {
 export function nestedSkillReviewRef(detail) {
     const skill = detail?.dataset?.skillReviewSkill || '';
     const jobId = detail?.dataset?.skillReviewJob || '';
-    return skill && jobId ? { skill, jobId } : null;
+    const recordId = detail?.dataset?.skillReviewRecord || '';
+    return skill && jobId ? { skill, jobId, ...(recordId ? { recordId } : {}) } : null;
 }
 
 /**
@@ -190,7 +200,8 @@ export function wireSkillReviewDisclosure(bubble, deps = {}) {
     const disclosure = bubble.querySelector('[data-skill-review-disclosure]');
     const full = bubble.querySelector('[data-skill-review-full]');
     const reviewRef = disclosure?.dataset.skillReviewSkill && disclosure?.dataset.skillReviewJob
-        ? { skill: disclosure.dataset.skillReviewSkill, jobId: disclosure.dataset.skillReviewJob }
+        ? { skill: disclosure.dataset.skillReviewSkill, jobId: disclosure.dataset.skillReviewJob,
+            ...(disclosure.dataset.skillReviewRecord ? { recordId: disclosure.dataset.skillReviewRecord } : {}) }
         : null;
     toggle.addEventListener('click', () => {
         const label = bubble.querySelector('.skill-review-toggle-label');
