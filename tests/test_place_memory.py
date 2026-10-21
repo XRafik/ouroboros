@@ -50,14 +50,21 @@ def test_many_places_keep_their_rows_and_main_keeps_owner_rows(tmp_path):
     assert before == list(chat_chain.iter_rows(tmp_path))  # presentation never rewrites history
 
 
-def test_focus_uses_own_room_before_category_and_own_wake_sees_only_index(tmp_path):
+@pytest.mark.parametrize("delivery_state", ["accepted", "delivered"])
+def test_focus_uses_own_room_before_category_and_own_wake_sees_only_index(tmp_path, delivery_state):
     shared.world(tmp_path)
     stamp = {"place_id": "garden", "conversation_key": "garden:talk", "source_event_id": "event1"}
+    unanswered = {**stamp, "source_event_id": "event2"}
     shared.append(tmp_path / "logs/chat.jsonl",
                   shared.msg("2026-09-05", "PRIVATE_PLACE_WORDS", chat_id=444, presence_provenance=stamp),
                   shared.msg("2026-09-06", "PRIVATE_PLACE_ANSWER", chat_id=444, direction="out",
                              type="presence_delivery", transport={"delivery": {
-                                 "state": "delivered", "presence_provenance": stamp}}))
+                                 "state": delivery_state, "presence_provenance": stamp}}),
+                  shared.msg("2026-09-07", "PRIVATE_UNANSWERED_WORDS", chat_id=444,
+                             presence_provenance=unanswered),
+                  shared.msg("2026-09-08", "PRIVATE_FAILED_ANSWER", chat_id=444, direction="out",
+                             type="presence_delivery", transport={"delivery": {
+                                 "state": "failed", "presence_provenance": unanswered}}))
     focus = _focus()
     own = {"id": "wake1", "metadata": {"usage_category": "consciousness", "wake_cause": "own_clock"}}
     spec = mv.view_spec_for_task(focus, tmp_path)
@@ -67,8 +74,11 @@ def test_focus_uses_own_room_before_category_and_own_wake_sees_only_index(tmp_pa
     wake = mv.capture_memory_view(tmp_path, own, mv.view_spec_for_task(own, tmp_path))
     own_text, focus_text = mv.render_room(wake), mv.render_room(focused)
     assert next(room for room in wake.live_rooms if room["room_id"] == "444")["words"] == []
-    assert "PRIVATE_PLACE_WORDS" in focus_text and "PRIVATE_PLACE_ANSWER" in focus_text
-    assert "PRIVATE_PLACE_WORDS" not in own_text and "PRIVATE_PLACE_ANSWER" not in own_text
+    for words in ("PRIVATE_PLACE_WORDS", "PRIVATE_PLACE_ANSWER", "PRIVATE_UNANSWERED_WORDS", "PRIVATE_FAILED_ANSWER"):
+        assert words in focus_text
+        assert words not in own_text
+    facts = next(room for room in mi.place_room_index(tmp_path) if room["room_id"] == "444")
+    assert (facts["arrivals"], facts["answered_events"], facts["unanswered_events"]) == (2, 1, 1)
     assert "Place garden; conversation garden:talk; answered events 1" in own_text
     assert "memory_read(room_id='444', rows=true)" in own_text
     assert mv.render_story(wake) == mv.render_story(focused)
