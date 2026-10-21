@@ -137,7 +137,9 @@ def test_state_carries_current_model_access_and_budget_resume_controls(gateway):
     assert payload["active_chat_activities_complete"] is True
     assert payload["main_attention_complete"] is True
     attention = {row["task_id"]: row for row in payload["main_attention"]}
-    assert set(attention) == {"access-task", "budget-task"}
+    assert set(attention) == {"access-task", "budget-task", "owner-paused-task"}
+    # An owner marker with no current tree fence awaits explicit selection (R3).
+    assert attention["owner-paused-task"]["can_resume"] is True
     model = attention["access-task"]
     assert model["model_waits"] == {"sign-in": wait}
     assert model["task_attempt"] == 3 and model["attention_reason"] == "model_access"
@@ -218,7 +220,7 @@ def _hold(reason):
     ({"_budget_pause": {**_EXACT, "reason": "budget"}}, False, True),
     ({"_budget_pause": {"status": "paused_before_dispatch", "reason": "budget", "replay_safe": True}}, False, True),
     ({"_budget_pause": {**_EXACT, "reason": "budget"}}, True, False),
-    ({"_budget_pause": {**_EXACT, "reason": "owner"}}, False, False),
+    ({"_budget_pause": {**_EXACT, "reason": "owner"}}, False, True),
     ({"_budget_pause": {**_EXACT, "reason": "sleep", "sleep": {"sleep_id": "s"}}}, False, False),
     ({"_budget_pause": {**_EXACT, "reason": "sleep", "sleep": {"sleep_id": "s"}},
       "_budget_pause_hold": _hold("saved_sleep_recovery")}, False, True),
@@ -227,8 +229,8 @@ def _hold(reason):
     ({"_budget_pause_hold": _hold("owner_restart_hold")}, False, True),
     ({"_budget_pause_hold": _hold("saved_work_hold")}, False, True),
     ({"_budget_pause_hold": _hold("continuation_writer_unsettled")}, False, False),
-    ({"_budget_pause_hold": _hold("restore_refused:invalid_budget_fence_snapshot")}, False, False),
-    ({"_continuation_prepared": "sha"}, False, False),
+    ({"_budget_pause_hold": _hold("restore_refused:invalid_budget_fence_snapshot")}, False, True),
+    ({"_continuation_prepared": "sha"}, False, True),
     ({"_resume_selection": {"selected_by": "owner"}}, False, False),
     ({}, False, False),
 ], ids=["exact-budget", "zero-dispatch-budget", "under-owner-fence", "owner-saved", "unheld-sleep",
@@ -236,30 +238,30 @@ def _hold(reason):
         "restore-refused", "continue-unconfirmed", "already-selected", "not-parked"])
 def test_explicit_resume_follows_each_rows_release_rule(tmp_path, row, owner_paused, expected):
     """Only rows that nothing but an explicit Resume continues need the owner."""
-    from supervisor.events_budget import explicit_resume_required
+    from ouroboros.gateway.state import _pending_resume_available
 
     task = {"id": "root", "root_task_id": "root", **row}
-    assert explicit_resume_required(_registries(tmp_path, [task]), task, owner_paused=owner_paused) is expected
+    assert _pending_resume_available(_registries(tmp_path, [task]), task, owner_paused=owner_paused) is expected
 
 
 def test_member_resume_belongs_to_its_root_unless_only_the_owner_can_select_it(tmp_path, monkeypatch):
     from supervisor import events_budget
-    from supervisor.events_budget import explicit_resume_required
+    from ouroboros.gateway.state import _pending_resume_available
 
     member = {"id": "child", "root_task_id": "root", "parent_task_id": "root",
               "_budget_pause_hold": _hold("owner_restart_hold")}
     root = {"id": "root", "root_task_id": "root"}
     # A running root with no live Resume grant: the model cannot select it; the owner must.
-    assert explicit_resume_required(_registries(tmp_path, [member], running={"root": {"task": root}}),
+    assert _pending_resume_available(_registries(tmp_path, [member], running={"root": {"task": root}}),
                                     member, owner_paused=False) is True
     # A root that is itself parked: its own Resume is the one action.
     parked_root = {**root, "_budget_pause": {**_EXACT, "reason": "budget"}}
-    assert explicit_resume_required(_registries(tmp_path, [parked_root, member]), member, owner_paused=False) is False
-    assert explicit_resume_required(_registries(tmp_path, [member], fences={"root": {"status": "active"}}),
+    assert _pending_resume_available(_registries(tmp_path, [parked_root, member]), member, owner_paused=False) is False
+    assert _pending_resume_available(_registries(tmp_path, [member], fences={"root": {"status": "active"}}),
                                     member, owner_paused=False) is False
     # A live root grant lets the root's model select the member (owner Q9).
     monkeypatch.setattr(events_budget, "live_root_resume_grant", lambda *_a, **_k: {"grant_id": "g", "generation": 1})
-    assert explicit_resume_required(_registries(tmp_path, [member], running={"root": {"task": root}}),
+    assert _pending_resume_available(_registries(tmp_path, [member], running={"root": {"task": root}}),
                                     member, owner_paused=False) is False
 
 

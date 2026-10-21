@@ -159,12 +159,13 @@ def test_exact_planned_handoff_reaches_worker_once(prepared, monkeypatch, adopt_
 @pytest.mark.parametrize("reason", ["stale_queue_row_grant_consumed", "stale_resume_grant_superseded"])
 @pytest.mark.parametrize("basis", ["valid", "foreign", "unreadable"])
 def test_legacy_spent_hold_is_redecided_on_first_restore(prepared, monkeypatch, reason, basis):
-    from supervisor.events_budget import BUDGET_HOLD_KEY, budget_hold_fact, hold_budget_row, hold_selectable
+    from supervisor.events_budget import hold_budget_row
+    from ouroboros.work_stop import continuation_refusal
 
     case = prepared
     task = case.host.pending[0]
     hold_budget_row(task, reason=reason, extra={"pause_id": "prior-pause", "grant_id": "spent-resume"})
-    assert not hold_selectable(task, task[BUDGET_HOLD_KEY])
+    assert continuation_refusal(task)["grant_state"] in {"consumed", "superseded"}
     assert "_budget_pause_resume" not in task and "_budget_pause_consumed" not in task
     path = recovery._path(case.host.root, "child1")
     if basis == "foreign":
@@ -183,9 +184,9 @@ def test_legacy_spent_hold_is_redecided_on_first_restore(prepared, monkeypatch, 
         return
     assert count == 1
     if basis == "unreadable":
-        assert budget_hold_fact(case.host.pending[0])["reason"] == reason
+        assert continuation_refusal(case.host.pending[0])["reason"] == reason
         return
-    assert budget_hold_fact(case.host.pending[0]) is None
+    assert not continuation_refusal(case.host.pending[0])
     assert recovery.pre_adopt_planned_handoffs(case.host.root, case.host.pending) == {"child1"}
     sent = worker(case.host, monkeypatch)
     workers.assign_tasks()

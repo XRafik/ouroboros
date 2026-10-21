@@ -461,7 +461,7 @@ def _complete_exact_budget_pause_after_death(job: dict, root: pathlib.Path, task
             if grant.get("consumed_at"):
                 return False, fenced  # the loop consumed it and ran on: ordinary custody
             from supervisor.budget_resume import revoke_exact_budget_resume
-            from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_GRANT_CONSUMED_STALE_ROW
+            from ouroboros.work_stop import continuation_refusal
             from ouroboros.budget_pause import exact_pause_marker
 
             task.setdefault("_budget_pause_resume", {
@@ -469,15 +469,15 @@ def _complete_exact_budget_pause_after_death(job: dict, root: pathlib.Path, task
                 "pause": exact_pause_marker(row, default_root=str(task.get("root_task_id") or task_id)),
             })
             if not revoke_exact_budget_resume(task, "worker_death_before_consumption"):
-                if (task.get(BUDGET_HOLD_KEY) or {}).get("reason") == HOLD_GRANT_CONSUMED_STALE_ROW:
+                if continuation_refusal(task).get("grant_state") == "consumed":
                     return False, fenced  # a concurrent consumption keeps crash custody, never re-arms
                 # Revocation failure is a nonterminal hold, never a crash retry
                 # or terminal. Preserve exact source and grant identity even if
                 # neither the result store nor the snapshot is writable.
                 held = dict(task)
                 held.setdefault("_budget_pause", exact_pause_marker(row, default_root=task_id))
-                hold = held.get(BUDGET_HOLD_KEY)
-                if not isinstance(hold, dict):
+                hold = continuation_refusal(held)
+                if not hold:
                     from supervisor.events_budget import HOLD_REVOCATION_UNWRITTEN, hold_budget_row
 
                     hold = hold_budget_row(held, reason=HOLD_REVOCATION_UNWRITTEN,
@@ -589,7 +589,7 @@ def _hold_unsaved_pause(job: dict, seed: dict) -> bool:
                             else "nothing was saved to continue: cancel it or start a new run"),
                         extra={"root_task_id": str(task.get("root_task_id") or task_id),
                                "pause_id": str(row.get("pause_id") or ""), "task_attempt": attempt,
-                               "pause_generation": int(row.get("pause_generation") or 0), "cause": "owner_pause"})
+                               "pause_generation": int(row.get("pause_generation") or 0)})
         _pool().PENDING.append(held)
         queue.sort_pending()
         try:

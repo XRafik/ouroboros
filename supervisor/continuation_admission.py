@@ -43,7 +43,8 @@ from ouroboros.task_store import patch_document
 
 log = logging.getLogger(__name__)
 
-from supervisor.events_budget import HOLD_CONTINUATION_WRITER  # noqa: E402 -- the one hold vocabulary
+from supervisor.events_budget import HOLD_CONTINUATION_WRITER  # noqa: E402 -- record writer
+from ouroboros.work_stop import pause_marker, writer_wait
 from ouroboros.store import StoreError
 
 
@@ -191,7 +192,7 @@ def conflicting_writers(q: Any, predecessor: str, *, drive_root: Any = None,
             if owner_latched and queued_admitted_dispatch(task):
                 continue
             if budget_pause_fact(task, fences) is None or (task.get("admitted_dispatch") == "possible"
-                                                   and not task.get("_budget_pause")):
+                                                   and not pause_marker(task)):
                 blockers.append({"kind": "dispatchable_member", "task_id": tid})
     try:
         member_results = tree_member_results(custody_root, predecessor)
@@ -702,14 +703,14 @@ def release_settled_continuations(tree_root: str) -> List[str]:
     released: List[str] = []
     with q._queue_lock:
         task_ids = [str(task.get("id") or "") for task in q.PENDING if isinstance(task, dict)
-                and (budget_hold_fact(task) or {}).get("reason") == HOLD_CONTINUATION_WRITER
+                and writer_wait(task)
                 and ((task.get("metadata") or {}).get("continuation") or {}).get("predecessor_task_id") == tree_root]
     for task_id in task_ids:
         observation = observe_held_budget_selection(q, task_id)
         with q._queue_lock:
             task = next((row for row in q.PENDING if str(row.get("id") or "") == task_id), None)
             hold = budget_hold_fact(task)
-            if task is None or (hold or {}).get("reason") != HOLD_CONTINUATION_WRITER:
+            if task is None or not writer_wait(task):
                 continue
             outcome = select_held_budget_row(q, task, hold, selected_by="reconciliation", observation=observation)
             if outcome.get("ok"):
@@ -719,11 +720,9 @@ def release_settled_continuations(tree_root: str) -> List[str]:
 
 def held_continuation_predecessors(pending: Any) -> List[str]:
     """Each predecessor whose Continue still waits under its own writer hold, once."""
-    from supervisor.events_budget import budget_hold_fact
-
     return sorted({str(((task.get("metadata") or {}).get("continuation") or {}).get("predecessor_task_id") or "")
                    for task in list(pending or ()) if isinstance(task, dict)
-                   and (budget_hold_fact(task) or {}).get("reason") == HOLD_CONTINUATION_WRITER} - {""})
+                   and writer_wait(task)} - {""})
 
 
 def recheck_held_continuations(*, stop_requested: Any = None) -> List[str]:

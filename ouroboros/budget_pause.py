@@ -1122,19 +1122,10 @@ BUDGET_HOLD_KEY = "_budget_pause_hold"
 
 
 def budget_hold_fact(task) -> Optional[Dict[str, Any]]:
-    """The durable NON-dispatch hold on one queued row (#1196), or ``None``.
+    """Current decision / writer wait. Refusals belong to continuation custody."""
+    from ouroboros.work_stop import hold_fact
 
-    Three shapes share it and none invents a checkpoint identity (no pause_id,
-    no ``exact_continuation``): a zero-dispatch sibling whose paused root's
-    admission fence was lifted by that root's Resume — lifting the fence must
-    not make it assignable, the model selects it explicitly (owner Q9) — a row
-    whose exact continuation could not be restored, and a row whose spent
-    grant could not be revoked. Release deletes this record; Q9 selection is separate.
-    """
-    if isinstance(task, dict) and task.get("_continuation_prepared"):
-        return {"reason": "continuation_publication_unconfirmed", "selected": False, "dispatchable": False}
-    hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    return hold if isinstance(hold, dict) else None
+    return hold_fact(task)
 
 
 def budget_fence_selected(task: Any, fence: Any) -> bool:
@@ -1156,9 +1147,11 @@ def budget_fence_selected(task: Any, fence: Any) -> bool:
     later sends. Dispatch still rechecks the live root grant
     (``events_budget.budget_resume_dispatch_allowed``).
     """
+    from ouroboros.work_stop import continuation_refusal
+
     fence_id = str((fence or {}).get("fence_id") or "") if isinstance(fence, dict) else ""
     if (not isinstance(task, dict) or not fence_id or isinstance(task.get("_budget_pause"), dict)
-            or task.get("_budget_pause_consumed") or budget_hold_fact(task) is not None):
+            or continuation_refusal(task) or task.get("_budget_pause_consumed") or budget_hold_fact(task) is not None):
         return False
     handoff = task.get("_budget_pause_resume")
     if isinstance(handoff, dict):

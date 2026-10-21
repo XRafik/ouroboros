@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional
 
 from ouroboros.model_wait import budget_paused_seconds, native_sleep_started_at, settle_execution_carry
 from supervisor.events_budget import budget_fence_selected, budget_hold_fact
+from ouroboros.work_stop import continuation_refusal
 from supervisor.queue import _queue_lock
 
 
@@ -643,7 +644,8 @@ def _candidate_ineligible(queue, candidate, remaining, running, *, selected=(), 
         return True
     if not _pool().repo_writer_task_allowed(candidate):
         return True
-    if isinstance(candidate.get("_budget_pause"), dict) or budget_hold_fact(candidate) is not None:
+    if (isinstance(candidate.get("_budget_pause"), dict) or budget_hold_fact(candidate) is not None
+            or continuation_refusal(candidate)):
         # Durable #1196 hold: sibling unselected after root release, unrestorable
         # continuation or failed grant revocation. Selection must be recorded before assignment.
         return True
@@ -717,8 +719,7 @@ def _choose_candidate(queue, remaining, unresolved_invalid_id_set, refused_this_
                         latch = queue.BUDGET_ROOT_FENCES.get(root_id) or {}
                         hold_budget_row(candidate, reason=HOLD_ROOT_FENCE_LIFTED,
                             detail="root_resume_generation_stale",
-                            extra={"root_task_id": root_id, "fence_id": str(latch.get("fence_id") or ""),
-                                   "cause": str(latch.get("cause") or "")},
+                            extra={"root_task_id": root_id, "fence_id": str(latch.get("fence_id") or "")},
                             result_root=pathlib.Path(candidate.get("budget_drive_root") or _pool().DRIVE_ROOT))
                 queue.persist_queue_snapshot(reason="stale_child_resume_held")
                 continue
@@ -815,7 +816,7 @@ def assign_tasks() -> None:
                     continue
                 if isinstance(task.get("_budget_pause"), dict):
                     continue
-                if budget_hold_fact(task) is not None:
+                if budget_hold_fact(task) is not None or continuation_refusal(task):
                     continue  # Held, not paused: no second pause row over the hold.
                 if task.get("_owner_wait_resume"):
                     continue  # Restore the checkpoint; the loop still owns its budget stop.

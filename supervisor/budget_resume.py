@@ -22,7 +22,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from ouroboros.control_actor import control_actor, mind_resume_refusal
+from ouroboros.control_actor import control_actor, observed_control_stop
+from ouroboros.work_stop import clear_refusal, continuation_refusal, release_refusal
 from ouroboros.work_stop import SELECTION_KEY, retain_consumed_selection
 from ouroboros.utils import utc_now_iso
 
@@ -46,10 +47,12 @@ def grant_exact_sleep_resume(task: Dict[str, Any], pause: Dict[str, Any],
 def _sleep_policy_allows(task, row, result_root):
     from types import SimpleNamespace
     from ouroboros.owner_pause import member_fence
-    from supervisor.events_budget import budget_hold_fact
+    from ouroboros.work_stop import current_stop, writer_wait
+    from supervisor import queue as q
 
     return bool(row.get("reason") == "sleep" and isinstance(row.get("sleep"), dict)
-                and row.get("sleep_ready") and not budget_hold_fact(task)
+                and row.get("sleep_ready") and not current_stop(task, {"budget": q.BUDGET_ROOT_FENCES})
+                and not writer_wait(task) and not continuation_refusal(task)
                 and not member_fence(SimpleNamespace(task_id=task.get("id"),
                     root_task_id=task.get("root_task_id") or task.get("id"), budget_drive_root=result_root)))
 
@@ -168,7 +171,8 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
     if not task:
         return None
     result_root = pathlib.Path(task.get("budget_drive_root") or q.DRIVE_ROOT)
-    if refusal := mind_resume_refusal(result_root, task):
+    if refusal := release_refusal(observed_control_stop(
+            result_root, task, budget=q.BUDGET_ROOT_FENCES), control_actor()):
         return refusal
     root_task_id = str(task.get("root_task_id") or task_id)
     try:
@@ -357,7 +361,7 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
     from ouroboros.model_wait import execution_elapsed_seconds
     from ouroboros.task_results import _TRULY_TERMINAL_STATUSES, load_task_result
     from supervisor.events_budget import (
-        BUDGET_HOLD_KEY, HOLD_REVOCATION_UNWRITTEN, HOLD_MALFORMED_RESUME_IDENTITY,
+        BUDGET_HOLD_KEY, HOLD_REVOCATION_UNWRITTEN,
         hold_budget_row, _root_resume_state, _root_resume_grants, hold_root_resume_descendants,
     )
     from supervisor import queue as q
@@ -369,7 +373,8 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
     if not pause_id.strip():
         return {"ok": False, "error": "malformed_pause_identity"}
     result_root = pathlib.Path(task.get("budget_drive_root") or q.DRIVE_ROOT)
-    if refusal := mind_resume_refusal(result_root, task):
+    if refusal := release_refusal(observed_control_stop(
+            result_root, task, budget=q.BUDGET_ROOT_FENCES), control_actor()):
         return refusal
     if any((pathlib.Path(q.DRIVE_ROOT) / "state" / name).exists()
            for name in ("owner_restart_no_resume.flag", "panic_stop.flag")):
@@ -424,11 +429,9 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
         # Another attempt than the checkpoint's: the loop would refuse the grant on arrival.
         return {"ok": False, "error": "pause_attempt_mismatch", "action": "cancel_or_new_run",
                 "row_attempt": int(row.get("task_attempt") or 0), "queue_attempt": int(task.get("_attempt") or 1)}
-    hold = task.get(BUDGET_HOLD_KEY) if isinstance(task.get(BUDGET_HOLD_KEY), dict) else {}
+    hold = continuation_refusal(task)
     if sleep_wake and not _sleep_policy_allows(task, row, result_root):
         return {"ok": False, "error": "sleep_wake_vetoed"}
-    if hold.get("reason") == HOLD_MALFORMED_RESUME_IDENTITY:
-        return {"ok": False, "error": HOLD_MALFORMED_RESUME_IDENTITY}
     live_grant = row.get("grant") if isinstance(row.get("grant"), dict) else {}
     if "grant" in row and not str(live_grant.get("grant_id") or "").strip():
         return {"ok": False, "error": "malformed_grant_identity"}
@@ -537,7 +540,8 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
     task["_budget_pause_resume"] = {
         **checkpoint, "grant_id": grant["grant_id"], "granted_at": grant["granted_at"],
         "grant_generation": generation, "pause_id": pause_id, "pause_generation": pause_generation,
-        "paused_duration_sec": grant["paused_duration_sec"], "pause": prior_pause,
+        "paused_duration_sec": grant["paused_duration_sec"],
+        "pause": {key: value for key, value in prior_pause.items() if key != "refusal"},
         "external_runs": external,
         # A sleep, and an explicitly bounded task's every exact Resume, stays excluded until
         # the worker consumes the grant: a capacity-delayed start is still that Pause (#939,
@@ -607,7 +611,6 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
                    **({"prior_hold_reason": str(released_hold.get("reason") or "")}
                       if released_hold else {})},
             result_root=result_root)
-        task["_budget_pause"] = prior_pause
         return {"ok": False, "error": "snapshot_not_persisted",
                 "held": HOLD_REVOCATION_UNWRITTEN, "grant_id": str(grant["grant_id"])}
     try:
@@ -615,7 +618,7 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
 
         write_task_result(
             result_root, task_id, STATUS_SCHEDULED, reason_code="",
-            resource_limit={**prior_pause, "status": "resume_granted", "resumed_at": grant["granted_at"],
+            resource_limit={**task["_budget_pause_resume"]["pause"], "status": "resume_granted", "resumed_at": grant["granted_at"],
                             "grant_id": grant["grant_id"], "auto_resume": False},
         )
     except Exception:
@@ -632,7 +635,8 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
          "paused_duration_sec": grant["paused_duration_sec"],
          "eligible_descendants": eligible if actor else [],
          "held_siblings": held_siblings, "rebound_held_siblings": sorted(rebound_holds),
-         "released_hold": str((released_hold or {}).get("reason") or "")},
+         "released_hold": str((released_hold or {}).get("reason") or ""),
+         "cleared_refusal": str(hold.get("reason") or "")},
     )
     return {"ok": True, "task_id": task_id, "root_task_id": root_task_id, "exact_continuation": True,
             "grant_id": grant["grant_id"], "grant_generation": generation,
@@ -666,17 +670,16 @@ def newer_continuation_basis(task: Dict[str, Any], drive_root: Any) -> bool:
 
 def resume_hold_requires_fence(task: Dict[str, Any], drive_root: Any) -> bool:
     """Re-decide spent, marker-less custody using its durable hold after restore."""
-    from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_GRANT_CONSUMED_STALE_ROW, HOLD_STALE_GRANT_SUPERSEDED
-
-    task.pop("_budget_pause_consumed", None)  # legacy in-memory copy; the hold owns these identities
-    hold = task.get(BUDGET_HOLD_KEY) or {}
-    if hold.get("reason") not in {HOLD_GRANT_CONSUMED_STALE_ROW, HOLD_STALE_GRANT_SUPERSEDED}:
+    task.pop("_budget_pause_consumed", None)  # obsolete local copy, never a grant
+    refusal = continuation_refusal(task)
+    if refusal.get("grant_state") not in {"consumed", "superseded"}:
         return False
-    if hold.get("reason") == HOLD_STALE_GRANT_SUPERSEDED and isinstance(task.get("_budget_pause"), dict):
-        return False  # retained exact-pause admission owns this hold
+    pause = task.get("_budget_pause") or {}
+    if refusal.get("grant_state") == "superseded" and pause.get("exact_continuation"):
+        return False  # the live exact locator owns its revalidation
     if not newer_continuation_basis(task, drive_root):
         return True
-    task.pop(BUDGET_HOLD_KEY, None)
+    clear_refusal(task)
     return False
 
 
@@ -689,20 +692,19 @@ def revalidate_consumed_resume_holds() -> None:
     with them its store reads are zero-wait, contention retrying next tick.
     """
     from supervisor import queue as q
-    from supervisor.events_budget import BUDGET_HOLD_KEY
     from supervisor.queue_snapshot import _fence_snapshot_running_rows
 
     from ouroboros.store import StoreError, admission_acquisition
 
     changed = False
     for task in q.PENDING:
-        before = task.get(BUDGET_HOLD_KEY)
+        before = continuation_refusal(task)
         try:
             with admission_acquisition():  # under Q nothing waits: a busy read keeps the hold for the next tick
                 # A live attempt of the same id owns the task: its stale row waits, never fences it.
                 if resume_hold_requires_fence(task, q.DRIVE_ROOT) and task.get("id") not in q.RUNNING:
                     _fence_snapshot_running_rows([{"id": task["id"]}], restored_ids=set())
-            changed |= before != task.get(BUDGET_HOLD_KEY)
+            changed |= before != continuation_refusal(task)
         except (StoreError, OSError, ValueError, TypeError, RuntimeError):
             log.warning("Continuation basis unreadable for %s; hold retained", task.get("id"), exc_info=True)
     if changed:
@@ -944,6 +946,9 @@ def resume_late_phase(task_id: str) -> Optional[Dict[str, Any]]:
         return {"ok": False, "error": "pause_record_unreadable"}
     if row.get("status") not in _TRULY_TERMINAL_STATUSES or not fence_closed(fence):
         return None
+    if refusal := release_refusal(observed_control_stop(
+            root, row, budget=q.BUDGET_ROOT_FENCES, owner=fence), control_actor()):
+        return refusal
     remainder = refresh_owner_pause_tree(task_id) != FENCE_RELEASED
     if remainder:
         refusal = _late_phase_refusal(q, root, task_id, row, fence)

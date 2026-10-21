@@ -307,7 +307,9 @@ def test_invalid_independent_snapshot_fence_cannot_be_cleared_by_project_recover
     path.write_bytes(original)
     sent = worker(host, monkeypatch)
     workers.assign_tasks()
-    assert not sent and host.pending[0]["_owner_hold"]
+    from ouroboros.work_stop import continuation_refusal
+    assert not sent and continuation_refusal(host.pending[0])
+    assert not host.pending[0].get("_owner_hold")
 
 
 @pytest.mark.parametrize("frozen", [True, False])
@@ -366,7 +368,12 @@ def test_held_deadline_keeps_custody_without_replay(host, tmp_path, monkeypatch,
         (host.root / "state" / "panic_stop.flag").write_text("panic")
     sent = worker(host, monkeypatch)
     # Retention grants no execution; a positive never-started receipt still expires.
-    assert budget_hold_fact(held)["reason"] == HOLD_SAVED_WORK
+    if dispatch == "owner_pause":
+        from ouroboros.work_stop import current_stop
+        assert not budget_hold_fact(held)
+        assert current_stop(held, {"budget": queue.BUDGET_ROOT_FENCES})["cause"] == "pause"
+    else:
+        assert budget_hold_fact(held)["reason"] == HOLD_SAVED_WORK
     for _ in range(2):
         queue.enforce_task_timeouts()
         workers.assign_tasks()

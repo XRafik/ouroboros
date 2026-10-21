@@ -46,6 +46,7 @@ import pathlib
 from typing import Any, Dict, List, Optional, Tuple
 
 from ouroboros.utils import append_jsonl, utc_now_iso
+from ouroboros.work_stop import pause_marker
 
 log = logging.getLogger(__name__)
 
@@ -166,6 +167,8 @@ def request_owner_pause(task_id: str, *, request_id: str, by: Optional[Dict[str,
     )
     from ouroboros.task_results import resolve_task_lineage
     from ouroboros.store import acquisition_budget, StoreBusy
+    from ouroboros.control_actor import control_actor, observed_control_stop
+    from ouroboros.work_stop import release_refusal
 
     from supervisor import queue as q
     task_id = str(task_id or "").strip()
@@ -183,6 +186,9 @@ def request_owner_pause(task_id: str, *, request_id: str, by: Optional[Dict[str,
         if not lineage["is_root_task"]:
             return {"ok": False, "error": "not_a_root_task", "root_task_id": str(task.get("root_task_id") or "")}
         root_drive = pathlib.Path(task.get("budget_drive_root") or q.DRIVE_ROOT)
+        if refusal := release_refusal(observed_control_stop(
+                root_drive, task, budget=q.BUDGET_ROOT_FENCES), control_actor()):
+            return refusal
         root_id = lineage["root_task_id"] if lineage["is_retry_root_attempt"] else task_id
         from ouroboros.owner_pause import root_actor
         if not root_actor(root_drive, root_id, task_id):
@@ -225,6 +231,17 @@ def request_owner_pause(task_id: str, *, request_id: str, by: Optional[Dict[str,
                 current = read_fence(root_drive, root_id)
                 if not fence_closed(current) or fence.get("fence_id") != current.get("fence_id"):
                     return released
+                latest, _lane = _locate_root_locked(q, task_id)
+                if (latest or {}).get("_budget_pause_hold") != task.get("_budget_pause_hold"):
+                    return {"ok": False, "error": "selection_authority_changed"}
+                if refusal := release_refusal(observed_control_stop(
+                        root_drive, latest, budget=q.BUDGET_ROOT_FENCES, owner=current), control_actor()):
+                    return refusal
+                # The accepted Pause replaces only the decision this actor may release.
+                # Independent exact continuation custody stays on its own marker.
+                for member in [*q.PENDING, *(m.get("task") or {} for m in q.RUNNING.values())]:
+                    if member.get("id") == task_id:
+                        member.pop("_budget_pause_hold", None)
                 latch = _set_root_budget_pause_locked(root_id, {
                     "fence_id": str(fence["fence_id"]), "cause": "owner_pause",
                     "paused_at": str(fence.get("requested_at") or utc_now_iso())})
@@ -310,7 +327,7 @@ def refresh_owner_pause_tree(root_task_id: str) -> str:
         running_meta = {task_id: dict(q.RUNNING.get(task_id) or {}) for task_id, _task in running_all}
         queued = [dict(item) for item in q.PENDING if isinstance(item, dict)
                   and root_task_id in (str(item.get("root_task_id") or ""), str(item.get("id") or ""))]
-        parked = [item for item in queued if isinstance(item.get("_budget_pause"), dict)]
+        parked = [item for item in queued if pause_marker(item)]
     try:
         fence = read_fence(root_drive, root_task_id)
     except Exception:
@@ -632,7 +649,7 @@ def settle_requested_owner_pauses(q: Any = None, *, now: Optional[float] = None,
         with q._queue_lock:
             parked = [dict(item) for item in q.PENDING if isinstance(item, dict)
                       and root_id in (str(item.get("root_task_id") or ""), str(item.get("id") or ""))
-                      and isinstance(item.get("_budget_pause"), dict)]
+                      and pause_marker(item)]
             warm = [(str(task_id), dict(meta)) for task_id, meta in q.RUNNING.items()
                     if warm_paused_member(meta) and root_id in (
                         str((meta.get("task") or {}).get("root_task_id") or ""), str(task_id))]

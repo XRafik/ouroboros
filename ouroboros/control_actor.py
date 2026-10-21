@@ -50,14 +50,14 @@ def mind_control(actor_task_id: str, reason: str):
         _ACTOR.reset(token)
 
 
-def mind_resume_refusal(root, task=None) -> dict | None:
-    """A model may not release a Panic hold, even after the global flag cleared."""
-    from pathlib import Path
-    from ouroboros.budget_pause import budget_hold_fact
+def observed_control_stop(root, task=None, *, budget=None, owner=None) -> dict:
+    """Feed observed control facts to the pure stop reader.
 
-    if not control_actor():
-        return None
-    hold = budget_hold_fact(task or {}) or {}
-    if hold.get("reason") == "panic_hold" or (Path(root) / "state" / "panic_stop.flag").exists():
-        return {"ok": False, "error": "panic_requires_owner_resume"}
-    return None
+    The legacy installation input remains until the separate installation-door
+    change; it does not become another per-task record.
+    """
+    from pathlib import Path
+    from ouroboros.work_stop import current_stop
+
+    installation = {"cause": "panic", "release": "owner"} if (Path(root) / "state" / "panic_stop.flag").exists() else {}
+    return current_stop(task, {"budget": budget or {}, "owner": owner or {}, "installation": installation})

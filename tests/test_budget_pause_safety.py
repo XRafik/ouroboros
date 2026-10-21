@@ -146,6 +146,7 @@ def _dead_granted_task(tmp_path, monkeypatch):
 @pytest.mark.parametrize("snapshot_ok", [True, False])
 def test_dead_unconsumed_grant_keeps_exact_hold_when_revocation_stores_fail(tmp_path, monkeypatch, snapshot_ok):
     from ouroboros import budget_pause
+    from ouroboros.work_stop import continuation_refusal
     from supervisor import events_budget, worker_health
 
     queue, workers, job, row = _dead_granted_task(tmp_path, monkeypatch)
@@ -160,7 +161,7 @@ def test_dead_unconsumed_grant_keeps_exact_hold_when_revocation_stores_fail(tmp_
     worker_health._recover_crashed_task_without_terminal(job, queue)
     assert terminals == [] and not workers.RUNNING
     held = workers.PENDING[0]
-    hold = held["_budget_pause_hold"]
+    hold = continuation_refusal(held)
     assert hold["grant_id"] == original_grant["grant_id"] and hold["pause_id"] == row["pause_id"]
     assert hold["snapshot_persisted"] is snapshot_ok and "_budget_pause_resume" not in held
     assert held["_budget_pause"]["checkpoint"]["source_ref"] == row["source_ref"]
@@ -203,7 +204,7 @@ def test_consumed_grant_crash_never_enters_ordinary_retry(tmp_path, monkeypatch)
 @pytest.mark.parametrize("fences", ["budget", "acceptance", "both"])
 @pytest.mark.parametrize("source_state", ["intact", "missing", "corrupt"])
 def test_invalid_fences_retain_exact_source_locators(tmp_path, monkeypatch, fences, source_state):
-    from supervisor.events_budget import budget_hold_fact
+    from ouroboros.work_stop import continuation_refusal
 
     queue, _, workers = _install_queue(tmp_path, monkeypatch)
     task, row = _parked(tmp_path, monkeypatch, task_id="saved")
@@ -222,7 +223,7 @@ def test_invalid_fences_retain_exact_source_locators(tmp_path, monkeypatch, fenc
     assert queue.restore_pending_from_snapshot() == 1
     held = workers.PENDING[0]
     assert held["_budget_pause"]["checkpoint"] == task["_budget_pause"]["checkpoint"]
-    assert budget_hold_fact(held) and held["_budget_pause"]["checkpoint"]["source_ref"] == row["source_ref"]
+    assert continuation_refusal(held) and held["_budget_pause"]["checkpoint"]["source_ref"] == row["source_ref"]
     sent = []
     _idle_worker(workers, sent)
     workers.assign_tasks()
@@ -235,6 +236,8 @@ def test_invalid_fences_retain_exact_source_locators(tmp_path, monkeypatch, fenc
                                           ("row", "pause_id"), ("grant", "grant_id")])
 def test_empty_resume_identity_cannot_match_or_overwrite(tmp_path, monkeypatch, surface, key):
     from ouroboros import budget_pause
+    from ouroboros import task_results
+    from ouroboros.work_stop import continuation_refusal
     from supervisor.budget_resume import revoke_exact_budget_resume
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
@@ -250,11 +253,20 @@ def test_empty_resume_identity_cannot_match_or_overwrite(tmp_path, monkeypatch, 
     writes = []
     monkeypatch.setattr(budget_pause, "set_budget_pause", lambda *_a, **_k: writes.append(True))
     assert revoke_exact_budget_resume(task, "restart_before_dispatch") is False
-    assert not writes and "_budget_pause_resume" not in task and task["_budget_pause_hold"]
+    assert not writes and "_budget_pause_resume" not in task and continuation_refusal(task)
     sent = []
     _idle_worker(workers, sent)
     workers.assign_tasks()
-    assert sent == [] and not queue.resume_budget_paused_task("malformed")["ok"] and not writes
+    assert sent == [] and not writes
+    if surface != "handoff":
+        # Resume independently reads the durable result, not the revoker's cached row.
+        read = task_results.load_task_result
+        monkeypatch.setattr(task_results, "load_task_result", lambda root, tid, **kw:
+            {**read(root, tid, **kw), "budget_pause": row} if tid == "malformed" else read(root, tid, **kw))
+        assert not queue.resume_budget_paused_task("malformed")["ok"] and not writes
+    else:
+        # A damaged handoff cannot permanently veto a fresh, valid durable source.
+        assert queue.resume_budget_paused_task("malformed")["ok"] and len(writes) == 2
 
 
 def test_resume_tool_selects_root_grandchild_and_parent_child_but_no_other_tree(tmp_path, monkeypatch):

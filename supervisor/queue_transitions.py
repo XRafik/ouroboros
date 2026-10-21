@@ -360,9 +360,8 @@ def budget_pause_fact(task, fences=None):
         # An explicit selection recorded against THIS fence released exactly one
         # row; its siblings stay fenced (owner Q9).
         return fence
-    if isinstance(task, dict) and budget_hold_fact(task) is not None:
-        return dict(budget_hold_fact(task))
-    return None
+    from ouroboros.work_stop import continuation_refusal
+    return budget_hold_fact(task) or continuation_refusal(task) or None
 
 
 def queued_admitted_dispatch(task: Any) -> bool:
@@ -370,10 +369,11 @@ def queued_admitted_dispatch(task: Any) -> bool:
     unsaved pause intent (#1729). Other pause/grant/hold/continuation carriers exclude it.
     A root latch still keeps it queued; prior effects remain the tree custody's question.
     """
-    from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_UNSAVED_PAUSE
+    from supervisor.events_budget import BUDGET_HOLD_KEY
+    from ouroboros.work_stop import record_policy
 
     hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    intent = isinstance(hold, dict) and hold.get("reason") == HOLD_UNSAVED_PAUSE
+    intent = isinstance(hold, dict) and record_policy(hold).get("needs_source")
     return bool(isinstance(task, dict) and task.get("admitted_dispatch") == "possible"
                 and not any(task.get(key) for key in (
                     "_owner_hold", "_budget_pause", "_budget_pause_resume", "_owner_wait_resume",
@@ -387,6 +387,8 @@ def pending_member_replay_safe(q: Any, member: Dict[str, Any]) -> Tuple[bool, st
 
     if member.get("_owner_hold"):
         return False, "owner_held"
+    if member.get("_continuation_prepared"):
+        return False, "continuation_publication_unconfirmed"
     if "_working_recovery" in member:
         # A locator alone does not authorize Resume: read its exact frozen source
         # and the target attempt's durable launch evidence, as assignment does.
@@ -436,21 +438,23 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
     ``selected_by`` names the MODEL-issued request (owner Q9); an empty value is
     the owner's own act, which needs no root grant above itself.
     """
-    from ouroboros.control_actor import control_actor, mind_resume_refusal
+    from ouroboros.control_actor import control_actor, observed_control_stop
+    from ouroboros.work_stop import clear_refusal, release_refusal, selection_record
     q = _queue_module()
     task_id = str(task_id or "").strip()
-    if refusal := mind_resume_refusal(q.DRIVE_ROOT):
+    if refusal := release_refusal(observed_control_stop(q.DRIVE_ROOT), control_actor()):
         return refusal
     if not task_id:
         return {"ok": False, "error": "missing_task_id"}
     from supervisor.events_budget import (
-        _held_selection_authority, budget_hold_fact, observe_held_budget_selection, select_held_budget_row,
+        _held_selection_authority, observe_held_budget_selection, select_held_budget_row,
     )
 
     external = observation = None
     with q._queue_lock:
         located = next((item for item in q.PENDING if str(item.get("id") or "") == task_id), None)
-        if refusal := mind_resume_refusal(q.DRIVE_ROOT, located):
+        if refusal := release_refusal(observed_control_stop(
+                q.DRIVE_ROOT, located, budget=q.BUDGET_ROOT_FENCES), control_actor()):
             return refusal
     if located is None:
         # A member parked WARM under the owner's Pause (its stack retained while a
@@ -538,7 +542,8 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
         task = next((item for item in q.PENDING if str(item.get("id") or "") == task_id), None)
         if task is None:
             return {"ok": False, "error": "task_not_pending"}
-        if refusal := mind_resume_refusal(q.DRIVE_ROOT, task):
+        if refusal := release_refusal(observed_control_stop(
+                q.DRIVE_ROOT, task, budget=q.BUDGET_ROOT_FENCES), control_actor()):
             return refusal
         pause = task.get("_budget_pause") if isinstance(task.get("_budget_pause"), dict) else None
         if pause and pause.get("exact_continuation"):
@@ -567,8 +572,8 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
         if (not selected_by and (task_id == candidate_root or "owner_pause_blockers" in (observation or {}))
                 and isinstance(candidate_fence, dict) and candidate_fence.get("cause") == "owner_pause"):
             return _resume_unstarted_owner_paused_root(q, task, candidate_fence, observation)
-        hold = budget_hold_fact(task)
-        if hold is not None and not pause:
+        hold = selection_record(task)
+        if hold:
             return select_held_budget_row(q, task, hold, selected_by=selected_by, observation=observation)
         if not pause:
             if not isinstance(candidate_fence, dict):
@@ -622,6 +627,8 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
             resumed_at = utc_now_iso()
             prior_pause = dict(pause)
             task.pop("_budget_pause", None)
+            task.pop("_budget_pause_hold", None)
+            clear_refusal(task)
             task["budget_resumed_at"] = resumed_at
             q.persist_queue_snapshot(reason="budget_pause_explicit_resume")
     if root_scope:

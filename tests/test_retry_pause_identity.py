@@ -514,8 +514,9 @@ def test_saved_state_that_cannot_complete_the_seed_defers_until_it_does(host, mo
 
 
 @pytest.mark.parametrize("carried", ["consumed_selection", "newer_hold"])
-def test_a_retry_drops_only_the_selection_its_own_dispatch_consumed(host, monkeypatch, clock, reaper,  # noqa: F811
-                                                                    carried):
+def test_a_new_pause_replaces_a_releasable_hold_and_retry_drops_the_consumed_selection(
+    host, monkeypatch, clock, reaper, carried,  # noqa: F811
+):
     from ouroboros.budget_pause import budget_fence_selected
     from supervisor.budget_resume import revoke_exact_budget_resume
     from supervisor.events_budget import HOLD_ROOT_FENCE_LIFTED
@@ -533,21 +534,15 @@ def test_a_retry_drops_only_the_selection_its_own_dispatch_consumed(host, monkey
                                          "fence_id": "newer-fence"}
     # The owner Pauses while the attempt hangs: a fence generation that selection never saw.
     assert request_owner_pause("held", request_id="newer")["ok"]
+    assert not budget_hold_fact(running), "the owner's new Pause releases the prior decision (A6)"
     latch = dict(queue.BUDGET_ROOT_FENCES["held"])
     _reap(clock, reaper)
     [retry] = _successors(host)
-    if carried == "consumed_selection":
-        assert "_resume_selection" not in retry and "_budget_pause_hold" not in retry
-    else:
-        assert budget_hold_fact(retry)["reason"] == HOLD_ROOT_FENCE_LIFTED, "selected alone erases nothing newer"
+    assert "_resume_selection" not in retry and "_budget_pause_hold" not in retry
     assert not budget_fence_selected(retry, latch) and not _assign(host, monkeypatch)
     resumed_now = queue.resume_budget_paused_task(retry["id"])
-    if carried == "consumed_selection":
-        assert resumed_now["ok"], "only the owner's new Resume releases it"
-        assert [t["id"] for t in _assign(host, monkeypatch)] == [retry["id"]]
-    else:
-        assert resumed_now == {"ok": False, "error": "selection_owner_held"}
-        assert budget_hold_fact(retry)["reason"] == HOLD_ROOT_FENCE_LIFTED and not _assign(host, monkeypatch)
+    assert resumed_now["ok"], "only the owner's new Resume releases it"
+    assert [t["id"] for t in _assign(host, monkeypatch)] == [retry["id"]]
 
 
 # --- B5: an owner Pause over a hung attempt, and the monetary latch --------------------------------

@@ -655,7 +655,7 @@ def revalidate_project_holds() -> None:
     from ouroboros.project_placement import pending_placement, refresh_pending_placement
     from ouroboros.owner_wait import restore_owner_wait_allowed
     from ouroboros.delegate_recovery import planned_handoff_resume_allowed
-    from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_RESTORE_REFUSED_PREFIX, budget_hold_fact
+    from supervisor.events_budget import BUDGET_HOLD_KEY, native_continuation_repair
 
     from supervisor.budget_resume import revalidate_consumed_resume_holds
 
@@ -710,7 +710,7 @@ def revalidate_project_holds() -> None:
                     if unseen_pause(task, before_pause):
                         _latch_unseen_pause(task)
                     continue  # retained pause, or its failed conversion; never a Stop
-                if (budget_hold_fact(task) or {}).get("reason") == HOLD_RESTORE_REFUSED_PREFIX + "owner_wait_source_unavailable":
+                if native_continuation_repair(task):
                     from ouroboros.cancel_intents import has_active_intent
 
                     wait = (load_task_result(queue.DRIVE_ROOT, tid, strict=True) or {}).get("owner_wait") or {}

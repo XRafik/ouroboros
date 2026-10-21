@@ -204,7 +204,8 @@ def test_a_revocation_that_cannot_be_written_stays_held_through_the_restart(tmp_
     hold, the durable grant is untouched, and the next Resume is refused."""
     from ouroboros import budget_pause
     from ouroboros.task_results import STATUS_CANCELLED, load_task_result
-    from supervisor.events_budget import HOLD_RESTART_REVOCATION_UNWRITTEN, budget_hold_fact
+    from supervisor.events_budget import HOLD_RESTART_REVOCATION_UNWRITTEN
+    from ouroboros.work_stop import continuation_refusal
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
     events = _pool_events(workers, monkeypatch)
@@ -222,7 +223,7 @@ def test_a_revocation_that_cannot_be_written_stays_held_through_the_restart(tmp_
     assert [row["id"] for row in workers.PENDING] == ["unwritten"] and _done_ids(events) == []
     kept = workers.PENDING[0]
     assert kept["_budget_pause"]["exact_continuation"] is True
-    assert budget_hold_fact(kept)["reason"] == HOLD_RESTART_REVOCATION_UNWRITTEN
+    assert continuation_refusal(kept)["reason"] == HOLD_RESTART_REVOCATION_UNWRITTEN
     row = load_task_result(tmp_path, "unwritten")
     assert row["status"] != STATUS_CANCELLED
     assert row["budget_pause"]["state"] == budget_pause.STATE_RESUME_GRANTED, "nothing was written over it"

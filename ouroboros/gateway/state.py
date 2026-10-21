@@ -432,6 +432,27 @@ def _managed_task_finalizing(drive_root: Any, task_id: str) -> bool:
         return False
 
 
+def _pending_resume_available(q: Any, task: dict, *, owner_paused: bool) -> bool:
+    """Present the current release rule; root custody still owns member selection."""
+    from ouroboros.work_stop import continuation_refusal, current_stop
+    from ouroboros.owner_pause import root_actor
+    from supervisor.events_budget import live_root_resume_grant
+    from supervisor.queue_transitions import budget_pause_fact
+
+    stop = current_stop(task, {"budget": q.BUDGET_ROOT_FENCES})
+    if owner_paused or not (stop.get("release") in {"resume", "owner"} or continuation_refusal(task)):
+        return False
+    task_id = str(task.get("id") or "")
+    root_id = str(task.get("root_task_id") or task_id)
+    result_root = pathlib.Path(task.get("budget_drive_root") or q.DRIVE_ROOT)
+    if root_actor(result_root, root_id, task_id, strict=True):
+        return True
+    fence = q.BUDGET_ROOT_FENCES.get(root_id) or {}
+    root_parked = fence.get("status") in {"active", "paused"} or any(
+        row.get("id") == root_id and budget_pause_fact(row, q.BUDGET_ROOT_FENCES) is not None for row in q.PENDING)
+    return not root_parked and not live_root_resume_grant(q, root_id, result_root)
+
+
 def _managed_task_budget_pausing(drive_root: Any, row: Dict[str, Any], task_id: str) -> bool | None:
     """A RUNNING task writing its exact budget pause (#1196): the durable
     ``budget_pause`` row is the only truth of that window; None means unreadable."""
@@ -669,7 +690,7 @@ def _chat_activities_snapshot(drive_root, task_bindings, direct_rows, pending_ro
                 "kind": "direct_chat" if row.get("_is_direct_chat") else "managed_task",
                 "phase": phase,
                 # Cancel stops a lineage-resolved root (``ChatOutbound.cancelable``); Resume is the
-                # parked row's own release rule (``events_budget.explicit_resume_required``).
+                # parked row's own release rule (``work_stop.current_stop``).
                 "can_resume": bool(can_resume), "cancelable": bool(root),
                 # A consumed owner Resume answered that fence's Pause: the row's own facts explain it.
                 **({"pause_cause": _activity_pause_cause(row, {} if owner_resumed else fence_rows.get(
@@ -692,7 +713,6 @@ def _chat_activities_snapshot(drive_root, task_bindings, direct_rows, pending_ro
 
         from types import SimpleNamespace
 
-        from supervisor.events_budget import explicit_resume_required
         from supervisor.queue_transitions import budget_pause_fact
 
         registries = SimpleNamespace(PENDING=pending_rows, BUDGET_ROOT_FENCES=fence_rows, DRIVE_ROOT=drive_root,
@@ -717,7 +737,7 @@ def _chat_activities_snapshot(drive_root, task_bindings, direct_rows, pending_ro
                 interrupted = phase in {"budget_paused", "budget_pausing"} and _interrupted_owner_resume(
                     drive_root, row, task_id)
                 phase = "unknown" if interrupted is None else "budget_paused" if interrupted else phase
-                resume = interrupted is True or (phase == "budget_paused" and explicit_resume_required(
+                resume = interrupted is True or (phase == "budget_paused" and _pending_resume_available(
                     registries, row, owner_paused=(fence_rows.get(str(row.get("root_task_id") or task_id)) or {}).get(
                         "cause") == "owner_pause" or _owner_fence_state(drive_root, row, task_id) == "paused"))
                 activities.append(_activity(task_id, row, phase, _epoch_or_zero(row.get("queued_at")),

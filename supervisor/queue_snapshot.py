@@ -231,8 +231,9 @@ def persist_queue_snapshot(reason: str = "") -> bool:
         for task in [*pending_items, *(meta.get("task") or {} for _, meta in running_items)]:
             if str(task.get("root_task_id") or task.get("id") or "") in fenced:
                 member = {key: task[key] for key in ("id", "_budget_pause", "_continuation_prepared") if key in task}
-                for key, fields in ((BUDGET_HOLD_KEY, ("reason",)),
-                                    ("_resume_selection", ("fence_id",)),
+                for key, fields in ((BUDGET_HOLD_KEY, ("reason", "release")),
+                                    ("_owner_wait_resume", ("refusal",)), ("_working_recovery", ("refusal",)),
+                                    ("_resume_selection", ("fence_id", "refusal")),
                                     ("_budget_pause_resume", ("pause_id", "grant_id", "authority", "root_fence_id", "selected_by", "root_grant_id", "root_resume_generation"))):
                     if key in task:
                         value = task[key]
@@ -387,13 +388,15 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
     from ouroboros.project_admission import host_unscoped
     from ouroboros.task_results import load_task_result
     from supervisor.budget_resume import resume_hold_requires_fence, revoke_exact_budget_resume
-    from supervisor.events_budget import (BUDGET_HOLD_KEY, HOLD_OWNER_RESTART, HOLD_PANIC, HOLD_RESTORE_REFUSED_PREFIX,
+    from supervisor.events_budget import (HOLD_OWNER_RESTART, HOLD_PANIC, HOLD_RESTORE_REFUSED_PREFIX,
                                           budget_hold_fact, hold_budget_row, hold_restored_budget_pause)
     from supervisor.restart_retention import (fresh_return_transaction, hold_after_stop, hold_for_owner_restart,
                                               hold_stopped_queue, never_started, panic_recorded, park_saved_pause, pause_ids,
                                               recover_saved_running,
                                               retained_pending, saved_sleep_hold_reason, unseen_pause)
     from supervisor.schedule_occurrence import first_attempt, first_dispatch_unsent, restore_verdict
+
+    from ouroboros.work_stop import clear_refusal, continuation_refusal
 
     sleep_hold_reason = saved_sleep_hold_reason(_queue().DRIVE_ROOT)
     owner_restart, panic = sleep_hold_reason == HOLD_OWNER_RESTART, sleep_hold_reason == HOLD_PANIC
@@ -507,8 +510,8 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
         if schedule_replay and task.get("admitted_dispatch") == "possible" and first_dispatch_unsent(task):
             # Its receipt proves no first handoff: never started, under this stop's own rule.
             task["admitted_dispatch"] = "none"
-            if (budget_hold_fact(task) or {}).get("reason") == "dispatch_outcome_unknown":
-                task.pop(BUDGET_HOLD_KEY, None)
+            if continuation_refusal(task).get("dispatch_unknown"):
+                clear_refusal(task)
         # Busy at boot proves neither way: this stop's rule for an unsent row, under Project
         # custody that re-reads the receipt each tick (``revalidate_project_holds``).
         recheck = (verdict == "busy" and task.get("admitted_dispatch") == "possible" and first_attempt(task)
@@ -522,7 +525,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
                 hold_after_stop(retained[-1], _queue().DRIVE_ROOT, HOLD_OWNER_RESTART if owner_restart else HOLD_PANIC)
         elif task.get("_owner_wait_resume"):
             # An existing Project hold is custody; its revalidation reads the owner-wait authority.
-            if budget_hold_fact(task) or wait_allowed:
+            if budget_hold_fact(task) or continuation_refusal(task) or wait_allowed:
                 retained.append(task)
             else:  # a refused cold handoff keeps its exact wait source, held for Resume
                 handoff = dict(task)
@@ -668,8 +671,9 @@ def _refuse_restore_invalid_fences(snapshot_pending: list, *, budget: bool = Fal
     )
     from supervisor.events_budget import (
         HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT, HOLD_INVALID_BUDGET_FENCE_SNAPSHOT,
-        budget_hold_fact, hold_restored_budget_pause,
+        hold_restored_budget_pause,
     )
+    from ouroboros.work_stop import continuation_refusal
     from supervisor.restart_retention import retained_pending
 
     cancelled: list[str] = []
@@ -680,13 +684,12 @@ def _refuse_restore_invalid_fences(snapshot_pending: list, *, budget: bool = Fal
         if not task_id:
             continue
         if task.get("_project_admission_restore_hold") or task.get("project_id"):
-            # Malformed independent fence evidence is not cleared by Project
-            # revalidation. Keep the row under the existing owner hold as well.
-            held = {**task, "_owner_hold": task.get("_owner_hold") or {
-                "reason": "The saved budget or acceptance fence is invalid; dispatch is held.",
-            }, "_project_admission_restore_hold": task.get("_project_admission_restore_hold") or {
+            # Broken restore evidence belongs to the continuation, not to the owner.
+            held = {**task, "_project_admission_restore_hold": task.get("_project_admission_restore_hold") or {
                 "reason": "project_routing_fence_lookup_failed", "detail": "Independent restore authority is invalid.",
             }}
+            hold_restored_budget_pause(held, _queue().DRIVE_ROOT,
+                reason=HOLD_INVALID_BUDGET_FENCE_SNAPSHOT if budget else HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT)
             with _queue()._queue_lock:
                 _append_held_pending_row(held)
             retained.append(task_id)
@@ -702,7 +705,7 @@ def _refuse_restore_invalid_fences(snapshot_pending: list, *, budget: bool = Fal
         except Exception:
             log.debug("Result authority unreadable for paused row %s; retained held", task_id, exc_info=True)
         held = dict(task)
-        if budget_hold_fact(held) is None:
+        if not continuation_refusal(held):
             held = hold_restored_budget_pause(
                 held, _queue().DRIVE_ROOT, reason=(HOLD_INVALID_BUDGET_FENCE_SNAPSHOT if budget
                                                   else HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT),
@@ -1094,10 +1097,11 @@ def _restore_pending(key: str, max_age_sec: int, terminalized: Optional[list]) -
                         # any, is kept); the next Resume re-reads the authority.
                         from ouroboros.budget_pause import RESTORE_REFUSAL_RECORD_UNREADABLE
                         from supervisor.events_budget import (
-                            HOLD_RESTORE_REFUSED_PREFIX, budget_hold_fact, hold_restored_budget_pause,
+                            HOLD_RESTORE_REFUSED_PREFIX, hold_restored_budget_pause,
                         )
+                        from ouroboros.work_stop import continuation_refusal
 
-                        if budget_hold_fact(task) is None:
+                        if not continuation_refusal(task):
                             task = hold_restored_budget_pause(
                                 dict(task), _queue().DRIVE_ROOT,
                                 reason=HOLD_RESTORE_REFUSED_PREFIX + RESTORE_REFUSAL_RECORD_UNREADABLE)

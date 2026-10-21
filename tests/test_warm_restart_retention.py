@@ -561,6 +561,7 @@ def test_a_closed_wait_with_a_retention_hold_still_reaches_shutdown_custody(tmp_
 @pytest.mark.parametrize("reason", ["owner", "owner_pause"])
 def test_unreadable_wait_does_not_abort_other_pending_restore(tmp_path, monkeypatch, ack, project_hold, reason):
     from ouroboros import task_results
+    from ouroboros.work_stop import continuation_refusal
     from ouroboros.cancel_intents import has_active_intent
 
     queue, _, workers = _install_queue(tmp_path, monkeypatch)
@@ -592,7 +593,7 @@ def test_unreadable_wait_does_not_abort_other_pending_restore(tmp_path, monkeypa
     restored = {t["id"]: t for t in workers.PENDING}
     assert {"saved-warm", "bystander"} <= restored.keys()
     assert restored["saved-warm"]["_owner_wait_resume"]["wait_id"] == wait["wait_id"]
-    assert budget_hold_fact(restored["saved-warm"]) and "_resume_selection" not in restored["saved-warm"]
+    assert continuation_refusal(restored["saved-warm"]) and not restored["saved-warm"].get("_resume_selection")
     assert not restored["saved-warm"].get("_terminalization_retry")
     assert not has_active_intent(tmp_path, "saved-warm", strict=True)
     if reason == "owner_pause":

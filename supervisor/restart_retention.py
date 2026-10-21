@@ -373,10 +373,9 @@ def retain_sleep_checkpoint(root: pathlib.Path, task_id: str, attempt: int, *, d
 
 def restart_held(task: Any) -> bool:
     """Whether this queued row carries an UNRELEASED owner-Restart hold."""
-    from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_OWNER_RESTART
+    from ouroboros.work_stop import current_stop
 
-    hold = task.get(BUDGET_HOLD_KEY) if isinstance(task, dict) else None
-    return isinstance(hold, dict) and str(hold.get("reason") or "") == HOLD_OWNER_RESTART
+    return current_stop(task).get("door") == "owner_restart"
 
 
 def never_started(task: Any) -> bool:
@@ -408,23 +407,13 @@ def hold_for_owner_restart(task: Dict[str, Any], drive_root: Any) -> Dict[str, A
 
 def hold_after_stop(task: Dict[str, Any], drive_root: Any, reason: str) -> Dict[str, Any]:
     """Hold recovered sleep or an owner's stop, preserving stronger prior holds."""
-    from supervisor.events_budget import HOLD_CONTINUATION_WRITER, budget_hold_fact, hold_budget_row
+    from supervisor.events_budget import hold_budget_row
+    from ouroboros.work_stop import door_can_replace
 
-    prior = budget_hold_fact(task)
-    if prior is not None:
-        if reason == HOLD_SAVED_SLEEP_RECOVERY or prior.get("reason") not in {
-                HOLD_CONTINUATION_WRITER, HOLD_SAVED_SLEEP_RECOVERY}:
-            return task
-    # A Continue waiting on its predecessor's writers is held by the newer
-    # Restart instead: a later reconciliation must not release what the owner's
-    # Restart now holds (its own release still re-checks those writers).
-    hold_budget_row(
-        task, reason=reason,
-        detail=("saved sleep recovered; held until an explicit Resume" if reason == HOLD_SAVED_SLEEP_RECOVERY
-                else "held by the owner's stop until an explicit Resume"),
-        extra={"root_task_id": str(task.get("root_task_id") or task.get("id") or ""),
-               **({"prior_hold": dict(prior)} if prior else {})},
-        result_root=pathlib.Path(task.get("budget_drive_root") or drive_root))
+    if door_can_replace(task, reason):
+        hold_budget_row(task, reason=reason, detail="saved work held until an explicit Resume",
+                        extra={"root_task_id": str(task.get("root_task_id") or task.get("id") or "")},
+                        result_root=pathlib.Path(task.get("budget_drive_root") or drive_root))
     return task
 
 
@@ -478,11 +467,12 @@ def retained_pending(task: Dict[str, Any], *, sleep_hold_reason: str = "") -> bo
     pause = task.get("_budget_pause")
     saved = isinstance(pause, dict) and pause.get("exact_continuation") is True
     from supervisor.events_budget import budget_hold_fact
+    from ouroboros.work_stop import reason_policy, record_policy
 
     hold = budget_hold_fact(task)
     if sleep_hold_reason and ((saved and pause.get("reason") == "sleep"
-                               and sleep_hold_reason != HOLD_SAVED_SLEEP_RECOVERY)
-                              or (hold or {}).get("reason") == HOLD_SAVED_SLEEP_RECOVERY):
+                               and reason_policy(sleep_hold_reason).get("replaces_door", True))
+                              or record_policy(hold).get("door_replaceable")):
         from supervisor import queue as q
 
         hold_after_stop(task, q.DRIVE_ROOT, sleep_hold_reason)

@@ -84,7 +84,7 @@ def test_unrestorable_source_holds_the_row_with_its_marker_and_a_later_grant_rel
     HELD beside its marker, refuses Resume typed while unreadable, and the grant
     that re-validates a readable source releases the hold."""
     from ouroboros import budget_pause
-    from supervisor.events_budget import budget_hold_fact
+    from ouroboros.work_stop import continuation_refusal
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "budget_remaining", lambda _st, **_k: 5.0)
@@ -98,19 +98,21 @@ def test_unrestorable_source_holds_the_row_with_its_marker_and_a_later_grant_rel
     assert queue.restore_pending_from_snapshot() == 1
     held = workers.PENDING[0]
     assert held["id"] == "corrupt-1" and held["_budget_pause"]["exact_continuation"] is True
-    hold = budget_hold_fact(held)
-    assert hold["reason"] == "restore_refused:pause_source_unreadable" and hold["release"] == "resume"
+    hold = continuation_refusal(held)
+    assert hold["reason"] == "restore_refused:pause_source_unreadable" and "release" not in hold
     sent = []
     workers.WORKERS[0] = affirm_ready(SimpleNamespace(wid=0, busy_task_id=None, reaping=False,
                                          in_q=SimpleNamespace(put=lambda t: sent.append(dict(t)))))
     workers.assign_tasks()
     assert sent == []  # held, not assignable
     assert queue.resume_budget_paused_task("corrupt-1")["error"] == "pause_source_unreadable"
-    assert "_budget_pause" in held and budget_hold_fact(held) is not None  # retained, still held
+    assert "_budget_pause" in held and bool(continuation_refusal(held))  # retained, still held
     source.write_bytes(original)
     granted = queue.resume_budget_paused_task("corrupt-1")
-    assert granted["ok"] is True and granted["released_hold"] == "restore_refused:pause_source_unreadable"
-    assert budget_hold_fact(held) is None and "_budget_pause_hold" not in held and "_budget_pause_resume" in held
+    assert granted["ok"] is True and "released_hold" not in granted
+    assert not continuation_refusal(held) and "_budget_pause_hold" not in held and "_budget_pause_resume" in held
+    from ouroboros.task_results import load_task_result
+    assert "refusal" not in load_task_result(tmp_path, "corrupt-1")["resource_limit"]
     workers.assign_tasks()
     assert [t["id"] for t in sent] == ["corrupt-1"]
 
@@ -121,7 +123,7 @@ def test_orphaned_unwritten_revocation_is_written_by_the_next_resume_before_a_ne
     Resume writes the deferred revocation, then mints generation 2."""
     from ouroboros import budget_pause
     from supervisor.budget_resume import revoke_exact_budget_resume
-    from supervisor.events_budget import budget_hold_fact
+    from ouroboros.work_stop import continuation_refusal
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "budget_remaining", lambda _st, **_k: 5.0)
@@ -133,7 +135,7 @@ def test_orphaned_unwritten_revocation_is_written_by_the_next_resume_before_a_ne
                         lambda *_a, **_k: (_ for _ in ()).throw(OSError("read-only file system")))
     assert revoke_exact_budget_resume(task, "budget_exhausted_before_dispatch") is False
     monkeypatch.setattr(budget_pause, "set_budget_pause", real_writer)
-    hold = budget_hold_fact(task)
+    hold = continuation_refusal(task)
     assert hold["reason"] == "resume_grant_revocation_unwritten" and hold["grant_id"] == first_grant
     assert task["_budget_pause"]["exact_continuation"] is True and "_budget_pause_resume" not in task
     assert budget_pause.budget_pause_row(tmp_path, "orphan-1")["state"] == budget_pause.STATE_RESUME_GRANTED
@@ -144,7 +146,7 @@ def test_orphaned_unwritten_revocation_is_written_by_the_next_resume_before_a_ne
     assert sent == []  # a stale grant never dispatches
     second = queue.resume_budget_paused_task("orphan-1")
     assert second["ok"] is True and second["grant_id"] != first_grant
-    assert second["grant_generation"] == 2 and second["released_hold"] == "resume_grant_revocation_unwritten"
+    assert second["grant_generation"] == 2 and not continuation_refusal(task)
     row = budget_pause.budget_pause_row(tmp_path, "orphan-1")
     assert row["grant"]["grant_id"] == second["grant_id"] and row["resume_generation"] == 2
     ctx, _limit = _loop_ctx(tmp_path, "orphan-1")
@@ -245,10 +247,11 @@ def test_a_consumed_grant_is_never_re_armed_by_a_later_revocation(tmp_path, monk
     put the task back on the pause path. The queue row is a stale carrier: its handoff
     leaves, no ``_budget_pause`` marker is re-minted over a task that is not paused, the
     durable RESUMED row is not written over, and the task's own status is not rewritten."""
+    from ouroboros.work_stop import continuation_refusal
     from ouroboros import budget_pause
     from ouroboros.task_results import load_task_result
     from supervisor.budget_resume import revoke_exact_budget_resume
-    from supervisor.events_budget import HOLD_GRANT_CONSUMED_STALE_ROW, budget_hold_fact
+    from supervisor.events_budget import HOLD_GRANT_CONSUMED_STALE_ROW
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "budget_remaining", lambda _st, **_k: 5.0)
@@ -266,10 +269,10 @@ def test_a_consumed_grant_is_never_re_armed_by_a_later_revocation(tmp_path, monk
 
     assert revoke_exact_budget_resume(task, "money_vanished") is False
     assert "_budget_pause_resume" not in task
-    assert "_budget_pause" not in task  # NOT re-minted over a task that is running on
+    assert set(task["_budget_pause"]) == {"refusal"}  # no new pause identity or executable source
     assert "_budget_pause_consumed" not in task
-    assert budget_hold_fact(task)["grant_id"] == grant_id
-    assert budget_hold_fact(task)["reason"] == HOLD_GRANT_CONSUMED_STALE_ROW
+    assert continuation_refusal(task)["grant_id"] == grant_id
+    assert continuation_refusal(task)["reason"] == HOLD_GRANT_CONSUMED_STALE_ROW
     after = budget_pause.budget_pause_row(tmp_path, "loop-4")
     assert after["state"] == budget_pause.STATE_RESUMED and after["grant"]["consumed_at"]
     assert load_task_result(tmp_path, "loop-4", strict=True)["status"] != "cancelled"
@@ -281,8 +284,9 @@ def test_malformed_acceptance_fence_evidence_retains_a_saved_pause_but_fails_clo
     its root's review state is cancelled rather than started. A saved exact budget pause
     is the one exception — retained as a typed, non-dispatchable hold carrying its
     ORIGINAL locator, never cancelled, until the owner's next Resume re-validates it."""
+    from ouroboros.work_stop import continuation_refusal
     from ouroboros.task_results import load_task_result
-    from supervisor.events_budget import HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT, budget_hold_fact
+    from supervisor.events_budget import HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT
 
     queue, _state, workers = _install_queue(tmp_path, monkeypatch)
     _paused, row = _parked(tmp_path, monkeypatch, task_id="child-6", root_task_id="root-6")
@@ -302,14 +306,15 @@ def test_malformed_acceptance_fence_evidence_retains_a_saved_pause_but_fails_clo
     # The ORIGINAL locator survives: the checkpoint still names the exact saved pause.
     assert held["_budget_pause"]["checkpoint"]["pause_id"] == row["pause_id"]
     assert held["_budget_pause"]["checkpoint"]["source_ref"] == row["source_ref"]
-    assert budget_hold_fact(held)["reason"] == HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT
+    assert continuation_refusal(held)["reason"] == HOLD_INVALID_ACCEPTANCE_FENCE_SNAPSHOT
     assert load_task_result(tmp_path, "child-6", strict=True)["status"] != "cancelled"
     # The ordinary row failed closed: not restored, and terminalized as cancelled.
     assert load_task_result(tmp_path, "plain-6", strict=True)["status"] == "cancelled"
 
 
 def test_acceptance_fence_at_restore_holds_a_saved_pause_instead_of_cancelling(tmp_path, monkeypatch):
-    from supervisor.events_budget import HOLD_ROOT_ACCEPTANCE_FENCED, budget_hold_fact
+    from ouroboros.work_stop import continuation_refusal
+    from supervisor.events_budget import HOLD_ROOT_ACCEPTANCE_FENCED
     from ouroboros.task_results import load_task_result
 
     queue, _state, workers = _install_queue(tmp_path, monkeypatch)
@@ -324,7 +329,7 @@ def test_acceptance_fence_at_restore_holds_a_saved_pause_instead_of_cancelling(t
         queue.ACCEPTANCE_FENCES.pop("root-5", None)
     held = workers.PENDING[0]
     assert held["id"] == "child-5" and held["_budget_pause"]["exact_continuation"] is True
-    assert budget_hold_fact(held)["reason"] == HOLD_ROOT_ACCEPTANCE_FENCED
+    assert continuation_refusal(held)["reason"] == HOLD_ROOT_ACCEPTANCE_FENCED
     assert load_task_result(tmp_path, "child-5", strict=True)["status"] != "cancelled"
 
 
@@ -543,8 +548,9 @@ def test_an_unwritten_grant_rollback_holds_the_row_instead_of_granting_forever(t
     written, the row keeps a grant the queue no longer carries. Recorded as the
     EXISTING unwritten-revocation hold, the next Resume writes that revocation
     before minting — instead of answering ``resume_already_granted`` forever."""
+    from ouroboros.work_stop import continuation_refusal
     from ouroboros import budget_pause
-    from supervisor.events_budget import HOLD_REVOCATION_UNWRITTEN, budget_hold_fact
+    from supervisor.events_budget import HOLD_REVOCATION_UNWRITTEN
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
     monkeypatch.setattr(state, "budget_remaining", lambda _st, **_k: 5.0)
@@ -561,7 +567,7 @@ def test_an_unwritten_grant_rollback_holds_the_row_instead_of_granting_forever(t
     monkeypatch.setattr(queue, "persist_queue_snapshot", lambda reason="": False)
     refused = queue.resume_budget_paused_task("f6-1")
     assert refused["error"] == "snapshot_not_persisted" and refused["held"] == HOLD_REVOCATION_UNWRITTEN
-    hold = budget_hold_fact(task)
+    hold = continuation_refusal(task)
     assert hold["reason"] == HOLD_REVOCATION_UNWRITTEN and hold["grant_id"] == refused["grant_id"]
     assert task["_budget_pause"]["exact_continuation"] is True and "_budget_pause_resume" not in task
     assert budget_pause.budget_pause_row(tmp_path, "f6-1")["state"] == budget_pause.STATE_RESUME_GRANTED
@@ -575,7 +581,7 @@ def test_an_unwritten_grant_rollback_holds_the_row_instead_of_granting_forever(t
     second = queue.resume_budget_paused_task("f6-1")
     assert second["ok"] is True and second["grant_id"] != refused["grant_id"]
     assert second["grant_generation"] == 2
-    assert second["released_hold"] == HOLD_REVOCATION_UNWRITTEN
+    assert not continuation_refusal(task)
     row = budget_pause.budget_pause_row(tmp_path, "f6-1")
     assert row["grant"]["grant_id"] == second["grant_id"] and row["resume_generation"] == 2
 
@@ -653,9 +659,10 @@ def test_owner_wait_restart_assignment_and_the_cold_loop_keep_the_budget_paused_
 
 @pytest.mark.parametrize("race", ["consumed", "unreadable"])
 def test_worker_death_reads_the_revokers_hold_before_reparking(tmp_path, monkeypatch, race):
+    from ouroboros.work_stop import continuation_refusal
     from ouroboros import budget_pause
     from supervisor import budget_resume, worker_health
-    from supervisor.events_budget import BUDGET_HOLD_KEY, HOLD_GRANT_CONSUMED_STALE_ROW, HOLD_RECORD_UNREADABLE_AT_REVOKE
+    from supervisor.events_budget import HOLD_GRANT_CONSUMED_STALE_ROW, HOLD_RECORD_UNREADABLE_AT_REVOKE
     from tests.test_worker_crash_retry import _make_worker
 
     queue, state, workers = _install_queue(tmp_path, monkeypatch)
@@ -690,7 +697,7 @@ def test_worker_death_reads_the_revokers_hold_before_reparking(tmp_path, monkeyp
     assert fenced and parked is (race == "unreadable")
     assert "_budget_pause_consumed" not in task
     expected = HOLD_GRANT_CONSUMED_STALE_ROW if race == "consumed" else HOLD_RECORD_UNREADABLE_AT_REVOKE
-    assert task[BUDGET_HOLD_KEY]["reason"] == expected
+    assert continuation_refusal(task)["reason"] == expected
     if race == "consumed":
         assert not workers.PENDING and workers.RUNNING[task["id"]] is meta
         assert budget_pause.budget_pause_row(tmp_path, task["id"])["state"] == budget_pause.STATE_RESUMED

@@ -107,6 +107,7 @@ def test_two_root_resumes_invalidate_child_selection_without_copying_its_stop(tm
     assert SELECTION_KEY not in child
     hold = eb.budget_hold_fact(child)
     assert hold["reason"] == eb.HOLD_ROOT_FENCE_LIFTED
+    assert "cause" not in hold
     assert hold["root_grant_id"] == current["root_grant_id"]
     assert q.resume_budget_paused_task("first", selected_by="saved-root")["ok"]
     assert eb.budget_resume_dispatch_allowed(q, child) is True
@@ -217,6 +218,7 @@ def test_mind_resume_text_never_becomes_the_next_stop_reason(tmp_path, monkeypat
         assert request_owner_pause("saved-root", request_id="new-pause")["ok"]
     workers.assign_tasks()
     assert eb.budget_hold_fact(rows["first"])["reason"] == eb.HOLD_ROOT_FENCE_LIFTED
+    assert "cause" not in eb.budget_hold_fact(rows["first"])
     assert SELECTION_KEY not in rows["first"]
 
 
