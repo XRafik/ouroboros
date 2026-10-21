@@ -802,7 +802,7 @@ def _persist(request: Request, old_settings: Dict[str, Any], current: Dict[str, 
 
     to_save = dict(current)
     to_save["OUROBOROS_RUNTIME_MODE"] = pending_mode
-    authored = ("OUROBOROS_SAFETY_MODE",) if safety_light else ()
+    authored = ("OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE")
     # Under the seam-wide document lock: the fingerprint precondition protects
     # THIS write from a stale merge, but not a generic save whose (locked)
     # read happened before this write — without the lock that save would land
@@ -814,7 +814,7 @@ def _persist(request: Request, old_settings: Dict[str, Any], current: Dict[str, 
         _owner_write_settings(
             to_save,
             authored_keys=authored,
-            allow_safety_lowering=safety_light,
+            allow_safety_lowering=True,
             precondition=_write_precondition(
                 install_preset_applied, safety_light, read_fingerprint,
             ),
@@ -871,7 +871,10 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
     subscriptions_connected, skip_presets = parse_subscription_intent(body)
     eligible = preset_eligible(old_settings)
     safety_light = _fresh_settings_file()
+    if not old_settings.get("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"):
+        current["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] = "full"
     if safety_light:
+        current["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] = "full"
         # Rev.3-2 desktop-wizard parity: a genuinely FRESH install authors the new-install ``light``
         # safety here (the shared validator must not: web/Docker reach it through the generic path);
         # the persist seam re-proves "no settings file yet" under the lock.

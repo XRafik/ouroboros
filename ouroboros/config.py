@@ -69,6 +69,7 @@ from ouroboros.model_slots import (
     get_heavy_model,  # noqa: F401
     get_image_input_mode,  # noqa: F401
     get_light_model,  # noqa: F401
+    get_safety_model,  # noqa: F401
     get_vision_model,  # noqa: F401
     migrate_legacy_slot_keys,  # noqa: F401
     parse_fallback_chain,  # noqa: F401
@@ -417,15 +418,16 @@ def get_runtime_mode() -> str:
     return normalize_runtime_mode(os.environ.get("OUROBOROS_RUNTIME_MODE", default_val) or default_val)
 
 
-def get_safety_mode() -> str:
+def get_safety_mode(kind: str = "owner") -> str:
     """Return captured Supervisor coverage (full | light | off).
 
     Ordinary modes use the owner writer; Cyber may configure subsequent work
     through the same settings owner. Coverage is separate from Cyber's advisory
     decision authority and from the facts of a saved physical request.
     """
-    default_val = str(SETTINGS_DEFAULTS["OUROBOROS_SAFETY_MODE"])
-    return normalize_safety_mode(runtime_setting("OUROBOROS_SAFETY_MODE", default_val) or default_val)
+    key = "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE" if kind == "consciousness" else "OUROBOROS_SAFETY_MODE"
+    default_val = str(SETTINGS_DEFAULTS[key])
+    return normalize_safety_mode(runtime_setting(key, default_val) or default_val)
 
 
 def get_context_mode() -> str:
@@ -499,6 +501,7 @@ def prepare_settings_for_persist(settings: dict, *, authored_keys: Sequence[str]
         and str(v) == str(SETTINGS_DEFAULTS.get(k, "")))}
     _guard_context_mode_lowering(prepared, allow_context_lowering=allow_context_lowering)
     _guard_safety_mode_lowering(prepared, allow_safety_lowering=allow_safety_lowering)
+    _guard_safety_configuration(prepared, owner_write=allow_safety_lowering)
     if runtime_mode_at_least(get_runtime_mode(), "cyber_pro") and prepared.get("OUROBOROS_CONTEXT_MODE") == "low":
         # Cyber may author Low. Keep that explicit choice distinct from retired auto-Low.
         prepared["OUROBOROS_CONTEXT_MODE_AUTO_LOW"] = "false"
@@ -517,13 +520,75 @@ def _guard_safety_mode_lowering(settings: dict, *, allow_safety_lowering: bool =
     owner-only outside Cyber Pro (mirrors the context-mode ratchet, BIBLE P3)."""
     if runtime_mode_at_least(get_runtime_mode(), "cyber_pro"):
         return
-    previous_mode = normalize_safety_mode(_settings_file_value("OUROBOROS_SAFETY_MODE", "full"))
-    next_mode = normalize_safety_mode(settings.get("OUROBOROS_SAFETY_MODE", previous_mode))
-    if _SAFETY_MODE_RANK[next_mode] < _SAFETY_MODE_RANK[previous_mode] and not allow_safety_lowering:
-        raise PermissionError(
-            f"OUROBOROS_SAFETY_MODE lowering refused: {previous_mode!r} -> {next_mode!r}. "
-            "Safety mode is owner-controlled — use the dedicated /api/owner/safety-mode endpoint."
-        )
+    for key in ("OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"):
+        previous_mode = normalize_safety_mode(_settings_file_value(key, "full"))
+        next_mode = normalize_safety_mode(settings.get(key, previous_mode))
+        if _SAFETY_MODE_RANK[next_mode] < _SAFETY_MODE_RANK[previous_mode] and not allow_safety_lowering:
+            raise PermissionError(
+                f"{key} lowering refused: {previous_mode!r} -> {next_mode!r}. "
+                "Safety mode is owner-controlled — use the dedicated /api/owner/safety-mode endpoint."
+            )
+
+
+def safety_configuration(settings: dict) -> tuple:
+    """Resolved checker identity; unrelated model/catalog changes remain ordinary writes."""
+    from ouroboros.configured_subagents import parse_configured_subagents
+
+    values = {**SETTINGS_DEFAULTS, **settings}
+    slot = "safety" if str(values.get("OUROBOROS_MODEL_SAFETY") or "").strip() else "light"
+    if slot == "light" and not str(values.get("OUROBOROS_MODEL_LIGHT") or "").strip():
+        slot = "main"
+    model = str(values.get({"safety": "OUROBOROS_MODEL_SAFETY", "light": "OUROBOROS_MODEL_LIGHT",
+                           "main": "OUROBOROS_MODEL"}[slot]) or SETTINGS_DEFAULTS["OUROBOROS_MODEL"]).strip()
+    local = model.endswith(" (local)") or str(values.get(f"USE_LOCAL_{slot.upper()}") or "").lower() in {"true", "1", "yes", "on"}
+    model = model.removesuffix(" (local)")
+    options = tuple(normalize_model_role_options(key, values.get(key))[0].get("safety", "")
+                    for key in (MODEL_ACCOUNTS_KEY, MODEL_CONTEXT_WINDOWS_KEY, MODEL_PROCESSING_PREFERENCES_KEY))
+    raw = values.get("OUROBOROS_SUBAGENTS")
+    recheck = ()
+    if raw:
+        try:
+            catalog = parse_configured_subagents(raw)
+            recheck = tuple((row.subagent_id, row.route, row.effort, row.processing_preference,
+                             row.enabled, catalog.enabled) for row in catalog.items if row.rechecks_flags)
+        except ValueError:
+            recheck = ("invalid", str(raw))
+    return (model, local, options, recheck,
+            normalize_safety_mode(values["OUROBOROS_SAFETY_MODE"]),
+            normalize_safety_mode(values["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"]),
+            str(values.get("OUROBOROS_SAFETY_OWNER_RULES") or ""))
+
+
+def _guard_safety_configuration(settings: dict, *, owner_write: bool = False) -> None:
+    rules = settings.get("OUROBOROS_SAFETY_OWNER_RULES", "")
+    if not isinstance(rules, str) or len(rules.encode("utf-8")) > 64_000:
+        raise ValueError("Safety owner rules must be text of at most 64,000 UTF-8 bytes")
+    if owner_write or runtime_mode_at_least(get_runtime_mode(), "cyber_pro"):
+        return
+    previous = _settings_integrity.read_settings_json_verified(SETTINGS_PATH) or {}
+    if safety_configuration(previous) != safety_configuration({**previous, **settings}):
+        raise PermissionError("The resolved Safety Supervisor is owner-controlled; use /api/owner/safety-model, safety-mode or safety-rules.")
+
+
+def _migrate_consciousness_safety(raw: dict, *, lock_held: bool) -> dict:
+    """Persist the upgrade once, on an existing document under its settings lock.
+
+    An absent document is fresh; a pinned child snapshot is read-only. Neither
+    is an upgrade. No effective/read-time copy follows later owner edits.
+    """
+    key = "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"
+    if key in raw or not lock_held or os.environ.get("OUROBOROS_SETTINGS_SHA256"):
+        return raw
+    from ouroboros.utils import append_jsonl, utc_now_iso, write_text_atomic
+
+    _guard_live_settings_write()
+    migrated = {**raw, key: normalize_safety_mode(raw.get("OUROBOROS_SAFETY_MODE", "full"))}
+    write_text_atomic(SETTINGS_PATH, serialize_settings(migrated))
+    append_jsonl(DATA_DIR / "logs" / "events.jsonl", {
+        "type": "safety_settings_migration", "actor": "migration", "ts": utc_now_iso(),
+        "key": key, "value": migrated[key],
+    })
+    return migrated
 
 
 def get_skills_repo_path() -> str:
@@ -822,6 +887,7 @@ def load_settings_lock_held(*, _settings_lock_held: bool = True) -> dict:
     except Exception:
         raw = None
     if isinstance(raw, dict):
+        raw = _migrate_consciousness_safety(raw, lock_held=_settings_lock_held)
         raw = normalize_and_persist_context_mode_compat(
             raw,
             settings_path=SETTINGS_PATH,
@@ -882,7 +948,8 @@ def save_settings(
         if onboarding_safety_default:
             wants_light = str(settings.get("OUROBOROS_SAFETY_MODE", "") or "").strip().lower() == "light"
             if wants_light and not SETTINGS_PATH.exists():
-                authored_keys = ("OUROBOROS_SAFETY_MODE",)
+                settings = {**settings, "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full"}
+                authored_keys = ("OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE")
                 allow_safety_lowering = True
         settings = prepare_settings_for_persist(
             settings, authored_keys=authored_keys,

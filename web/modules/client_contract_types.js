@@ -131,6 +131,7 @@
  * The wizard's starting values; besides these keys it carries one key per `contract.providerFields[].stateKey`
  * (a configured secret reads as `secretPlaceholder`), `contract.budgetFields[].stateKey` and `contract.modelSlots[].stateKey`.
  * @typedef {Object} SetupInitialState
+ * @property {string} safetyModel
  * @property {string} providerProfile
  * @property {string} reviewEnforcement
  * @property {string} runtimeMode
@@ -474,6 +475,7 @@
 
 /**
  * @typedef {Object} OwnerSafetyModeRequest
+ * @property {'your_work'|'consciousness'=} kind
  * @property {'full'|'light'|'off'} mode
  */
 
@@ -846,4 +848,20 @@
  * @property {string} card_id
  * @property {boolean} pinned
  * @property {string=} pinned_at
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyRulesRequest
+ * @property {string} rules
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyRulesResponse
+ * @property {boolean} ok
+ * @property {string} rules
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyModelRequest
+ * @property {Object} settings
  */
