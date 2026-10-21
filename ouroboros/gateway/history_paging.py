@@ -242,10 +242,10 @@ def room_lens(data_dir: pathlib.Path, thread_id: int, project_chat_ids: set, sou
     candidate; the lens is its superset). A Project reads its own chat, the lineage columns of the
     tasks bound to it, the task ids of their descendants (the store's lineage: a child's row the
     supervisor recorded under Main with its task id alone belongs to the room its parent was turned
-    into) and the owner rows its bindings name (by client id, else by chat and time). Main and every
-    chat no Project owns read the rooms no Project owns (A2A and hidden traffic excluded), the rows
-    without a chat and the question rows Main pins as pointers. The cost is the room's own facts and
-    tasks, never another room's history."""
+    into) and the owner rows its bindings name (by client id, else by chat and time). Other rooms
+    probe their stored chat only. Main retains the historical non-Project candidate superset
+    (A2A and hidden traffic excluded), rows without a chat and its question pointers; membership
+    filters out place rows. A place-room read never scans another room's history."""
     if thread_id in project_chat_ids:
         bound = sorted(task for task, chat in bindings_by_task.items() if chat == thread_id)
         keys: list = [("chat_id", thread_id)]

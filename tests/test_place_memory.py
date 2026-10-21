@@ -25,6 +25,8 @@ def test_place_predicate_is_typed_and_inventory_retains_it(stamp):
 
 
 def test_many_places_keep_their_rows_and_main_keeps_owner_rows(tmp_path):
+    from ouroboros.gateway.history_paging import room_lens
+
     shared.world(tmp_path)
     rows = [shared.msg("2026-09-05", f"PLACE_WORDS_{room}", chat_id=room,
                        presence_provenance={"place_id": f"p{room}", "conversation_key": f"c{room}"})
@@ -35,7 +37,12 @@ def test_many_places_keep_their_rows_and_main_keeps_owner_rows(tmp_path):
     grouped = mi.open_rows_by_room(tmp_path)
     assert len(grouped["1"]) >= 50
     assert not any(row_provenance(meta) == "place" for _a, meta, _p in grouped["1"])
+    main_history = list(chat_chain.iter_room_rows(tmp_path, "1"))
+    assert not any(row_provenance(row) == "place" for _a, row, _p in main_history)
+    assert sum(row["text"].startswith("OWNER_WORDS_") for _a, row, _p in main_history) == 50
     for room in range(400, 600):
+        lens = room_lens(tmp_path, room, set(), [], {})
+        assert lens["chat"].keys == lens["progress"].keys == (("chat_id", room),)
         indexed = list(chat_chain.iter_room_rows(tmp_path, str(room)))
         assert len(indexed) == len(grouped[str(room)]) == 1
         assert indexed[0][0] == grouped[str(room)][0][0]
@@ -58,6 +65,7 @@ def test_focus_uses_own_room_before_category_and_own_wake_sees_only_index(tmp_pa
     focused = mv.capture_memory_view(tmp_path, focus, spec)
     wake = mv.capture_memory_view(tmp_path, own, mv.view_spec_for_task(own, tmp_path))
     own_text, focus_text = mv.render_room(wake), mv.render_room(focused)
+    assert next(room for room in wake.live_rooms if room["room_id"] == "444")["words"] == []
     assert "PRIVATE_PLACE_WORDS" in focus_text and "PRIVATE_PLACE_ANSWER" in focus_text
     assert "PRIVATE_PLACE_WORDS" not in own_text and "PRIVATE_PLACE_ANSWER" not in own_text
     assert "Place garden; conversation garden:talk; answered events 1" in own_text
