@@ -33,7 +33,6 @@ def world(tmp_path, monkeypatch):
     pending = []
     queue.init_queue_refs(pending, {}, {'value': 0})
     monkeypatch.setenv('TOTAL_BUDGET', '1000')
-    monkeypatch.setattr(schedules, '_last_skill_schedule_sync', float('inf'))
     write_task_result(root, ORIGIN, 'running', root_task_id=ORIGIN,
                       billing_group=BINDING, deadline_at=DEADLINE)
     return ctx, root, pending

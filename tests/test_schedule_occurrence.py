@@ -17,7 +17,7 @@ from tests._store_shared import delete_result, unreadable_result
 
 @pytest.fixture
 def q(tmp_path, monkeypatch):
-    from supervisor import queue, queue_schedules, state, workers
+    from supervisor import queue, state, workers
 
     root = tmp_path / "data"  # project folders live beside, never inside, the data root
     root.mkdir()
@@ -28,7 +28,6 @@ def q(tmp_path, monkeypatch):
     queue.init_queue_refs(pending, {}, {"value": 0})
     monkeypatch.setattr(workers, "REPO_DIR", tmp_path / "repo")
     (tmp_path / "repo").mkdir()
-    monkeypatch.setattr(queue_schedules, "resync_skill_schedules", lambda *_a: {})
     monkeypatch.setattr("ouroboros.config.get_bg_wakeup_min_sec", lambda: 0)  # waits end at once here
     return SimpleNamespace(queue=queue, pending=pending, root=root)
 

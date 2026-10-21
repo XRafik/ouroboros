@@ -1,19 +1,14 @@
 """Owner-governed schedule lifecycle: create/edit, disable/delete/restore, remove.
 
 The leaf beside ``supervisor/queue_schedules.py`` (the store, transaction,
-audit, projections, skill sync and dispatch): every OWNER-authored mutation of
+audit, projections and dispatch): every OWNER-authored mutation of
 an existing or new row lives here, over the store's own transaction and audit
 seams, so the durable file keeps one writer discipline while the module that
 owns dispatch stays readable in one window (DEVELOPMENT "Paying down a size
 cap"). Callers reach these through ``supervisor.queue``; nothing here is a
 second scheduler or a second store.
 
-Restore of a suppressed skill row rechecks skill presence, manifest declaration,
-``supervised_task`` permission and readiness. A blocked row comes back disabled
-as ``restored_not_ready`` (marker lifted, change recorded); an absent or
-unknowable skill or schedule is ``manifest_absent`` with ``changed=false`` and
-the suppression kept. A consumed one-shot is ``consumed_not_rearmed`` until a
-fresh ``trigger.run_at`` is authored.
+A consumed one-shot stays history until a fresh firing instant is authored.
 """
 
 from __future__ import annotations
@@ -24,7 +19,6 @@ import pathlib
 import uuid
 from typing import Any, Dict, Optional
 
-from ouroboros.schedule_contract import schedule_slug
 from ouroboros.utils import utc_now_iso
 from supervisor import queue_schedules as _store
 from supervisor.queue_schedules import (
@@ -36,7 +30,6 @@ from supervisor.queue_schedules import (
     _audit_row,
     _audit_schedule_mutation,
     _is_consumed_once,
-    _is_suppressed,
     _schedule_next_run,
     _write_scheduled_tasks,
     load_schedule_store,
@@ -45,73 +38,16 @@ from supervisor.queue_schedules import (
 
 log = logging.getLogger(__name__)
 
-# Restore lifts the owner's suppression only for a schedule its skill's manifest
-# STILL declares (acceptance claim: "Restore clears suppression only for extant
-# manifest"). These blockers say the manifest is absent or unknowable, so the
-# marker stays and the action is a typed no-change refusal; the other blockers
-# (permission, readiness, identity) describe an extant row that merely cannot
-# dispatch yet, and restore lifts the marker while reporting them.
-MANIFEST_ABSENT_BLOCKERS: frozenset[str] = frozenset({
-    "skill_unknown", "skill_discovery_failed", "skill_absent", "schedule_absent_from_manifest",
-})
-# Typed no-change outcomes of ``mutate_scheduled_task``: the intent and its
-# refusal are both audited, the row is byte-identical afterwards.
-UNCHANGED_STATUSES: frozenset[str] = frozenset({"consumed_not_rearmed", "manifest_absent", "not_suppressed"})
-
-
-def _skill_schedule_dispatchable(drive_root: pathlib.Path, record: Dict[str, Any]) -> tuple[bool, str]:
-    """Whether a skill-manifest row may dispatch again, and the blocker if not.
-
-    Restore lifts the OWNER's suppression; it never enables the skill. So the
-    row comes back only as far as the skill lifecycle currently allows: a skill
-    that was uninstalled, lost the schedule from its manifest, lost its
-    ``supervised_task`` permission or is not review-ready returns disabled with
-    a named reason instead of a schedule that would fail at dispatch.
-    """
-    skill_name = str(record.get("skill") or "").strip()
-    if not skill_name:
-        return False, "skill_unknown"
-    try:
-        from ouroboros.config import get_skills_repo_path
-        from ouroboros.skill_loader import discover_skills
-
-        skills = discover_skills(pathlib.Path(drive_root), repo_path=get_skills_repo_path())
-    except Exception:
-        log.debug("skill discovery failed while restoring %s", record.get("id"), exc_info=True)
-        return False, "skill_discovery_failed"
-    skill = next((item for item in skills if str(getattr(item, "name", "")) == skill_name), None)
-    if skill is None:
-        return False, "skill_absent"
-    if bool(getattr(skill, "identity_collision", False)):
-        return False, "skill_identity_collision"
-    manifest = getattr(skill, "manifest", None)
-    declared = {
-        schedule_slug("skill", skill_name, str(spec.get("name") or "").strip())
-        for spec in list(getattr(manifest, "scheduled_tasks", []) or [])
-        if isinstance(spec, dict) and str(spec.get("name") or "").strip() and str(spec.get("cron") or "").strip()
-    }
-    if str(record.get("id") or "") not in declared:
-        return False, "schedule_absent_from_manifest"
-    if "supervised_task" not in set(getattr(manifest, "permissions", []) or []):
-        return False, "skill_permission_missing"
-    try:
-        from ouroboros.skill_readiness import skill_readiness_for_execution
-
-        if not skill_readiness_for_execution(pathlib.Path(drive_root), skill).ready:
-            return False, "skill_not_ready"
-    except Exception:
-        log.debug("skill readiness probe failed while restoring %s", record.get("id"), exc_info=True)
-        return False, "readiness_unavailable"
-    return True, ""
+UNCHANGED_STATUSES: frozenset[str] = frozenset({"consumed_not_rearmed"})
 
 
 def _merge_onto_current(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Merge an owner-authored record onto the CURRENT row, under the write lock.
 
     Only the fields a caller actually authors win; provenance, run history, the
-    consumed receipt and the owner's suppression marker are read from the row on
+    consumed receipt are read from the row on
     disk, so a full-record PUT built from a stale GET cannot roll back a
-    concurrent scheduler tick or skill resync.
+    concurrent scheduler tick.
     """
     from supervisor.schedule_occurrence import remember_claim_basis
 
@@ -146,20 +82,7 @@ def _merge_onto_current(existing: Dict[str, Any], incoming: Dict[str, Any]) -> D
             merged["next_run_at"] = existing["next_run_at"]
         if consumed:
             merged["enabled"] = False
-    if str(merged.get("source") or "") == "skill_manifest":
-        # A skill row's ``enabled`` is RECONCILED from skill readiness, so an
-        # edit that flips it would be undone by the next resync and look durable
-        # meanwhile. The owner's durable statement is the suppression marker,
-        # which only the lifecycle action writes — so that is where this goes.
-        if bool(existing.get("enabled", True)) != bool(merged.get("enabled", True)):
-            raise ScheduleRefused(
-                "lifecycle_action_required",
-                "a skill-manifest schedule is enabled by its skill's readiness; use the "
-                "disable/restore lifecycle action, which records the owner's decision so "
-                "the skill resync cannot undo it")
-    if _is_suppressed(merged) or merged.get("delete_requested_at"):
-        # A suppressed skill row, or a deleted row waiting only for work it
-        # already accepted: neither an edit nor a save re-arms future runs.
+    if merged.get("delete_requested_at"):
         merged["enabled"] = False
     return merged
 
@@ -349,80 +272,38 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
                         "schedule_id": wanted, "audit": "not_written",
                         "detail": "the schedule audit log could not be written; nothing was changed"}
             running = _store._schedule_running_or_queued(wanted, root)
-            skill_row = str(current.get("source") or "") == "skill_manifest"
             detail, removed = "", False
             if operation == "disable":
                 current["enabled"] = False
-                if skill_row:
-                    current["manual_override"] = "disabled"
                 status = "updated"
             elif operation == "delete":
-                if skill_row:
-                    # Retained as a suppressed record: dropping the row would only
-                    # have it recreated by the next lifecycle resync, and the owner
-                    # would never see that their delete did not hold.
-                    current["enabled"] = False
-                    current["manual_override"] = "deleted"
-                    status = "suppressed"
-                else:
-                    from supervisor.followup_policy import relation_kind
-                    from supervisor.schedule_occurrence import deletion_settled, owed
+                from supervisor.followup_policy import relation_kind
+                from supervisor.schedule_occurrence import deletion_settled, owed
 
-                    status, owes = "deleted", owed(current, drive_root=root)
-                    continuation = relation_kind(current) != "independent"
-                    if owes is not False or not deletion_settled(current, drive_root=root):
-                        # An accepted run waits to be re-queued: removal is deferred until it
-                        # starts, because deleting a row never takes back an admission (#1315).
-                        # A continuation's row also carries its task's Stop/Restart release
-                        # and start binding, so it stays until that task settles.
-                        current["enabled"], current["delete_requested_at"] = False, utc_now_iso()
-                        status = "delete_deferred"
-                        if owes is None:
-                            detail = ("the occurrence receipt is missing, unreadable or conflicting; the disabled "
-                                      "row is retained until its execution history can be established")
-                        elif owes:
-                            detail = ("an accepted run is still owed; the row will be removed once that run starts"
-                                      + (" and its task settles" if continuation else ""))
-                        else:
-                            detail = ("no new run starts; this row continues a task that has not settled "
-                                      "and is removed once it settles")
+                status, owes = "deleted", owed(current, drive_root=root)
+                continuation = relation_kind(current) != "independent"
+                if owes is not False or not deletion_settled(current, drive_root=root):
+                    # An accepted run waits to be re-queued: removal is deferred until it
+                    # starts, because deleting a row never takes back an admission (#1315).
+                    # A continuation's row also carries its task's Stop/Restart release
+                    # and start binding, so it stays until that task settles.
+                    current["enabled"], current["delete_requested_at"] = False, utc_now_iso()
+                    status = "delete_deferred"
+                    if owes is None:
+                        detail = ("the occurrence receipt is missing, unreadable or conflicting; the disabled "
+                                  "row is retained until its execution history can be established")
+                    elif owes:
+                        detail = ("an accepted run is still owed; the row will be removed once that run starts"
+                                  + (" and its task settles" if continuation else ""))
                     else:
-                        tasks = [item for item in tasks if str(item.get("id") or "") != wanted]
-                        removed = True
+                        detail = ("no new run starts; this row continues a task that has not settled "
+                                  "and is removed once it settles")
+                else:
+                    tasks = [item for item in tasks if str(item.get("id") or "") != wanted]
+                    removed = True
             elif _is_consumed_once(current):
                 status = "consumed_not_rearmed"
                 detail = "a one-shot that already fired is history; schedule a new run_at instead"
-            elif skill_row:
-                # Probed UNDER the transaction: readiness is skill state on disk,
-                # not a row field, so a probe taken before the lock could be
-                # stale by the time the row is written (a resync or an owner
-                # skill disable in between) and would re-arm a schedule its skill
-                # cannot dispatch. The hold is bounded by skill discovery; the
-                # honest outcome is worth that contention.
-                dispatchable, blocker = _skill_schedule_dispatchable(root, current)
-                if not _is_suppressed(current):
-                    # Nothing of the owner's to lift: a skill row without the marker
-                    # is disabled by its skill's READINESS and re-arms on resync
-                    # when the skill is ready. Saying "suppression lifted" here
-                    # would describe a decision nobody took.
-                    status = "not_suppressed"
-                    detail = ("this skill schedule is not suppressed; it is "
-                              + (f"disabled by skill readiness ({blocker}) and re-arms when the skill is ready"
-                                 if blocker else "already enabled"))
-                elif blocker in MANIFEST_ABSENT_BLOCKERS:
-                    # No extant manifest schedule to restore INTO: the owner's
-                    # suppression stays on the row (the next resync would otherwise
-                    # drop the unsuppressed orphan and forget the decision before a
-                    # reinstall could honor it).
-                    status = "manifest_absent"
-                    detail = (f"{blocker}: the skill no longer declares this schedule; "
-                              "suppression kept until it does")
-                else:
-                    current.pop("manual_override", None)
-                    current["enabled"] = dispatchable
-                    status = "updated"
-                    if not dispatchable:
-                        status, detail = "restored_not_ready", blocker
             else:
                 # A new explicit Restore may cancel a still-pending deletion;
                 # exact hold releases return above and never change this intent.
@@ -438,7 +319,7 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
             recorded = _audit_schedule_mutation(
                 phase="outcome", result=status, before=before,
                 after=(None if removed else current), **audit)
-            achieved = status in {"updated", "deleted", "delete_deferred", "suppressed"}
+            achieved = status in {"updated", "deleted", "delete_deferred"}
             if changed and not recorded:
                 # Keep the lifecycle blocker beside the audit disclosure: a lost
                 # outcome record must not erase WHY the row is still not ready.
@@ -462,9 +343,7 @@ def remove_scheduled_task(schedule_id: str, *, drive_root: pathlib.Path | None =
                           actor: str = "", task_id: str = "", reason: str = "") -> bool:
     """Remove a scheduled task record by id, through the one audited delete seam.
 
-    A skill-manifest row is SUPPRESSED rather than dropped (see
-    ``mutate_scheduled_task``); either way the row stops dispatching, which is
-    what this boolean has always meant to its callers.
+    The boolean reports whether the audited lifecycle action changed the row.
     """
     outcome = mutate_scheduled_task(
         "delete", schedule_id, drive_root=drive_root, task_id=task_id,

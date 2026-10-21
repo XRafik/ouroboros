@@ -1,11 +1,7 @@
-"""Recurring schedules: the durable file, the skill sync, and what they enqueue.
+"""Durable schedules, their projections and due occurrence dispatch.
 
-Owns state/scheduled_tasks.json and the periodic reconciliation of skill-declared
-schedules into it, then turns a schedule that is due into a queued task — skipping
-any whose previous run is still pending or running.
-
-The sync throttle is this module's own clock, not queue state: the writer and the
-reader are both here.
+Owns state/scheduled_tasks.json and turns a due schedule into a queued task,
+skipping any whose previous run is still pending or running.
 """
 
 from __future__ import annotations
@@ -19,14 +15,12 @@ import logging
 import os
 import pathlib
 import threading
-import time
 import uuid
 from typing import Any, Callable, Dict, List
 from ouroboros.consciousness_authority import apply_consciousness_authority
 from ouroboros.contracts.task_contract import build_task_contract, normalize_allowed_resources
 from ouroboros.dialogue_provenance import presence_metadata_binding
-from ouroboros.schedule_contract import RESERVED_TEMPLATE_FIELDS, schedule_slug
-from ouroboros.skill_loader import skill_identity_collision_names
+from ouroboros.schedule_contract import RESERVED_TEMPLATE_FIELDS
 from ouroboros.utils import atomic_write_json, in_worker_process, read_json_dict, utc_now_iso
 from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
 from supervisor.schedule_time import (
@@ -35,7 +29,7 @@ from supervisor.schedule_time import (
     parse_schedule_time as _parse_schedule_time,
     prune_consumed_once_records as _prune_consumed_once,
     record_last_error as _record_last_error,
-    schedule_next_run as _schedule_next_run,
+    schedule_next_run as _schedule_next_run,  # noqa: F401 -- lifecycle writer seam
     timezone_for_schedule as _timezone_for_schedule,
 )
 
@@ -55,10 +49,6 @@ def _queue():
     return queue
 
 
-_last_skill_schedule_sync: float = 0.0
-
-
-_SKILL_SCHEDULE_SYNC_INTERVAL_SEC: float = 60.0
 # Per-thread depth of the held transactions, keyed by the TABLE's resolved lock
 # path. Thread-local, so it needs no mutex of its own; the cross-thread ordering
 # is the queue lock the transaction takes first.
@@ -70,15 +60,10 @@ _SCHEDULE_LOCK_STALE_SEC = 30.0
 # The owner-governed actions over an EXISTING row; creation and editing stay on
 # the upsert seam, so this set is exactly "what happens to a future dispatch".
 SCHEDULE_ACTIONS: frozenset[str] = frozenset({"disable", "delete", "restore"})
-# A skill row the owner disabled or deleted is retained with this marker: the
-# lifecycle resync reconciles the row's CONTENT but may never re-arm it, and the
-# marker survives a manifest edit because it is keyed by the same schedule id.
-SUPPRESSED_OVERRIDES: frozenset[str] = frozenset({"disabled", "deleted"})
 # Fields the RUNTIME owns. A caller builds its record from a GET that may already
 # be stale, so these are always taken from the row on disk instead of the payload.
 _RUNTIME_OWNED_FIELDS: tuple[str, ...] = (
     "source", "skill", "created_at", "last_run_at", "last_task_id", "last_error",
-    "skill_content_hash", "manual_override",
     # The occurrence protocol's host facts (supervisor/schedule_occurrence.py).
     "occurrence", "hold", "continuation_of", "delete_requested_at",
 )
@@ -87,7 +72,7 @@ _RUNTIME_OWNED_FIELDS: tuple[str, ...] = (
 _AUDIT_ROW_KEYS: tuple[str, ...] = (
     "id", "name", "enabled", "source", "skill", "trigger", "timezone",
     "created_at", "updated_at", "last_run_at", "last_task_id", "completed_at",
-    "next_run_at", "manual_override",
+    "next_run_at",
     "followup_relation", "followup_origin", "followup_hold", "followup_wait",
 )
 # ``manage_schedules`` is a model-facing tool.  Keep one page comfortably below
@@ -295,17 +280,10 @@ def _is_consumed_once(record: Dict[str, Any]) -> bool:
     return str(trigger.get("type") or "") == "once" and bool(record.get("completed_at"))
 
 
-def _is_suppressed(record: Dict[str, Any]) -> bool:
-    """A skill row the owner disabled or deleted and the resync may not re-arm."""
-    return (str(record.get("source") or "") == "skill_manifest"
-            and str(record.get("manual_override") or "").strip().lower() in SUPPRESSED_OVERRIDES)
-
-
 def schedule_lifecycle_status(record: Dict[str, Any]) -> str:
     """The one lifecycle word every surface says about a row.
 
-    ``consumed`` and ``suppressed`` are RETAINED history: neither dispatches
-    again, and neither is an ``active`` schedule wearing a disabled flag.
+    ``consumed`` is retained history, never an active schedule.
     ``delete_pending`` outranks them: a deleted row that still owes accepted
     work stays visible until that work no longer needs it, then disappears.
     """
@@ -317,8 +295,6 @@ def schedule_lifecycle_status(record: Dict[str, Any]) -> str:
         return "held"
     if record.get("followup_wait"):
         return "waiting"
-    if _is_suppressed(record):
-        return "suppressed"
     return "active" if record.get("enabled", True) else "disabled"
 
 
@@ -382,11 +358,8 @@ def _schedule_projection_row(raw: Dict[str, Any]) -> Dict[str, Any]:
     row["status"] = status
     row["active"] = status == "active"
     row["consumed"] = status == "consumed"
-    row["suppressed"] = status == "suppressed"
-    # Retained rows are history the owner can still act on; only a suppressed
-    # one can come back, and only after its skill is re-evaluated.
-    row["retained"] = status in {"consumed", "suppressed", "held"}
-    row["restorable"] = status == "suppressed" or bool(raw.get("followup_hold") and raw.get("hold_persisted", True))
+    row["retained"] = status in {"consumed", "held", "delete_pending"}
+    row["restorable"] = status == "delete_pending" or bool(raw.get("followup_hold") and raw.get("hold_persisted", True))
     row["delete_pending"] = status == "delete_pending"
     if row["delete_pending"]:
         row["delete_requested_at"] = _bounded_projection_text(raw.get("delete_requested_at"), 64)
@@ -483,7 +456,6 @@ def schedule_activity_projection(data: Dict[str, Any]) -> Dict[str, Any]:
         row["status"] = status
         row["active"] = status == "active"
         row["consumed"] = status == "consumed"
-        row["suppressed"] = status == "suppressed"
         projected = _schedule_projection_row(row)
         for key in ("retained", "restorable", "relation", "followup_origin", "followup_hold",
                     "followup_wait", "hold_persisted", "billing_group", "deadline_at", "delete_pending"):
@@ -540,126 +512,6 @@ def _audit_schedule_mutation(*, drive_root: pathlib.Path, operation_id: str, pha
     except Exception:
         log.exception("schedule audit %s write failed for %s", phase, schedule_id)
         return False
-
-
-def _skill_schedule_ready(skill: Any, drive_root: pathlib.Path | None) -> bool:
-    """Schedule readiness plus the supervised_task permission (read before the table locks)."""
-    try:
-        from ouroboros.skill_readiness import skill_readiness_for_execution
-        ready = skill_readiness_for_execution(pathlib.Path(drive_root or _queue().DRIVE_ROOT), skill).ready
-    except Exception:
-        log.debug("skill schedule readiness probe failed for %s", getattr(skill, "name", ""), exc_info=True)
-        ready = False
-    return ready and "supervised_task" in set(getattr(getattr(skill, "manifest", None), "permissions", []) or [])
-
-
-def sync_skill_schedules(skills: List[Any], *, drive_root: pathlib.Path | None = None) -> Dict[str, Any]:
-    """Sync reviewed skill manifest scheduled_tasks into the core schedule table.
-
-    Readiness reads skill state and discovers its peers, so it is computed per
-    skill before Q and the table lock are taken; only the row merge holds them."""
-    readiness = {id(skill): _skill_schedule_ready(skill, drive_root) for skill in skills
-                 if not bool(getattr(skill, "identity_collision", False))
-                 and getattr(getattr(skill, "manifest", None), "scheduled_tasks", None)}
-    with schedule_transaction(drive_root):
-        data = load_schedule_store(drive_root)
-        by_id = {str(item.get("id") or ""): dict(item) for item in data.get("tasks") or []}
-        touched: list[str] = []
-        blocked_skill_names = {
-            str(getattr(skill, "name", "") or "") for skill in skills
-            if bool(getattr(skill, "identity_collision", False))
-        }
-        changed = False
-        for skill in skills:
-            if bool(getattr(skill, "identity_collision", False)):
-                # Preserve prior rows: a collision is not a removed/runnable skill.
-                continue
-            manifest = getattr(skill, "manifest", None)
-            for spec in list(getattr(manifest, "scheduled_tasks", []) or []):
-                if not isinstance(spec, dict):
-                    continue
-                name = str(spec.get("name") or "").strip()
-                cron = str(spec.get("cron") or "").strip()
-                if not name or not cron:
-                    continue
-                schedule_id = schedule_slug("skill", str(getattr(skill, "name", "")), name)
-                touched.append(schedule_id)
-                schedule_ready = readiness[id(skill)]
-                record = by_id.get(schedule_id, {})
-                from supervisor.schedule_occurrence import remember_claim_basis
-
-                remember_claim_basis(record)
-                trigger = {"type": "cron", "expr": cron}
-                timing_changed = (
-                    dict(record.get("trigger") or {}) != trigger
-                    or str(record.get("timezone") or "") != str(spec.get("timezone") or "")
-                )
-                # The suppression marker is keyed by the SCHEDULE ID, so an owner
-                # decision survives a manifest edit that changes the row's content
-                # under the same id — the resync reconciles what the row says, not
-                # whether the owner still wants it to fire.
-                manual_override = str(record.get("manual_override") or "").strip().lower()
-                next_record = {
-                    **record,
-                    "id": schedule_id,
-                    "name": f"{getattr(skill, 'name', '')}/{name}",
-                    "description": str(spec.get("description") or f"Scheduled skill task {getattr(skill, 'name', '')}/{name}"),
-                    "enabled": False if manual_override in SUPPRESSED_OVERRIDES else bool(schedule_ready),
-                    "timezone": str(spec.get("timezone") or ""),
-                    "trigger": trigger,
-                    "task": {
-                        "type": "task",
-                        "text": (
-                            f"Run reviewed scheduled skill task `{getattr(skill, 'name', '')}/{name}`. "
-                            "Use skill_exec or the reviewed extension surface as appropriate, then report outcome."
-                        ),
-                        "metadata": {
-                            "source": "skill_scheduled_task",
-                            "resource_intent": {"kind": "system_repo"},
-                            "skill": str(getattr(skill, "name", "")),
-                            "scheduled_task": name,
-                        },
-                    },
-                    "source": "skill_manifest",
-                    "skill": str(getattr(skill, "name", "")),
-                    "skill_content_hash": str(getattr(skill, "content_hash", "")),
-                    "updated_at": utc_now_iso(),
-                }
-                if timing_changed or not next_record.get("next_run_at"):
-                    next_record["next_run_at"] = _schedule_next_run(next_record)
-                if next_record != record:
-                    by_id[schedule_id] = next_record
-                    changed = True
-        for schedule_id, record in list(by_id.items()):
-            if (
-                str(record.get("source") or "") == "skill_manifest"
-                and str(record.get("skill") or "") not in blocked_skill_names
-                and schedule_id not in touched
-                and not _is_suppressed(record)
-            ):
-                from supervisor.schedule_occurrence import owed
-
-                if owed(record, drive_root=drive_root) is False:
-                    by_id.pop(schedule_id, None)
-                else:
-                    record.update(enabled=False, delete_requested_at=utc_now_iso())
-                changed = True
-        if changed:
-            data["tasks"] = list(by_id.values())
-            _write_scheduled_tasks(data, drive_root)
-        return {"changed": changed, "skill_schedule_ids": touched}
-
-
-def resync_skill_schedules(drive_root: pathlib.Path | None = None) -> Dict[str, Any]:
-    """Mirror discovered manifest schedules after skill lifecycle changes."""
-    from ouroboros.config import get_skills_repo_path
-    from ouroboros.skill_loader import discover_skills
-
-    root = pathlib.Path(drive_root or _queue().DRIVE_ROOT)
-    return sync_skill_schedules(
-        discover_skills(root, repo_path=get_skills_repo_path()),
-        drive_root=root,
-    )
 
 
 def _rows_hold_schedule(rows: Any, schedule_id: str, task_id: str = "") -> bool:
@@ -798,22 +650,11 @@ def _task_from_schedule(record: Dict[str, Any], *, task_id: str = "") -> Dict[st
     return task
 
 
-def _skill_collisions(root: pathlib.Path, now: datetime.datetime) -> frozenset[str] | None:
-    """The identity-collision inventory, read before the locks only when a skill row could be due."""
-    for row in list_scheduled_tasks(root).get("tasks") or []:
-        if not (isinstance(row, dict) and row.get("source") == "skill_manifest" and row.get("enabled", True)):
-            continue
-        due = _parse_schedule_time(row.get("next_run_at"), _timezone_for_schedule(row))
-        if due is None or due <= now:
-            return skill_identity_collision_names(root)
-    return None
-
-
 def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
     """Admit due cron/once schedules through the occurrence protocol.
 
     Claims and reconciliation run under the queue+table locks; every expensive
-    step (skill discovery and readiness, the collision inventory, resource intent,
+    step (resource intent,
     folder checks, memory fork, root billing, the allowance read) runs without
     them; admission rechecks and commits under them again
     (``supervisor/schedule_occurrence.py``). A due ``kind: "notify"`` row is a
@@ -824,20 +665,11 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
     generation's ``stop`` (``server_maintenance``): confirmed contention under Q
     defers that row, or the pass, writing no hold, audit or claim, while
     unreadable, corrupt or foreign records keep their typed holds."""
-    global _last_skill_schedule_sync
     from supervisor import schedule_notes as notes, schedule_occurrence as occurrences
 
     if stop is not None and stop():
         return
     root = _queue().DRIVE_ROOT
-    now_monotonic = time.monotonic()
-    if now_monotonic - _last_skill_schedule_sync >= _SKILL_SCHEDULE_SYNC_INTERVAL_SEC:
-        _last_skill_schedule_sync = now_monotonic
-        try:
-            resync_skill_schedules(root)
-        except Exception:
-            log.debug("Failed to sync skill schedules during scheduler tick", exc_info=True)
-    collision_names = _skill_collisions(root, datetime.datetime.now(datetime.timezone.utc))
     from supervisor.followup_policy import control_guard, scan_policy, refresh_policy
 
     # Copy the table while its writers are excluded. Policy reads below own no Q
@@ -957,9 +789,6 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
                 if next_run > now:
                     continue
                 due_at = next_run.isoformat()
-            if str(record.get("source") or "") == "skill_manifest" and (
-                    collision_names is None or str(record.get("skill") or "") in collision_names):
-                continue  # an unread inventory (the row became due since) waits a pass
             if view.get("hold") or view["wait"] or record.get("followup_hold"):
                 continue
             if notes.is_note(record):
