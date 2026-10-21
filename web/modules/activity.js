@@ -136,7 +136,19 @@ export function isRetainedSchedule(s) {
     return ['consumed', 'suppressed'].includes(scheduleStatus(s));
 }
 
-export function scheduleRowHtml(s) {
+function scheduleTextHtml(s, note, expanded) {
+    const text = String((note ? s.notification?.text : s.task?.text || s.task?.objective)
+        || s.description || s.objective_preview || '').trim();
+    if (!text) return '';
+    const preview = text.split(/\r?\n/)[0].slice(0, 96);
+    if (preview === text) return `<span class="activity-sub" data-i18n-authored>${esc(text)}</span>`;
+    return `<details class="project-ending-details activity-sub" data-schedule-text="${esc(s.id || '')}"${expanded ? ' open' : ''}>
+        <summary data-act="schedule-text" data-id="${esc(s.id || '')}" data-i18n-authored>${esc(preview)}…</summary>
+        <div data-i18n-authored>${esc(text).replace(/\r?\n/g, '<br>')}</div>
+    </details>`;
+}
+
+export function scheduleRowHtml(s, expanded = false) {
     const managed = isSkillManaged(s);
     const trigger = s.trigger || {};
     const once = String(trigger.type || 'cron') === 'once';
@@ -145,10 +157,7 @@ export function scheduleRowHtml(s) {
     const timing = once
         ? `one-shot · at/after ${scheduleInstantHtml(trigger.run_at)}`
         : `${esc(trigger.expr || s.cron || '')} (${s.timezone ? esc(s.timezone) : 'server time zone'})`;
-    // A note (kind "notify") is shown to the owner as written, with no task: its
-    // row names it by its own words rather than by a schedule label.
-    const note = String(s.kind || '') === 'notify';
-    const noteText = note ? String(s.notification?.text || '') : '';
+    const note = ['note', 'notify'].includes(s.kind);
     const next = s.next_run_at ? scheduleInstantHtml(s.next_run_at) : '';
     const status = scheduleStatus(s);
     const enabled = status === 'active';
@@ -157,8 +166,9 @@ export function scheduleRowHtml(s) {
     const pendingDelete = status === 'delete_pending';
     const id = esc(s.id || '');
     // A due occurrence that waits (capacity, a missing folder, an unknown fact) says why.
-    const waiting = s.hold && s.hold.reason
-        ? ` · <span class="activity-tag" title="${esc(s.hold.detail || '')}">waiting: ${esc(s.hold.reason)}</span>` : '';
+    const wait = s.waiting_detail ?? s.hold ?? s.waiting;
+    const waitText = typeof wait === 'string' ? wait : [wait?.reason, wait?.detail].filter(Boolean).join(': ');
+    const waiting = waitText ? ` · <span class="activity-tag">waiting: ${esc(waitText)}</span>` : '';
     // Why the row did not do its job, as stored (a note whose chat write was not
     // confirmed is consumed and never retried, so this is the only place it says so).
     const failed = s.last_error ? ` · <span class="activity-tag">last error: ${esc(s.last_error)}</span>` : '';
@@ -176,7 +186,9 @@ export function scheduleRowHtml(s) {
     const pendingDetail = pendingDelete ? ` · deletion waits for ${relation === 'independent'
         ? 'its accepted run to start' : 'its task to finish'}` : '';
     const statusLabel = pendingDelete ? 'deletion pending' : status;
-    const sub = `${note ? 'reminder · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)}${pendingDetail} · ${esc(relation)}${binding}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}` : ''}${s.followup_wait ? ` · ${esc(explanations[s.followup_wait] || s.followup_wait)}` : ''}${s.completed_at ? ' · already fired' : ''}${managed && s.skill ? ` · ${esc(s.skill)}` : ''}${waiting}${failed}`;
+    const destination = s.destination || s.task || {};
+    const address = `${destination.project_id ? ` · project ${esc(destination.project_id)}` : ''}${destination.chat_id != null ? ` · chat ${esc(destination.chat_id)}` : ''}`;
+    const sub = `${note ? 'reminder · ' : s.kind === 'task' ? 'task · ' : ''}${timing}${next && !consumed && !pendingDelete ? ` · next ${next}` : ''} · ${esc(statusLabel)}${pendingDetail} · ${esc(relation)}${binding}${address}${s.deadline_at ? ` · deadline ${scheduleInstantHtml(s.deadline_at, { includeYear: true })}` : ''}${hold.reason ? ` · ${esc(explanations[hold.reason] || hold.reason)}${hold.detail ? `: ${esc(hold.detail)}` : ''}` : ''}${s.followup_wait && !s.waiting_detail ? ` · ${esc(explanations[s.followup_wait] || s.followup_wait)}` : ''}${s.completed_at ? ' · already fired' : ''}${managed && s.skill ? ` · ${esc(s.skill)}` : ''}${waiting}${failed}`;
     // The exact hold release stays available wherever a hold exists, including on a
     // deleted row whose accepted task still needs it; it never re-enables the row.
     const holdControl = !hold.hold_id ? ''
@@ -208,7 +220,8 @@ export function scheduleRowHtml(s) {
                         : `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="${suppressed || !enabled ? 'restore' : 'disable'}">${enabled ? 'Disable' : (suppressed ? 'Restore' : 'Enable')}</button>`;
     return `<div class="activity-row activity-schedule${enabled || hold.hold_id || s.followup_wait ? '' : ' off'}">
         <div class="activity-row-main">
-            <span class="activity-name"${noteText ? ` title="${esc(noteText)}"` : ''}>${esc(noteText || s.name || s.id || 'schedule')}</span>
+            <span class="activity-name" data-i18n-authored>${esc(s.display_name || s.name || s.id || 'schedule')}</span>
+            ${scheduleTextHtml(s, note, expanded)}
             <span class="activity-sub">${sub}</span>
         </div>
         <div class="activity-row-actions">${lifecycle}
@@ -259,6 +272,7 @@ export function initActivity({ mount, ws } = {}) {
     let migrationTimer = null, destroyed = false;
     // Remembered across re-renders: the owner's retained-history disclosure state.
     let historyOpen = false;
+    let expandedSchedules = new Set();
     mount.innerHTML = `<div class="activity-scroll">
         <div class="activity-section" data-activity-section="queue"><h3 class="activity-h">Running &amp; queued</h3></div>
         <div class="activity-section" data-activity-section="background"><h3 class="activity-h">Background</h3></div>
@@ -415,7 +429,7 @@ export function initActivity({ mount, ws } = {}) {
         const retained = [];
         for (const s of tasks) (isRetainedSchedule(s) ? retained : standing).push(s);
         const parts = standing.length
-            ? standing.map(scheduleRowHtml)
+            ? standing.map((s) => scheduleRowHtml(s, expandedSchedules.has(String(s.id || ''))))
             : ['<div class="activity-empty">No active or disabled schedules.</div>'];
         if (retained.length) {
             // A refresh rebuilds this markup, so the disclosure carries the state
@@ -424,7 +438,7 @@ export function initActivity({ mount, ws } = {}) {
             // the app undoing their action.
             parts.push(`<details class="activity-history" data-activity-history${historyOpen ? ' open' : ''}>
                 <summary>History &amp; suppressed (${retained.length})</summary>
-                ${retained.map(scheduleRowHtml).join('')}
+                ${retained.map((s) => scheduleRowHtml(s, expandedSchedules.has(String(s.id || '')))).join('')}
             </details>`);
         }
         return parts.join('');
@@ -433,6 +447,8 @@ export function initActivity({ mount, ws } = {}) {
     function rememberDisclosure() {
         const details = mount.querySelector('[data-activity-history]');
         if (details) historyOpen = Boolean(details.open ?? details.hasAttribute('open'));
+        expandedSchedules = new Set([...mount.querySelectorAll('[data-schedule-text]')]
+            .filter((node) => node.open ?? node.hasAttribute('open')).map((node) => node.dataset.scheduleText));
     }
 
     function focusedControl() {
@@ -529,7 +545,7 @@ export function initActivity({ mount, ws } = {}) {
 
     mount.addEventListener('click', async (event) => {
         const btn = event.target.closest('[data-act]');
-        if (!btn || busy) return;
+        if (!btn || busy || btn.dataset.act === 'schedule-text') return;
         const act = btn.dataset.act;
         const id = btn.dataset.id || '';
         if (act === 'task-control') {

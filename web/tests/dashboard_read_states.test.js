@@ -259,7 +259,7 @@ test('Activity keeps last-known data and actions on refresh failure, then reconc
 });
 
 const lifecycleSchedules = [
-    { id: 'active', name: 'Active schedule', enabled: true, status: 'active', trigger: { type: 'cron', expr: '* * * * *' } },
+    { id: 'active', name: 'Active schedule', enabled: true, status: 'active', task: { text: 'Inspect the results\nKeep the full instruction readable.' }, trigger: { type: 'cron', expr: '* * * * *' } },
     { id: 'disabled', name: 'Disabled schedule', enabled: false, status: 'disabled', trigger: { type: 'cron', expr: '* * * * *' } },
     { id: 'suppressed', name: 'Suppressed skill', enabled: false, status: 'suppressed', retained: true, restorable: true, source: 'skill_manifest', manual_override: 'disabled', trigger: { type: 'cron', expr: '* * * * *' } },
     { id: 'consumed', name: 'Consumed once', enabled: false, status: 'consumed', consumed: true, retained: true, completed_at: '2026-09-21T00:00:00Z', trigger: { type: 'once', run_at: '2026-09-20T00:00:00Z' } },
@@ -455,6 +455,15 @@ test('Activity keeps the retained-history disclosure and focus the owner left op
     rebuilt.open = false;
     await activity.refresh();
     assert.equal(section(mount, 'schedules').querySelector('[data-activity-history]').hasAttribute('open'), false);
+    const objective = schedules.querySelector('[data-schedule-text]');
+    objective.open = true;
+    objective.querySelector('summary').focus();
+    await activity.refresh();
+    assert.equal(schedules.querySelector('[data-schedule-text]').hasAttribute('open'), true);
+    assert.equal(globalThis.document.activeElement.dataset.act, 'schedule-text');
+    schedules.querySelector('[data-schedule-text]').open = false;
+    await activity.refresh();
+    assert.equal(schedules.querySelector('[data-schedule-text]').hasAttribute('open'), false);
 });
 
 test('Activity preserves disclosure and current focus as of render, not request start', async (t) => {
