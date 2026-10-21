@@ -13,7 +13,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D03 | Context assembly, fit & compaction | 23 | 0 |
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
-| D06 | Review stack | 91 | 0 |
+| D06 | Review stack | 92 | 0 |
 | D07 | Delegation, subagents & Claudexor | 73 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 72 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
@@ -28,7 +28,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **840** | **0** |
+| **total** | | **841** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -409,7 +409,6 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/preflight_receipts.py`
 - `ouroboros/preflight_runner.py`
 - `ouroboros/review.py`
-- `ouroboros/review_actor_aggregation.py`
 - `ouroboros/review_body_fact.py`
 - `ouroboros/review_checking.py`
 - `ouroboros/review_checking_prune.py`
@@ -432,6 +431,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/review_price.py`
 - `ouroboros/review_projection.py`
 - `ouroboros/review_records.py`
+- `ouroboros/review_seat_outcome.py`
 - `ouroboros/review_session_custody.py`
 - `ouroboros/review_session_preparation.py`
 - `ouroboros/review_session_reads.py`
@@ -447,6 +447,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/review_thread_continuity.py`
 - `ouroboros/review_verdict.py`
 - `ouroboros/review_verdict_extraction.py`
+- `ouroboros/review_wave.py`
 - `ouroboros/reviewer_slot_config.py`
 - `ouroboros/reviewer_window.py`
 - `ouroboros/safe_test_supervisor.py`

@@ -332,6 +332,8 @@ class ReviewActorRecord:
     status: str
     raw_text: str = ""
     parsed: Any = None
+    # The declared contract is finalized once, before producer persistence.
+    outcome: Dict[str, Any] = field(default_factory=dict)
     # Per-actor parsed verdict (PASS/FAIL/DEGRADED/UNKNOWN). Carried here so a
     # reader can take only the actors that CONTRIBUTED to the aggregate
     # (``review_verdict._contributing_actors``) instead of re-deriving the verdict.

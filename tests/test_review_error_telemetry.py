@@ -51,7 +51,7 @@ def _run(root, monkeypatch, actor, *, surface="multi_model_review", ctx=None):
     monkeypatch.setattr("ouroboros.reviewer_slot_config.record_reviewer_slot_executions", lambda *a, **kw: None)
     request = ReviewRequest(surface=surface, goal="review test", task_id="child", retry_key="wave-known")
     coordinator = ReviewCoordinator(llm=object(), drive_root=root, usage_ctx=ctx)
-    return coordinator.run(request, [ReviewSlot(slot_id="slot-stable", model="requested-model")])
+    return coordinator.run(request, [ReviewSlot(slot_id=actor.slot_id, model="requested-model")])
 
 
 @pytest.mark.parametrize("surface", [
@@ -242,7 +242,7 @@ def test_same_cycle_replay_keeps_the_settled_operations_append_receipt(tmp_path,
     fast = [run.actors[0] for run in runs]
     assert len({actor["operation_id"] for actor in fast}) == 1  # one paid operation, replayed
     assert all(run.actors[1]["late_result_pending"] for run in runs)  # its sibling never settled meanwhile
-    assert [row["slot_id"] for row in _model_errors(tmp_path)] == ["fast"]
+    assert sorted(row["slot_id"] for row in _model_errors(tmp_path)) == ["fast", "late"]
     assert [actor["error_event_logged"] for actor in fast] == [append_ok, True, True]
 
 
@@ -294,12 +294,15 @@ def test_a_receipt_marks_only_its_own_settled_operation(tmp_path, monkeypatch):
 
 
 def test_awaited_valid_and_report_answers_write_no_error(tmp_path, monkeypatch):
+    from ouroboros.tools.scope_review_contract import SCOPE_REQUIRED_ITEMS
+
     monkeypatch.setattr(utils, "_log_sink", None)
     for actor, surface in (
         (ReviewActorRecord(slot_id="slot-stable", model="m", status="error", operation_state="pending_dispatch"),
          "multi_model_review"),
         (ReviewActorRecord(slot_id="slot-stable", model="m", status="ok", raw_text=json.dumps([
-            {"item": "coupling", "verdict": "PASS", "severity": "advisory", "reason": "checked"}])),
+            {"item": item, "verdict": "PASS", "severity": "advisory", "reason": "checked"}
+            for item in SCOPE_REQUIRED_ITEMS])),
          "scope_review"),
         (ReviewActorRecord(slot_id="slot-stable", model="m", status="ok", raw_text="# Review\nAll checks passed."),
          "deep_self_review"),

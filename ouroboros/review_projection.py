@@ -100,7 +100,8 @@ def _review_actor_projection(actor: Any, surface: str) -> Dict[str, Any]:
     parsed = row.get("parsed") if isinstance(row.get("parsed"), (dict, list)) else None
     # The one decision point: a slot is awaited only while it carries no answer. A row that
     # carries one is judged by its answer, whatever its custody state says.
-    awaiting = review_slot_awaiting(row) and parsed is None and not str(row.get("raw_text") or "").strip()
+    outcome = row.get("outcome") or {}
+    awaiting = (review_slot_awaiting(row) or outcome.get("status") == "pending") and parsed is None and not str(row.get("raw_text") or "").strip()
     usage = row.get("usage") if isinstance(row.get("usage"), dict) else {}
     explicit_parse = str(row.get("parse_status") or "")
     if explicit_parse == AWAITING_PROJECTION:
@@ -157,9 +158,9 @@ def _review_actor_projection(actor: Any, surface: str) -> Dict[str, Any]:
             )
             if reason:
                 break
-    reason = reason or error or ("Reviewer response was malformed or absent." if not valid else "")
+    reason = reason or error or ("Reviewer response was malformed or absent." if not valid and explicit_parse != "valid" else "")
     if awaiting:
-        reason = _AWAITING_REASON
+        reason = (reason or _AWAITING_REASON) if outcome else _AWAITING_REASON
     model = str(usage.get("resolved_model", row.get("model")) or "")
     provider = str(usage.get("provider") or row.get("provider") or "")
     if not provider:
@@ -307,6 +308,7 @@ def _ledger_seat_actor(seat: Dict[str, Any], record: Dict[str, Any]) -> Dict[str
     with its findings COUNTED (the bodies ride once, bounded, in ``findings``), and the
     observed model, else the requested one (``panel_facts`` counts the unobserved)."""
     status, surface = str(seat.get("status") or ""), str(record.get("surface") or "review")
+    outcome = seat.get("outcome") or {}
     requested = seat.get("requested") if isinstance(seat.get("requested"), dict) else {}
     observed = str(seat.get("observed_model") or "")
     model = observed if observed not in ("", "unknown") else str(requested.get("model") or "")
@@ -328,9 +330,9 @@ def _ledger_seat_actor(seat: Dict[str, Any], record: Dict[str, Any]) -> Dict[str
         "slot_id": str(seat.get("seat_id") or ""), "model": model,
         "provider": _sub().provider_for_model(model) if model else "unknown",
         "actor_role": f"{surface} {'additional ' if seat.get('additional') else ''}reviewer",
-        "transport_status": str(seat.get("transport_status") or ("success" if status in _LEDGER_PARSE else status or "unknown")),
-        "parse_status": _LEDGER_PARSE.get(status, "none"),
-        "semantic_verdict": str(((record.get("verdict") or {}).get("per_row") or {}).get(seat.get("seat_id")) or ""),
+        "transport_status": str(outcome.get("transport") or seat.get("transport_status") or ("success" if status in _LEDGER_PARSE else status or "unknown")),
+        "parse_status": outcome.get("parse") or _LEDGER_PARSE.get(status, "none"),
+        "semantic_verdict": str(outcome.get("verdict") or "") if outcome else str(((record.get("verdict") or {}).get("per_row") or {}).get(seat.get("seat_id")) or ""),
         "quorum_contribution": contributes,
         "enforcement_impact": str(record.get("enforcement") or "unknown") if contributes else "abstains",
         "operation_state": str(seat.get("operation_state") or ""),

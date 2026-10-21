@@ -334,6 +334,7 @@ class ReviewSlotExecutor:
         self.assignment = assignment
         self.llm = llm
         self.usage_observer: Optional[Callable[[Dict[str, Any]], None]] = None
+        self.answer_observer: Optional[Callable[[], None]] = None
 
     def _observe_usage(self, usage: Optional[Dict[str, Any]]) -> None:
         observe_review_usage(self.usage_observer, usage)
@@ -1441,6 +1442,8 @@ class AgentSessionReviewExecutor(ReviewSlotExecutor):
 
     def _verdict_result(self, force_extraction: bool = False) -> ReviewAttemptResult:
         text = self._raw_transcript or ""
+        if text.strip() and self.answer_observer:
+            self.answer_observer()
         canonical, method, extraction_usage = canonicalize_session_verdict(
             text,
             conformance_passed=self._conformance_passed and not force_extraction,

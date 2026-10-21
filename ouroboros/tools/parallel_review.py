@@ -396,7 +396,9 @@ def run_parallel_review(
             else:
                 from ouroboros.review_history_view import queue_review_history_context
                 try:
-                    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                    from ouroboros.review_wave import review_wave_scope
+
+                    with review_wave_scope(), _cf.ThreadPoolExecutor(max_workers=1) as pool:
                         # The wave runs under a COPY of the admitting context
                         # (contextvars.copy_context, the loop_tool_execution and
                         # plan_review precedent): the usage scope the wave was
