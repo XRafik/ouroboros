@@ -162,6 +162,9 @@ def subagent_message_meta(
         "effort_requested": first("effort_requested"),
         "effort_source": first("effort_source"),
     }
+    cognitive = source.get("parent_cognitive_route") or metadata.get("parent_cognitive_route")
+    if isinstance(cognitive, Mapping):
+        meta["parent_cognitive_route"] = dict(cognitive)
     if event:
         meta["subagent_event"] = str(event)
     return meta

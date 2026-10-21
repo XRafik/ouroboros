@@ -879,6 +879,7 @@ class OuroborosAgent:
         _exec_note = dispatch_executor_note(
             dispatch.executor_resolution if dispatch is not None else None,
             lane=dispatch.lane if dispatch is not None else None,
+            cognitive_route=task.get("parent_cognitive_route"),
         )
         if _exec_note:
             messages.append({"role": "user", "content": _exec_note})

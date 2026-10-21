@@ -780,8 +780,10 @@ def resolve_configured_actor_dispatch(
         route_health,
     )
     from ouroboros.tools.control_delegation import profile_from_task_constraint
+    from ouroboros.supervisor_route import validate_cognitive_route
 
     snapshot = validate_subagent_snapshot(task.get("configured_subagent"))
+    cognitive = validate_cognitive_route(task.get("parent_cognitive_route"))
     route_spec = snapshot["route"]
     route_kind = str(route_spec.get("kind") or "")
     route_target = str(route_spec.get("target_id") or "").strip()
@@ -883,7 +885,6 @@ def resolve_configured_actor_dispatch(
                 if gateway is not None:
                     gateway.close()
 
-    cognitive = task.get("parent_cognitive_route") if isinstance(task.get("parent_cognitive_route"), dict) else {}
     nanny_model = str(cognitive.get("model") or "").strip()
     nanny_effort = str(cognitive.get("effort") or "").strip().lower()
     if not nanny_model and not unavailable:
