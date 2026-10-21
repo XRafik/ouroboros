@@ -146,18 +146,30 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
 
     // The strip opens and closes like the capsule row's fold (style.css): its height runs from 0 while its words fade,
     // so the row above it rises with it instead of jumping; a reply staged over another one swaps in place. The room it
-    // takes at rest (its box and margins, --reply-room) is where the composer's reserve goes at once (chat.js).
+    // takes at rest (its box and margins, --reply-room) is where the composer's reserve goes at once (chat.js). Staging
+    // focuses the field and lays the composer out, a long frame the first time: the strip is held shut through it
+    // (`data-hold`) and opens from the next frame, so no long frame shows it half open.
     function run(node, to) {
         const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null;
         const margins = style ? (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0) : 0;
         node.style.setProperty('--reply-h', `${node.offsetHeight}px`);
         node.style.setProperty('--reply-room', `${node.offsetHeight + margins}px`);
+        if (to === 'open' && typeof requestAnimationFrame === 'function') {
+            node.dataset.hold = '';
+            node.dataset.motion = 'open';
+            return new Promise((resolve) => requestAnimationFrame(resolve)).then(() => {
+                if (!('hold' in node.dataset)) return 'cancel';
+                delete node.dataset.hold;
+                return afterMotion(node, { property: 'max-height' }).done;
+            });
+        }
+        delete node.dataset.hold;
         node.dataset.motion = to === 'open' ? 'shut' : 'open';
         void node.offsetHeight;  // the motion starts from this height
         node.dataset.motion = to;
         return afterMotion(node, { property: 'max-height' }).done;
     }
-    function paint() {
+    function paint(animate = true) {
         const before = strip;
         strip = staged ? createReplyQuote(staged, { composer: true, onJump: jump, onCancel: () => cancel() }) : null;
         if (strip) {
@@ -168,7 +180,8 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             if (before?.isConnected && before.dataset.motion !== 'shut') { before.replaceWith(strip); return; }
             textRow.before(strip);
             const opened = strip;
-            void run(opened, 'open').then(() => { if (opened.dataset.motion === 'open') delete opened.dataset.motion; });
+            // A reply the room kept comes with the room; one staged now opens.
+            if (animate) void run(opened, 'open').then(() => { if (opened.dataset.motion === 'open') delete opened.dataset.motion; });
         } else input.removeAttribute('aria-describedby');
         if (before?.isConnected && before.dataset.motion !== 'shut') {
             before.inert = true;  // leaving, its controls take no press
@@ -254,7 +267,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
 
     try {
         const saved = storage && storageKey ? storage.getItem(storageKey) : '';
-        if (saved) { staged = normalizeReplyRef(JSON.parse(saved)); paint(); }
+        if (saved) { staged = normalizeReplyRef(JSON.parse(saved)); paint(false); }
     } catch { staged = null; }
 
     /**

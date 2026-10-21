@@ -9660,12 +9660,14 @@ body.keyboard-open .project-panel {
     transition: max-height var(--motion-close) var(--ease-sheet), margin-top var(--motion-close) var(--ease-sheet),
         margin-bottom var(--motion-close) var(--ease-sheet), opacity var(--motion-fade) ease;
 }
-.chat-field > .chat-quote--composer[data-motion="shut"] {
+.chat-field > .chat-quote--composer:is([data-motion="shut"], [data-hold]) {
     max-height: 0;
     margin-top: 0;
     margin-bottom: 0;
     opacity: 0;
 }
+/* Held through the frame that staged it (chat_reply.js): shut at once, then it opens from the next frame. */
+.chat-field > .chat-quote--composer[data-hold] { transition: none; }
 /* The sent draft's copy in flight (send_flight.js; DESIGN "The composer field"): the new bubble's own look, fixed over
    the room for one motion, above a Project and below the drawer, inert. */
 .chat-bubble.chat-send-flight {

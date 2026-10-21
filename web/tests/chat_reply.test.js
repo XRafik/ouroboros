@@ -227,6 +227,27 @@ test('Reply stages the strip and the next frame carries only the address; Esc or
     } finally { f.close(); }
 });
 
+test('a staged strip is held shut through the frame that staged it and opens from the next', async () => {
+    const frames = [], prior = globalThis.requestAnimationFrame;
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    const f = fixture();
+    try {
+        const saved = f.bubble('assistant', 'The audit found three stale projects.');
+        f.feed.append(saved);
+        f.replies.decorate(saved, { row_address: 'row:1@b#2', role: 'assistant' });
+        saved.querySelector('.chat-message-reply').click();
+        const strip = f.strip();
+        assert.deepEqual([strip.dataset.motion, 'hold' in strip.dataset], ['open', true],
+            'staging focuses the field and lays it out: the strip waits that frame out shut');
+        frames.splice(0).forEach((callback) => callback());
+        await Promise.resolve();  // the frame's callback settles before that frame's style is worked out
+        assert.deepEqual([strip.dataset.motion, 'hold' in strip.dataset], ['open', false], 'then it opens');
+    } finally {
+        f.close();
+        globalThis.requestAnimationFrame = prior;
+    }
+});
+
 test('a reply to a still-open question card answers in the card\'s own field, never a second path', () => {
     const f = fixture();
     try {
