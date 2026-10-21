@@ -1559,7 +1559,7 @@ def final_attempt_facts(detail: Dict[str, Any], run_id: str) -> Dict[str, Any]:
             (pathlib.Path(run_dir) / "final" / "telemetry.yaml").read_text(encoding="utf-8"))
     except (OSError, ValueError, RuntimeError, yaml.YAMLError):
         return {}
-    if not isinstance(record, dict) or record.get("run_id") not in held_run_names(detail, run_id):
+    if not isinstance(record, dict) or str(record.get("run_id") or "") not in held_run_names(detail, run_id):
         return {}
     final_id, attempts = record.get("final_attempt_id"), record.get("attempts")
     if not isinstance(final_id, str) or not final_id.strip() or not isinstance(attempts, list):

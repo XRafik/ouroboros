@@ -535,7 +535,7 @@ def _receipt_line(names: frozenset, row: Dict[str, Any]) -> str:
     target = row.get("to") if isinstance(row.get("to"), dict) else {}
     parts = [f"try {row.get('tryIndex')} ({row.get('attemptId') or '?'}): {row.get('carrier') or '?'} "
              f"after {row.get('cause') or '?'}"
-             + (f" of run {source.get('runId')}" if source.get("runId") and source.get("runId") not in names else ""),
+             + (f" of run {source.get('runId')}" if source.get("runId") and str(source["runId"]) not in names else ""),
              f"profile {source.get('profileId') or '?'} -> {target.get('profileId') or '?'}",
              f"memory {row.get('memory') or 'unknown'}",
              f"model {row.get('observedModel') or 'unattested'}"]

@@ -180,3 +180,15 @@ def test_a_continued_try_of_the_same_run_names_no_other_run():
     assert "of run" not in terminal_continuity(JOB, summary)["continuity"][0]
     summary["continuity"] = [{**row, "from": {**row["from"], "runId": "run-0123456789ab"}}]
     assert "of run run-0123456789ab" in terminal_continuity(JOB, summary)["continuity"][0]
+
+
+def test_a_name_that_is_not_a_string_is_refused_without_raising(tmp_path):
+    """Membership in the names must stay as tolerant as the old ``!=`` was."""
+    from ouroboros.delegate_continuation import terminal_continuity
+    from ouroboros.gateways.claudexor import final_attempt_facts
+    from tests.test_claudexor_observed_attempt import _write_telemetry
+
+    attempts = [{"attempt_id": "a02", "harness_id": "codex", "observed_model": "gpt-6-astra"}]
+    assert final_attempt_facts(_named(_write_telemetry(tmp_path, attempts, run_id=[RUN])), JOB) == {}
+    row = {"tryIndex": 2, "carrier": "native", "cause": "quota", "from": {"runId": {"id": RUN}}, "to": {}}
+    assert "of run" in terminal_continuity(JOB, {"jobId": JOB, "runId": RUN, "continuity": [row]})["continuity"][0]
