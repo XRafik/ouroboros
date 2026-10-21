@@ -6,19 +6,22 @@ import functools
 import json
 import logging
 from dataclasses import replace
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from ouroboros import store
-from ouroboros.gateway import host_service as host
 from ouroboros.gateway._helpers import run_sync_to_completion
 from ouroboros.presence_delivery import PresenceDeliveryConflict, delivery_reporting_version
+
+if TYPE_CHECKING:
+    from ouroboros.gateway import host_service as host
 
 log = logging.getLogger(__name__)
 
 async def _api_presence_delivery(request: Request) -> JSONResponse:
     """Record exact provider receipts without sending or starting model work."""
+    from ouroboros.gateway import host_service as host
     ctx: host.HostServiceContext = request.app.state.host_service_context
     try:
         skill_name, _token_payload = await host._authenticated(ctx, request.headers.get("x-skill-token", ""), "presence")
@@ -111,6 +114,7 @@ async def _api_presence_turn(request: Request) -> JSONResponse:
     terminal result. A retry of the same event joins the retained execution.
     """
 
+    from ouroboros.gateway import host_service as host
     ctx: host.HostServiceContext = request.app.state.host_service_context
     try:
         skill_name, _token_payload = await host._authenticated(ctx, request.headers.get("x-skill-token", ""), "presence")
@@ -292,6 +296,7 @@ def _presence_work_view(
 
 async def _api_presence_work(request: Request) -> JSONResponse:
     """Read a correlated late result, or retain an attributed inbox observation."""
+    from ouroboros.gateway import host_service as host
     ctx: host.HostServiceContext = request.app.state.host_service_context
     try:
         skill_name, _token_payload = await host._authenticated(ctx, request.headers.get("x-skill-token", ""), "presence")
@@ -333,6 +338,7 @@ async def _api_presence_work(request: Request) -> JSONResponse:
 
 async def _api_presence_place(request: Request) -> JSONResponse:
     """An authenticated connector's outbox rechecks current state without model work."""
+    from ouroboros.gateway import host_service as host
     ctx = request.app.state.host_service_context
     try:
         skill, _token = await host._authenticated(ctx, request.headers.get("x-skill-token", ""), "presence")
