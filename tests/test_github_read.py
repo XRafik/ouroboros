@@ -388,6 +388,28 @@ def test_checks_is_the_existing_reader_registered_as_a_method(gh, monkeypatch, t
 
 
 # ---- api ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("document", [
+    'query{search(query:"fix mutation bug",type:ISSUE,first:1){issueCount}}',
+    'query{search(query:"""fix mutation bug\nwith a block string""",type:ISSUE,first:1){issueCount}}',
+    '# mutation Fake { ignored }\nquery { viewer { login } }',
+    'query mutation { viewer { mutation: login } }',
+])
+def test_graphql_query_classification_ignores_strings_comments_and_names(gh, document):
+    gh.answer = lambda p, argv, kw: '{"data":{}}'
+    assert _payload(gh.read(method="api", graphql=document))[1]["data"] == {"data": {}}
+    assert len(gh.calls) == 1
+
+
+@pytest.mark.parametrize("document", [
+    'mutation { addReaction(input:{}) { clientMutationId } }',
+    '# comment before the operation\nmutation M { addReaction(input:{}) { clientMutationId } }',
+    'query Q { viewer { login } } mutation M { addReaction(input:{}) { clientMutationId } }',
+])
+def test_graphql_real_mutations_are_refused_before_any_read_send(gh, document):
+    text = gh.read(method="api", graphql=document)
+    assert "GH_API_READ_ONLY" in text and "github_write(method='api'" in text and not gh.calls
+
+
 @pytest.mark.parametrize("query_value", ["repo:owner/selected is:open", "mutation { deleteIssue(input:{id:1}) { clientMutationId } }"])
 def test_graphql_envelope_preserves_document_and_variable_types(gh, query_value):
     document = "query($query:String!){search(query:$query,type:ISSUE,first:1){issueCount}}"

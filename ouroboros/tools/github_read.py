@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from ouroboros.tool_capabilities import tool_result_limit
-from ouroboros.tools.github import _gh_api, _gh_graphql, _gh_run, _no_launch_yet, _refuse, _split_repo, github_token_from_env_or_settings
+from ouroboros.tools.github import _gh_api, _gh_graphql, _gh_run, _graphql_operations, _no_launch_yet, _refuse, _split_repo, github_token_from_env_or_settings
 from ouroboros.tools.registry import ToolContext
 
 METHODS = ("whoami", "get", "list", "search", "checks", "api")
@@ -26,8 +26,6 @@ _BODY_CHARS, _PREVIEW_CHARS, _DIFF_CHARS, _REPLIES = 2000, 200, 8000, 50
 _LINK_NEXT_RE = re.compile(r'<([^>]*)>;\s*rel="next"')
 _PAGE_RE = re.compile(r"[?&]page=(\d+)")
 _URL_REPO_RE = re.compile(r"^https://([^/]+)/([^/]+)/([^/]+)/")
-# A GraphQL document whose operation is a mutation (the keyword outside a selection set).
-_MUTATION_RE = re.compile(r"(?:^|[\s,}])mutation\b")
 # Exact commit counts and the review decision of listed PRs by node id: one fixed read, no commit objects.
 _PR_COMMIT_COUNTS_QUERY = "query($ids:[ID!]!){nodes(ids:$ids){...on PullRequest{id commits{totalCount} reviewDecision}}}"
 _PAGE_INFO = "pageInfo{hasNextPage endCursor}"
@@ -722,7 +720,7 @@ def _api(read: _Read) -> str:
     if bool(route) == bool(document):
         return read.refuse("⚠️ TOOL_ARG_ERROR: api takes exactly one of route (a REST GET path) or graphql (a query document).")
     if document:
-        if _MUTATION_RE.search(document):
+        if "mutation" in _graphql_operations(document):
             return read.refuse("⚠️ GH_API_READ_ONLY: github_read(method='api') sends GET routes and GraphQL queries only; "
                                "a mutation goes through github_write(method='api', graphql=...).")
         variables = read.args.get("variables") or {}

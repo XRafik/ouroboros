@@ -15,8 +15,8 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from ouroboros.tools.github import GhResult, _gh_api, _gh_graphql, _no_launch_yet, _refuse, _split_repo
-from ouroboros.tools.github_read import _MUTATION_RE, _repo_of
+from ouroboros.tools.github import GhResult, _gh_api, _gh_graphql, _graphql_operations, _no_launch_yet, _refuse, _split_repo
+from ouroboros.tools.github_read import _repo_of
 from ouroboros.tools.registry import ToolContext
 from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
 from ouroboros.utils import utc_now_iso
@@ -363,7 +363,7 @@ def _api(write: _Write) -> str:
     if bool(route) == bool(document):
         return write.refuse("⚠️ TOOL_ARG_ERROR: api takes exactly one of route (with http_method and input) or graphql (a mutation document).")
     if document:
-        if not _MUTATION_RE.search(document):
+        if _graphql_operations(document) != {"mutation"}:
             return write.refuse("⚠️ TOOL_ARG_ERROR: github_write(method='api', graphql=...) sends mutations; a query goes through "
                                 "github_read(method='api', graphql=...).")
         variables = write.args.get("variables") or {}

@@ -257,6 +257,31 @@ def _gh_cmd(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
 
 
 _REPO_RE = re.compile(r"^(?:(?P<host>[^/\s]+)/)?(?P<owner>[^/\s]+)/(?P<name>[^/\s]+)$")
+_GRAPHQL_LITERALS = re.compile(r'"""(?:\\.|(?!""")[\s\S])*"""|"(?:\\.|[^"\\])*"|#[^\r\n]*')
+
+
+def _graphql_operations(document: str) -> set[str]:
+    """Operation keywords at definition starts, excluding strings, comments and selection sets."""
+    code = _GRAPHQL_LITERALS.sub(" ", document)
+    operations, braces, parentheses, start = set(), 0, 0, True
+    for token in re.findall(r"[A-Za-z_]\w*|[{}()]", code):
+        if start:
+            if token in ("query", "mutation", "subscription"):
+                operations.add(token)
+            elif token == "{":
+                operations.add("query")  # shorthand operation
+            start = False
+        if token == "(":
+            parentheses += 1
+        elif token == ")":
+            parentheses -= 1
+        elif not parentheses:
+            if token == "{":
+                braces += 1
+            elif token == "}":
+                braces -= 1
+                start = braces == 0
+    return operations
 
 
 def _split_repo(repo: str) -> Optional[tuple]:

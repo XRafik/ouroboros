@@ -162,6 +162,23 @@ def test_resolve_thread_is_a_graphql_mutation_read_back_by_its_state(gh, state, 
 
 
 # ---- api ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("document", [
+    'query{search(query:"fix mutation bug",type:ISSUE,first:1){issueCount}}',
+    '# mutation Fake { ignored }\nquery { viewer { login } }',
+    'query{search(query:"""fix mutation bug""",type:ISSUE,first:1){issueCount}}',
+])
+def test_graphql_queries_with_mutation_text_are_refused_by_write(gh, document):
+    text = gh.write(method="api", graphql=document)
+    assert "github_read(method='api'" in text and not gh.calls
+    assert gh.result.code == "TOOL_ARG_ERROR"
+
+
+def test_graphql_commented_mutation_is_admitted_by_write(gh):
+    gh.answer = lambda p, argv, kw: '{"data":{}}'
+    _line, receipt = _receipt(gh.write(method="api", graphql='# comment\nmutation M { addReaction(input:{}) { clientMutationId } }'))
+    assert receipt["outcome"] == "confirmed" and len(gh.calls) == 1
+
+
 def test_api_sends_rest_mutations_and_graphql_mutations_and_names_the_effect(gh):
     gh.answer = lambda p, argv, kw: json.dumps([{"name": "bug", "id": 1}])
     line, receipt = _receipt(gh.write(method="api", http_method="PUT", route="repos/owner/selected/issues/7/labels", input={"labels": ["bug"]}, repo="owner/selected"))
