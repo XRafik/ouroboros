@@ -8,7 +8,7 @@ Browser/CLI routes: `gateway/router.py`; Host Service: §12. Tests check this ta
 
 Files routes: `gateway/files.py::file_browser_routes()` (envelopes/parity: §11). `gateway/host_service.py::create_host_service_app` builds the separate token-authenticated loopback Host Service, not a public owner API (§12).
 
-`/api/files/*` path operations resolve `path` and refuse escapes from the configured root. In-root symlinks stay usable; out-of-root symlinks may be listed with `is_symlink: true` but cannot be read, written, downloaded, deleted or traversed. Chat attachments (`/api/files/download?upload=<id>`) use stored ids, not paths: the separate `chat_uploads.open_upload` authority confines them to `data/uploads`, independently of the Files root.
+`/api/files/*` resolves paths inside the configured root. In-root symlinks work; outside links may be listed (`is_symlink: true`), never read, written, downloaded, deleted or traversed. Chat downloads (`?upload=<id>`) instead use `chat_uploads.open_upload` inside `data/uploads`, independently of the Files root.
 
 | Method | Path | Note |
 |---|---|---|
@@ -120,7 +120,7 @@ Files routes: `gateway/files.py::file_browser_routes()` (envelopes/parity: §11)
 | GET | `/api/tasks/{task_id}` | |
 | GET | `/api/tasks/{task_id}/events` | integer rank |
 | POST | `/api/tasks/{task_id}/events` | read-only v2 cursor (§3 History reads and the SSE v2 transport) |
-| GET | `/api/tasks/{task_id}/artifacts/{name}` | confined reads of the task's own stores; SVG: `sandbox` CSP, `nosniff` (`gateway/task_archive.py`) |
+| GET | `/api/tasks/{task_id}/artifacts/{name}` | own stores: POSIX no-follow or Windows NT relative handles; admission facts precede child-store metadata reads; SVG: `sandbox` CSP, `nosniff` (`gateway/task_archive.py`) |
 | POST | `/api/tasks/{task_id}/cancel` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/hurry` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/pause` | (§6 Owner Pause of a whole tree) |
