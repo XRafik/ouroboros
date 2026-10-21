@@ -458,7 +458,7 @@ def test_the_refusal_is_its_own_kind_that_rotates_without_cooling_the_model():
     ({"_last_llm_error_kind": "bad_request", "_last_llm_provider_code": "unsupported_parameter"},
      "rejected as invalid for this route"),
     ({"_last_llm_error_kind": "bad_request", "_last_llm_failure": {"provider_code": "model_capability_refused"}},
-     "cannot serve this model"),
+     "cannot serve this model, and this round asks no other account"),
     # A capability code left over from an earlier failure does not name a later, uncoded one.
     ({"_last_llm_error_kind": "bad_request", "_last_llm_provider_code": "model_capability_refused",
       "_last_llm_failure": {"provider_code": None}}, "rejected as invalid for this route"),
