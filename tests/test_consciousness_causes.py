@@ -91,10 +91,12 @@ def test_durable_handoff_waits_for_pool_terminal_even_before_queue_restore(clock
     assert clock.clock.next_wake_at == T0 + 5000 + DEFAULT * 2
 
 
-def test_matching_id_with_a_foreign_cause_cannot_finish_the_clock(clock, monkeypatch):
+def test_completion_requires_the_matching_actor_id_and_own_clock_cause(clock, monkeypatch):
     _launched(clock)
     deadline = clock.clock.next_wake_at
     monkeypatch.setattr(clock_module.time, "time", lambda: T0 + 5000)
+    clock.clock._wake_finished("another-own-wake", False, metadata=OWN, pooled=True)
+    assert clock.clock.next_wake_at == deadline and LAST_WAKE_STATE_KEY not in clock.store
     clock.clock._wake_finished("wake0001", False, metadata=FOCUS, pooled=True)
     assert clock.clock.next_wake_at == deadline and LAST_WAKE_STATE_KEY not in clock.store
     clock.clock._wake_finished("wake0001", False, metadata=OWN, pooled=True)
