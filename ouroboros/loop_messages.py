@@ -952,7 +952,7 @@ def _own_focus_fact(ctx: Any) -> Tuple[str, str]:
 def append_context_facts(ctx: Any, *, money: Optional[Dict[str, Any]] = None) -> bool:
     """Append facts for this round's current route and working view, before dispatch.
 
-    An unchanged reprepare reuses the visible row, so its values are as of that row's
+    An unchanged or cache-marker-only reprepare reuses the row, with values as of its
     sample instant. A fallback, owner switch or recovery rewrite gets fresh facts
     rather than inheriting another route's window and tariff. Sent history is never
     rewritten; the producer-labelled standalone rows let refusal recovery address
@@ -963,7 +963,7 @@ def append_context_facts(ctx: Any, *, money: Optional[Dict[str, Any]] = None) ->
     usage = ctx.accumulated_usage
     plan = ctx.context_fit_plan
     focus_identity, focus_fact = _own_focus_fact(ctx)
-    source = [m for m in ctx.messages if m.get(HOST_CONTEXT_KIND_KEY) != CONTEXT_FACTS_NAME]
+    source = [{k: v for k, v in m.items() if k != "cache_control"} for m in ctx.messages if m.get(HOST_CONTEXT_KIND_KEY) != CONTEXT_FACTS_NAME]
     source.append({"role": "system", "content": json.dumps(ctx.tool_schemas, ensure_ascii=False, sort_keys=True)})
     key = (ctx.round_idx, ctx.active_model, ctx.active_context_mode, ctx.active_effort,
            str(getattr(plan, "route_fp", "")), str(getattr(plan, "status", "")),
