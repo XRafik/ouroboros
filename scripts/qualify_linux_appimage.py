@@ -12,6 +12,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import signal
@@ -22,6 +23,8 @@ import time
 import urllib.request
 import uuid
 
+
+DESKTOP_KEYS = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'ouroboros/desktop_media.py'))['LINUX_DESKTOP_KEYS']
 
 HOST_GRAPHICS = ('libGL.so.1', 'libEGL.so.1', 'libGLESv2.so.2', 'libGLdispatch.so.0', 'libgbm.so.1', 'libdrm.so.2')
 
@@ -59,21 +62,26 @@ def descendants(pid):
     return found
 
 
-def find_window(pattern, evidence):
-    """Retain the actual X11 observation instead of masking a failed command."""
-    args = ['xdotool', 'search', '--onlyvisible', '--name', pattern]
-    # The clean image's C locale cannot convert GTK's UTF8_STRING window title.
-    # Keep the application environment unchanged; only the X11 reader uses UTF-8.
-    reader_env = {**os.environ, 'LC_ALL': 'C.UTF-8'}
-    observed = subprocess.run(args, text=True, capture_output=True, timeout=10, env=reader_env)
-    (evidence / 'window-search.json').write_text(json.dumps({
-        'argv': args, 'returncode': observed.returncode,
-        'stdout': observed.stdout, 'stderr': observed.stderr,
-        'DISPLAY': os.environ.get('DISPLAY'), 'reader_locale': reader_env['LC_ALL'],
-    }, indent=2))
-    if observed.returncode not in (0, 1) or observed.stderr:
-        raise RuntimeError(f'X11 search failed: {observed.returncode}: {observed.stderr}')
-    return observed.stdout.strip() if observed.returncode == 0 else None
+def find_window(title, evidence, launcher_pid):
+    """Observe actual clients and their raw properties; an error is never absence."""
+    reader = Path(__file__).with_name('x11_window_identity.py')
+    args = [sys.executable, '-I', '-S', str(reader)]
+    observed = subprocess.run(args, capture_output=True, timeout=10)
+    report = {'argv': args, 'returncode': observed.returncode,
+              'stdout': observed.stdout.decode('ascii', errors='backslashreplace'),
+              'stderr': observed.stderr.decode('utf-8', errors='backslashreplace'),
+              'requested_title': title, 'launcher_pid': launcher_pid}
+    # Keep every poll, including failures, and the last observation for inspection.
+    with (evidence / 'window-search.jsonl').open('a') as stream:
+        stream.write(json.dumps(report) + '\n')
+    (evidence / 'window-search.json').write_text(json.dumps(report, indent=2))
+    if observed.returncode != 0 or observed.stderr:
+        raise RuntimeError(f'X11 identity reader failed: {report}')
+    try:
+        observation = json.loads(observed.stdout)
+    except ValueError as exc:
+        raise RuntimeError(f'Invalid X11 identity response: {report}') from exc
+    return runpy.run_path(str(reader))['select_window'](observation, launcher_pid, title)
 
 
 def alive(pid):
@@ -94,8 +102,9 @@ def process_evidence(pid, evidence, filename='processes.json'):
                       'mount_namespace': os.readlink(proc / 'ns/mnt'),
                       'argv': (proc / 'cmdline').read_bytes().decode().split('\0'),
                       'environment': {k: v for k, v in env.items() if k in (
-                          'OUROBOROS_PRESENTATION', 'GI_TYPELIB_PATH', 'LD_LIBRARY_PATH', 'PYWEBVIEW_GUI',
-                          'WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS', 'WEBKIT_FORCE_SANDBOX')},
+                          'OUROBOROS_PRESENTATION', *DESKTOP_KEYS,
+                          'WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS', 'WEBKIT_FORCE_SANDBOX')
+                          or k.startswith('OUROBOROS_DESKTOP_')},
                       'maps': maps}
             records.append(record)
         except (FileNotFoundError, ProcessLookupError):
@@ -104,6 +113,17 @@ def process_evidence(pid, evidence, filename='processes.json'):
             records.append({'pid': child, 'unreadable': str(exc), 'exe': '', 'maps': '', 'environment': {}})
     (evidence / filename).write_text(json.dumps(records, indent=2))
     return records
+
+
+def assert_server_environment(records, caller):
+    servers = [r for r in records if any(arg.endswith('/server.py') for arg in r.get('argv', []))]
+    assert servers, 'No actual server process observed'
+    for server in servers:
+        actual = server['environment']
+        for key in DESKTOP_KEYS:
+            assert (key in actual, actual.get(key)) == (key in caller, caller.get(key)), (key, actual)
+        assert not any(key.startswith('OUROBOROS_DESKTOP_HOST_') or key == 'OUROBOROS_DESKTOP_ENV_SAVED'
+                       for key in actual), actual
 
 
 def sandbox_observation(records, launcher_namespace):
@@ -126,7 +146,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
     env = dict(os.environ)
     # PIP_REQUIRE_VIRTUALENV is safe_test's host guard. The product's own pip
     # installs --user into the disposable data dir and must not be refused.
-    for key in ('APPDIR', 'APPIMAGE', 'LD_LIBRARY_PATH', 'GI_TYPELIB_PATH', 'PYWEBVIEW_GUI',
+    for key in ('APPDIR', 'APPIMAGE', *DESKTOP_KEYS,
                 'PIP_REQUIRE_VIRTUALENV'):
         env.pop(key, None)
     for name in ('home', 'data', 'app', 'tmp', 'cache', 'config', 'xdg-data'):
@@ -173,16 +193,10 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     return json.load(response)
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
-                # Match the real GTK title through a UTF-8-capable X11 reader.
-                setup = wait_for(lambda: find_window('^Ouroboros.*Setup$', evidence), 'Setup', process=process)
-                legacy = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros.*Setup$'],
-                                        text=True, capture_output=True, timeout=10, env={**os.environ, 'LC_ALL': 'C'})
-                (evidence / 'window-search-C-control.json').write_text(json.dumps({
-                    'returncode': legacy.returncode, 'stdout': legacy.stdout, 'stderr': legacy.stderr}, indent=2))
-                title = run('xprop', '-id', setup.splitlines()[0], '_NET_WM_NAME', 'WM_NAME',
-                            env={**os.environ, 'LC_ALL': 'C.UTF-8'})
-                (evidence / 'setup-title.txt').write_text(title)
-                assert 'Ouroboros' in title and 'Setup' in title, title
+                setup = wait_for(lambda: find_window('Ouroboros — Setup', evidence, launcher_pid),
+                                 'Setup', process=process)
+                (evidence / 'setup-identity.json').write_text(json.dumps(setup, indent=2))
+                (evidence / 'setup-title.txt').write_text(setup['title'], encoding='utf-8')
                 # Only add a bridge witness; retain the shipped page and its actual UI.
                 page = state / 'app/repo/web/index.html'
                 original = page.read_text()
@@ -199,9 +213,13 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 page.write_text(original + suffix)
                 (evidence / 'bridge-instrumentation.html').write_text(suffix)
                 # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
-                run('xdotool', 'windowactivate', '--sync', setup.splitlines()[0])
+                run('xdotool', 'windowactivate', '--sync', str(setup['id']))
                 run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
-                window = wait_for(lambda: find_window('^Ouroboros v', evidence), 'Main window', process=process).splitlines()[0]
+                version = (state / 'app/repo/VERSION').read_text().strip()
+                identity = wait_for(lambda: find_window(f'Ouroboros v{version}', evidence, launcher_pid),
+                                    'Main window', process=process)
+                (evidence / 'main-identity.json').write_text(json.dumps(identity, indent=2))
+                window = str(identity['id'])
                 proof = wait_for(lambda: received[0] if received else None, 'real MainApi shell_info roundtrip', process=process)
                 (evidence / 'bridge.json').write_text(json.dumps(proof, indent=2))
                 assert proof['info']['source_launcher'] is source, proof
@@ -211,6 +229,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 (evidence / 'window.txt').write_text(geometry + '\n' + run('xprop', '-id', window))
                 run('import', '-window', window, str(evidence / 'window.png'))
                 records = process_evidence(process.pid, evidence)
+                assert_server_environment(records, env)
                 (evidence / 'webkit-sandbox.json').write_text(json.dumps(
                     sandbox_observation(records, os.readlink(f'/proc/{launcher_pid}/ns/mnt')), indent=2))
                 for library in ('libgtk-3', 'libwebkit2gtk-4.1', 'libjavascriptcoregtk-4.1', 'libgirepository-1.0', 'libglib-2.0', 'libsoup-3.0'):
@@ -229,6 +248,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
             else:
                 records = process_evidence(process.pid, evidence)
+                assert_server_environment(records, env)
                 assert any(r['environment'].get('OUROBOROS_PRESENTATION') == 'browser_fallback' for r in records)
                 warning = (state / 'data/logs/launcher.log').read_text()
                 assert 'continuing in browser mode' in warning
@@ -249,7 +269,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 for name, args in (
                     ('x11-tree', ['xwininfo', '-root', '-tree']),
                     ('x11-clients', ['xprop', '-root', '_NET_CLIENT_LIST']),
-                    ('x11-any-title', ['xdotool', 'search', '--name', '.*']),
+                    ('x11-properties', [sys.executable, '-I', '-S', str(Path(__file__).with_name('x11_window_identity.py'))]),
                 ):
                     diagnostic = subprocess.run(args, text=True, capture_output=True, timeout=10)
                     (evidence / (name + '.json')).write_text(json.dumps({
@@ -312,6 +332,9 @@ def main():
     damaged.mkdir()
     run(str(appimage), '--appimage-extract', cwd=damaged)
     extracted = damaged / 'squashfs-root'
+    # deb/rpm/tarball execute this exact public payload entry, bypassing AppRun.
+    one_case(appimage, state / 'direct-entry', evidence / 'direct-entry',
+             command=[str(extracted / 'usr/lib/ouroboros/Ouroboros')])
     for typelib in extracted.rglob('WebKit2-4*.typelib'):
         typelib.unlink()
     one_case(appimage, state / 'missing-backend', evidence / 'missing-backend', native=False,

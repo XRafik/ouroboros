@@ -482,7 +482,9 @@ def open_path_external(path: pathlib.Path) -> None:
     elif IS_WINDOWS:
         os.startfile(str(target))  # type: ignore[attr-defined]
     else:
-        subprocess.Popen(["xdg-open", str(target)])
+        from ouroboros.desktop_media import host_environment
+
+        subprocess.Popen(["xdg-open", str(target)], env=host_environment())
 
 
 def is_unstable_macos_app_path(path: pathlib.Path) -> bool:

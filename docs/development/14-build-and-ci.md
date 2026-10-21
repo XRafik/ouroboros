@@ -120,12 +120,13 @@ Anyone can check a downloaded ZIP with `scripts/verify_windows_signature.ps1 -Ex
 
 ### Release proof capsule
 
-The artifact pipeline (per-platform archive smokes, native Linux packages, the AppImage custody chain, SBOM and attestation binding, the seven-required-desktop plus optional-Android release job, and `release-preflight`'s tag behaviour) lives in ARCHITECTURE §8 and `.github/workflows/ci.yml`. The honesty invariants a change must preserve:
+ARCHITECTURE §8 and `.github/workflows/ci.yml` own archive/package smokes, AppImage custody, SBOM/attestations, seven required desktop assets, optional Android and tag preflight. Preserve these invariants:
 
-- A red `release-preflight` still lets the desktop build rehearse, which may consume configured macOS signing/notarization and records attestations in the repository and public transparency log; configured Windows signing and `release` need a green preflight, so that run has no signed Windows ZIP or GitHub Release, only run artifacts.
-- Proof and notes carry each consumed job's actual conclusion, never a fixed pass; the `v7.7.0` owner exception (ARCHITECTURE §8) is disclosed separately.
-- Publication is draft-first under a per-tag concurrency group; the remote annotated tag is revalidated against the event SHA before the draft and again before publishing, and a rerun never overwrites a published release.
-- Vendor-distribution smokes (Astra, RED OS) are reported evidence, never release authority: third-party registry reachability is outside the pipeline's control.
+- Red `release-preflight` permits desktop rehearsal, which may consume macOS signing/notarization and record repository/public-log attestations. Windows signing and `release` require green preflight; a red run has only run artifacts, no signed Windows ZIP or GitHub Release.
+- Proof/notes record each consumed job's actual conclusion; disclose the `v7.7.0` owner exception (ARCHITECTURE §8) separately.
+- Publication is draft-first with per-tag concurrency. Revalidate the remote annotated tag against the event SHA before drafting and publishing; reruns never overwrite published releases.
+- Astra/RED OS smokes are evidence, not release authority: third-party registry reachability is outside pipeline control.
+- Native Linux requires Jammy x86_64 and authenticated source indices; missing exact sources fail capture. Other builders keep the host backend. CI retains complete/partial sources for 30 days; recipient delivery remains a release obligation.
 - Release AppImage smoke stays headless. [Native GTK qualification](../../packaging/appimage/README.md) is separate.
-- `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1` is a local-builder escape hatch only: it skips Playwright's host-library installation, not browser-binary bundling, and a build using it must disclose that browser host compatibility was not locally proven.
-- Never represent a later checksum inventory as build-time provenance, an SBOM, or packaged smoke evidence that the original build did not create.
+- Local-only `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1` skips host-library installation, not browser bundling; disclose unproven host compatibility.
+- Later checksum inventories are not build-time provenance, an SBOM, or original packaged smoke evidence.

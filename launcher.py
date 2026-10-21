@@ -70,7 +70,7 @@ from ouroboros.launcher_bootstrap import (
     automatic_launch_allowed,
     sync_existing_repo_from_bundle as _sync_existing_repo_from_bundle_impl,
 )
-from ouroboros.desktop_media import attach_media_permissions, display_ready as _display_ready
+from ouroboros.desktop_media import attach_media_permissions, display_ready as _display_ready, host_environment, route_gtk_browser
 from ouroboros.runtime_venv import PREPARATION_DEPS_TIMEOUT_SEC, RuntimeVenvRefused, mark_ready, prepare_runtime_venv
 from ouroboros.launcher_onboarding import (
     prepare_first_run_settings as _prepare_first_run_settings,
@@ -175,11 +175,15 @@ def _hidden_run(command, **kwargs):
     """Hidden bootstrap commands keep their own Job/lifeline until cleanup."""
     from ouroboros.launcher_bootstrap import run_bootstrap_command
 
+    if IS_LINUX:
+        kwargs.setdefault("env", host_environment())
     return run_bootstrap_command(command, _shutdown_event, **merge_hidden_kwargs(kwargs))
 
 
 def _hidden_popen(command, *, bootstrap=False, **kwargs):
     """subprocess.Popen() with platform-appropriate hidden-window flags."""
+    if IS_LINUX:
+        kwargs.setdefault("env", host_environment())
     if bootstrap:
         from ouroboros.launcher_bootstrap import spawn_bootstrap_command
 
@@ -427,20 +431,16 @@ def _cleanup_recorded_server_group_for_pid(pid: int, reason: str = "agent_exit")
 def start_agent(port: int = AGENT_SERVER_PORT) -> subprocess.Popen:
     """Start server.py as the managed agent subprocess."""
     global _agent_proc, _agent_job
-    # Stdlib-only, so it loads even when the server's own imports are broken; imported
-    # before the spawn, because an undrained pipe would block the server.
+    # Stdlib-only; import before spawning so broken server imports cannot leave its pipe undrained.
     from ouroboros.process_logging import copy_capped_output
 
     settings = _load_settings()
     _apply_settings_to_env(settings)
-    env = embedded_python_env(DATA_DIR, os.environ.copy())
+    env = embedded_python_env(DATA_DIR, host_environment() if IS_LINUX else os.environ.copy())
     env["PYTHONPATH"] = str(REPO_DIR)
-    # ENV IS THE AUTHORITY for the bind host (config.SETTINGS_KEYS_NOT_EXPORTED_TO_ENV):
-    # `settings` here is the MERGED view, so it usually carries the shipped
-    # 127.0.0.1 default that no owner ever authored. Stamping it over an
-    # operator-provided environment host reintroduced the exact regression the
-    # export exclusion closed — setdefault lets the settings value stand in
-    # only when the environment says nothing.
+    # Environment owns the bind host (config.SETTINGS_KEYS_NOT_EXPORTED_TO_ENV).
+    # Merged settings include the unauthored 127.0.0.1 default: setdefault supplies
+    # it only when absent, preserving the operator override the export exclusion protects.
     saved_host = str(settings.get("OUROBOROS_SERVER_HOST") or "").strip()
     host_source = "environment" if str(env.get("OUROBOROS_SERVER_HOST") or "").strip() else "settings"
     if saved_host:
@@ -452,9 +452,8 @@ def start_agent(port: int = AGENT_SERVER_PORT) -> subprocess.Popen:
     env["OUROBOROS_MANAGED_BY_LAUNCHER"] = "1"
     env["OUROBOROS_MANAGED_REPO_DIR"] = str(REPO_DIR.resolve())
     env["OUROBOROS_LAUNCH_INTENT"] = _launch_intent  # this launcher's parsed intent, never an inherited one
-    # Launcher-owned presentation is re-stamped for every generation; other hosts default
-    # to web. After a killed launcher it can remain stale until the next owned reap.
-    # Env-only: a SETTINGS_DEFAULTS entry would pop an injected value when absent on disk.
+    # Re-stamp presentation each generation (other hosts: web); a killed launcher's value stays until reap.
+    # Env-only: SETTINGS_DEFAULTS would pop an injected value absent on disk.
     env["OUROBOROS_PRESENTATION"] = (
         str(os.environ.get("OUROBOROS_PRESENTATION") or "web")
         if _external_ui else "browser_fallback" if _headless else "desktop_window"
@@ -979,6 +978,8 @@ def _webview_ready() -> tuple[bool, str]:
         return False, f"{type(exc).__name__}: {exc}"
     if not IS_LINUX:
         return True, ""
+    route_gtk_browser(backend, lambda url, new=0, autoraise=True: bool(
+        _open_browser_detached(url, new=new, autoraise=autoraise)))
     return _display_ready(backend)
 
 
@@ -1006,26 +1007,25 @@ def _headless_signal_handler(signum, frame) -> None:
     _shutdown_event.set()
 
 
-def _open_browser_detached(url: str, outcome: Optional[list] = None) -> threading.Thread:
-    """Open the default browser without ever blocking the caller.
-    `webbrowser.open` waits for the child on a stdlib-resolved console
-    browser (w3m/lynx or an unrecognized $BROWSER), which would stall the
-    keep-alive loop for that browser's lifetime; the URL is already printed,
-    so the open is best-effort and rides a daemon thread. Returns the thread
-    so a short-lived caller (the already-running notice) can bound-join it
-    before process exit would kill the daemon thread under the opener.
-    An ``outcome`` list, when given, receives exactly one entry — True/False
-    from ``webbrowser.open`` or the raised exception — so a bounded-join
-    caller (the desktop bridge) can report failure honestly.
-    DELIBERATE (owner-approved): the opened browser is the USER'S own
-    application, intentionally outside process custody and launcher teardown —
-    the Emergency-Stop invariant governs the AGENT'S tree, and killing the
-    owner's browser would be hostile. A stdlib-resolved console browser
-    (w3m/lynx) may outlive the launcher; the printed URL is primary.
+def _open_browser_detached(url: str, outcome: Optional[list] = None, *, new=0, autoraise=True) -> threading.Thread:
+    """Best-effort open on a daemon thread: console browsers can wait indefinitely.
+    The printed URL is primary. Return the thread for short-lived callers to
+    bound-join; ``outcome`` receives one bool or exception for honest bridge errors.
+    Owner-approved: the user's browser, including a surviving console browser, is
+    outside launcher custody/teardown. Emergency Stop governs only the agent tree.
     """
     def _open() -> None:
         try:
-            result: object = bool(webbrowser.open(url))
+            if IS_LINUX and os.environ.get("OUROBOROS_DESKTOP_ENV_SAVED") == "1":
+                # webbrowser has no env argument: resolve BROWSER/defaults in a clean child, never swap GUI env.
+                opened = subprocess.run([
+                    EMBEDDED_PYTHON, "-I", "-S", "-c",
+                    "import sys, webbrowser; sys.exit(0 if webbrowser.open(sys.argv[1], int(sys.argv[2]), sys.argv[3]=='1') else 1)",
+                    url, str(new), '1' if autoraise else '0',
+                ], env=host_environment())
+                result: object = opened.returncode == 0
+            else:
+                result = bool(webbrowser.open(url) if new == 0 and autoraise else webbrowser.open(url, new, autoraise))
         except Exception as exc:
             result = exc
             log.info("Could not open the default browser for %s", url, exc_info=True)

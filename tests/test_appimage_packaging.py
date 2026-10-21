@@ -263,6 +263,9 @@ def test_desktop_bundle_environment_survives_exec_and_preserves_cli_cwd(tmp_path
     successor.chmod(0o755)
     launcher = payload / 'Ouroboros'
     launcher.write_text('#!/bin/sh\nexec "$OUROBOROS_BUNDLE_DIR/../successor"\n')
+    import runpy
+    runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))['install_desktop_entry'](payload)
+    (payload / 'Ouroboros.bin').chmod(0o755)
     launcher.chmod(0o755)
     env = {**os.environ, 'APPDIR': str(appdir), 'PYWEBVIEW_GUI': 'qt', 'LD_LIBRARY_PATH': '/caller/lib'}
     result = subprocess.run([str(apprun)], env=env, cwd=tmp_path, capture_output=True, text=True, check=True)
@@ -444,3 +447,204 @@ def test_native_qualifier_wait_reports_an_early_exit_not_a_timeout():
     # A live process still gets the ordinary deadline.
     with pytest.raises(RuntimeError, match=r'^Timed out: Setup$'):
         wait_for(lambda: None, 'Setup', timeout=0.3, process=Process(None))
+
+
+@pytest.fixture
+def renamed_linux_payload(tmp_path):
+    """Real entries around a recording stand-in for the frozen ELF, never a GUI."""
+    import runpy
+    import sys
+
+    payload = tmp_path / 'payload/Ouroboros'
+    native = payload / '_internal/linux-gtk'
+    native.mkdir(parents=True)
+    (native / 'manifest.json').write_text('{}')
+    (native / 'desktop-env.sh').write_bytes((REPO / 'packaging/appimage/desktop-env.sh').read_bytes())
+    entry = payload / 'Ouroboros'
+    entry.write_text(f'#!{sys.executable}\nimport json, os, pathlib, sys\n'
+                     'pathlib.Path(os.environ["TEST_ENTRY_OUTPUT"]).write_text(json.dumps('
+                     '{"argv":sys.argv,"bundle":os.environ.get("OUROBOROS_BUNDLE_DIR"),'
+                     '"saved":os.environ.get("OUROBOROS_DESKTOP_ENV_SAVED")}))\n')
+    entry.chmod(0o755)
+    runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))['install_desktop_entry'](payload)
+    return payload
+
+
+@pytest.mark.serial
+def test_release_archive_digest_and_ci_extraction_keep_the_shared_entry(tmp_path, renamed_linux_payload, monkeypatch):
+    import argparse
+    import json
+    import tarfile
+    import yaml
+    from scripts import release_proof
+
+    payload = renamed_linux_payload
+    dist, extracted = tmp_path / 'dist', tmp_path / 'extracted'
+    dist.mkdir()
+    extracted.mkdir()
+    archive = dist / 'Ouroboros-7.7.1-linux-x86_64.tar.gz'
+    with tarfile.open(archive, 'w:gz') as tar:
+        tar.add(payload, arcname='Ouroboros')
+    digest = release_proof.sha256_file(archive)
+    args = argparse.Namespace(directory=dist, expect_sha256=digest, github_output=None)
+    release_proof.command_locate(args)
+    workflow = yaml.safe_load((REPO / '.github/workflows/ci.yml').read_text())
+    steps = workflow['jobs']['build']['steps']
+    smoke = next(s['run'] for s in steps if s.get('id') == 'smoke_linux')
+    extract = next(line.strip() for line in smoke.splitlines() if line.strip().startswith('tar -xzf '))
+    extract = extract.replace('${{ steps.release_asset.outputs.path }}', str(archive))
+    subprocess.run(['bash', '-eu', '-c', extract], env={**os.environ, 'SMOKE_ROOT': str(extracted)}, check=True)
+    output = tmp_path / 'entry.json'
+    monkeypatch.setenv('TEST_ENTRY_OUTPUT', str(output))
+    entry = extracted / 'Ouroboros/Ouroboros'
+    subprocess.run([str(entry), '--launch-intent', 'automatic'], check=True)
+    observed = json.loads(output.read_text())
+    assert observed['argv'] == [str(entry.with_name('Ouroboros.bin')), '--launch-intent', 'automatic']
+    assert observed['bundle'] == str(entry.parent / '_internal') and observed['saved'] == '1'
+    archive.write_bytes(archive.read_bytes() + b'tampered')
+    with pytest.raises(ValueError, match='not the .* digest'):
+        release_proof.command_locate(args)
+    entry.with_name('Ouroboros.bin').unlink()
+    output.unlink()
+    refused = subprocess.run([str(entry)], capture_output=True)
+    assert refused.returncode != 0 and not output.exists()
+
+
+@pytest.mark.serial
+def test_ci_runtime_root_uses_the_live_renamed_executable(tmp_path):
+    import yaml
+
+    steps = yaml.safe_load((REPO / '.github/workflows/ci.yml').read_text())['jobs']['build']['steps']
+    smoke = next(s['run'] for s in steps if s.get('name') == 'Smoke final Linux AppImage')
+    lines = [line.strip() for line in smoke.splitlines()]
+    # Execute the exact production parameter expansions; no /proc, ldd or AppImage runs on this Mac.
+    assignments = '\n'.join(next(line for line in lines if line.startswith(name + '='))
+                            for name in ('APPIMAGE_RUNTIME_ROOT', 'APPIMAGE_PRIVATE_BASE'))
+    extraction = tmp_path / 'private/appimage_extracted_fixture'
+    binary = extraction / 'usr/lib/ouroboros/Ouroboros.bin'
+    script = assignments + '\nprintf "%s\\n%s\\n" "$APPIMAGE_RUNTIME_ROOT" "$APPIMAGE_PRIVATE_BASE"'
+    actual = subprocess.check_output(['bash', '-eu', '-c', script],
+                                    env={**os.environ, 'LAUNCHER_EXE': str(binary)}, text=True).splitlines()
+    assert actual == [str(extraction), str(extraction.parent)]
+    wrong = subprocess.check_output(['bash', '-eu', '-c', script],
+                                   env={**os.environ, 'LAUNCHER_EXE': str(binary.with_name('Ouroboros'))}, text=True).splitlines()
+    assert wrong != actual  # the old basename must not masquerade as the renamed ELF
+    assert 'ldd "$LAUNCHER_EXE" >"$LDD_LOG"' in lines
+    assert 'kill -TERM "$LAUNCHER_PID"' in lines
+    assert 'if [ "$APPIMAGE_RUNTIME_EXE" != "$APPIMAGE" ]; then' in lines
+
+
+@pytest.mark.serial
+def test_cli_and_signin_resolve_public_entry_and_refuse_only_internal_binary(tmp_path, renamed_linux_payload, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from ouroboros import desktop_autostart, packaged_cli
+
+    payload = renamed_linux_payload
+    monkeypatch.setattr(packaged_cli, 'IS_MACOS', False)
+    monkeypatch.setattr(packaged_cli, 'IS_WINDOWS', False)
+    monkeypatch.delenv('APPIMAGE', raising=False)
+    monkeypatch.delenv('APPDIR', raising=False)
+    output = tmp_path / 'entry.json'
+    monkeypatch.setenv('TEST_ENTRY_OUTPUT', str(output))
+    original_popen, children = subprocess.Popen, []
+
+    def capture(*args, **kwargs):
+        proc = original_popen(*args, **kwargs)
+        children.append(proc)
+        return proc
+
+    monkeypatch.setattr(packaged_cli.subprocess, 'Popen', capture)
+    runtime = SimpleNamespace(bundle_root=payload / '_internal')
+    packaged_cli._launch_desktop_app(runtime)
+    assert len(children) == 1
+    assert children[0].wait(timeout=10) == 0
+    assert json.loads(output.read_text())['argv'] == [str(payload / 'Ouroboros.bin')]
+    import launcher
+    from ouroboros import launcher_bootstrap, platform_layer
+    plain_python = payload / '_internal/python-standalone/bin/python3'
+    plain_python.parent.mkdir(parents=True)
+    plain_python.touch()
+    monkeypatch.setattr(launcher, 'sys', SimpleNamespace(
+        frozen=True, _MEIPASS=str(runtime.bundle_root), executable=str(payload / 'Ouroboros.bin')))
+    monkeypatch.setattr(launcher_bootstrap, 'sys', SimpleNamespace(executable=str(payload / 'Ouroboros.bin')))
+    assert launcher._bundle_dir() == runtime.bundle_root
+    assert launcher_bootstrap.find_embedded_python(runtime.bundle_root, macos=False) == str(plain_python)
+    assert runtime.bundle_root in platform_layer.bundled_resource_ancestor_bases(payload / 'Ouroboros.bin')
+    monkeypatch.setattr(desktop_autostart.sys, 'platform', 'linux')
+    for key, value in {'OUROBOROS_BUNDLE_DIR': str(runtime.bundle_root), 'OUROBOROS_PRESENTATION': 'desktop_window',
+                       'OUROBOROS_MANAGED_BY_LAUNCHER': '1', 'OUROBOROS_APP_VERSION': '7.7.1'}.items():
+        monkeypatch.setenv(key, value)
+    assert desktop_autostart.launcher_target() == (payload / 'Ouroboros', '')
+    (payload / 'Ouroboros').unlink()
+    assert packaged_cli._desktop_app_path(runtime.bundle_root) is None
+    with pytest.raises(packaged_cli.PackagedCLIError, match='could not locate packaged desktop launcher'):
+        packaged_cli._launch_desktop_app(runtime)
+    assert desktop_autostart.launcher_target()[0] is None
+    assert len(children) == 1  # no fallback to the internal ELF, and no registration was changed
+
+
+@pytest.mark.serial
+def test_package_builder_stages_renamed_payload_and_public_desktop_unit(tmp_path, renamed_linux_payload):
+    """Actual builder staging/spec; package encoders are recording fixtures, not native installs."""
+    import json
+    import sys
+
+    tools, evidence, dist = (tmp_path / name for name in ('tools', 'package-records', 'dist'))
+    tools.mkdir()
+    evidence.mkdir()
+    # dpkg-deb snapshots staging; rpmbuild executes its generated %install in a
+    # temporary buildroot. Actual package encoding/installing remains native QA.
+    encoder = '''import json, os, pathlib, shutil, subprocess, sys
+args = sys.argv[1:]
+evidence = pathlib.Path(os.environ['TEST_PACKAGE_RECORDS'])
+if pathlib.Path(sys.argv[0]).name == 'dpkg-deb':
+    shutil.copytree(args[-2], evidence / 'deb-root', symlinks=True)
+    pathlib.Path(args[-1]).write_bytes(b'fixture deb, not a package')
+else:
+    defines = dict(args[i+1].split(' ', 1) for i, arg in enumerate(args) if arg == '--define')
+    suffix = defines.get('rel_suffix', '')
+    spec = pathlib.Path(args[-1]).read_text()
+    (evidence / ('rpm' + suffix + '.spec')).write_text(spec)
+    buildroot = evidence / ('rpm' + suffix + '-root')
+    install = spec.split('%install\\n', 1)[1].split('\\n%files', 1)[0]
+    subprocess.run(['bash', '-eu', '-c', install.replace('%{buildroot}', str(buildroot))], check=True)
+    version = next(line.split()[1] for line in spec.splitlines() if line.startswith('Version:'))
+    target = pathlib.Path(defines['_topdir']) / 'RPMS/x86_64' / ('ouroboros-' + version + '-1' + suffix + '.x86_64.rpm')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b'fixture rpm, not a package')
+'''
+    for tool in ('dpkg-deb', 'rpmbuild'):
+        path = tools / tool
+        path.write_text(f'#!{sys.executable}\n' + encoder)
+        path.chmod(0o755)
+    env = {**os.environ, 'PATH': str(tools) + os.pathsep + os.environ['PATH'],
+           'TEST_PACKAGE_RECORDS': str(evidence)}
+    subprocess.run(['bash', 'scripts/build_linux_packages.sh', str(renamed_linux_payload), str(dist)],
+                   cwd=REPO, env=env, check=True, capture_output=True, text=True)
+    stage = evidence / 'deb-root'
+    installed = stage / 'opt/ouroboros'
+    for name in ('Ouroboros', 'Ouroboros.bin', '_internal/linux-gtk/desktop-env.sh'):
+        assert (installed / name).read_bytes() == (renamed_linux_payload / name).read_bytes()
+    assert os.access(installed / 'Ouroboros', os.X_OK) and os.access(installed / 'Ouroboros.bin', os.X_OK)
+    assert (stage / 'usr/bin/ouroboros').readlink() == pathlib.Path('/opt/ouroboros/bin/ouroboros')
+    desktop = (stage / 'usr/share/applications/ouroboros.desktop').read_text().splitlines()
+    assert 'Exec=/opt/ouroboros/Ouroboros' in desktop
+    unit = (stage / 'usr/lib/systemd/user/ouroboros.service').read_text().splitlines()
+    command = next(line.removeprefix('ExecStart=') for line in unit if line.startswith('ExecStart='))
+    assert command == '/opt/ouroboros/Ouroboros --launch-intent automatic'
+    assert 'KillMode=control-group' in unit and not any(line.startswith('Restart=') for line in unit)
+    output = tmp_path / 'unit-entry.json'
+    subprocess.run([str(installed / 'Ouroboros'), *command.split()[1:]],
+                   env={**env, 'TEST_ENTRY_OUTPUT': str(output)}, check=True)
+    assert json.loads(output.read_text())['argv'] == [str(installed / 'Ouroboros.bin'), '--launch-intent', 'automatic']
+    for name in ('rpm.spec', 'rpm.red80.spec'):
+        spec = (evidence / name).read_text()
+        rpm_root = evidence / name.replace('.spec', '-root')
+        assert (rpm_root / 'opt/ouroboros/Ouroboros.bin').read_bytes() == (installed / 'Ouroboros.bin').read_bytes()
+        assert (rpm_root / 'opt/ouroboros/Ouroboros').read_bytes() == (installed / 'Ouroboros').read_bytes()
+        assert (rpm_root / 'usr/lib/systemd/user/ouroboros.service').read_bytes() == (stage / 'usr/lib/systemd/user/ouroboros.service').read_bytes()
+        assert 'cp -al ' in spec and '"%{buildroot}/opt/ouroboros"' in spec
+        assert '/opt/ouroboros\n' in spec.split('%files\n')[1]
+        assert '"%{buildroot}/usr/lib/systemd/user/ouroboros.service"' in spec
+    assert not (dist / '.package-stage').exists()  # builder cleanup still ran

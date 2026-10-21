@@ -283,6 +283,17 @@ def bundle(internal: Path) -> None:
         } for p in sorted(root.rglob("*")) if p.is_file()},
     }
     (root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    install_desktop_entry(internal.parent)
+
+
+def install_desktop_entry(payload: Path) -> None:
+    """All payload consumers save caller state before PyInstaller changes it."""
+    binary = payload / "Ouroboros.bin"
+    if binary.exists():
+        raise RuntimeError(f"Refusing to overwrite a desktop entry: {binary}")
+    (payload / "Ouroboros").rename(binary)
+    shutil.copy2("packaging/appimage/desktop-launcher.sh", payload / "Ouroboros")
+    (payload / "Ouroboros").chmod(0o755)
 
 
 if __name__ == "__main__":

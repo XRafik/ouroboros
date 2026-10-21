@@ -20,6 +20,7 @@ block_cipher = None
 _is_macos = sys.platform == "darwin"
 _is_windows = sys.platform == "win32"
 _is_linux = sys.platform == "linux"
+_bundle_linux_gtk = _is_linux and os.environ.get('OUROBOROS_BUNDLE_LINUX_GTK', '1') == '1'
 
 if _is_windows:
     _icon = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
@@ -54,7 +55,7 @@ _extra_datas = []
 _extra_binaries = []
 _extra_hiddenimports = []
 
-if _is_linux:
+if _bundle_linux_gtk:
     _extra_hiddenimports += ['gi', 'gi.repository.Gtk', 'gi.repository.WebKit2', 'cairo']
 
 # Bundle the official, notarized Node.js runtime (pruned to bin/node[.exe]) so
@@ -159,9 +160,9 @@ a = Analysis(
         'webview',
         'ouroboros.config',
     ] + _extra_hiddenimports,
-    hookspath=['packaging/appimage/hooks'] if _is_linux else [],
+    hookspath=['packaging/appimage/hooks'] if _bundle_linux_gtk else [],
     hooksconfig={'gi': {'module-versions': {'Gtk': '3.0', 'WebKit2': '4.1', 'Soup': '3.0'}}}
-        if _is_linux else {},
+        if _bundle_linux_gtk else {},
     runtime_hooks=['scripts/pyi_rth_pythonnet.py'] if _is_windows else [],
     excludes=[],
     win_no_prefer_redirects=False,

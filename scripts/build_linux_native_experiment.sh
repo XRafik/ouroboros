@@ -7,7 +7,7 @@ EVIDENCE=$(realpath "$1")
 test "$(uname -sm)" = 'Linux x86_64'
 test -z "$(git status --porcelain --untracked-files=no)"
 export CC=gcc CXX=g++ LDSHARED='gcc -shared' PYTHONDONTWRITEBYTECODE=1
-export UV_PYTHON_DOWNLOADS=never
+export UV_PYTHON_DOWNLOADS=never OUROBOROS_BUNDLE_LINUX_GTK=1
 mkdir -p "$EVIDENCE/apt-release"
 # The ordinary archive is not a snapshot: keep the signed index state used.
 cp /etc/apt/sources.list /etc/apt/sources.list.d/native-sources.list \
@@ -59,21 +59,9 @@ chmod +x dist/Ouroboros/bin/*
 bash scripts/build_appimage.sh
 cp dist/*.AppImage "$EVIDENCE/"
 cp dist/Ouroboros/_internal/linux-gtk/manifest.json "$EVIDENCE/gtk-manifest.json"
-# Retain matching Debian source archives and packaging/patches for the shipped
-# closure, including modified WebKit. Availability to recipients remains a
-# distribution obligation; the manifest alone does not discharge it.
-"$PY" -I -S - "$EVIDENCE" <<'PY'
-import hashlib, json, pathlib, subprocess, sys
-evidence = pathlib.Path(sys.argv[1])
-sources = evidence / 'native-sources'
-sources.mkdir()
-manifest = json.loads((evidence / 'gtk-manifest.json').read_text())
-for package, version in sorted(manifest['source_packages'].items()):
-    subprocess.run(['apt-get', 'source', '--download-only', package + '=' + version], cwd=sources, check=True)
-(evidence / 'native-sources.sha256').write_text(''.join(
-    hashlib.sha256(path.read_bytes()).hexdigest() + '  ' + path.name + '\n'
-    for path in sorted(sources.iterdir()) if path.is_file()))
-PY
+# Production and diagnostic builds retain the same exact source closure.
+"$PY" -I -S scripts/capture_linux_sources.py dist/Ouroboros/_internal/linux-gtk \
+    "$EVIDENCE/native-sources-linux.tar.gz"
 cp repo_bundle_manifest.json "$EVIDENCE/"
 sha256sum "$EVIDENCE/"*.AppImage > "$EVIDENCE/appimage.sha256"
 dpkg-query -W > "$EVIDENCE/builder-packages.tsv"
@@ -81,4 +69,5 @@ cp /etc/apt/sources.list "$EVIDENCE/apt-sources.list"
 # Dependency-only environment; every launcher test retains the network guard.
 "$BUILD_ENV/bin/python" -m pytest tests/test_appimage_packaging.py tests/test_desktop_media.py \
     tests/test_launcher_source_handoff.py tests/test_launcher_headless_fallback.py \
-    tests/test_build_scripts.py -o addopts='' --junitxml="$EVIDENCE/focused-tests.xml"
+    tests/test_build_scripts.py tests/test_linux_desktop_environment.py \
+    tests/test_linux_native_source_capture.py tests/test_x11_window_identity.py -o addopts='' --junitxml="$EVIDENCE/focused-tests.xml"

@@ -389,6 +389,8 @@ Output: `dist/Ouroboros-<VERSION>.dmg`, containing `Ouroboros.app`, an `Applicat
 
 ### Linux (.AppImage and .tar.gz)
 
+The bundled GTK3/WebKitGTK window is built on **Ubuntu 22.04 x86_64** with the build packages and authenticated `deb-src` indices described in [the Linux packaging notes](packaging/appimage/README.md). Native window qualification is still pending. This is not a claim that a Jammy graphics stack works with every newer host driver.
+
 ```bash
 bash scripts/download_python_standalone.sh
 bash build_linux.sh
@@ -398,9 +400,11 @@ Outputs: `dist/Ouroboros-<VERSION>-linux-<arch>.AppImage` and the extraction-fri
 
 On a build host where system packages are managed separately, set `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1`; Chromium and WebKit are still downloaded and bundled, but the build does not invoke `sudo` to install host libraries.
 
+`OUROBOROS_BUNDLE_LINUX_GTK=auto` (default) selects the bundled closure on Ubuntu 22.04 x86_64. Other Linux builders, including aarch64, retain the previous host-backend build and browser fallback, without a self-contained window claim. Set `=0` explicitly for that path or `=1` to require the closure and fail on missing/unsupported inputs; release CI requires `=1`. Native builds also produce `dist/native-sources-linux-<VERSION>.tar.gz` and its SHA-256. Keep these with the binaries; recipient source delivery remains a distribution obligation.
+
 ### Linux (.deb and .rpm)
 
-Wraps the payload `build_linux.sh` just produced, so run it afterwards:
+Wraps the payload `build_linux.sh` just produced, so run it afterwards: The native packages and tarball use the same `Ouroboros` entry wrapper as the AppImage, including caller-environment preservation. Package smoke is headless; it does not qualify a native window or graphics-driver compatibility on those distributions.
 
 ```bash
 sudo apt-get install -y dpkg-dev rpm   # rpm provides rpmbuild
