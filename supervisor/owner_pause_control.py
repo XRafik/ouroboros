@@ -67,10 +67,11 @@ def _locate_root_locked(q: Any, task_id: str) -> Tuple[Optional[Dict[str, Any]],
 
 
 def _late_work(q: Any, task_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
-    """``(result_row, live_review)`` of an answered root still owning late work, else ``(None, False)``.
+    """``(result_row, late_work)`` of an answered root still owning late work, else ``(None, False)``.
 
     Its open or in-flight upkeep is reachable so the Pause can end it at once; a live
     review operation is reachable so its unsent preparation can wait for Resume.
+    Live descendants also belong to the answered root, even after all its own phases ended.
     """
     from ouroboros.post_task_checkpoint import post_task_synthesis_in_flight, post_task_synthesis_is_open
     from ouroboros.review_operation import task_has_live_review_operation
@@ -82,9 +83,12 @@ def _late_work(q: Any, task_id: str) -> Tuple[Optional[Dict[str, Any]], bool]:
     except Exception:
         return None, False
     checkpoint = row.get("root_phase_checkpoint") if isinstance(row.get("root_phase_checkpoint"), dict) else {}
-    if live_review or post_task_synthesis_in_flight(q.DRIVE_ROOT, task_id) or post_task_synthesis_is_open(
+    with q._queue_lock:
+        descendants = any(str(task.get("root_task_id") or "") == task_id and task.get("id") != task_id
+                          for task in [*q.PENDING, *(m.get("task") or {} for m in q.RUNNING.values())])
+    if descendants or live_review or post_task_synthesis_in_flight(q.DRIVE_ROOT, task_id) or post_task_synthesis_is_open(
             checkpoint.get("post_task_synthesis")):
-        return {**row, "id": task_id}, live_review
+        return {**row, "id": task_id}, live_review or descendants
     return None, False
 
 

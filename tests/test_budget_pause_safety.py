@@ -176,7 +176,7 @@ def test_dead_unconsumed_grant_keeps_exact_hold_when_revocation_stores_fail(tmp_
     assert [task["id"] for task in sent] == ["dead"]
 
 
-def test_consumed_grant_crash_never_enters_ordinary_retry(tmp_path, monkeypatch):
+def test_consumed_grant_without_new_working_source_is_never_reexecuted(tmp_path, monkeypatch):
     from ouroboros import budget_pause, delegate_recovery
     from ouroboros.task_results import load_task_result
     from supervisor import worker_health
@@ -191,6 +191,8 @@ def test_consumed_grant_crash_never_enters_ordinary_retry(tmp_path, monkeypatch)
     monkeypatch.setattr(owner_wait, "rebind_restored_route", lambda *_a, **_k: (None, "max"))
     budget_pause.resume_paused_loop(SimpleNamespace(_ctx=ctx), saved, [], {}, {}, set(),
                                     budget_remaining_usd=5.0)
+    from ouroboros.working_checkpoint import discard
+    discard(tmp_path, "dead")  # no current source: old Resume bytes are never a retry source
     monkeypatch.setattr(delegate_recovery, "reconcile_unrecoverable_task", lambda *_a, **_k: None)
     monkeypatch.setattr(queue, "enqueue_task", lambda *_a, **_k: pytest.fail("completed effects replayed"))
     terminals = []
@@ -516,3 +518,57 @@ def test_a_hold_ended_by_control_inside_the_refused_dispatch_rail_is_a_truthful_
     assert usage["execution_status"] == "failed" and usage["reason_code"] == "deadline_local"
     assert trace["forced_finalization"]["control_reason"] == "deadline"
     assert isinstance(text, str) and text
+
+
+def test_consumed_resume_crash_retries_current_working_source_without_old_grant(tmp_path, monkeypatch):
+    from ouroboros import budget_pause, owner_wait, working_checkpoint as wc
+    from supervisor import worker_health
+
+    queue, workers, job, _ = _dead_granted_task(tmp_path, monkeypatch)
+    monkeypatch.setattr(worker_health, "_dead_job_is_current", lambda j: workers.RUNNING.get("dead") is j["meta"])
+    ctx, limit = _loop_ctx(tmp_path, "dead")
+    old = copy.deepcopy(job["task"]["_budget_pause_resume"])
+    saved = budget_pause.load_budget_pause(ctx, old)
+    monkeypatch.setattr(owner_wait, "rebind_restored_route", lambda *_a, **_k: (None, "max"))
+    budget_pause.resume_paused_loop(SimpleNamespace(_ctx=ctx), saved, [], {}, {}, set(), budget_remaining_usd=5.0)
+    # A newer batch owns an unfinished effect. Recovery must keep its UNKNOWN closure.
+    limit.messages.append({"role": "user", "content": "new work after Resume"})
+    wc.save_round(limit, "pre_effect")
+    before = budget_pause.budget_pause_row(tmp_path, "dead")
+    worker_health._recover_crashed_task_without_terminal(job, queue)
+    [retry] = workers.PENDING
+    assert retry["id"] == "dead" and retry["_attempt"] == 2 and not workers.RUNNING
+    assert "_budget_pause_resume" not in retry and "_budget_pause" not in retry
+    assert budget_pause.budget_pause_row(tmp_path, "dead") == before
+    with pytest.raises(ValueError, match="no live single-use grant"):
+        budget_pause.load_budget_pause(ctx, old)
+    restored = wc.load_recovery(ctx, retry["_working_recovery"])
+    assert restored["working"]["boundary"] == "pre_effect"
+    assert restored["working"]["pending_tool_call_ids"] == ["call_b"]
+    assert any(row.get("content") == "new work after Resume" for row in restored["messages"])
+    from tests.test_budget_pause_holds import _idle_worker
+    sent = []
+    _idle_worker(workers, sent)
+    workers.assign_tasks()
+    assert [task["id"] for task in sent] == ["dead"]
+    assert sent[0]["_working_recovery"] == retry["_working_recovery"]
+    from ouroboros import loop
+    from tests.test_loop_transport_wait import _loop_kwargs
+    from tests.test_working_checkpoint import _registry
+
+    registry = _registry(tmp_path, monkeypatch, "dead", 2)
+    registry._ctx.working_recovery = retry["_working_recovery"]
+    monkeypatch.setattr(registry, "execute_result", lambda *_a, **_k: pytest.fail("UNKNOWN effect replayed"))
+    seen = []
+
+    def dispatch(call, disposition, **kwargs):
+        seen.extend(call.messages)
+        return {"role": "assistant", "content": "Continued new work", "tool_calls": []}, 0.0
+
+    monkeypatch.setattr(loop, "_dispatch_round_model", dispatch)
+    kwargs = {**_loop_kwargs(tmp_path, registry, []), "task_id": "dead"}
+    result, _usage, _trace = loop.run_llm_loop(**kwargs)
+    assert result == "Continued new work"
+    assert any(row.get("content") == "done a" for row in seen)
+    unknown = next(row for row in seen if row.get("tool_call_id") == "call_b")
+    assert "UNKNOWN" in unknown["content"] and "NOT re-executed" in unknown["content"]

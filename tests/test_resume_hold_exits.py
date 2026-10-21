@@ -17,9 +17,7 @@ def test_release_consumers_do_not_branch_on_hold_names():
     symbols = {key for key, value in vars(eb).items() if key.startswith("HOLD_") and value in names}
     symbols.add("HOLD_SAVED_SLEEP_RECOVERY")
     # Transport/source mechanisms (sleep, exact owner custody) are not release
-    # names. UI labels are converted in stage 3.
-    deferred = {"_activity_pause_cause", "_budget_pause_reason",
-                "_queue_hold_facts", "classify_member"}
+    # names. UI and mind use the same table too.
     offenders = []
     for directory in ("supervisor", "ouroboros"):
         for path in (root / directory).rglob("*.py"):
@@ -29,7 +27,7 @@ def test_release_consumers_do_not_branch_on_hold_names():
             assert "SELECTABLE_HOLD_REASONS" not in source and "OWNER_ROOT_RESUME_HOLDS" not in source, path
             tree = ast.parse(source)
             for function in ast.walk(tree):
-                if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) or function.name in deferred:
+                if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     continue
                 for node in ast.walk(function):
                     if not isinstance(node, (ast.Compare, ast.IfExp)):

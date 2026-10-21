@@ -209,7 +209,7 @@ def test_failed_selection_publication_keeps_the_native_wait_unselected(restart_c
         fault.setattr(queue, "persist_queue_snapshot", lambda reason="":
                       False if reason == "budget_hold_selected" else persist(reason=reason))
         refused = queue.resume_budget_paused_task(env.case.task_id)
-    assert refused == {"ok": False, "error": "snapshot_not_persisted"}
+    assert refused["ok"] is False and refused["error"] == "snapshot_not_persisted"
     assert env.task == before and not env.sent
     workers.assign_tasks()
     assert not env.sent and continuation_refusal(env.task) and not env.task.get("_resume_selection")

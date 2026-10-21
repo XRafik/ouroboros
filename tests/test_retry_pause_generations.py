@@ -403,7 +403,7 @@ def test_root_resume_holds_queued_children_for_selection_without_a_projected_lat
         fault.setattr(owner_pause, "read_fence", unreadable)
         refused = queue.resume_budget_paused_task("held")
     rows = {t["id"]: t for t in workers.PENDING}
-    assert refused == {"ok": False, "error": "owner_pause_custody_unreadable"}, refused
+    assert refused["ok"] is False and refused["error"] == "owner_pause_custody_unreadable", refused
     assert rows["held"].get("_budget_pause") and not any(budget_hold_fact(rows[c]) for c in children)
     assert (queue.BUDGET_ROOT_FENCES.get("held") or {}).get("fence_id") == projected
     resumed = queue.resume_budget_paused_task("held")

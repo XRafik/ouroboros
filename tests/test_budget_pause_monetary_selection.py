@@ -210,7 +210,7 @@ def test_stop_and_unpublished_or_unknown_selection_authority_admit_nothing(tmp_p
 
     request_cancel(tmp_path, CHILD, reason="owner_stop", source="test")
     stopped = queue.resume_budget_paused_task(CHILD)
-    assert stopped == {"ok": False, "error": "cancel_intent_active"}, stopped
+    assert stopped["ok"] is False and stopped["error"] == "cancel_intent_active", stopped
     assert _reserve(tmp_path, CHILD) == FENCED
 
     (tmp_path / "state" / "queue_dispatch.json").write_text("{not json", encoding="utf-8")

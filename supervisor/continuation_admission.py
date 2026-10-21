@@ -235,12 +235,23 @@ def conflicting_writers(q: Any, predecessor: str, *, drive_root: Any = None,
                     blockers.append({"kind": "owned_process", "task_id": row.get("owner_task"), "pid": pid})
     except Exception as exc:
         blockers.append({"kind": "process_custody_unreadable", "detail": str(exc)[:200]})
+    blockers.extend(model_handoffs(custody_root, predecessor, member_results=member_results,
+                                   for_continue=for_continue))
+    return blockers
+
+
+def model_handoffs(custody_root, predecessor, *, member_results=None, for_continue=False):
+    """Read the same unresolved model recipients for admission and display. Never repairs."""
+    blockers = []
     try:
         from ouroboros import usage_store
         from ouroboros.local_custody_repair import ended_unbound_model_request
         # The root's open attempts only (the store's open-set index).
         with usage_store.read(custody_root) as txn:
             attempts = txn.open_attempts(root_task_id=predecessor)
+        if attempts and member_results is None:
+            from ouroboros.owner_pause import tree_member_results
+            member_results = tree_member_results(custody_root, predecessor)
         for attempt in attempts:
             if attempt.get("state") in {"dispatched", "unresolved"}:
                 consumer = attempt.get("local_answer_consumer_id")
@@ -262,6 +273,7 @@ def conflicting_writers(q: Any, predecessor: str, *, drive_root: Any = None,
                 if for_continue and review_owned:
                     continue
                 blockers.append({"kind": "model_handoff", "attempt_id": attempt.get("attempt_id"),
+                                 "task_id": attempt.get("task_id"),
                                  "review_owned": review_owned})
     except Exception as exc:
         blockers.append({"kind": "attempt_custody_unreadable", "detail": str(exc)[:200]})

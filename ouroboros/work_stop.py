@@ -30,6 +30,23 @@ STOP_REASONS = {
     "authority": {"cause": "authority", "release": "resume", "ui_code": "budget_paused"},
     "sleep": {"cause": "wait", "release": "none", "ui_code": "sleeping"},
 }
+# Product words shared by the owner's work projection and the mind's roster.
+STOP_TEXT = {
+    "paused_by_owner": "You paused it", "paused_by_mind": "Ouroboros paused it",
+    "paused_unattributed": "", "saved_on_stop": "Saved when the app stopped",
+    "after_restart": "Held after a restart", "after_panic": "Stopped by Panic",
+    "spending_limit": "Spending limit reached", "technical_pause": "After a technical problem",
+    "awaiting_selection": "Waiting for Ouroboros or you to resume it",
+    "restore_failed": "Its saved state could not be restored", "held": "Held",
+    "sleeping": "Sleeping until it is woken",
+    "earlier_work_unconfirmed": "Continue starts when the earlier attempt's work is confirmed finished",
+}
+_CAUSE_CODES = {"pause": "paused_unattributed", "app_stop": "saved_on_stop", "panic": "after_panic",
+                "money": "spending_limit", "authority": "technical_pause",
+                "awaiting_selection": "awaiting_selection", "refusal": "restore_failed"}
+_PAUSE_CAUSES = {"pause": "owner", "app_stop": "restart", "money": "budget", "authority": "authority"}
+
+
 REFUSAL_FACTS = {
     "stale_queue_row_grant_consumed": {"grant_state": "consumed"},
     "stale_resume_grant_superseded": {"grant_state": "superseded"},
@@ -90,7 +107,9 @@ def current_stop(task: dict | None, fences: dict | None = None) -> dict:
     root_id = str(task.get("root_task_id") or task.get("id") or "")
     budget = (fences.get("budget") or {}).get(root_id) or {}
     tree = {}
-    if owner.get("state") in {"requested", "paused"}:
+    if owner.get("awaiting_selection"):
+        member = member or {**reason_policy("root_fence_member_pending_selection"), "scope": "member"}
+    elif owner.get("state") in {"requested", "paused"}:
         tree = {**owner, **reason_policy("owner"), "scope": "tree"}
     elif budget.get("status") in {"active", "paused"}:
         from ouroboros.budget_pause import budget_fence_selected
@@ -105,6 +124,77 @@ def current_stop(task: dict | None, fences: dict | None = None) -> dict:
     if installation:
         return {**installation, **({"member_stop": stop} if stop else {}), "scope": "installation"}
     return stop
+
+
+def _display_task(task: dict) -> dict:
+    """Join the display snapshot's locator with its current durable point."""
+    source = dict(task)
+    pause = source.get("budget_pause") or {}
+    if pause.get("state") in {"pausing", "paused", "resume_granted"}:
+        source["_budget_pause"] = {"reason": "budget", **pause, **(source.get("_budget_pause") or {})}
+    return source
+
+
+def stop_presentation(task: dict, fences: dict | None = None) -> dict:
+    """The same stop, reason, author and release rule for every surface. No storage probes."""
+    from ouroboros.control_actor import pause_author
+
+    task = _display_task(task)
+    stop = task.get("stop") if isinstance(task.get("stop"), dict) else current_stop(task, fences)
+    refusal = task.get("refusal") or continuation_refusal(task)
+    point = pause_marker(task)
+    if not stop and not refusal and point.get("reason") and record_policy(point)["cause"] == "refusal":
+        refusal = {"reason": point["reason"]}
+    cause = stop.get("cause")
+    code = _CAUSE_CODES.get(cause, "held")
+    author = pause_author(stop)
+    if cause == "pause":
+        code = {"owner": "paused_by_owner", "ouroboros": "paused_by_mind"}.get(author["actor"], code)
+    elif cause == "app_stop" and stop.get("door") == "owner_restart":
+        code = "after_restart"
+    wait = record_policy(hold_fact(task)) if not stop else {}
+    sleeping = not stop and record_policy(pause_marker(task) or task.get("budget_pause")).get("cause") == "wait"
+    if not stop:
+        code = ("earlier_work_unconfirmed" if wait.get("wait_for") else "restore_failed" if refusal
+                else "sleeping" if sleeping else "held")
+    # An interrupted, consumed handoff can still need addressed Resume even
+    # though its stop was already released; the census names that existing door.
+    needs_resume = refusal or task.get("can_resume")
+    release = stop.get("release") or ("resume" if needs_resume else "none")
+    if release_refusal(stop, {"actor": "ouroboros"}):
+        release = "owner" if release_refusal(stop, {"actor": "owner"}) is None else "none"
+    entry = {"code": code, "text": STOP_TEXT[code]}
+    since = (author.get("at") or stop.get("held_at") or stop.get("requested_at") or stop.get("paused_at")
+             or (hold_fact(task) or {}).get("held_at"))
+    if since:
+        entry["since"] = since
+    if author.get("actor"):
+        entry["by"] = author
+    return {"stop": stop, "refusal": refusal, "reason": entry,
+            "pause_cause": _PAUSE_CAUSES.get(cause, "sleep" if sleeping else "unknown"),
+            "release": release, "resumable": release in {"resume", "owner"},
+            "waiting": bool(not stop and not needs_resume and (wait.get("wait_for") or sleeping))}
+
+
+def activity_stop_view(row: dict, raw: dict | None = None) -> dict:
+    """Census adapter, including the older phase/cause shape; translations live only here."""
+    raw = raw or {}
+    task = {**row, **raw, "id": row.get("activity_id") or row.get("id")}
+    if "hold" in raw:
+        task["_budget_pause_hold"] = raw["hold"]
+    fences = dict(raw.get("fences") or {})
+    # Older census consumers supply only pause_cause. A declared owner author
+    # describes a tree fence, not an orphaned member marker (R3).
+    if "stop" not in task and not task.get("_budget_pause"):
+        cause = row.get("pause_cause")
+        if cause == "owner":
+            fences.setdefault("owner", {"state": "requested", "by": raw.get("pause_by") or {},
+                                        "requested_at": (raw.get("pause_by") or {}).get("at")})
+        elif cause in {"budget", "authority", "sleep"}:
+            task["_budget_pause"] = {"reason": cause}
+        elif cause == "restart" and not task.get("_budget_pause_hold"):
+            task["_budget_pause_hold"] = {"reason": "owner_restart_hold"}
+    return stop_presentation(task, fences)
 
 
 def release_refusal(stop: dict | None, actor: dict | None) -> dict | None:
@@ -145,7 +235,7 @@ def continuation_refusal(task: dict | None) -> dict:
         if isinstance(point, dict) and isinstance(point.get("refusal"), dict):
             return point["refusal"]
     hold = task.get("_budget_pause_hold")
-    if isinstance(hold, dict) and record_policy(hold)["cause"] == "refusal":
+    if isinstance(hold, dict) and hold and record_policy(hold)["cause"] == "refusal":
         return {**hold, **record_policy(hold)}
     if task.get("_continuation_prepared"):
         return {"reason": "continuation_publication_unconfirmed"}
@@ -257,3 +347,39 @@ def retain_consumed_selection(task: dict, pause_row: dict) -> bool:
         selected_by=str(grant.get("selected_by") or "owner"),
         selected_at=str(grant.get("granted_at") or ""), by=grant.get("by") or {})
     return True
+
+
+def resume_outcome(outcome: dict) -> dict:
+    """Ordinary words beside typed refusals, shared by HTTP and both mind doors."""
+    if outcome.get("ok"):
+        return outcome
+    if outcome.get("runs") and not outcome.get("blockers"):
+        outcome = {**outcome, "blockers": [{"kind": "delegated_run", **run} for run in outcome["runs"]]}
+    error = str(outcome.get("error") or "")
+    phrases = {"panic_requires_owner_resume": "Only the owner can release a Panic hold.",
+               "pause_source_unreadable": STOP_TEXT["restore_failed"],
+               "pause_record_missing": STOP_TEXT["restore_failed"],
+               "root_still_paused": STOP_TEXT["awaiting_selection"],
+               "root_resume_grant_missing": STOP_TEXT["awaiting_selection"]}
+    words = []
+    for block in outcome.get("blockers") or ():
+        kind, tid = block.get("kind"), block.get("task_id", "")
+        if kind == "delegated_run":
+            run = block.get("run_id") or block.get("invocation_id") or ""
+            words.append(f"delegated run {run} is running" if block.get("state") == "running" else
+                         "a delegated start has an unknown outcome (no run was recorded)"
+                         if block.get("stop_outcome") == "pending_invocation_unbound" else
+                         f"delegated run {run}: its stop is requested, not confirmed"
+                         if block.get("state") == "stop_requested" else
+                         f"delegated run {run}: its outcome is unknown")
+            continue
+        words.append({"model_handoff": "a model request has no recorded result",
+                      "tool_handoff": f"a tool call of task {tid} has not returned",
+                      "running_member": f"task {tid} is still running",
+                      "dispatchable_member": f"task {tid} is queued to run",
+                      "owned_process": f"a process of task {tid} is still alive",
+                      "merge_operation": f"a merge of task {tid} is not settled",
+                      "workspace_executor": f"a workspace process of task {tid} is not settled"}.get(
+                          kind, str(kind or "unknown").replace("_", " ")))
+    return {**outcome, "message": "Resume refused: " + (
+        "; ".join(dict.fromkeys(words)) if words else phrases.get(error, error.replace("_", " ")))}

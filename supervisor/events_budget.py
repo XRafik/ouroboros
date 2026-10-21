@@ -645,6 +645,7 @@ def _handle_budget_resume_child(evt: Dict[str, Any], ctx: Any) -> None:
     requester = str(evt.get("requested_by") or "").strip()
     with _queue_lock:
         target = next((row for row in ctx.PENDING if str(row.get("id") or "") == task_id), None)
+        target = target or (getattr(ctx, "RUNNING", {}).get(task_id) or {}).get("task")
         lineage_ok = bool(
             target is not None and requester
             and requester in (str(target.get("parent_task_id") or ""), str(target.get("root_task_id") or ""))
@@ -1352,10 +1353,8 @@ def _root_resume_grants(state: Dict[str, Any]) -> tuple:
             return {'grant_id': str(selection['root_grant_id']),
                     'generation': int(selection['root_resume_generation']), 'pause_id': ''}, durable
 
-    if current and warmed:
-        # A current selection above supersedes historical warm authority. A
-        # direct actor or its acknowledged pooled return can otherwise lend
-        # that warm grant without reconstructing a retired queue carrier.
+    if warmed and (current or warm.get('tree_only')):
+        # A terminal tree's explicit Resume lends only to individually selected children.
         return warmed, durable
     if exact and row.get('state') == STATE_RESUME_GRANTED and not grant.get('consumed_at'):
         return exact, durable

@@ -286,7 +286,7 @@ def recover_confirmed_dead_worker(job: dict) -> None:
     incomplete publication raises ``TerminalFileRecoveryPending`` and the reaper keeps the
     job. Only confirmed absence reaches crash policy: a signal is an infrastructure failure,
     an eligible crash retries within ``QUEUE_MAX_RETRIES`` keeping its cost and wait
-    restrictions, and a budget continuation forbids ordinary retry.
+    restrictions; an unconsumed budget continuation stays on its exact pause.
     """
     from ouroboros.headless import prepare_terminal_task_files, terminal_task_files_ready
     from ouroboros.task_results import load_task_result, _TRULY_TERMINAL_STATUSES
@@ -409,7 +409,7 @@ def _complete_exact_budget_pause_after_death(job: dict, root: pathlib.Path, task
     crash: the grant this dead process can no longer consume is revoked under
     its own identity and the SAME task id is parked back on its exact pause for
     the owner to Resume again. A CONSUMED grant is never reopened — that task
-    ran on, and its death takes terminal crash custody without ordinary retry.
+    ran on, and ordinary crash custody may continue its NEW working source.
     ``budget_pause.death_returns_to_pause`` names this window for the worker,
     which leaves a ``handle_task`` exception inside it to this recovery.
 
@@ -701,6 +701,22 @@ def _recover_crashed_task_without_terminal(job: dict, queue: Any) -> None:
             terminal_task_metadata(task.get("metadata")), worker_id=wid,
         )
         return
+    # Consumption ended the pause's custody. Its current working bytes, saved
+    # before consumption and at subsequent effect boundaries, own recovery (Q2=A).
+    working, spent_pause = {}, {}
+    if budget_pausing:
+        from ouroboros.budget_pause import STATE_RESUMED, budget_pause_row
+        from ouroboros.working_checkpoint import prepare_recovery
+        try:
+            pause = budget_pause_row(pathlib.Path(task.get("budget_drive_root") or root), task_id)
+            if (pause.get("state") == STATE_RESUMED and (pause.get("grant") or {}).get("consumed_at")
+                    and int(pause.get("task_attempt") or 0) == attempt):
+                working = prepare_recovery(pathlib.Path(task.get("budget_drive_root") or root), task_id,
+                                           from_attempt=attempt, cause="worker_crash")
+                if working:
+                    budget_pausing, spent_pause = False, pause
+        except Exception as exc:
+            raise TerminalFileRecoveryPending("consumed Resume working source could not be frozen") from exc
     replay_unsafe = (not getattr(w, "active_capacity", True)
                      or has_owner_wait_checkpoint(meta, attempt) or budget_pausing)
     # Reconstruct cost/rounds from durable llm_usage for any
@@ -827,8 +843,15 @@ def _recover_crashed_task_without_terminal(job: dict, queue: Any) -> None:
         task["_attempt"] = attempt + 1
         # The existing same-ID retry continues the saved work, not the original prompt.
         from ouroboros.working_checkpoint import attach_recovery
-        attach_recovery(pathlib.Path(task.get("budget_drive_root") or root), task,
-                        source_task_id=task_id, from_attempt=attempt, cause="worker_crash", prior_task=prior_task)
+        if working:
+            from ouroboros.work_stop import retain_consumed_selection
+            retain_consumed_selection(task, spent_pause)
+            task.pop("_budget_pause_resume", None)
+            task.pop("_budget_pause", None)
+            task["_working_recovery"] = working
+        else:
+            attach_recovery(pathlib.Path(task.get("budget_drive_root") or root), task,
+                            source_task_id=task_id, from_attempt=attempt, cause="worker_crash", prior_task=prior_task)
         from ouroboros.model_wait import fold_running_clock, stamp_execution_handoff
 
         fold_running_clock(task, meta)  # confirmed waits newer than the checkpoint (#939)

@@ -182,7 +182,8 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
         return {"ok": False, "error": "owner_pause_custody_unreadable"}
     # A pooled member's parked row rides RUNNING; a direct actor's only its durable row.
     warm = warm_paused_member(meta) if direct is None else _warm_paused_direct_turn(result_root, task_id)
-    if not fence_closed(fence) or not warm:
+    tree_selection = bool(fence.get("state") == FENCE_RELEASED and (fence.get("resume_grant") or {}).get("tree_only"))
+    if not (fence_closed(fence) or tree_selection) or not warm:
         return None
     fence_id = str(fence.get("fence_id") or "")
     if owner_restart_in_progress(q.DRIVE_ROOT):
@@ -202,7 +203,7 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
             origin = load_task_result(result_root, root_task_id, strict=True) or {}
         except Exception:
             return {"ok": False, "error": "owner_pause_custody_unreadable"}
-        if selected_by or origin.get("status") not in _TRULY_TERMINAL_STATUSES:
+        if (selected_by and not tree_selection) or origin.get("status") not in _TRULY_TERMINAL_STATUSES:
             return {"ok": False, "error": "root_still_paused", "root_task_id": root_task_id,
                     "action": "resume_root_first"}
     try:

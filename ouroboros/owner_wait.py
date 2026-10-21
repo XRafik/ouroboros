@@ -625,7 +625,7 @@ def consume_warm_resume(ctx: Any) -> bool:
         fence = read_fence(root_drive, root_task_id)
         stamp = {"consumed_at": utc_now_iso(), "consumed_by": task_id,
                  "task_attempt": int(getattr(ctx, "task_attempt", 1) or 1)}
-        if fence_closed(fence):
+        if fence_closed(fence) or ((fence.get("resume_grant") or {}).get("tree_only") and task_id != root_task_id):
             selected = dict(fence.get("selected_members") or {})
             mine = selected.get(task_id)
             if not isinstance(mine, dict):

@@ -70,7 +70,8 @@ def test_resume_rejects_replay_unsafe_pause(tmp_path, monkeypatch, dispatch):
         },
     })
 
-    assert queue.resume_budget_paused_task("unsafe-task") == {
+    refused = queue.resume_budget_paused_task("unsafe-task")
+    assert {key: refused[key] for key in ("ok", "error", "action")} == {
         "ok": False,
         "error": "replay_unsafe" if dispatch == "none" else "dispatch_outcome_unknown",
         "action": "cancel_or_new_run",

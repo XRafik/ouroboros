@@ -430,6 +430,12 @@ def pending_member_replay_safe(q: Any, member: Dict[str, Any]) -> Tuple[bool, st
 
 
 def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[str, Any]:
+    from ouroboros.work_stop import resume_outcome
+
+    return resume_outcome(_resume_budget_paused_task(task_id, selected_by=selected_by))
+
+
+def _resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[str, Any]:
     """Explicitly resume one budget-paused task and, if needed, its root latch.
 
     A replay-safe ZERO-dispatch row is released as before. An EXACT
@@ -465,6 +471,12 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
         warm = resume_warm_owner_pause_root(task_id, selected_by=selected_by)
         if warm is not None:
             return warm
+    if located is None and not selected_by:
+        from supervisor.owner_pause_resume import resume_terminal_tree
+
+        tree = resume_terminal_tree(task_id)
+        if tree is not None:
+            return tree
     if located is None and not selected_by:
         # An answered root's Pause: its deferred late review resumes, or nothing is left.
         from supervisor.budget_resume import resume_late_phase
@@ -511,8 +523,15 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
 
         external = observe_task_runs(result_root, task_id, reason="budget_resume_uncovered_cost",
                                      request_stop=not (owner_paused or pause_reason == "authority"))
+        from supervisor.continuation_admission import action_writers
+        if not owner_paused:
+            blockers = action_writers(q, root_task_id, drive_root=result_root)
+            # External custody retains the exact door's own typed refusal below.
+            local = [b for b in blockers if b.get("task_id") == task_id and b.get("kind") not in {
+                "running_member", "dispatchable_member", "delegated_run", "custody_unreadable"} and not b.get("review_owned")]
+            if local:
+                return {"ok": False, "error": "owner_pause_effects_unsettled", "blockers": local}
         if owner_paused:
-            from supervisor.continuation_admission import action_writers
 
             # A saved loop is not proof that its handed tools/processes ended.
             # Observe the existing whole-tree custody owner off the queue lock.

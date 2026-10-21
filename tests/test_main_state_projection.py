@@ -286,7 +286,7 @@ def test_census_resume_and_stop_follow_owner_facts_and_children_stay_out_of_the_
     assert not any(key in row for row in census.values() for key in ("parent_task_id", "delegation_role"))
     attention = {row["task_id"]: row for row in payload["main_attention"]}
     assert set(attention) == {"held-sleep", "held-child"}
-    assert attention["held-sleep"]["attention_reason"] == "resume"
+    assert attention["held-sleep"]["attention_reason"] == "restart"  # saved sleep is app_stop in the shared table
     # The child's own Resume is real (no root grant exists); Stop addresses roots only.
     assert attention["held-child"]["can_resume"] is True and attention["held-child"]["cancelable"] is False
     assert attention["held-child"]["root_task_id"] == "running-root"

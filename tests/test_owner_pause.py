@@ -214,8 +214,8 @@ def test_the_tree_turns_paused_only_when_no_member_runs_and_sent_work_settled(tm
     from ouroboros.gateway.state import _chat_activities_snapshot_safe
     phase = lambda: next(row["phase"] for row in _chat_activities_snapshot_safe(tmp_path)
                          if row["activity_id"] == "root-1")
-    assert phase() == "budget_pausing"
-    # Nothing runs any more, but the child's sent run still does: not a clean Paused.
+    assert phase() == "budget_paused"
+    # The actor is Paused; its child's unsettled run stays the second-line tail and the fence stays requested.
     assert owner_pause.read_fence(tmp_path, "root-1")["state"] == owner_pause.FENCE_REQUESTED
 
     # With every member parked, only the assignment tick's re-check can notice the
