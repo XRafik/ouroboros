@@ -454,7 +454,7 @@ ouroboros/ — agent core and shared runtime (§6)
     claudexor_accounts.py — thin owned-daemon status/login/account proxies; no auth logic or browser token; only a successful read proves absence (§3 Agent accounts; §4)
     claudexor_passive.py, claudexor_contracts.py — passive quota read and envelope types (docs/PASSIVE_QUOTA_READ.md)
     claudexor_quota.py — Owned-daemon refresh/reset/receipt proxies; catalog negotiation, exact key/body and typed errors, no start/retry/browser token (§3 Agent accounts; §4)
-    harness_maintenance.py — Owner maintenance HTTP surface over the shared host service (§6 Vendor program maintenance; routes: §4)
+    harness_maintenance.py — Owner maintenance HTTP over shared service (§6; routes: §4)
     host_service.py — Loopback-only Host Service API (§12)
     host_notify.py — POST /notify beside the Host Service: a granted skill's sentence becomes one signed `skill_notice` System row in the owner's chat (§12)
     history.py, history_deliveries.py — Shared Chat room/quiz/media/review/terminal projection and cost-breakdown factories; delivery rows' `msg_type`
@@ -696,7 +696,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   │   ├── custody_staging/       ← unserved copies prepared by a drive settlement
 │   │   ├── custody_trash/         ← fully custodied drives awaiting deletion
 │   │   ├── betterleaks/           ← scanner runtime, created only by the explicit installer
-│   │   ├── cx/                    ← managed Claudexor store: immutable `<version>-<sha12>/` trees, install.lock
+│   │   ├── cx/                    ← Claudexor: immutable `<version>-<sha12>/`, retained `node/<version>-<platform>.g-*`, install.lock
 │   │   └── skills/<name>/         ← per-skill state (§13): review.json, owner_attestation.json, enabled.json, deps.json, health.json, extension_calls/, __extension_imports/
 │   ├── claudexor/                 ← Ouroboros-owned Claudexor home (`CLAUDEXOR_CONFIG_DIR`)
 │   ├── memory/

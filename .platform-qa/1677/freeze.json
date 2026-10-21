@@ -1,0 +1,15 @@
+{
+  "base": "3e3a1c79af5aacaf4583b868001a330798ffa3f0",
+  "manifest_sha256": "527aee4b26b780d9a1f097a9a66670db935a50cd457f318c11bc4f904237e02b",
+  "lock_sha256": "bbb0d6705f21aabc00c6aec80374df8dcd540c508344b0ee115440951bd3f177",
+  "probe_sha256": "42eff995dac4fba7ec33c5021e12bfe6845e071e89705180a54adb2e63551228",
+  "engine": "4.5.0",
+  "product_paths": 18,
+  "extra_experiment_files": [
+    ".gitattributes",
+    ".github/workflows/ci.yml",
+    ".platform-qa/1677"
+  ],
+  "native": "NOT_RUN",
+  "never_merge_experiment_branch": true
+}

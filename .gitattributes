@@ -26,3 +26,37 @@ tests/fixtures/llm_wire/** -text -whitespace
 # LF so a Windows checkout reads the same lines and digests as the committed
 # bytes.
 docs/**/*.md text eol=lf
+
+# Experiment only: source-bound Windows proof reads the exact committed bytes.
+docs/CLIENT_CONTRACT.md text eol=lf
+docs/architecture/01-high-level-architecture.md text eol=lf
+docs/architecture/04-server-api-endpoints.md text eol=lf
+docs/architecture/06-agent-core.md text eol=lf
+ouroboros/claudexor_daemon.py text eol=lf
+ouroboros/claudexor_runtime.py text eol=lf
+ouroboros/claudexor_runtime_pin.json text eol=lf
+ouroboros/config.py text eol=lf
+ouroboros/gateway/endpoint_index.py text eol=lf
+ouroboros/gateway/management_contracts.py text eol=lf
+ouroboros/gateways/claudexor.py text eol=lf
+ouroboros/gateways/claudexor_maintenance.py text eol=lf
+ouroboros/harness_maintenance.py text eol=lf
+ouroboros/platform_layer.py text eol=lf
+ouroboros/process_custody.py text eol=lf
+ouroboros/process_scope.py text eol=lf
+ouroboros/safe_test_supervisor.py text eol=lf
+ouroboros/test_environment.py text eol=lf
+ouroboros/tools/control_maintenance.py text eol=lf
+pyproject.toml text eol=lf
+scripts/claudexor_toolchain_smoke.py text eol=lf
+scripts/safe_test.py text eol=lf
+tests/test_claudexor_node_generations.py text eol=lf
+tests/test_claudexor_runtime_delivery.py text eol=lf
+tests/test_claudexor_toolchain_smoke.py text eol=lf
+tests/test_harness_maintenance_browser.py text eol=lf
+tests/test_harness_maintenance_host.py text eol=lf
+uv.lock text eol=lf
+web/modules/harness_maintenance.js text eol=lf
+web/modules/management_contract_types.js text eol=lf
+web/tests/harness_maintenance.test.js text eol=lf
+.platform-qa/1677/* text eol=lf
