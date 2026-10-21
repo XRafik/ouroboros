@@ -195,6 +195,8 @@ def install_bootstrap_harness(monkeypatch, data, *, repo=None, review_mode="requ
 
     def factory(**kwargs):
         actual = make_agent(**kwargs)
+        from tests.presence_legacy_helpers import register_legacy_completion
+        register_legacy_completion(actual.tools)
         h.agents.append(actual)
         return actual
 
