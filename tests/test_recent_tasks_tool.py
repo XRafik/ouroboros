@@ -124,6 +124,7 @@ def test_recent_tasks_reports_running_queue(tmp_path):
     }]
 
 
+
 def test_recent_tasks_row_lists_facts_and_addresses_not_bodies(tmp_path):
     """A listing row is facts, previews and the full read's address: no artifact manifest, contract brief
     or tool-error entries ride in it (20.10: one 20-row page was 1,486,244 chars)."""
@@ -136,7 +137,8 @@ def test_recent_tasks_row_lists_facts_and_addresses_not_bodies(tmp_path):
                        "context": "BRIEF-MARK " * 5_000, "delegation_budget": {"may_delegate": True},
                        "predecessor_authority": {"result": "PREDECESSOR-MARK " * 3_000}},
         outcome_axes={"execution": {"status": "degraded",
-                                    "unresolved_tool_errors": [{"result": "ERROR-MARK " * 50}] * 30}},
+                                    "unresolved_tool_errors": [{"result": "ERROR-MARK " * 50}] * 30},
+                      "objective": {"status": "not_evaluated", "warnings": ["residual_tool_errors_without_review"]}},
     )
 
     text = _handle_recent_tasks(_ctx(tmp_path), limit=1)
@@ -144,15 +146,17 @@ def test_recent_tasks_row_lists_facts_and_addresses_not_bodies(tmp_path):
 
     for marker in ("MANIFEST-", "PREDECESSOR-MARK", "ERROR-MARK"):
         assert marker not in text
-    reader = "get_task_result(task_id='big', include_authority=True)"
-    assert row["artifact_bundle"] == {"status": "ready", "recorded_artifacts": 400, "source_read": reader}
+    assert row["source_read"] == "get_task_result(task_id='big', include_authority=True)"
+    assert row["artifact_bundle"] == {"status": "ready", "recorded_artifacts": 400}
     contract = row["task_contract"]
-    assert contract["task_type"] == "task" and contract["source_read"] == reader
+    assert contract["task_type"] == "task" and "source_read" not in contract
     assert contract["objective"] == {"same_as": "description"}
     assert contract["context"].endswith("(truncated preview from 55000 chars)")
     assert contract["omitted"] == ["delegation_budget", "predecessor_authority"]
     assert row["outcome_axes"]["execution"]["status"] == "degraded"
     assert row["outcome_axes"]["execution"]["unresolved_tool_errors"] == 30
+    assert row["outcome_axes"]["objective"]["warnings"] == ["residual_tool_errors_without_review"], \
+        "a list of names is a fact, not evidence entries"
     assert len(text) < 5_000
 
 
@@ -162,10 +166,9 @@ def test_recent_tasks_small_contract_and_bundle_stay_readable(tmp_path):
 
     row = json.loads(_handle_recent_tasks(_ctx(tmp_path)))["tasks"][0]
 
-    assert row["task_contract"] == {"objective": "Do work",
-                                    "source_read": "get_task_result(task_id='small', include_authority=True)"}
-    assert row["artifact_bundle"]["status"] == "ready_no_changes"
-    assert row["artifact_bundle"]["recorded_artifacts"] == 0 and "errors" not in row["artifact_bundle"]
+    assert row["task_contract"] == {"objective": "Do work"}
+    assert row["source_read"] == "get_task_result(task_id='small', include_authority=True)"
+    assert row["artifact_bundle"] == {"status": "ready_no_changes", "recorded_artifacts": 0}
 
 
 def _cover(ctx, limit, **flags):
@@ -187,13 +190,48 @@ def test_recent_tasks_page_holds_whole_rows_within_its_declared_size(tmp_path, m
 
     seen = [row["task_id"] for page in pages for row in page["tasks"]]
     assert seen == [f"task{idx:02d}" for idx in reversed(range(12))], "every row once, in order"
-    assert len(pages) > 1
+    assert len(pages) > 1 and max(len(page["tasks"]) for page in pages) > 1, "whole rows share a page"
+    assert all("omitted_chars" not in row for page in pages for row in page["tasks"])
     for page in pages:
         assert len(recent_tasks._page_json(page)) <= 6_000
         assert page["returned"] == len(page["tasks"])
         if page["next"]:
             assert page["next"]["offset"] == page["offset"] + page["returned"]
             assert page["page_chars_bound"] == 6_000
+
+
+def test_recent_tasks_page_size_counts_the_keys_it_sends(tmp_path, monkeypatch):
+    """The bound holds for the page as sent: the fit counts its own `page_chars_bound` key."""
+    from ouroboros.tools import recent_tasks
+
+    for idx in range(3):
+        _write_task(tmp_path, f"task{idx}", result="r" * 700, updated_at=f"2026-01-01T00:00:{idx:02d}Z")
+    two = recent_tasks.recent_tasks_page(tmp_path, limit=2)
+    bound = len(recent_tasks._page_json(two)) + 5  # two rows fit only without the key the fit adds
+    monkeypatch.setattr(recent_tasks, "tool_result_limit", lambda name: bound)
+
+    page = recent_tasks.recent_tasks_page(tmp_path, limit=3)
+
+    assert page["returned"] == 1 and page["page_chars_bound"] == bound
+    assert len(recent_tasks._page_json(page)) <= bound
+
+
+def test_recent_tasks_fitted_pages_count_unreadable_slots_once(tmp_path, monkeypatch):
+    from ouroboros.tools import recent_tasks
+
+    for idx in range(8):
+        _write_task(tmp_path, f"task{idx}", result="r" * 700, updated_at=f"2026-01-01T00:00:{idx:02d}Z")
+    unreadable_result(monkeypatch, "task5", root=tmp_path)
+    monkeypatch.setattr(recent_tasks, "tool_result_limit", lambda name: 4_000)
+
+    pages = _cover(_ctx(tmp_path), 20)
+
+    tasks = [row["task_id"] for page in pages for row in page["tasks"]]
+    unreadable = [row["task_id"] for page in pages for row in page["unreadable_tasks"]]
+    assert unreadable == ["task5"] and "task5" not in tasks
+    assert sorted(tasks + unreadable) == sorted(f"task{idx}" for idx in range(8)), "every slot once"
+    for page in pages:
+        assert page["returned"] == len(page["tasks"]) + len(page["unreadable_tasks"])
 
 
 def test_recent_tasks_page_fit_stays_quiet_when_rows_fit_and_for_explicit_bodies(tmp_path, monkeypatch):
@@ -206,8 +244,10 @@ def test_recent_tasks_page_fit_stays_quiet_when_rows_fit_and_for_explicit_bodies
     assert whole["returned"] == 5 and whole["next"] is None and "page_chars_bound" not in whole
 
     monkeypatch.setattr(recent_tasks, "tool_result_limit", lambda name: 1_000)
+    for flags in ({"include_results": True}, {"include_traces": True}):
+        bodies = json.loads(_handle_recent_tasks(_ctx(tmp_path), limit=5, **flags))
+        assert bodies["returned"] == 5 and "page_chars_bound" not in bodies, flags
     bodies = json.loads(_handle_recent_tasks(_ctx(tmp_path), limit=5, include_results=True))
-    assert bodies["returned"] == 5 and "page_chars_bound" not in bodies
     assert all(row["result"] == "r" * 700 for row in bodies["tasks"]), "asked-for bodies arrive whole"
 
 
@@ -222,7 +262,7 @@ def test_recent_tasks_oversized_single_row_becomes_an_address_and_advances(tmp_p
 
     assert page["returned"] == 1 and page["next"]["offset"] == 1
     stub = page["tasks"][0]
-    assert stub["task_id"] == "wide" and stub["omitted_chars"] > 900
+    assert stub["task_id"] == "wide" and stub["omitted_chars"] > 900 and stub["description"] == "task wide"
     assert stub["source_read"] == "get_task_result(task_id='wide', include_authority=True)"
     assert "result_preview" not in stub
     after = json.loads(_handle_recent_tasks(_ctx(tmp_path), **page["next"]))
@@ -237,7 +277,8 @@ def test_recent_tasks_scoped_reader_names_the_binding_scope():
         "get_task_result(task_id='t1', include_authority=True, presence_scope='own_binding')")
 
 
-def test_recent_tasks_running_rows_preview_long_queue_text(tmp_path):
+def test_recent_tasks_keeps_whole_queue_text_it_has_no_reader_for(tmp_path):
+    """Running queue rows have no result record to open, so their text is not previewed away."""
     state = tmp_path / "state"
     state.mkdir()
     (state / "queue_snapshot.json").write_text(json.dumps({
@@ -246,5 +287,4 @@ def test_recent_tasks_running_rows_preview_long_queue_text(tmp_path):
 
     row = json.loads(_handle_recent_tasks(_ctx(tmp_path)))["running"][0]
 
-    assert row["description"].endswith("(truncated preview from 22000 chars)")
-    assert len(row["description"]) < 300
+    assert row["description"] == "QUEUE-TEXT " * 2_000

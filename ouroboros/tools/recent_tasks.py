@@ -24,7 +24,6 @@ from ouroboros.dialogue_provenance import (
 
 _MAX_TASKS = 20
 _PREVIEW_CHARS = 800
-_RUNNING_PREVIEW_CHARS = 200
 _ORIGIN_KEYS = ("provider", "conversation_id", "thread_id", "conversation_key", "source_event_id")
 # A listing row names its task's contract; the whole contract is one get_task_result read away.
 _CONTRACT_FACTS = ("task_type", "status", "source", "deadline_at")
@@ -67,12 +66,12 @@ def _page_json(page: Dict[str, Any]) -> str:
 
 
 def _counted_axes(axes: Dict[str, Any]) -> Dict[str, Any]:
-    """The outcome axes with each evidence list as its length; statuses stay whole, the lists stay in the record."""
-    return {name: ({key: len(value) if isinstance(value, list) else value for key, value in axis.items()}
-                   if isinstance(axis, dict) else axis) for name, axis in axes.items()}
+    """The outcome axes with each evidence list (of records) as its length; statuses and named lists stay whole."""
+    return {name: ({key: len(value) if isinstance(value, list) and any(isinstance(v, dict) for v in value) else value
+                    for key, value in axis.items()} if isinstance(axis, dict) else axis) for name, axis in axes.items()}
 
 
-def _contract_facts(contract: Dict[str, Any], *, description: str, source_read: str) -> Dict[str, Any]:
+def _contract_facts(contract: Dict[str, Any], *, description: str) -> Dict[str, Any]:
     """A contract's short facts and text previews, the names of what the row leaves to the full read."""
     facts: Dict[str, Any] = {key: contract[key] for key in _CONTRACT_FACTS if contract.get(key) not in (None, "")}
     for key in _CONTRACT_TEXTS:
@@ -81,7 +80,14 @@ def _contract_facts(contract: Dict[str, Any], *, description: str, source_read: 
             facts[key] = {"same_as": "description"} if key == "objective" and value == description else _preview(value)
     omitted = sorted(key for key, value in contract.items()
                      if key not in facts and key != "schema_version" and value not in (None, "", [], {}))
-    return {**facts, **({"omitted": omitted} if omitted else {}), "source_read": source_read}
+    return {**facts, **({"omitted": omitted} if omitted else {})}
+
+
+def _row_stub(row: Dict[str, Any], chars: int) -> Dict[str, Any]:
+    """A row that alone exceeds the page: its identity, origin, size and reader."""
+    keep = ("task_id", "status", "presence_origin", "source_read")
+    return {**{key: row[key] for key in keep if key in row},
+            "description": _preview(row.get("description")), "omitted_chars": chars}
 
 
 def _task_record(
@@ -115,14 +121,16 @@ def _task_record(
     _cost = cost_projection(data)
     task_name = str(data.get("task_id") or task_id)
     description = str(data.get("description") or "")
-    # A listing row carries facts and bounded previews; the whole record is the single-task read.
-    source_read = _source_read(task_name, binding)
+    axes = normalize_outcome_axes(data)
+    # A listing row carries facts and bounded previews beside the single-task read that holds the
+    # whole record; a withheld row has no reader this binding may open, so it keeps its bodies.
+    compact = not withheld
     record: Dict[str, Any] = {
         "task_id": task_name,
         "ts": str(data.get("ts") or ""),
         "status": str(data.get("status") or ""),
-        "outcome_axes": _counted_axes(normalize_outcome_axes(data)),
-        "description": _preview(description),
+        "outcome_axes": _counted_axes(axes) if compact else axes,
+        "description": _preview(description) if compact else description,
         # SSOT cost projection (C2/ABI-3): honest null (never a fabricated $0),
         # the honest name only, finality unfabricated.
         "accounted_upper_bound_usd": _cost["accounted_upper_bound_usd"],
@@ -132,14 +140,16 @@ def _task_record(
     }
     if isinstance(data.get("execution_observation"), dict):
         record["execution_observation"] = dict(data["execution_observation"])
+    if compact:
+        record["source_read"] = _source_read(task_name, binding)
     if isinstance(data.get("task_contract"), dict):
-        record["task_contract"] = _contract_facts(data["task_contract"], description=description,
-                                                  source_read=source_read)
+        record["task_contract"] = (_contract_facts(data["task_contract"], description=description)
+                                   if compact else data["task_contract"])
     if isinstance(data.get("artifact_bundle"), dict):
         bundle = data["artifact_bundle"]
         rows = [bundle.get(key) if isinstance(bundle.get(key), list) else [] for key in ("artifacts", "errors")]
-        record["artifact_bundle"] = {"status": bundle.get("status"), "recorded_artifacts": len(rows[0]),
-                                     **({"errors": len(rows[1])} if rows[1] else {}), "source_read": source_read}
+        record["artifact_bundle"] = ({"status": bundle.get("status"), "recorded_artifacts": len(rows[0]),
+                                      **({"errors": len(rows[1])} if rows[1] else {})} if compact else bundle)
     if isinstance(data.get("focus"), dict):
         from ouroboros.focus import compact_focus
         focus = compact_focus(data.get("focus"))
@@ -229,8 +239,8 @@ def _running_tasks(drive_root: pathlib.Path, binding: str | None = None) -> List
         rows.append({
             "task_id": task_id,
             "status": "running",
-            "description": _preview(item.get("text") or item.get("description")
-                                    or task.get("description") or task.get("text") or "", _RUNNING_PREVIEW_CHARS),
+            "description": str(item.get("text") or item.get("description")
+                               or task.get("description") or task.get("text") or ""),
             "ts": str(item.get("ts") or snapshot.get("ts") or ""),
         })
     return rows
@@ -342,8 +352,6 @@ def _handle_recent_tasks(
         restricted=_restricted_actor(ctx), binding=binding,
         exclude=str(getattr(ctx, "task_id", "") or "") if binding is not None else "",
     )
-    if binding is not None:
-        page["presence_scope"] = {"scope": PRESENCE_OWN_WORK_SCOPE, "binding_id": binding}
     text = _page_json(page)
     if page.get("error"):
         # Snapshot refusal returns no page. Per-row unreadable_tasks/read_gap
@@ -400,7 +408,7 @@ def recent_tasks_page(
             if item.get("queue_task_id"):
                 entries.append(("task", {
                     "task_id": str(item["queue_task_id"]), "status": str(item.get("status") or ""),
-                    "description": _preview(item.get("description")), "source": "queue_snapshot",
+                    "description": str(item.get("description") or ""), "source": "queue_snapshot",
                 }))
                 continue
             record, error = _task_record(
@@ -447,25 +455,25 @@ def recent_tasks_page(
                 **({"presence_scope": PRESENCE_OWN_WORK_SCOPE} if binding is not None else {}),
             } if remaining else None),
             **({"read_gap": dict(read_gap)} if read_gap else {}),
+            **({"presence_scope": {"scope": PRESENCE_OWN_WORK_SCOPE, "binding_id": binding}}
+               if binding is not None else {}),
         }
 
     base = assemble(entries)
-    if stable and not include_results and not include_traces:
-        # The declared producer page (tool_capabilities.TOOL_RESULT_LIMITS) holds whole rows; the
-        # rest is the next page. Explicit result/trace bodies are the caller's chosen size.
-        bound = tool_result_limit("recent_tasks")
+    bound = tool_result_limit("recent_tasks")
+    if stable and not include_results and not include_traces and len(_page_json(base)) > bound:
+        # The declared producer page (tool_capabilities.TOOL_RESULT_LIMITS) holds whole rows, measured
+        # as sent; the rest is the next page. Explicit result/trace bodies are the caller's chosen size.
+        def over(page: Dict[str, Any]) -> bool:
+            return len(_page_json({**page, "page_chars_bound": bound})) > bound
+
         fitted = entries
-        while len(fitted) > 1 and len(_page_json(base)) > bound:
+        while len(fitted) > 1 and over(base):
             fitted = fitted[:-1]
             base = assemble(fitted)
-        if fitted and fitted[0][0] == "task" and len(_page_json(base)) > bound:
-            row = fitted[0][1]
-            fitted = [("task", {"task_id": row.get("task_id"), "status": row.get("status"),
-                                "omitted_chars": len(_page_json(row)),
-                                "source_read": _source_read(str(row.get("task_id") or ""), binding)})]
-            base = assemble(fitted)
-        if fitted is not entries:
-            base["page_chars_bound"] = bound
+        if fitted and fitted[0][0] == "task" and over(base):
+            base = assemble([("task", _row_stub(fitted[0][1], len(_page_json(fitted[0][1]))))])
+        base["page_chars_bound"] = bound
     if not stable:
         return {
             **base,
