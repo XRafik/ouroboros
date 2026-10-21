@@ -820,7 +820,9 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # displacing into node/.old-*; metadata reads use _node_roots instead of spelling
 # node/*-*/managed-node.json. Retained generations and legacy roots share section 4's cx row.
 # 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
-EXPECTED_SCAN_PATHS = 408
+# 408 -> 409: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
+# the switch helper (body adoption row).
+EXPECTED_SCAN_PATHS = 409
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
