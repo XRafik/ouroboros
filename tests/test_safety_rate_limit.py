@@ -26,6 +26,12 @@ def _ensure_remote_key(monkeypatch):
     branch; lane-specific tests override with their own env calls."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-for-routing")
     monkeypatch.delenv("USE_LOCAL_LIGHT", raising=False)
+    # Lane S owns this call site. Exercise its requested deadline-scope seam
+    # until integration replaces safety.py's high-level model_call_slot wrapper.
+    from ouroboros import model_concurrency
+    physical_slot = model_concurrency.model_call_slot
+    monkeypatch.setattr(model_concurrency, "model_call_slot", lambda *args, **kwargs: (
+        physical_slot if "route" in kwargs else model_concurrency.model_call_scope)(*args, **kwargs))
     yield
 
 
@@ -418,9 +424,9 @@ def test_short_conversation_keeps_every_message_and_no_marker():
     assert "omitted" not in rendered
 
 
-def test_rate_limit_retry_takes_one_slot_per_attempt(monkeypatch, tmp_path):
-    """model_concurrency caps CONCURRENT calls, so the retry must take a FRESH slot
-    and the backoff must sleep BETWEEN slot contexts — never inside a held one."""
+def test_rate_limit_retry_scopes_each_attempt_before_backoff(monkeypatch, tmp_path):
+    """Each high-level retry carries its own deadline scope; backoff is outside.
+    Physical capacity and retained sender lifetime are tested at the send seam."""
     import contextlib
 
     import ouroboros.safety as safety
@@ -430,7 +436,7 @@ def test_rate_limit_retry_takes_one_slot_per_attempt(monkeypatch, tmp_path):
     state = {"acquired": 0, "depth": 0, "slept_at_depth": []}
 
     @contextlib.contextmanager
-    def _counting_slot(model, use_local=False, deadline_ts=None):
+    def _counting_scope(model, use_local=False, deadline_ts=None):
         state["acquired"] += 1
         state["depth"] += 1
         try:
@@ -438,7 +444,7 @@ def test_rate_limit_retry_takes_one_slot_per_attempt(monkeypatch, tmp_path):
         finally:
             state["depth"] -= 1
 
-    monkeypatch.setattr(model_concurrency, "model_call_slot", _counting_slot)
+    monkeypatch.setattr(model_concurrency, "model_call_scope", _counting_scope)
     monkeypatch.setattr(
         safety, "_safety_rate_limit_backoff",
         lambda ctx: state["slept_at_depth"].append(state["depth"]),
@@ -451,9 +457,9 @@ def test_rate_limit_retry_takes_one_slot_per_attempt(monkeypatch, tmp_path):
     ok, _ = check_safety("create_github_issue", {"title": "x"}, ctx=ctx)
 
     assert ok is False, "double rate limit ends in the typed blocked outcome"
-    assert state["acquired"] == 2, "one slot per attempt, not one slot around both"
-    assert state["slept_at_depth"] == [0], "the backoff must not run inside a held slot"
-    assert state["depth"] == 0, "every acquired slot is released"
+    assert state["acquired"] == 2, "one deadline scope per attempt"
+    assert state["slept_at_depth"] == [0], "backoff is outside the attempt scope"
+    assert state["depth"] == 0, "every attempt scope exits"
 
 
 def test_rate_limit_backoff_is_capped_by_the_task_deadline(monkeypatch):
