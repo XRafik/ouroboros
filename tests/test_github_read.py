@@ -197,6 +197,28 @@ def test_get_with_a_cursor_pages_exactly_one_facet(gh):
     assert gh.read(method="get", kind="pr", target=7, include=["weird"]).startswith("⚠️ TOOL_ARG_ERROR: unknown include facet(s) weird")
 
 
+@pytest.mark.parametrize("detail", ["concise", "full"])
+@pytest.mark.parametrize("nested", ["comments", "replies"])
+def test_nested_cuts_are_disclosed_in_both_detail_modes(gh, detail, nested):
+    def answer(p, argv, kw):
+        if p.route != "graphql":
+            return json.dumps(_pr(7))
+        node = {"id": "PRRT_1" if nested == "comments" else "DC_1",
+                nested: {"totalCount": 51, "nodes": [{"id": f"C_{i}", "body": "x"} for i in range(50)]}}
+        connection = {"totalCount": 1, "pageInfo": {"hasNextPage": False}, "nodes": [node]}
+        repository = {"pullRequest": {"reviewThreads": connection}} if nested == "comments" else {"discussion": {"comments": connection}}
+        return json.dumps({"data": {"repository": repository}})
+    gh.answer = answer
+    args = {"method": "get", "kind": "pr", "include": ["threads"]} if nested == "comments" else {"method": "list", "kind": "discussion"}
+    _line, payload = _payload(gh.read(**args, target=7, detail=detail))
+    notice = " ".join(payload["omitted"])
+    assert f"1 {nested} beyond the 50 fetched" in notice
+    assert ("review_comment" in notice and "target=7" in notice) if nested == "comments" else ("DC_1" in notice and "replies(first:100" in notice)
+    if detail == "full":
+        page = payload["facets"]["threads"] if nested == "comments" else payload
+        assert len(page["items"][0][nested]["nodes"]) == 50
+
+
 @pytest.mark.parametrize("kind,target,route,label", [
     ("comment", 44, "repos/{owner}/{repo}/issues/comments/44", "comment 44"),
     ("review_comment", 45, "repos/{owner}/{repo}/pulls/comments/45", "review_comment 45"),
@@ -361,7 +383,7 @@ def test_list_discussions_and_their_comments_with_replies_are_graphql_pages(gh):
     assert payload["total_count"] == 9 and payload["items"][0]["category"] == "General" and payload["items"][0]["body_preview"] == "hello"
     line, payload = _payload(gh.read(method="list", kind="discussion", target=1))
     assert line.startswith("github_read list discussion #1 comments (with replies)") and payload["items"][0]["replies"][0]["id"] == "DC_2"
-    assert any("50 replies beyond the first 50" in note for note in payload["omitted"])
+    assert any("50 replies beyond the 1 fetched" in note for note in payload["omitted"])
 
 
 # ---- search ------------------------------------------------------------------------------------------

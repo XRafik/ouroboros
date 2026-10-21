@@ -157,7 +157,23 @@ class _Read:
         return {f: item[f] for f in self.fields if f in item}
 
     def rows(self, raw: list, shape) -> list:
+        for row in raw:
+            if isinstance(row, dict):
+                self.nested_cuts(row)
         return [self.project(dict(r) if self.detail == "full" else shape(r)) for r in raw if isinstance(r, dict)]
+
+    def nested_cuts(self, row: dict) -> None:
+        """Nested pagination belongs to source completeness, independently of the display projection."""
+        for key in ("comments", "replies"):
+            connection = row.get(key)
+            if not isinstance(connection, dict) or "nodes" not in connection:
+                continue
+            total, fetched = connection.get("totalCount"), len(connection.get("nodes") or [])
+            if isinstance(total, int) and total > fetched:
+                recovery = (f"github_read(method='list', kind='review_comment', target={self.number()})" if key == "comments" else
+                            f"github_read(method='api', graphql=...) on DiscussionComment node {row.get('id')!r}, paging replies(first:100, after:...) with pageInfo")
+                self.omitted.append(f"node {row.get('id')}: {total - fetched} {key} beyond the {fetched} fetched not shown; "
+                                    f"{recovery} reads the rest")
 
     def deliver(self, line: str, payload: dict) -> str:
         payload = {"method": self.method, "kind": self.kind or None, "repo": self.repo or "selected Project", **payload}
@@ -350,9 +366,6 @@ def _discussion_comment_shape(read: _Read, c: dict) -> dict:
     item["replies"] = [{"id": r.get("id"), "database_id": r.get("databaseId"), "author": _login(r, "author"),
                         "created_at": r.get("createdAt"), "url": r.get("url"), "body": r.get("body")}
                        for r in replies.get("nodes") or []]
-    if isinstance(replies.get("totalCount"), int) and replies["totalCount"] > len(item["replies"]):
-        read.omitted.append(f"comment {c.get('id')}: {replies['totalCount'] - len(item['replies'])} replies beyond the first "
-                            f"{_REPLIES} not shown; read them with api(graphql=...) on that comment node")
     return item
 
 
@@ -364,9 +377,6 @@ def _thread_shape(read: _Read, t: dict) -> dict:
             "comments": [{"id": c.get("databaseId"), "node_id": c.get("id"), "author": _login(c, "author"),
                           "created_at": c.get("createdAt"), "url": c.get("url"), "body": c.get("body")}
                          for c in comments.get("nodes") or []]}
-    if isinstance(comments.get("totalCount"), int) and comments["totalCount"] > len(item["comments"]):
-        read.omitted.append(f"thread {t.get('id')}: {comments['totalCount'] - len(item['comments'])} comments beyond the first "
-                            f"{_REPLIES} not shown; list(kind=review_comment, target=<pr>) reads them all")
     return item
 
 
