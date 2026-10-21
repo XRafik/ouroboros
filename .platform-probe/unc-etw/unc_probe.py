@@ -163,28 +163,22 @@ def window(args, phase, target, operation, test_port=0):
 
 
 @contextlib.contextmanager
-def anonymous():
-    """No account lookup, logon, password, registry setting, or stored credential."""
-    from ctypes import wintypes as W
-    kernel = C.WinDLL("kernel32", use_last_error=True)
-    advapi = C.WinDLL("advapi32", use_last_error=True)
-    kernel.GetCurrentThread.restype = W.HANDLE
-    advapi.ImpersonateAnonymousToken.argtypes = [W.HANDLE]
-    advapi.ImpersonateAnonymousToken.restype = W.BOOL
-    advapi.RevertToSelf.argtypes = []
-    advapi.RevertToSelf.restype = W.BOOL
-    if not advapi.ImpersonateAnonymousToken(kernel.GetCurrentThread()):
-        raise C.WinError(C.get_last_error())
-    try:
-        yield
-    finally:
-        if not advapi.RevertToSelf():
-            os._exit(123)  # do not proceed in an unknown security context
+def runner_identity():
+    """Fresh hosted-runner identity against its own loopback SMB only.
+
+    Anonymous UNC returned Win64 without an observable TCP attempt in r3. This
+    separate experiment uses the runner's normal identity for BOTH paths; any OS
+    authentication stays on this disposable machine. No owner identity or supplied
+    credential is used, and no authentication payload is recorded.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("RUNNER_OS") != "Windows":
+        raise Incomplete("default-token control requires the disposable hosted Windows job")
+    yield
 
 
 def unsafe_at(api, held):
     # Deliberate control mutation: omit OBJ_DONT_REPARSE. Original api.at/read
-    # are untouched. The trusted local root handle was opened before impersonation.
+    # are untouched. The trusted local root handle belongs to this runner fixture.
     text = C.create_unicode_buffer("unc\\bytes.bin")
     length = len(text.value.encode("utf-16-le"))
     name = api.Unicode(length, length + 2, C.cast(text, C.c_void_p))
@@ -211,8 +205,8 @@ def child(args):
             if (address.version != 4 or not address.is_loopback or
                     not re.fullmatch(r"probe1297-[0-9a-f]{32}", args.share)):
                 raise Incomplete("invalid internal target")
-            with anonymous():
-                emit("operation_begin", kind="direct", anonymous=True)
+            with runner_identity():
+                emit("operation_begin", kind="direct", identity="ephemeral_windows_runner")
                 try:
                     with api.owned(api.create(f"\\\\{address}\\{args.share}\\bytes.bin",
                                               0x80000000, 7, None, 3, 0, None)):
@@ -224,14 +218,14 @@ def child(args):
                 if args.child == "safe":
                     if api.read(held, "local.bin") != module.GOOD:
                         raise AssertionError("candidate local positive failed")
-                    with anonymous():
-                        emit("operation_begin", kind="safe", anonymous=True)
+                    with runner_identity():
+                        emit("operation_begin", kind="safe", identity="ephemeral_windows_runner")
                         detail = {"ntstatus": module.denied(
                             lambda: api.read(held, "unc/bytes.bin"), {module.RPE}),
                             "attributes": "0x1040", "local_positive": True}
                 else:
-                    with anonymous():
-                        emit("operation_begin", kind="unsafe", anonymous=True)
+                    with runner_identity():
+                        emit("operation_begin", kind="unsafe", identity="ephemeral_windows_runner")
                         detail = unsafe_at(api, held)
         if api.live:
             raise AssertionError("native handle leak")
@@ -277,7 +271,7 @@ def run(args):
     # r1/r2 recorded reconnect events while Winsock still returned WSAEWOULDBLOCK;
     # that is an incomplete connection, not a refused or successful connection.
     # Every target port must nevertheless produce its own attempt event. Real
-    # anonymous UNC and same-symlink unsafe controls remain separately required.
+    # filesystem-to-UNC and same-symlink unsafe controls remain separately required.
     tcp_target = fresh_target(used)
     with bound_socket(tcp_target, False) as guard:
         port = guard.getsockname()[1]
@@ -344,7 +338,7 @@ def run(args):
         obs, _ = window(args, phase, target,
                         lambda: operation(args, "direct", target=target, share=share))
         if not count(obs, {445}, attempts=True):
-            raise Incomplete(f"{phase}: real anonymous filesystem-to-UNC did not calibrate port 445")
+            raise Incomplete(f"{phase}: real runner-identity filesystem-to-UNC did not calibrate port 445")
     if api.live:
         raise Incomplete("fixture native handles leaked")
 

@@ -1,10 +1,10 @@
 # #1297: bounded UNC observer experiment
 
-**Native status: INCOMPLETE.** Two preserved Windows2022 ETW runs compiled and
-recorded scoped reconnect events with no reported loss, but stopped at a Winsock
-control that returned 10035 rather than the assumed 10061. Neither reached UNC.
-The revised attempt-based calibration below is unrun. No thirteenth-case PASS
-is claimed; the existing twelve-case result remains separate.
+**Native status: INCOMPLETE.** Three preserved Windows2022 ETW runs compiled.
+The third calibrated plain TCP attempts to 445/139 with zero reported loss, but
+anonymous CreateFileW returned Win64 without observable target TCP events. It did
+not reach the safe/unsafe pair. This new separate hosted-runner-token experiment
+is unrun; no thirteenth-case PASS is claimed. The twelve-case proof stays separate.
 
 The observer uses an owned ETW system-logger session and the documented TcpIp
 metadata provider. It never binds 445/139, stops services, changes firewall or
@@ -23,12 +23,13 @@ The safe call remains `api.read(held, "unc/bytes.bin")`, with the original
 component grammar, RootDirectory handling, access/options, and `0x1040` attributes.
 The separate unsafe control intentionally opens `unc\bytes.bin` relative to a
 held root with `0x40`, allowing reparsing. It is never a candidate fallback.
-Both paths run in the same anonymous thread context after acquiring their
-trusted local root handles. The local positive read runs before impersonation.
-This avoids credential use even if the safe path leaks. Anonymous access denial
-cannot stand in for the required RPE status, and the anonymous unsafe path must
-still make observable contact. This token context is an explicit difference
-from the earlier runner-identity experiment; its original cases are untouched.
+Both paths now use the same default identity of a fresh disposable GitHub-hosted
+Windows runner, against that machine's numeric loopback addresses only. No owner
+profile, supplied credential, remote host or authentication-payload capture is
+involved. Windows may use its ephemeral local identity against its own SMB server;
+this does NOT claim absence of OS authentication. The prior anonymous experiment
+remains INCOMPLETE and preserved, not reclassified. Permission denial cannot
+stand in for RPE, and the unsafe path must still produce target TCP events.
 
 Run once on a **fresh** runner; do not reuse the runner with `srvnet` STOP_PENDING.
 After the parent places these files at `.platform-probe/unc-etw/`, add this step
@@ -72,15 +73,16 @@ The sequence is:
    or heartbeat event alone cannot satisfy any of these attempt checks. This
    changes our calibration assumption after the two native counterexamples;
    it changes neither the confined reader nor either real UNC control below.
-2. On another fresh address/share, attempt a real `CreateFileW` UNC open under
-   `ImpersonateAnonymousToken`. Require a port-445 attempt event; the file need
-   not open. Anonymous rejection before networking is INCOMPLETE.
+2. On another fresh loopback address/share, attempt a real `CreateFileW` UNC
+   open under the ephemeral runner identity. Require a port-445 attempt event;
+   the file need not open. Rejection or local fast paths before observable TCP
+   are INCOMPLETE.
 3. Create a verified directory symlink to a third, unused address/share. In a
-   fresh observer window, prove a local read works, switch to anonymous context,
+   fresh observer window, prove a local read works under the same runner context,
    then require the original safe path's `STATUS_REPARSE_POINT_ENCOUNTERED` and
    zero scoped 445/139 events.
 4. In a separate window, traverse **that same symlink** with the deliberately
-   unsafe native call, anonymously. Require a port-445 attempt event. This
+   unsafe native call under the identical runner identity. Require a port-445 attempt event. This
    independently tests the mutation and the actual filesystem-to-UNC route.
 5. Repeat the direct UNC calibration on another fresh address/share.
 
@@ -90,8 +92,8 @@ not lost to a child-PID filter. The safe target is never touched by SMB controls
 before the safe window. Fresh numeric addresses avoid DNS and reduce server/session
 and failure-cache reuse; unique share names alone would not achieve that. Any
 alias canonicalization, local fast path, or caching that makes an unsafe control
-invisible blocks PASS. No caches are flushed. No owner credentials are used;
-anonymous control failure has no authenticated retry.
+invisible blocks PASS. No caches are flushed. No owner credentials are used.
+This is one explicitly separate token-context experiment, not a hidden retry.
 
 Exit codes are 0 PASS, 1 FAIL, 2 NOT_RUN, 3 INCOMPLETE. A safe native refusal alone
 cannot pass. Unknown versions/layouts, unattributable TcpIp Fail events, ETW loss,
@@ -108,14 +110,14 @@ metadata in transient ETW buffers is unacceptable, this backend is unsuitable.
 
 A native PASS would mean: the original safe operation returned the required
 native refusal and produced no target TCP metadata during this bounded window,
-while this runner demonstrated observer liveness, refused-attempt visibility,
+while this runner demonstrated observer liveness, attempted-connection visibility,
 and direct/unsafe UNC contact without reported ETW loss. It would **not** prove
 packet-for-packet SYN capture, every network protocol, IPv6, external hosts, a
 successful remote read, arbitrary delayed work after the window, or universal
 confinement. Keep this narrower evidence distinct from the old SYN-plus-accept
 oracle; do not silently replace that oracle or label the original case passed.
 
-If the refused control is invisible, the precise blocker is that documented
+If a required connection-attempt control is invisible, the precise blocker is that documented
 classic TcpIp metadata has not provided an attributable initial failed attempt
 on this runner. Next investigate the runner's TCPIP provider manifest for a
 documented, target-filterable connect-attempt event, or an already-enabled WFP
@@ -142,7 +144,7 @@ Sources checked on 2026-10-21:
   and [ProcessTrace](https://learn.microsoft.com/en-us/windows/win32/api/evntrace/nf-evntrace-processtrace):
   stop/flush and consumer draining. Both must complete before assessing absence.
 - [ImpersonateAnonymousToken](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-impersonateanonymoustoken):
-  anonymous network access without account credentials.
+  used by the earlier preserved anonymous experiment, not this runner-token variant.
 - [NtCreateFile](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile):
   RootDirectory-relative names used by the deliberate unsafe control.
 - [Pktmon start](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/pktmon-start),
@@ -150,7 +152,8 @@ Sources checked on 2026-10-21:
   [WFP engine options](https://learn.microsoft.com/en-us/windows/win32/api/fwpmu/nf-fwpmu-fwpmenginesetoption0):
   alternatives and their limits; no claim that they were exercised here.
 
-Portable validation is in `checks/portable.json`. It exercises scope/byte-order
+Original-prototype portable validation is in `checks/portable.json`; it is not
+new validation of the parent's later control changes. It exercises scope/byte-order
 decoding (including SYSTEM), lost/unknown evidence, control isolation, and the
 non-Windows NOT_RUN path. It does not compile Windows SDK code or prove native
 behavior. No independent review or acceptance has been performed by this worker.
