@@ -17,6 +17,7 @@ import threading
 import re
 import shlex
 import time
+from collections import OrderedDict
 from typing import Tuple, Dict, Any, List, Optional
 
 from ouroboros.config import get_safety_model, get_runtime_mode, get_safety_call_timeout_sec, get_safety_max_tokens, get_safety_mode
@@ -152,10 +153,8 @@ TOOL_POLICY: Dict[str, str] = {
     "send_video": POLICY_SKIP,
     "send_file": POLICY_SKIP,
     "send_links": POLICY_SKIP,
-    "presence_finish": POLICY_SKIP,
     "presence_cancel_work": POLICY_SKIP,
     "configure_presence": POLICY_CHECK,
-    "initiate_presence": POLICY_SKIP,
     "escalate": POLICY_SKIP,
     "forward_to_worker": POLICY_CHECK,
     "compact_context": POLICY_SKIP,
@@ -424,55 +423,9 @@ def _redact_secrets_in_text(text: str) -> str:
     return redacted
 
 
-# Character budget for the CONVERSATION section of the safety prompt. It was
-# unbounded: every retained round of a long task rode into every light-model safety
-# call, so the prompt grew with the task until the provider rate-limited the safety
-# lane. The tool proposal is the SUBJECT of the check and stays outside this budget.
-_SAFETY_CONTEXT_CHAR_BUDGET = 4000
-_SAFETY_OMISSION_MARKER = "[… {n} older messages omitted]"
-
-# Character budget for the serialized SUBJECT (the proposed call's own arguments).
-# The subject is embedded VERBATIM — truncating it would hide the tail from the
-# reviewer, so an over-budget subject is REFUSED fail-closed instead: one oversized
-# run_script/run_command payload otherwise inflates this prompt past provider
-# limits, and the conversation budget above cannot help because the subject rides
-# outside it. The refusal is a typed policy denial with a working alternative
-# (split the payload into reviewable calls), never a truncated half-reviewed call.
+# The complete proposed call is reviewed verbatim after redaction. An oversize
+# subject is refused with a reshape/split alternative, never truncated.
 _SAFETY_SUBJECT_CHAR_BUDGET = 250_000
-
-
-def _format_messages_for_safety(messages: List[Dict[str, Any]]) -> str:
-    'Format compact safety context, redacting before truncation.'
-    rendered: List[str] = []
-    for m in messages:
-        role = m.get("role", "?")
-        content = m.get("content", "")
-        if not content or role == "tool":
-            continue
-        if isinstance(content, list):
-            content = " ".join(
-                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-            )
-        text = _redact_secrets_in_text(str(content))
-        if len(text) > 500:
-            omitted = len(text) - 500
-            text = text[:500] + f" [...{omitted} chars omitted]"
-        rendered.append(f"[{role}] {text}")
-    kept: List[str] = []
-    used = 0
-    for idx in range(len(rendered) - 1, -1, -1):
-        # Worst case if this is the last line taken: exactly ``idx`` older ones dropped.
-        reserve = (len(_SAFETY_OMISSION_MARKER.format(n=idx)) + 1) if idx else 0
-        cost = len(rendered[idx]) + (1 if kept else 0)
-        if kept and used + cost + reserve > _SAFETY_CONTEXT_CHAR_BUDGET:
-            break
-        used += cost
-        kept.append(rendered[idx])
-    kept.reverse()
-    dropped = len(rendered) - len(kept)
-    if dropped:
-        kept.insert(0, _SAFETY_OMISSION_MARKER.format(n=dropped))
-    return "\n".join(kept)
 
 
 def _render_subject_json(arguments: Dict[str, Any]) -> str:
@@ -488,11 +441,16 @@ def _render_subject_json(arguments: Dict[str, Any]) -> str:
     return rendered.encode("utf-8", "replace").decode("utf-8")
 
 
-# The complete mandatory bundle and per-work history are byte-budgeted; no tail is hidden.
+# Mandatory evidence and decisive history must fit; omitted SAFE rows are counted.
 _SAFETY_BUNDLE_BYTE_BUDGET = 512_000
 _SAFETY_PRIOR_BYTE_BUDGET = 64_000
-_PRIOR_VERDICTS: dict[str, dict[str, dict]] = {}
+_PRIOR_VERDICTS: OrderedDict[str, dict[str, dict]] = OrderedDict()
 _PRIOR_LOCK = threading.RLock()
+
+
+class _VerdictHistory(dict):
+    """Retained decisive rows plus an explicit count of omitted SAFE verdicts."""
+    omitted_safe = 0
 
 
 class _Assessment(tuple):
@@ -529,12 +487,20 @@ def _remember(ctx, digest, tool_name, assessment, *, speech_refused=False):
     with _PRIOR_LOCK:
         previous = _PRIOR_VERDICTS.get(root, {})
         row["verdicts"] = (*previous.get(digest, {}).get("verdicts", ()), *assessment.verdicts)
-        history = {**previous, digest: row}
-        if len(json.dumps(history, ensure_ascii=False).encode("utf-8", "replace")) > _SAFETY_PRIOR_BYTE_BUDGET:
-            return False
+        history = _VerdictHistory({**previous, digest: row})
+        history.omitted_safe = getattr(previous, "omitted_safe", 0)
+        safe_rows = iter([key for key, value in history.items()
+                         if not value.get("speech_refused") and value.get("verdicts")
+                         and all(verdict["status"] == "SAFE" for verdict in value["verdicts"])])
+        while len(json.dumps(history, ensure_ascii=False).encode("utf-8", "replace")) > _SAFETY_PRIOR_BYTE_BUDGET:
+            key = next(safe_rows, None)
+            if key is None:
+                return False  # decisive flags must fit in full
+            history.omitted_safe += len(history.pop(key)["verdicts"])
         if root not in _PRIOR_VERDICTS and len(_PRIOR_VERDICTS) >= 512:
-            return False
+            _PRIOR_VERDICTS.popitem(last=False)  # an evicted root earns no speech reissue
         _PRIOR_VERDICTS[root] = history
+        _PRIOR_VERDICTS.move_to_end(root)
     return True
 
 
@@ -551,7 +517,9 @@ def _needs_checker(ctx):
 def _hold(ctx, tool_name, reason, *, status="UNAVAILABLE"):
     _emit_durable_safety_event(ctx, {"type": "safety_hold", "tool": tool_name, "reason": reason, "hold": status})
     marker = "SAFETY_SUBJECT_TOO_LARGE_BLOCKED" if status == "TOO_LARGE" else "SAFETY_UNAVAILABLE"
-    return _Assessment(False, f"⚠️ {marker}: {reason}. This call was not checked. Retry when review is available.", status=status)
+    next_step = ("Reduce the payload or split the work before retrying; complete evidence must fit."
+                 if status == "TOO_LARGE" else "Retry when review is available.")
+    return _Assessment(False, f"⚠️ {marker}: {reason}. This call was not checked. {next_step}", status=status)
 
 
 def _build_check_prompt(tool_name, arguments, messages=None, *, args_json=None, ctx=None, resolved_binding=None):
@@ -559,19 +527,28 @@ def _build_check_prompt(tool_name, arguments, messages=None, *, args_json=None, 
     from dataclasses import asdict, is_dataclass
     from ouroboros.place_guard import call_place_facts
     from ouroboros.places import load_places
+    from ouroboros.tool_access import canonical_data_root
 
     metadata = getattr(ctx, "task_metadata", None) or {}
     kind = work_kind(metadata)
     focus = metadata.get("focus") or {}
     place = dict(call_place_facts(ctx, tool_name, arguments) or {})
-    place_id = place.get("place_id") or arguments.get("place_id") or focus.get("place_id")
+    # A focus occasions the work; it does not establish where this call lands.
+    # Only these two built-ins take an actual place reference as their subject.
+    if tool_name in {"configure_presence", "place_reply"} and arguments.get("place_id"):
+        place["place_id"] = arguments["place_id"]
+    place_ids = {row["place_id"] for row in place.get("places", []) if row.get("place_id")}
+    if place.get("place_id"):
+        place_ids.add(place["place_id"])
     notes = []
-    if place_id:
-        record = next((p for p in load_places(_safety_drive_root(ctx)) if p.place_id == place_id), None)
-        if record:
-            place.update(place_id=record.place_id, place_label=record.label, place_state=record.state)
-            notes = [{"text": n.text, "author": n.author,
-                      "standing_delegation": n.author in {"owner", "migration"}} for n in record.notes]
+    if place_ids:
+        for record in load_places(canonical_data_root(ctx)):
+            if record.place_id not in place_ids:
+                continue
+            if record.place_id == place.get("place_id"):
+                place.update(place_label=record.label, place_state=record.state)
+            notes.extend({"place_id": record.place_id, "text": n.text, "author": n.author,
+                          "standing_delegation": n.author in {"owner", "migration"}} for n in record.notes)
     if tool_name == "place_reply":
         place.update(effect="message", targets={"destination": arguments.get("destination")})
     occasion = "unknown"
@@ -588,7 +565,12 @@ def _build_check_prompt(tool_name, arguments, messages=None, *, args_json=None, 
     sources = directives if isinstance(directives, list) else [m for m in (messages or []) if m.get("role") == "user"]
     target = asdict(resolved_binding) if is_dataclass(resolved_binding) else resolved_binding
     with _PRIOR_LOCK:
-        earlier = list(_PRIOR_VERDICTS.get(_root_id(ctx), {}).values())
+        root = _root_id(ctx)
+        history = _PRIOR_VERDICTS.get(root, {})
+        if root in _PRIOR_VERDICTS:
+            _PRIOR_VERDICTS.move_to_end(root)
+        earlier = list(history.values())
+        omitted_safe = getattr(history, "omitted_safe", 0)
     bundle = {
         "work": {"kind": kind, "label": "your work" if kind == "owner" else "consciousness",
                  "root_task_id": _root_id(ctx), "task_id": getattr(ctx, "task_id", ""), "runtime_mode": _runtime_mode(ctx),
@@ -599,6 +581,7 @@ def _build_check_prompt(tool_name, arguments, messages=None, *, args_json=None, 
         "subject": {"tool": tool_name, "physical_target": target, "place": place},
         "standing_delegation": {"owner_rules": runtime_setting("OUROBOROS_SAFETY_OWNER_RULES", ""), "place_notes": notes},
         "earlier_verdicts": earlier,
+        "earlier_safe_verdicts_omitted": omitted_safe,
     }
     return (f"Runtime mode: {_runtime_mode(ctx)}\nHost evidence (provenance is not consent):\n"
             + _render_subject_json(bundle) + "\nProposed tool call:\nTool: " + tool_name
@@ -998,6 +981,12 @@ def _safety_model_call(
     from ouroboros import model_concurrency
     from ouroboros.llm_observability import chat_observed
     from ouroboros.tools.review_helpers import cached_prompt_blocks
+    if model_role == "safety":
+        from ouroboros.model_slots import MODEL_ACCOUNTS_KEY, model_role_option, resolve_processing_preference
+        if account is None:
+            account = str(model_role_option(MODEL_ACCOUNTS_KEY, "safety"))
+        if processing is None:
+            processing = resolve_processing_preference("safety")
 
     if time.time() < _SAFETY_STORM_UNTIL:
         raise _SafetyRateLimited(
@@ -1213,10 +1202,15 @@ def _run_llm_check(
             return _hold(ctx, tool_name, f"Safety Supervisor returned unparseable response (class={failure_class}) after one repair retry")
 
     verdicts = [{"stage": "first", **result}]
-    from ouroboros.configured_subagents import normalize_configured_subagents
-    catalog, _ = normalize_configured_subagents(runtime_setting("OUROBOROS_SUBAGENTS", "") or {"enabled": False, "items": []})
-    row = next((r for r in catalog.items if r.rechecks_flags and r.enabled), None) if catalog.enabled else None
-    if result["status"] != "SAFE" and row is not None:
+    row = None
+    if result["status"] != "SAFE":
+        from ouroboros.configured_subagents import normalize_configured_subagents
+        try:
+            catalog, _ = normalize_configured_subagents(runtime_setting("OUROBOROS_SUBAGENTS", "") or {"enabled": False, "items": []})
+        except ValueError as exc:
+            return _hold(ctx, tool_name, f"Second-check roster unavailable after a first-stage flag: {sanitize_tool_result_for_log(str(exc))}")
+        row = next((r for r in catalog.items if r.rechecks_flags and r.enabled), None) if catalog.enabled else None
+    if row is not None:
         second_prompt = ("You review a flag a first checker raised; overturning it needs a reason.\n"
                          + prompt + "\nFirst verdict:\n" + _render_subject_json(result))
         if len(second_prompt.encode("utf-8")) > _SAFETY_BUNDLE_BYTE_BUDGET:
@@ -1271,7 +1265,7 @@ def check_safety(
     from ouroboros.tool_effects import effect_of
     effect = effect_of(tool_name, ctx=ctx, is_mcp=tool_name.startswith("mcp_"))
     speech = tool_name == "place_reply" or effect.effect == "message"
-    if tool_name == "manage_schedules" and arguments.get("action") in {"create", "update"}:
+    if tool_name == "manage_schedules" and arguments.get("action") in {"create", "update", "restore"}:
         policy = POLICY_CHECK
     if effect.declared and effect.effect == "read":
         _emit_durable_safety_event(ctx, {"type": "safety_declared_read_skip", "tool": tool_name,
@@ -1302,7 +1296,10 @@ def check_safety(
     cyber = mode_has_unrestricted_agency(_runtime_mode(ctx))
     digest = _subject_digest(tool_name, arguments)
     with _PRIOR_LOCK:
-        prior = _PRIOR_VERDICTS.get(_root_id(ctx), {}).get(digest, {})
+        root = _root_id(ctx)
+        prior = _PRIOR_VERDICTS.get(root, {}).get(digest, {})
+        if root in _PRIOR_VERDICTS:
+            _PRIOR_VERDICTS.move_to_end(root)
     if speech and prior.get("speech_refused"):
         _emit_durable_safety_event(ctx, {"type": "safety_sent_despite_check", "tool": tool_name,
                                        "subject_digest": digest, "verdicts": prior["verdicts"],

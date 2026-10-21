@@ -44,7 +44,7 @@ def legacy_registry(*args, **kwargs):
 
 def register_legacy_completion(registry):
     from ouroboros.tools.registry import ToolEntry
-    registry.register(ToolEntry(name="presence_finish", handler=_finish_presence,
+    registry.register(ToolEntry(name="presence_finish", handler=_finish_presence, safety_policy="skip",
         schema={"name": "presence_finish", "description": "Frozen pre-migration completion fixture.",
                 "parameters": {"type": "object", "properties": {"outcome": {"type": "string"},
                     "message": {"type": "string"}, "action": {"type": "string"},
@@ -148,7 +148,7 @@ def _initiate_presence(
 def legacy_tools():
     from ouroboros.tools.presence import get_tools
     from ouroboros.tools.registry import ToolEntry
-    return [*get_tools(), ToolEntry(name="initiate_presence", handler=_initiate_presence,
+    return [*get_tools(), ToolEntry(name="initiate_presence", handler=_initiate_presence, safety_policy="skip",
             schema={"name": "initiate_presence", "parameters": {"type": "object", "properties": {}}})]
 
 

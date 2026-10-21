@@ -182,6 +182,19 @@ def consciousness_origin_metadata(parent_metadata: Any, *, started_root: bool = 
     }
 
 
+def stamp_schedule_writer(record: Dict[str, Any], writer_kind: str, writer_metadata: Any,
+                          *, started_root: bool) -> None:
+    """Persist the next occurrence's origin from host writer facts, never the template.
+
+    Independent schedules use root-start semantics, including the confirmed-owner
+    exception. A related continuation keeps its caller's kind and cause.
+    """
+    source = writer_metadata if isinstance(writer_metadata, Mapping) else {}
+    kind = WORK_KIND_OWNER if writer_kind == WORK_KIND_OWNER else WORK_KIND_CONSCIOUSNESS
+    origin = consciousness_origin_metadata({**source, "work_kind": kind}, started_root=started_root)
+    record.update(writer_kind=origin["work_kind"], writer_origin=origin)
+
+
 def stamp_manifest_schedule(previous: Mapping[str, Any], current: Dict[str, Any]) -> None:
     """A published skill authors changed schedule content; readiness resync does not."""
     authored = ("task", "trigger", "timezone", "name", "description", "skill_content_hash")

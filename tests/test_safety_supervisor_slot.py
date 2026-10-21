@@ -42,6 +42,63 @@ def test_slot_inherits_light_then_main_and_local(monkeypatch):
     assert get_safety_model() == "main (local)"
 
 
+@pytest.mark.parametrize("key,light,main,chosen,empty", [
+    ("OUROBOROS_MODEL_ACCOUNTS", "light-account", "main-account", "safety-account", ""),
+    ("OUROBOROS_MODEL_CONTEXT_WINDOWS", 32000, 64000, 16000, 0),
+    ("OUROBOROS_MODEL_PROCESSING_PREFERENCES", "fast", "economy", "standard", ""),
+])
+def test_inherited_checker_options_follow_its_model_chain(key, light, main, chosen, empty):
+    from ouroboros.model_slots import model_role_option
+    values = {"OUROBOROS_MODEL_SAFETY": "", "OUROBOROS_MODEL_LIGHT": "light-model", "OUROBOROS_MODEL": "main-model",
+              key: {"light": light, "main": main}}
+    assert model_role_option(key, "safety", settings=values) == light
+    values[key]["safety"] = chosen
+    assert model_role_option(key, "safety", settings=values) == chosen
+    values[key].pop("safety")
+    values["OUROBOROS_MODEL_SAFETY"] = "explicit-checker"
+    assert model_role_option(key, "safety", settings=values) == empty
+    values["OUROBOROS_MODEL_SAFETY"] = values["OUROBOROS_MODEL_LIGHT"] = ""
+    values[key].pop("light")
+    assert model_role_option(key, "safety", settings=values) == main
+
+
+@pytest.mark.parametrize("key,value", [("OUROBOROS_MODEL_ACCOUNTS", "other-account"),
+    ("OUROBOROS_MODEL_CONTEXT_WINDOWS", 32000), ("OUROBOROS_MODEL_PROCESSING_PREFERENCES", "economy")])
+def test_inherited_options_are_owner_guarded_but_unrelated_light_options_are_not(settings_root, key, value):
+    config, path = settings_root
+    before = path.read_bytes()
+    with pytest.raises(PermissionError):
+        config.save_settings({**config.load_settings(), key: {"light": value}})
+    assert path.read_bytes() == before
+    _owner_write_settings({**config.load_settings(), "OUROBOROS_MODEL_SAFETY": "fixed"},
+                          allow_safety_lowering=True, authored_keys=("OUROBOROS_MODEL_SAFETY",))
+    config.save_settings({**config.load_settings(), key: {"light": value}})
+    assert json.loads(json.loads(path.read_text())[key]) == {"light": value}
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_physical_checker_captures_inherited_or_explicit_route(monkeypatch, tmp_path, explicit):
+    from ouroboros import safety, model_slots, llm_observability
+    values = {"OUROBOROS_MODEL_SAFETY": "checker" if explicit else "", "OUROBOROS_MODEL_LIGHT": "light",
+              "OUROBOROS_MODEL_ACCOUNTS": {"light": "light-account"},
+              "OUROBOROS_MODEL_PROCESSING_PREFERENCES": {"light": "economy"},
+              "OUROBOROS_PROCESSING_PREFERENCE": "standard"}
+    monkeypatch.setattr(model_slots, "runtime_setting", lambda key, default="": values.get(key, default))
+    monkeypatch.setattr(safety, "_SAFETY_STORM_UNTIL", 0)
+    monkeypatch.setattr(safety, "_get_safety_prompt", lambda: "Fixture checker")
+    calls = []
+    def capture(_client, **kwargs):
+        calls.append(kwargs)
+        return {"content": '{"status":"SAFE","reason":"Fixture"}'}, {}
+    monkeypatch.setattr(llm_observability, "chat_observed", capture)
+    safety._safety_model_call(client=object(), ctx=SimpleNamespace(task_id="fixture", drive_root=tmp_path),
+        tool_name="fixture", light_model="checker" if explicit else "light", use_local=False,
+        call_type="safety_check", user_prompt="Fixture subject", on_usage=lambda _usage: None)
+    assert calls[0]["model_role"] == "safety"
+    assert calls[0]["model_account_override"] == ("" if explicit else "light-account")
+    assert calls[0]["processing_preference"] == ("standard" if explicit else "economy")
+
+
 @pytest.mark.parametrize("change", [
     {"OUROBOROS_MODEL_LIGHT": "other"}, {"OUROBOROS_MODEL_SAFETY": "explicit"},
     {"OUROBOROS_SAFETY_MODE": "light"}, {"OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "off"},

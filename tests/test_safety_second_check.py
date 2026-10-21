@@ -80,6 +80,18 @@ def test_unmarked_or_disabled_never_second_checks(supervisor):
     assert len(h.calls) == 3
 
 
+def test_invalid_roster_holds_only_a_flag_and_grants_no_speech_retry(supervisor):
+    h = supervisor
+    h.values["OUROBOROS_SUBAGENTS"] = {"enabled": True, "items": [{"unknown_key": 1}]}
+    h.replies.append({"status": "SAFE", "reason": "First checker cleared it"})
+    assert h.module.check_safety("place_reply", {"text": "clear"}, ctx=h.ctx)[0]
+    for _ in range(2):
+        h.replies.append({"status": "DANGEROUS", "reason": "First checker flagged it"})
+        ok, message = h.module.check_safety("place_reply", {"text": "flagged"}, ctx=h.ctx)
+        assert not ok and "UNAVAILABLE" in message and "Second-check roster" in message
+    assert len(h.calls) == 3  # holds never earn deliberate-reissue authority
+
+
 def test_each_checker_accounts_its_physical_usage(supervisor, monkeypatch):
     h = supervisor
     h.values["OUROBOROS_SUBAGENTS"] = catalog()

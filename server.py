@@ -461,7 +461,7 @@ def _handle_bridge_update_batch(bridge, updates, offset: int, ctx: Any, cursor: 
             # a bare `/review` (Telegram) runs on the Main model.
             parts = text.split(None, 1)
             ctx.queue_deep_self_review_task(reason="owner:/review", force=True, chat_id=chat_id, client_message_id=client_message_id,
-                                            reviewer=parts[1].strip() if len(parts) > 1 else "")
+                                            reviewer=parts[1].strip() if len(parts) > 1 else "", origin={"work_kind": "owner"})
         elif lowered.startswith("/evolve"):
             parts = lowered.split()
             action = parts[1] if len(parts) > 1 else "on"
