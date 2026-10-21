@@ -260,15 +260,29 @@ def _compose(ctx: Any, reviewers: Any, reason: str) -> Tuple[Any, List[str], str
     force on the context); the request the job could NOT compose (``_skill_review_panel_request``), handed
     to the wave as it is — the wave collects an open paid wave of these bytes under its recorded panel or
     refuses the same way, typed and at $0; or, for a direct call, one composed here by strictness."""
+    # The request is handed on as the caller wrote it: a value of the wrong type is the panel's own typed
+    # REVIEW_PANEL_ARGUMENT refusal, never a string split into one-letter reviewer names.
     prior = getattr(ctx, "_skill_review_composed_panel", None)
     if prior is not None:
-        return prior, list(reviewers or ()), str(reason or "")
-    request = getattr(ctx, "_skill_review_panel_request", None)
-    if request:
-        return None, list(request[0] or ()), str(request[1] or "")
+        return prior, _as_given(reviewers), reason
     from ouroboros.reviewer_slot_config import compose_review_panel
 
-    return compose_review_panel(list(reviewers or ()), str(reason or ""), surface="skill"), list(reviewers or ()), str(reason or "")
+    request = getattr(ctx, "_skill_review_panel_request", None)
+    if request:
+        named, why = _as_given(request[0]), request[1]
+        if not isinstance(named, list) or not isinstance(why, str):
+            compose_review_panel(named, why, surface="skill")  # the panel's own typed REVIEW_PANEL_ARGUMENT
+        return None, named, why
+
+    return compose_review_panel(_as_given(reviewers), reason if reason is not None else "", surface="skill"), \
+        _as_given(reviewers), reason
+
+
+def _as_given(reviewers: Any) -> Any:
+    """The reviewers argument as the caller gave it (a copy of a list or tuple; ``None`` → no names)."""
+    if reviewers is None:
+        return []
+    return list(reviewers) if isinstance(reviewers, (list, tuple)) else reviewers
 
 
 def _outcome_from_result(skill: Any, subject: Any, result: Dict[str, Any], *, rebuttal_sha: str) -> SkillReviewOutcome:
@@ -348,7 +362,7 @@ def review_skill(ctx: Any, skill_name: str, *, persist: bool = True, review_rebu
         # The panel reads the frozen copy bound to content_hash and mutates no skill state, so other
         # lifecycle work runs meanwhile; the lane is back before anything below persists.
         with lend_lifecycle_lane():
-            result = run_review_change(ctx, subject="skill", reviewers=list(reviewers or ()), reason=str(reason or ""),
+            result = run_review_change(ctx, subject="skill", reviewers=reviewers, reason=reason if reason is not None else "",
                                        review_rebuttal=str(review_rebuttal or ""), _frozen_skill=subject, _panel=panel)
     except ReviewChangeArgumentError as exc:
         return _pending(skill.name, str(exc), content_hash=content_hash, code="TOOL_ARG_ERROR")

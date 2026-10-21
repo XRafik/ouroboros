@@ -1258,7 +1258,7 @@ def run_skill_review_lifecycle_blocking(
     except PanelCompositionError:
         # The wave decides: an open paid wave of these bytes is collected under its recorded panel (current
         # tick edits cannot revoke collection); otherwise the same refusal comes back typed from it, $0.
-        panel, panel_request = None, (list(reviewers or ()), str(reason or ""))
+        panel, panel_request = None, (reviewers if reviewers is not None else [], reason)
     except ValueError:
         panel = None  # the review collects its paid wave or returns its typed configuration refusal
     mark_stale_review_job_interrupted(drive_root, skill_name, current_content_hash=content_hash)
