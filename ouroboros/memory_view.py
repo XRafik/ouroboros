@@ -1019,19 +1019,13 @@ def render_story(snapshot: MemoryViewSnapshot, level: FloorLevel = FULL_VIEW) ->
     lines = ["## My story", "", _STORY_INTRO]
     if pointers:
         taken = set(gone.get("F3", ()))
-        whole = any(entry.get("text") and str(entry["room_id"]) not in taken for entry in pointers)
-        lines += ["", "### Old memory retold by a helper before the update (not lived; "
-                      + ("whole where the window holds it, else read by id)" if whole else "read by id)")]
+        lines += ["", "### Old memory retold by a helper before the update (not lived; exact sources readable by id)"]
         lines += retold_lines(pointers, taken)
     shown = set(gone.get("F5", ()))
-    if shown:  # the oldest pages: a prefix of the story order; a record an addressed account tells stays named
-        lines += ["", "### My older pages, parts and accounts, by address"]
-        for entry in pages:
-            if entry["id"] in shown:
-                lines += [_page_pointer(entry), *_told_lines(entry["id"], told)]
+    # A selected form changes this entry alone, without regrouping unrelated entries or changing their headers.
     for entry in pages:
-        if entry["id"] not in shown:
-            lines += _page_lines(entry) + _told_lines(entry["id"], told)
+        lines += (["", _page_pointer(entry)] if entry["id"] in shown else _page_lines(entry))
+        lines += _told_lines(entry["id"], told)
     lines += ["", _pages_line(snapshot.legacy_blocks)]
     if snapshot.legacy_blocks.get("accounts"):
         lines.append(accounts_line(snapshot.legacy_blocks))
@@ -1040,6 +1034,7 @@ def render_story(snapshot: MemoryViewSnapshot, level: FloorLevel = FULL_VIEW) ->
 
 
 def _note_lines(notes: List[Dict[str, Any]]) -> List[str]:
+    """Authored source bytes and their stamp only; the start allowance never changes a note's rendering."""
     return [f"note {note['id']} by {note['role']} on {note['date']}\n{_indented(note['text'])}" for note in notes]
 
 
