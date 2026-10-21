@@ -2079,10 +2079,9 @@ export function createChatInstance({
         const taskId = getLogTaskGroupId(evt) || '';
         if (!taskId) return false;
         const rawTs = evt.ts || evt.timestamp || new Date().toISOString();
-        // Task-bound Skill lifecycle is presentation on its explicit owner,
-        // never a synthetic lifecycle task card.
-        const review = attachReviewFromRow(evt, rawTs);
-        if (review !== undefined) return review;
+        // Task-bound lifecycle and placed rows share their live/history consumer.
+        const placed = attachReviewFromRow(evt, rawTs) ?? attachCardRow(evt, rawTs);
+        if (placed !== undefined) return placed;
         const childInfo = subagentChildParents.get(taskId);
         if (childInfo && eventType === 'task_done') return routeSubagentTerminalToCard(taskId, evt);
         const summary = summarizeChatLiveEvent(evt);

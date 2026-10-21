@@ -1,10 +1,8 @@
 # Naming and boundaries
 
-This chapter owns the rules that keep the body legible from outside: naming and
-dependency direction, the CLI contract, cognitive quality and LLM-first affordances,
-where a fact may live in the two books, the anti-patterns behind real incidents,
-external facts and provider independence. Each rule names what enforces it or says
-that only review does, and points to ARCHITECTURE for mechanism.
+Naming, dependency direction, CLI, cognitive quality, LLM-first affordances, books,
+anti-patterns, external facts and provider independence. Rules name enforcement or
+say review-only; ARCHITECTURE owns mechanisms.
 
 - Code, comments, docstrings, commit messages and product UI strings are English source
   copy; a non-English owner reads the install's translation memory
@@ -296,35 +294,32 @@ is where a deliberate exception states its reason.
 
 ### External facts: unknown is not no
 
-External model/provider facts (inputs, capacity, prices, ids, availability) can change
-without an Ouroboros release.
+Inputs, capacity, prices, ids and availability can change between releases.
 
-1. Exact-route evidence, not lists: the route's own metadata, a dated probe
-   beside a provider-keyed wire projection with a recovery path, or the
-   owner's setting. A model name, prefix or family is never that evidence, nor is
-   another route's catalog.
-2. Unknown is not no. Without evidence the owner's input, the tool and the explicit
-   request go through unchanged and the route answers; no shipped literal may drop
-   input, refuse a tool, rewrite a saved choice or narrow a request.
-3. Disclose a refusal as one request's outcome and repair that attempt; a durable "no"
-   needs scoped evidence of absence.
-4. A limit of our own transport is a fact about Ouroboros, declared at the lane and
-   named as such in what the model reads.
-5. A retained wire fact (the table) keeps source and date, exact scope and what happens
-   when stale either way; requested, sent and provider-reported values stay
-   distinct.
+1. Exact-route evidence: its metadata, a dated probe beside its recoverable wire
+   projection, or the owner's setting. Neither model names/prefixes/families nor
+   other routes' catalogs qualify.
+2. Unknown is not no: absent evidence, owner inputs, tools and explicit requests
+   pass unchanged. No shipped literal may drop input, refuse tools, rewrite saved
+   choices or narrow requests.
+3. Refusals describe one request; repair it. A durable "no" needs scoped absence
+   evidence.
+4. Name Ouroboros transport limits at the lane and in model input.
+5. Wire facts keep source/date, exact scope and both stale outcomes; requested,
+   sent and provider-reported values stay distinct.
 
-Guards: `tests/test_image_capability_contract.py` keeps unseen models' images on all
-image-capable transports; `tests/test_model_name_invariance.py` keeps unevidenced
+Guards: `tests/test_image_capability_contract.py` keeps unseen models' images on
+capable transports; `tests/test_model_name_invariance.py` keeps unevidenced
 payloads name-independent (exceptions below); `tests/test_tristate_truthiness_guard.py`
-forbids truth-testing yes/no/unknown. This provenance grants no runtime authority;
+forbids truth-testing yes/no/unknown. Provenance grants no runtime authority;
 probes live in cited docstrings or linked contracts.
 
 | Location | Fact | Evidence & re-probe | If stale |
 |---|---|---|---|
 | `ouroboros/tools/imagegen.py`; `ouroboros/gateways/image_api.py` | Image wire facts | [Dated sources](../IMAGE_GENERATION.md#direct-api-contracts); re-check each exact route | Stale positives refuse requests; negatives hide capability |
-| `ouroboros/llm_attempt.py::supports_message_cache_control` | Families whose message cache controls OpenRouter accepts or translates (`anthropic/`, `google/gemini-`, `openai/`) | `openai/` rests on the OpenRouter caching guide cited in the docstring, not a live probe; re-probe before widening, never by name resemblance | False positive invalidates a request; false negative loses the prompt cache |
-| `ouroboros/llm_attempt.py::openai_family_model` | OpenAI's public API looks a cache up only at message ends unless a breakpoint is explicit | Probe in the docstring; re-probe `cached_tokens` across two conversations before widening; never match on a substring such as `gpt` | Stale positive moves the cache boundary for a prefix-caching family; stale negative pays cold prefixes |
+| `ouroboros/llm_attempt.py::supports_message_cache_control` | Message cache controls OpenRouter accepts or translates (`anthropic/`, `google/gemini-`, `openai/`) | `openai/`: OpenRouter caching guide in docstring, no live probe; re-probe before widening, never by name resemblance | False positive invalidates a request; false negative loses the prompt cache |
+| `ouroboros/llm_attempt.py::openai_family_model` | OpenAI's public API checks caches only at message ends without an explicit breakpoint | Docstring probe; before widening, re-probe `cached_tokens` across two conversations, never a substring such as `gpt` | Stale positive moves the cache boundary for a prefix-caching family; stale negative pays cold prefixes |
+| `ouroboros/transcript_prefix.py` | Anthropic prefix binding: Opus 5.5 / Fable 5.1 / Sonnet 5.5 / Haiku 5.5 bind signed reasoning to prior system/tools/messages; accounts created from 2026-08-31 return 400 on mismatch, older accounts log unless opted in | [Anthropic migration guide, Breaking change 3](https://platform.claude.com/docs/en/models/fable-5-1/migration-guide#breaking-changes); direct Opus 5.5 probe 2026-10-21 | Re-probe exact route/account before edits; excess trust causes 400s, excess retirement loses reasoning |
 | `ouroboros/llm_openai_compatible.py` OpenRouter `extra_body.provider.require_parameters` for `anthropic/` | Anthropic models on OpenRouter route only to endpoints accepting every sent parameter | Undated; OpenRouter per-endpoint `supported_parameters` (`/api/v1/models/{author}/{slug}/endpoints`); a declared exception of `tests/test_model_name_invariance.py` | Stale positive narrows failover; stale negative routes to an endpoint that drops or refuses a parameter |
 | `ouroboros/reasoning_artifacts.py::SIGNED_PORTABLE` and its sealed classifier | Which families' sealed reasoning artifacts survive a same-model cross-provider replay; readable artifacts are portable by shape | Short vouched roster plus a shape-first classifier that fails closed on unreadable artifacts; extend only by a fresh cross-provider replay probe of the exact family | False positive 400s the replayed turn (strip-and-retry is the net); false negative pins a portable transcript to one endpoint |
 | `ouroboros/provider_models.py::_ANTHROPIC_MODEL_ALIASES` / `migrate_model_value` | Direct-provider id spelling compatibility | Shipped mapping; a catalog confirms a current id, not whether a saved spelling was intentional; retire an alias only through a documented window | Removing an alias breaks upgrades; guessing one silently reroutes |

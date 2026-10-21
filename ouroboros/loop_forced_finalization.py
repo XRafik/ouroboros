@@ -1240,7 +1240,10 @@ def _forced_final_answer(
             source=f"{reason_code}_window_elapsed", host_words=fallback_host_words,
         )
     tools_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
+    _loop()._retire_unbound_reasoning(ctx)
     _loop()._append_or_merge_user_message(ctx.messages, prompt)
+    from ouroboros.transcript_prefix import append_reasoning_retirement_fact
+    append_reasoning_retirement_fact(ctx.accumulated_usage, ctx.round_idx, ctx.messages)
     extracted = ""
     response_meta: Dict[str, Any] = {}
     attempt = 0

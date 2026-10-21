@@ -907,6 +907,7 @@ def _dispatch_round_model(
     from ouroboros.send_clock import main_clock_policy
     from ouroboros.loop_messages import append_context_facts
 
+    _loop()._retire_unbound_reasoning(ctx)
     if append_context_facts(ctx):
         disposition = _loop()._measure_round_main_fit(
             ctx, automatic_pass_used=bool(getattr(disposition, "automatic_pass_used", False)))
@@ -1059,6 +1060,7 @@ def _reprepare_waiting_main(ctx: _RoundModelCallContext, kwargs: dict):
     # The physical pre-send predicate rechecks this newly adopted route before dispatch.
     from ouroboros.loop_messages import append_context_facts
 
+    _loop()._retire_unbound_reasoning(ctx)
     append_context_facts(ctx)
     disposition = _loop()._measure_round_main_fit(ctx, automatic_pass_used=False)
     from ouroboros.send_clock import MainSendClock
