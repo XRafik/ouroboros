@@ -169,6 +169,7 @@ D20 = "Presence"
 "ouroboros/late_review_marks.py" = "D15"  # late reviewer feedback kept in view as a host mark in its owning room
 "ouroboros/consolidator.py" = "D15"
 "ouroboros/knowledge.py" = "D15"
+"ouroboros/memory_publication.py" = "D15"
 "ouroboros/markdown_source.py" = "D18"
 "ouroboros/reference_books.py" = "D18"
 "ouroboros/context.py" = "D03"

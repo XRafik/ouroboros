@@ -109,8 +109,10 @@ def focus_signature(ctx: Any) -> Dict[str, Any]:
         from ouroboros.dialogue_evidence import own_room_chat
         from ouroboros.tool_access_paths import canonical_data_root
 
-        room = own_room_chat(ctx, canonical_data_root(ctx)) or room
-    focus["room_id"] = str(assignment.get("room_chat_id") or room or 1)
+        resolved = own_room_chat(ctx, canonical_data_root(ctx))
+        room = resolved if resolved is not None else room
+    room = assignment.get("room_chat_id", room)
+    focus["room_id"] = str(room if room is not None else 1)
     from ouroboros.dialogue_provenance import presence_provenance_from_task
 
     origin = {**presence_provenance_from_task({"metadata": meta}), **assignment}

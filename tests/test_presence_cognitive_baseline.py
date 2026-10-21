@@ -172,7 +172,8 @@ def test_admitted_external_turn_writes_global_knowledge_and_nothing_else(tmp_pat
             seen["scratchpad"] = registry.execute(
                 "update_scratchpad", {"content": "Alex's room: brevity today, worth testing next time."})
             seen["identity"] = registry.execute(
-                "update_identity", {"content": "I am Ouroboros. " + "I keep one memory in every room. " * 4})
+                "update_identity", {"content": "I am Ouroboros. " + "I keep one memory in every room. " * 4,
+                                    "expected_revision": __import__("hashlib").sha256((data / "memory/identity.md").read_bytes()).hexdigest()})
             seen["refused"] = {
                 name: registry.execute(name, args)
                 for name, args in (
