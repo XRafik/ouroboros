@@ -222,6 +222,14 @@ def test_api_marks_a_locally_stamped_time(gh):
     assert receipt["at"] == NOW and receipt["at_source"] == "local" and receipt["actor"] is None
 
 
+def test_graphql_api_alias_cannot_attribute_an_edit_to_the_object_author(gh):
+    gh.answer = lambda p, argv, kw: json.dumps({"data": {"createIssue": {"issue": {
+        "id": "I_7", "author": {"login": "issue-creator"}, "updatedAt": NOW}}}})
+    _line, receipt = _receipt(gh.write(method="api", graphql='mutation { createIssue: updateIssue(input:{id:"I_7",title:"New"}) '
+                                      '{ issue { id author { login } updatedAt } } }'))
+    assert receipt["actor"] is None and receipt["at"] == NOW
+
+
 def test_resolve_receipt_uses_githubs_resolved_by(gh):
     def answer(p, argv, kw):
         assert "resolvedBy{login}" in p.graphql

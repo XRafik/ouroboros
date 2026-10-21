@@ -208,7 +208,7 @@ def test_github_write_schema_fields(registry):
     assert props["body"]["type"] == "string"
     assert props["body"]["default"] == ""
     assert props["labels"]["type"] == "array"
-    assert props["labels"]["default"] == []
+    assert "default" not in props["labels"]  # Omitted keeps labels; only an explicit [] clears them.
 
 
 def test_tool_execute_basic(registry):

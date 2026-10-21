@@ -413,13 +413,9 @@ def _api(write: _Write) -> str:
     if res.ok:
         got = _parse(res) or {}
         first = _first_object(got)
-        if document:
-            name, payload = next(iter((got.get("data") or {}).items()), ("", {}))
-            created = name.startswith(("add", "create")) and isinstance(payload, dict) and any(
-                key in payload for key in ("comment", "pullRequestReview", "reaction", "issue", "pullRequest", "release"))
-        else:
-            created = http_method == "POST" and route.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] in {
-                "comments", "reviews", "reactions", "replies", "issues", "pulls", "releases"}
+        # Arbitrary GraphQL selections/aliases do not prove creation from the response key alone.
+        created = not document and http_method == "POST" and route.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] in {
+            "comments", "reviews", "reactions", "replies", "issues", "pulls", "releases"}
         at = (first.get("created_at") or first.get("createdAt") or first.get("submitted_at")) if created else (
             first.get("updated_at") or first.get("updatedAt"))
         return write.receipt(effect, target, url=first.get("html_url") or first.get("url") or "", oid=first.get("id") or first.get("node_id") or "",
