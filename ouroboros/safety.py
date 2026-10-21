@@ -900,9 +900,8 @@ def _safety_rate_limit_reason(
 
 
 def _safety_rate_limit_backoff(ctx: Optional[Any]) -> None:
-    """One bounded backoff, capped by the task deadline. Called BETWEEN `model_call_slot`
-    contexts: that primitive caps CONCURRENT calls, so sleeping inside a held slot would
-    park the route for every other thread."""
+    """One bounded backoff, capped by the task deadline. Called BETWEEN physical calls:
+    the provider slot is held only inside a physical send, so this sleep parks no route."""
     delay = _SAFETY_RATE_LIMIT_BACKOFF_SEC
     deadline = _safety_deadline_epoch(ctx)
     if deadline is not None:
@@ -1018,7 +1017,8 @@ def _safety_model_call(
         msg: Dict[str, Any] = {}
         usage: Optional[Dict[str, Any]] = None
         try:
-            with model_concurrency.model_call_slot(
+            # The physical sender takes the provider slot; this only carries the deadline.
+            with model_concurrency.model_call_scope(
                 light_model, use_local, _safety_deadline_epoch(ctx)
             ):
                 msg, usage = chat_observed(

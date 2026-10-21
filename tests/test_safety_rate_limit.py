@@ -26,12 +26,6 @@ def _ensure_remote_key(monkeypatch):
     branch; lane-specific tests override with their own env calls."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "fake-key-for-routing")
     monkeypatch.delenv("USE_LOCAL_LIGHT", raising=False)
-    # Lane S owns this call site. Exercise its requested deadline-scope seam
-    # until integration replaces safety.py's high-level model_call_slot wrapper.
-    from ouroboros import model_concurrency
-    physical_slot = model_concurrency.model_call_slot
-    monkeypatch.setattr(model_concurrency, "model_call_slot", lambda *args, **kwargs: (
-        physical_slot if "route" in kwargs else model_concurrency.model_call_scope)(*args, **kwargs))
     yield
 
 
