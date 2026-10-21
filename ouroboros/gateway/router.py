@@ -164,13 +164,12 @@ def collect_routes(
     from ouroboros.gateway import desktop_autostart as desktop_host
     from ouroboros.gateway.onboarding_host import api_onboarding_bootstrap, onboarding_page
     from ouroboros.gateway.owner_effort import api_owner_effort_range
-    from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model
+    from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model, api_owner_safety_mode
     from ouroboros.gateway.settings import (
         api_acknowledge_capability,
         api_onboarding,
         api_owner_auto_grant,
         api_owner_context_mode,
-        api_owner_safety_mode,
         api_owner_runtime_mode,
         api_settings_get,
         api_settings_post,

@@ -23,12 +23,11 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from ouroboros.gateway.onboarding import api_onboarding_complete
-from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model
+from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model, api_owner_safety_mode
 from ouroboros.gateway.settings import (
     api_owner_auto_grant,
     api_owner_context_mode,
     api_owner_runtime_mode,
-    api_owner_safety_mode,
     api_settings_post,
 )
 

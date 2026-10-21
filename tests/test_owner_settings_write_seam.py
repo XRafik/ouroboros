@@ -897,6 +897,8 @@ _OWNER_SETTINGS_WRITERS = [
 
 def _owner_app(handler_name, route, isolated_settings):
     from ouroboros.gateway import settings as settings_mod
+    if handler_name == "api_owner_safety_mode":
+        from ouroboros.gateway import safety_settings as settings_mod
 
     app = Starlette(routes=[
         Route(route, endpoint=getattr(settings_mod, handler_name), methods=["POST"])])

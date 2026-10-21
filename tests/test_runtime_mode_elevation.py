@@ -114,7 +114,7 @@ def test_save_settings_allows_elevation_with_explicit_flag(isolated_settings):
 
     _seed_disk(isolated_settings, {"OUROBOROS_RUNTIME_MODE": "light"})
     save_settings(
-        {"OUROBOROS_RUNTIME_MODE": "advanced", "OPENAI_API_KEY": "irrelevant"},
+        {"OUROBOROS_RUNTIME_MODE": "advanced", "TOTAL_BUDGET": "42.0"},
         allow_elevation=True,
     )
     on_disk = json.loads(isolated_settings.read_text(encoding="utf-8"))
@@ -1004,7 +1004,7 @@ def test_owner_endpoint_authors_its_own_key_even_at_the_default(isolated_setting
     from starlette.testclient import TestClient
 
     from ouroboros import config as cfg
-    from ouroboros.gateway.settings import api_owner_safety_mode
+    from ouroboros.gateway.safety_settings import api_owner_safety_mode
 
     _own_ratchet_env(monkeypatch)
     _os.environ["OUROBOROS_SAFETY_MODE"] = "light"

@@ -840,9 +840,6 @@ def _api_owner_context_mode_sync(request: Request, body: Any) -> JSONResponse:
     return JSONResponse({"ok": True, "project_id": project_id, "context_mode": next_mode, "cognition": cognition})
 
 
-from ouroboros.gateway.safety_settings import api_owner_safety_mode, _api_owner_safety_mode_sync  # noqa: F401
-
-
 async def api_acknowledge_capability(request: Request) -> JSONResponse:
     """Acknowledge a context window or response maximum for an exact route.
     Provider, model, endpoint and applicable headers/options bind the assertion;
