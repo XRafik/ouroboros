@@ -166,13 +166,13 @@ def migrate_places(drive_root: Any) -> dict:
         if current.get("migration", {}).get("presence_bindings_v1"):
             return current
         rows = dict(current["places"])
-        imported = legacy_places(Path(drive_root))
+        imported, problems = legacy_places(Path(drive_root))
         known = {bid for row in rows.values() for bid in row.get("legacy_binding_ids", ())}
         for place in imported:
             if not known.intersection(place.legacy_binding_ids):
                 rows.setdefault(place.place_id, asdict(place))
         return {**current, "places": rows, "revision": current["revision"] + 1,
-                "migration": {"presence_bindings_v1": True, "at": utc_now_iso()}}
+                "migration": {"presence_bindings_v1": True, "at": utc_now_iso(), "problems": problems}}
 
     try:
         return update_json_locked(path, migrate, strict_existing_dict=True, reject_existing_empty_dict=True)
@@ -187,6 +187,16 @@ def load_places(drive_root: Any) -> list[Place]:
     if not current.get("migration", {}).get("presence_bindings_v1"):
         current = migrate_places(drive_root)
     return [_decode(value) for _key, value in sorted(current["places"].items())]
+
+
+def migration_problems(drive_root: Any) -> list[dict]:
+    load_places(drive_root)
+    return list(_read(drive_root).get("migration", {}).get("problems", []))
+
+
+def place_room_index(drive_root: Any, place_id: str) -> list[dict]:
+    from ouroboros.place_arrivals import room_index
+    return room_index(drive_root, get_place(drive_root, place_id))
 
 
 def get_place(drive_root: Any, place_id: str) -> Place:

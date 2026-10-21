@@ -1,7 +1,6 @@
 """Model-free attention decisions after the room has durably heard an event."""
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,12 +15,16 @@ def decide_attention(root: Path, admission, event) -> tuple[str, dict]:
     except PlaceError as exc:
         if exc.code != "place_not_found":
             raise
-        return "silent", {}
+        return "silent", {"reason": "disconnected"}
     facts = event.facts if event.facts is not None else (FACT_LEGACY_ADDRESSED,)
     if event.actor.get("is_bot") is True:
         facts = (*facts, "from_bot")
-    if place.state == "paused" or not presence_admission.focus_enabled(root) or not wake_matches(place, facts):
-        return "silent", {}
+    if place.state == "paused":
+        return "silent", {"reason": "paused"}
+    if not presence_admission.focus_enabled(root):
+        return "silent", {"reason": "off"}
+    if not wake_matches(place, facts):
+        return "silent", {"reason": "no_wake_match"}
     allowance = presence_admission.focus_allowance(root)
     if allowance.get("status") != "available":
         retry_after = 60  # transport backoff when there is no known allowance reset
@@ -34,19 +37,10 @@ def decide_attention(root: Path, admission, event) -> tuple[str, dict]:
     return "focus", allowance
 
 
-def settle_heard(root: Path, task: dict, event):
-    """A successful silent intake is final for this event, including after a later switch On."""
-    from ouroboros.presence_runner import presence_result_from_stored
-    from ouroboros.task_results import load_task_result, write_task_result
-    metadata = {**task["metadata"], "presence_outcome": "silent", "presence_result_text": "",
-                "focus_heard_only": True}
-    write_task_result(root, task["id"], "completed", create_only=True, strict_existing_dict=True,
-                      metadata=metadata, chat_id=task["chat_id"], _is_direct_chat=True,
-                      source=task["source"], result="", terminal_origin="host_notice")
-    row = load_task_result(root, task["id"], strict=True)
-    if row.get("status") not in {"completed", "failed"}:
-        return None  # another request already admitted it; the Host joins its custody
-    return replace(presence_result_from_stored(row, task["id"]), continuation_version=event.continuation_version)
+def settle_heard(root: Path, task: dict, event, reason: str = "heard"):
+    """Finalize on the accepted room row; heard-only arrivals create no task document."""
+    from ouroboros.place_arrivals import record_heard
+    return record_heard(root, task, event, reason)
 
 
 def offer_to_author(root, task: dict, event) -> bool:
