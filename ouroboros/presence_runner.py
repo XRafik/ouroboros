@@ -109,7 +109,7 @@ def _presence_delivery(outcome: str, text: str, terminal_origin: str, *, legacy:
     return outcome, text
 
 
-def presence_result_from_stored(stored: Mapping[str, Any], task_id: str) -> PresenceTurnResult:
+def presence_result_from_stored(stored: Mapping[str, Any], task_id: str, drive_root=None) -> PresenceTurnResult:
     """One replay projection for cached turns and completed delegated work."""
     from ouroboros.task_finalization import TERMINAL_ORIGIN_MODEL_FINAL, provider_terminal_body, terminal_notice_text
 
@@ -134,12 +134,13 @@ def presence_result_from_stored(stored: Mapping[str, Any], task_id: str) -> Pres
         # refusal, and the deferred-work view must not hand that draft to the correspondent.
         outcome, text = "silent", ""
     presence = metadata.get("presence") if isinstance(metadata.get("presence"), dict) else {}
-    return PresenceTurnResult(
+    from ouroboros.place_reply import project_reply
+    return project_reply(drive_root, metadata, PresenceTurnResult(
         outcome=outcome, text=text, task_id=task_id,
         work_ref=str(metadata.get("presence_work_ref") or ""),
         delivery_reporting_version=int(presence.get("delivery_reporting_version") == 1),
         output_ref=str(metadata.get("presence_output_ref") or "") if text else "",
-    )
+    ))
 
 
 def build_presence_result_event(task: dict[str, Any], text: str, ctx: Any, *, terminal_origin: str = "",
@@ -148,8 +149,9 @@ def build_presence_result_event(task: dict[str, Any], text: str, ctx: Any, *, te
     from ouroboros.presence_continuation import _handoff_ref, terminal_output
     from ouroboros.task_finalization import HOST_AUTHORED_TERMINAL_ORIGINS
 
-    if (task.get("metadata") or {}).get("wake_cause") == "focus":
-        from ouroboros.place_reply import prepare_focus_reply
+    from ouroboros.place_reply import prepare_focus_reply, reply_carrier
+    carrier = reply_carrier(task.get("metadata") or {})
+    if carrier:
         # Ordinary exits have already returned flags to the mind. Forced exits cannot buy a
         # new round: preserve the flag as a held reply instead of releasing unchecked speech.
         allowed, refusal = prepare_focus_reply(ctx, str(text or ""), quiet=terminal_origin != "model_final" or bool(
@@ -157,9 +159,8 @@ def build_presence_result_event(task: dict[str, Any], text: str, ctx: Any, *, te
         if not allowed:
             from ouroboros.place_reply import record_notice
             from ouroboros.tool_access import canonical_data_root
-            focus = task["metadata"]["focus"]
-            record_notice(canonical_data_root(ctx), place_id=focus["place_id"],
-                          conversation_key=focus["conversation_key"], task_id=task["id"],
+            record_notice(canonical_data_root(ctx), place_id=carrier["place_id"],
+                          conversation_key=carrier["conversation_key"], task_id=task["id"],
                           text="Reply held after finalization: " + refusal, identity=task["id"] + ":forced-hold")
             ctx._presence_completion = {"outcome": "silent"}
             ctx._presence_completion_accepted = True
@@ -502,7 +503,7 @@ def _cached_result(drive_root: Path, task_id: str, identity: str = "") -> Presen
         return None  # the conversation gate distinguishes a live author from a lost attempt
     if refusal:
         raise _refused_turn(drive_root, task_id, stored, refusal, identity=identity)
-    return presence_result_from_stored(stored, task_id)
+    return presence_result_from_stored(stored, task_id, drive_root)
 
 
 def _notify_unresolved_turn(drive_root: Path, task_id: str) -> None:
@@ -1151,6 +1152,7 @@ def run_presence_turn(
         except (OSError, ValueError, StoreError) as exc:
             raise PresenceTurnError("presence_start_unwritable", "source_event_id", turn_ref=task_id) from exc
         try:
+            lease.intake_agent = agent
             events = agent.handle_task(task)
         except BaseException:  # its executor ended without a terminal: record that end, never a re-run
             _notify_unresolved_turn(Path(drive_root), task_id)
@@ -1182,6 +1184,8 @@ def run_presence_turn(
             output_ref=str(row.get("output_ref") or ""),
             continuation_version=event.continuation_version,
         )
+        from ouroboros.place_reply import project_reply
+        result = project_reply(drive_root, task["metadata"], result)
         if result.outcome in {"message", "deferred"} and result.text and not result.delivery_reporting_version:
             log_dialogue(direction="out", user_id=0, text=result.text)
         # Still under the conversation lock. A replay writes only through the cached-replay repair, under

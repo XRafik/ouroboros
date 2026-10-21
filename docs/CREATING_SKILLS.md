@@ -947,9 +947,10 @@ Use the connector's ordinary content-hash-bound skill token for:
   These are observed provider facts, never text classification. Absent facts mean
   `legacy_addressed` for older connectors that already filtered events. Empty facts
   are distinct from absent facts. Bots require an explicit bot wake item.
-- `GET /presence/place?provider=&account_id=&conversation_id=`: returns
+- `GET /presence/place?provider=&account_id=&conversation_id=&thread_id=`: returns
   `{place_id, label, state}` for the connector's outbox recheck. `/identity`
-  advertises `places_version: 1`. An empty conversation id is an opaque queued mutation:
+  advertises `places_version: 1`. Optional `thread_id` selects the topic; omission keeps
+  the room lookup. An empty conversation id is an opaque queued mutation:
   any Silent/Paused place for that connector, provider and matching/broad account restricts it.
 - `GET /presence/work/{work_ref}?binding_id=...`: reads correlated late work,
   including after a place is Paused or disconnected. The binding query is optional;
@@ -967,13 +968,18 @@ An exhausted or unknown allowance returns `consciousness_allowance_exhausted`,
 `presence_capacity_full` retry response. A matching event focuses consciousness in
 that room under the owner's autonomy level and allowance, independently of its own
 clock. A current author can receive later arrivals as typed context-only mail.
+The host acknowledges this handoff only while that author accepts intake under its
+final-drain lock; a closed or ended author leaves the event eligible for ordinary admission.
 
 A focus uses ordinary `finish_task`, including `silent=true`. The host derives
 `message`, `silent`, `tool_delivered` or `deferred` from the final, delivery receipts
 and successfully started long work. Automatic speech passes the `place_reply`
-Safety check; a flag returns to the mind. Silent/Paused destinations hold the reply
-with a System fact. Late receipts still record what happened and add a visible
-warning. Proactive speech uses the connector's own tools; `presence_finish` and
+Safety check; a flag returns to the mind, including for long work promoted from a
+focus. Silent/Paused/disconnected destinations and Advises autonomy hold the reply
+with a System fact. Cached replies, continuation envelopes and work polls apply the
+current place state without another generation or paid check. A held projection keeps
+the durable answer and its output identity; repeated holds record one fact per subject.
+Late receipts still record what happened and add a visible warning. Proactive speech uses the connector's own tools; `presence_finish` and
 `initiate_presence` are no longer public tools.
 
 A turn's source identity uses its first legacy binding id (otherwise its place id), source event ID, provider/account,

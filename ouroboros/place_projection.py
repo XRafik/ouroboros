@@ -32,6 +32,7 @@ def connect_declared_place(root, connector: str, *, account_id: str = "", conver
 
 
 def place_view(root, place, *, declarations: list[dict] | None = None, allowance: dict | None = None) -> dict[str, Any]:
+    from ouroboros.place_arrivals import account_candidates
     rows = place_declarations(root) if declarations is None else declarations
     row = next((r for r in rows if r["skill"] == place.connector and (
         not place.contribution_id or r["id"] == place.contribution_id)), {})
@@ -49,6 +50,7 @@ def place_view(root, place, *, declarations: list[dict] | None = None, allowance
                   icon=row.get("icon") if isinstance(row.get("icon"), dict) else {"name": row["icon"]} if row.get("icon") else {}, wake_suggestions=list(row.get("wakes") or []),
                   unanswered=activity["unanswered"], last_activity_at=activity["last_activity_at"],
                   activity_coverage="captured_place_events", spent_24h_usd=spend)
+    result["account_candidates"] = account_candidates(root, place.place_id)
     if not row:
         result["status"] = {"text": "Connector unavailable", "tone": "warn"}
     return result

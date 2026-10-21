@@ -254,7 +254,8 @@ async def _api_presence_turn(request: Request) -> JSONResponse:
                 return _presence_error("too many in-flight presence requests", 429, "presence_capacity_full", "retry")
             # A version-1 consumer takes a continuing author's initial envelope; v0 waits for its terminal.
             result = await asyncio.wrap_future(execution.initial if continuing else execution.result)
-        return JSONResponse(turn_response(result, continuing))
+        return JSONResponse(await host._bounded_host_read(ctx, functools.partial(
+            turn_response, result, continuing, ctx.data_dir)))
     except json.JSONDecodeError:
         return _presence_error("invalid json", 400, "presence_payload_invalid", "rejected")
     except (PresenceAdmissionError, PresenceTurnError) as exc:
@@ -348,7 +349,8 @@ async def _api_presence_place(request: Request) -> JSONResponse:
             _outbox_place, ctx.data_dir, connector=skill,
             provider=str(request.query_params.get("provider") or ""),
             account_id=str(request.query_params.get("account_id") or ""),
-            conversation_id=str(request.query_params.get("conversation_id") or "")))
+            conversation_id=str(request.query_params.get("conversation_id") or ""),
+            thread_id=str(request.query_params.get("thread_id") or "")))
         if place is None:
             return _presence_error("Connect this place in Consciousness > Places.", 404, "place_not_connected", "blocked")
         return JSONResponse({"place_id": place.place_id, "label": place.label, "state": place.state})
@@ -358,7 +360,7 @@ async def _api_presence_place(request: Request) -> JSONResponse:
         return _presence_error(str(exc), 503, "places_unavailable", "retry")
 
 
-def _outbox_place(drive_root, *, connector, provider, account_id, conversation_id):
+def _outbox_place(drive_root, *, connector, provider, account_id, conversation_id, thread_id=""):
     from ouroboros.places import places_of_connector, resolve_place
 
     if not conversation_id:
@@ -368,4 +370,4 @@ def _outbox_place(drive_root, *, connector, provider, account_id, conversation_i
         if restricted is not None:
             return restricted
     return resolve_place(drive_root, connector=connector, provider=provider,
-                         account_id=account_id, conversation_id=conversation_id)
+                         account_id=account_id, conversation_id=conversation_id, thread_id=thread_id)

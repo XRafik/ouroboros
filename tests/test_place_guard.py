@@ -20,7 +20,7 @@ def places(monkeypatch, tmp_path):
     monkeypatch.setattr(guard.places, "places_of_connector", lambda root, connector: rows if connector == "connector" else [])
     monkeypatch.setattr(guard.places, "load_places", lambda root: rows)
 
-    def resolve(root, *, connector, targets):
+    def resolve(root, *, connector, targets, conversation="", thread=""):
         values = [v for values in targets.values() for v in values]
         match = next((p for p in rows if p.conversation_id in values), None)
         return match, match is not None

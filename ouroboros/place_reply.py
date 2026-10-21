@@ -25,31 +25,89 @@ def record_notice(root, *, place_id: str, conversation_key: str, task_id: str, t
         return dialogue_store.append(root, "chat", row, feed=True)
 
 
+def reply_carrier(metadata) -> dict:
+    """Speech follows the retained destination, not a wake-only census stamp."""
+    presence = metadata.get("presence") or {}
+    event = presence.get("event") or {}
+    place_id = presence.get("place_id") or (metadata.get("focus") or {}).get("place_id")
+    if not place_id or not event.get("conversation_key"):
+        return {}
+    return {"place_id": place_id, "conversation_key": event["conversation_key"],
+            "destination": event.get("destination") or {}}
+
+
+def reply_hold(root, metadata, task_id, text: str) -> str:
+    """Current host facts only: never generate or buy another safety check on replay."""
+    carrier = reply_carrier(metadata)
+    if not carrier and text:
+        from pathlib import Path
+        from ouroboros.places import load_places, places_path
+        from ouroboros.presence_bindings import PRESENCE_BINDINGS_FILENAME
+        presence = metadata.get("presence") or {}
+        event = presence.get("event") or {}
+        binding_id = presence.get("binding_id")
+        # Pre-migration task bytes retain the old id. Resolve it through the
+        # existing place store; isolated legacy readers have no place state.
+        if (binding_id and event.get("conversation_key") and
+                (places_path(root).exists() or (Path(root) / "state" / PRESENCE_BINDINGS_FILENAME).exists())):
+            place = next((p for p in load_places(root) if binding_id in (p.place_id, *p.legacy_binding_ids)), None)
+            carrier = {"place_id": place.place_id if place else binding_id,
+                       "conversation_key": event["conversation_key"], "destination": event.get("destination") or {}}
+    if not carrier or not text:
+        return ""
+    from ouroboros.consciousness_authority import is_observe_origin
+    try:
+        place = get_place(root, carrier["place_id"])
+        state, label = place.state, place.label
+    except PlaceError as exc:
+        if exc.code != "place_not_found":
+            raise
+        state, label = "disconnected", carrier["place_id"]
+    message = (f"Reply held: {label} is {state.title()}" if state in {"silent", "paused", "disconnected"}
+               else "Reply held: autonomy is Advises" if is_observe_origin(metadata) else "")
+    if message:
+        digest = _reply_digest(carrier, text)
+        record_notice(root, place_id=carrier["place_id"], conversation_key=carrier["conversation_key"],
+                      task_id=task_id, text=message, identity=f"{task_id}:{digest}:held")
+    return message
+
+
+def _reply_digest(carrier, text):
+    subject = {"text": text, "destination": carrier["destination"], "place_id": carrier["place_id"]}
+    return hashlib.sha256(json.dumps(subject, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def project_reply(root, metadata, result):
+    """Hold only the outward view; keep the durable answer and output identity."""
+    from dataclasses import replace
+    if (root is not None and result.outcome in {"message", "deferred"}
+            and reply_hold(root, metadata, result.task_id, result.text)):
+        return replace(result, outcome="silent", text="")
+    return result
+
+
+def project_output(root, metadata, task_id, output):
+    if (root is not None and output.get("outcome", "message") in {"message", "deferred"}
+            and reply_hold(root, metadata, task_id, str(output.get("text") or ""))):
+        return {**output, "outcome": "silent", "text": ""}
+    return dict(output)
+
+
 def prepare_focus_reply(ctx, text: str, *, quiet: bool = False) -> tuple[bool, str]:
     metadata = getattr(ctx, "task_metadata", {}) or {}
-    if metadata.get("wake_cause") != "focus":
+    carrier = reply_carrier(metadata)
+    if not carrier:
         return True, ""
     from ouroboros.tool_access import canonical_data_root
     from ouroboros.presence_context import confirmed_delivery_receipts
     from ouroboros.presence_continuation import _handoff_ref, selection_for
     root = canonical_data_root(ctx)
-    focus, presence = metadata["focus"], metadata["presence"]
-    place_id = focus["place_id"]
     outcome = "silent" if quiet else "deferred" if _handoff_ref(ctx) else "tool_delivered" if confirmed_delivery_receipts(ctx) else "message"
     if outcome in {"message", "deferred"} and text:
-        try:
-            place = get_place(root, place_id)
-            state, label = place.state, place.label
-        except PlaceError as exc:
-            if exc.code != "place_not_found":
-                raise
-            state, label = "disconnected", place_id
-        subject = {"text": text, "destination": presence["event"]["destination"], "place_id": place_id}
-        digest = hashlib.sha256(json.dumps(subject, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
-        if state in {"silent", "paused", "disconnected"}:
-            message = f"Reply held: {label} is {state.title()}"
-            record_notice(root, place_id=place_id, conversation_key=focus["conversation_key"],
-                          task_id=ctx.task_id, text=message, identity=f"{ctx.task_id}:{digest}:held")
+        subject = {"text": text, "destination": carrier["destination"], "place_id": carrier["place_id"]}
+        digest = _reply_digest(carrier, text)
+        message = reply_hold(root, metadata, ctx.task_id, text)
+        if message:
             ctx._focus_reply_hold = message
             outcome = "silent"
         elif getattr(ctx, "_focus_checked_reply", None) != digest:

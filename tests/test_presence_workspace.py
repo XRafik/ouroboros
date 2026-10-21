@@ -168,7 +168,7 @@ def test_admitted_registry_reads_writes_and_runs_script_in_external_folder(insta
     assert hashlib.sha256(core.read_bytes()).hexdigest() == before
 
 
-def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory(installed, monkeypatch):
+def test_focus_promotion_uses_ordinary_scope_and_followup_keeps_admitted_folder(installed, monkeypatch):
     from ouroboros.tools.control import _build_child_subagent_contract, _start_task
     from ouroboros.tools.followup import _handle_schedule_followup
     from supervisor import queue, workers
@@ -183,8 +183,8 @@ def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory
     _confirm_promote(monkeypatch)
     monkeypatch.setattr(workers, "DRIVE_ROOT", installed.data)
     monkeypatch.setattr(workers, "REPO_DIR", installed.repo)
-    result = _start_task(ctx, "Finish the report", title="Report finish", workspace_root="/unselected",
-                                   project_name="Unselected")
+    result = _start_task(ctx, "Finish the report", title="Report finish", workspace_root=str(installed.workspace),
+                                   project_name="Selected")
     assert result.startswith("OK: task"), result
     event = ctx.pending_events[0]
     enqueued = []
@@ -196,9 +196,9 @@ def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory
     assert outcome["status"] == "scheduled", outcome
     promoted = enqueued[0]
     assert promoted["workspace_root"] == str(installed.workspace)
-    assert promoted["memory_mode"] == "shared"
-    assert not promoted.get("drive_root") and not promoted.get("project_id")
-    assert resolve_project_id(promoted) == ""
+    assert promoted["memory_mode"] == "forked"
+    assert promoted.get("drive_root") and promoted["project_id"] == "selected"
+    assert resolve_project_id(promoted) == "selected"
 
     queue.init(installed.data)
     queue.init_queue_refs([], {}, {"value": 0})
@@ -223,7 +223,7 @@ def test_promotion_and_scheduled_followup_keep_admitted_folder_and_shared_memory
     })
     assert child["workspace"] == task["task_contract"]["workspace"]
     assert "capability_ceiling" not in child and "capability_ceiling" not in task["task_contract"]
-    assert not (installed.data / "state" / "headless_tasks").exists()
+    assert (installed.data / "state" / "headless_tasks").exists()
 
 
 def test_explicit_project_choice_still_wins_over_presence_folder(installed):
@@ -236,10 +236,10 @@ def test_explicit_project_choice_still_wins_over_presence_folder(installed):
 def test_promotion_with_an_unusable_presence_folder_returns_the_typed_repair_and_sends_nothing(
     installed, monkeypatch,
 ):
-    """The Presence branch of workspace admission: the admitted folder vanished
-    before the promote was admitted, so the typed refusal names the Presence
-    profile as the place to fix it (the cause rides `detail` to the model) and
-    admission sends no chat text — nothing fans out into a public conversation."""
+    """A requested folder vanishes before ordinary promotion admission.
+
+    The typed repair names that request; admission still sends no public text.
+    """
     import shutil
 
     from ouroboros.tools.control import _start_task
@@ -251,7 +251,7 @@ def test_promotion_with_an_unusable_presence_folder_returns_the_typed_repair_and
     _confirm_promote(monkeypatch)
     monkeypatch.setattr(workers, "DRIVE_ROOT", installed.data)
     monkeypatch.setattr(workers, "REPO_DIR", installed.repo)
-    result = _start_task(ctx, "Finish the report", title="Report finish")
+    result = _start_task(ctx, "Finish the report", title="Report finish", workspace_root=str(installed.workspace))
     assert result.startswith("OK: task"), result
     event = ctx.pending_events[0]
     shutil.rmtree(installed.workspace)  # the admitted folder disappears before admission
@@ -265,7 +265,7 @@ def test_promotion_with_an_unusable_presence_folder_returns_the_typed_repair_and
     ))
 
     assert (outcome["status"], outcome["reason"]) == ("needs_manual_target", "workspace_unusable")
-    assert outcome["detail"].startswith("The folder configured in the Presence profile is unusable: ")
+    assert "This task asked for" in outcome["detail"] and "explicitly" in outcome["detail"]
     assert str(installed.workspace) in outcome["detail"]
-    assert outcome["detail"].endswith("Fix the Presence profile's workspace_root or clear it.")
+    assert "Presence profile" not in outcome["detail"]
     assert sent == [] and enqueued == []

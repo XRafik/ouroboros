@@ -172,6 +172,9 @@ def test_place_arrival_is_context_only_and_deduplicated(focus):
     lease = PresenceTurnGate(state_root=root / "state").acquire(event.conversation_key)
     try:
         lease.bind_author("another-author")
+        import threading
+        lease.intake_agent = SimpleNamespace(_owner_message_admission_lock=threading.RLock(),
+            _accepting_owner_messages=True, _busy=True, _current_task_id="another-author")
         assert offer_to_author(root, task, event)
         assert offer_to_author(root, task, event)
         rows = [json.loads(line) for line in _mailbox_path(root, "another-author").read_text().splitlines()]
@@ -236,18 +239,21 @@ lease.release()
             child.wait(timeout=10)
 
 
-@pytest.mark.parametrize("silent", [False, True])
-def test_focus_ordinary_finish_traverses_reply_check(focus, monkeypatch, silent):
+@pytest.mark.parametrize("silent,promote", [(False, False), (True, False), (False, True)])
+def test_focus_ordinary_finish_traverses_reply_check(focus, monkeypatch, silent, promote):
     import queue
     from ouroboros import loop
     from ouroboros.tools.registry import ToolRegistry
     from ouroboros.presence_runner import build_presence_result_event
     root, _place, _admission, _event = focus
     task = task_for(focus)
+    if promote:
+        from tests.test_place_reply_revision import promoted
+        task = promoted(task)
     registry = ToolRegistry(repo_dir=root, drive_root=root)
     registry._ctx.task_metadata = task["metadata"]
     registry._ctx.task_contract = task["task_contract"]
-    registry._ctx.is_direct_chat = True
+    registry._ctx.is_direct_chat = not promote
     monkeypatch.setenv("OUROBOROS_TASK_REVIEW_MODE", "off")
     monkeypatch.setattr("ouroboros.presence_context.confirmed_delivery_receipts", lambda _ctx: frozenset())
     checks, calls = [], []

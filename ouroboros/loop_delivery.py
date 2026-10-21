@@ -1242,6 +1242,9 @@ def _no_tool_final_answer(
             )
             _loop()._merge_finalization_trace(llm_trace, forced_trace)
             return text, usage, llm_trace
+        from ouroboros.place_intake import reopen_for_place_mail
+        if not stopping and reopen_for_place_mail(tools._ctx, post_controls):
+            return held()  # keep the answer; the accepted place context gets a model round
     _loop()._project_child_result_dispositions(limit_ctx, llm_trace)
     # UNKNOWN evidence delivers a candidate retained over it as published; a KNOWN candidate is re-retained below.
     evidence_revision, evidence_fingerprint = _loop()._delivery_evidence_state(tools, limit_ctx, llm_trace)

@@ -235,7 +235,8 @@ def places_of_connector(drive_root: Any, connector: str) -> list[Place]:
     return [place for place in load_places(drive_root) if place.connector == connector]
 
 
-def place_for_target(drive_root: Any, *, connector: str, targets: Mapping[str, list[str]]) -> tuple[Place | None, bool]:
+def place_for_target(drive_root: Any, *, connector: str, targets: Mapping[str, list[str]],
+                     conversation: str = "", thread: str = "") -> tuple[Place | None, bool]:
     """Resolve declared target values against stored account/conversation ids.
 
     Multiple destinations must be checked separately by the dispatch caller. An
@@ -244,20 +245,31 @@ def place_for_target(drive_root: Any, *, connector: str, targets: Mapping[str, l
     places = places_of_connector(drive_root, connector)
     if not places:
         return None, True
-    values = {str(value) for group in targets.values() for value in group if str(value)}
+    values = {str(value) for key, group in targets.items() if key not in {thread, "thread_id", "account_id"}
+              for value in group if str(value)}
+    conversations = set(targets.get(conversation, [])) if conversation else values
+    threads = set(targets.get(thread or "thread_id", []))
+    accounts = set(targets.get("account_id", []))
+    values |= accounts
     if not values:
         return None, False
-    exact = [p for p in places if (p.conversation_id and p.conversation_id in values)
-             or ((p.destination or {}).get("conversation_id") in values)
-             or (not p.conversation_id and p.account_id and p.account_id in values)]
+    def matches(account, room, topic):
+        return ((not accounts or account in {"", "*"} or account in accounts)
+                and (not topic or topic in threads)
+                and ((room and room in conversations) or (not room and account and account in values)))
+    exact = [p for p in places if matches(p.account_id, p.conversation_id, p.thread_id)
+             or (p.destination and matches(p.destination.get("account_id", ""),
+                                           p.destination.get("conversation_id", ""), p.destination.get("thread_id", "")))]
     if exact:
         # A caller passing several targets must not hide a blocked one behind an active one.
-        exact.sort(key=lambda p: (p.state != STATE_ACTIVE, bool(p.conversation_id)), reverse=True)
+        exact.sort(key=lambda p: (bool(p.account_id), bool(p.conversation_id), bool(p.thread_id),
+                                  p.state != STATE_ACTIVE), reverse=True)
         return exact[0], True
-    broad = [p for p in places if not p.account_id and not p.conversation_id]
+    broad = [p for p in places if not p.account_id and not p.conversation_id and not p.thread_id]
     if len(broad) == 1:
         return broad[0], True
-    if len(places) == 1 and not places[0].conversation_id:
+    if (len(places) == 1 and not places[0].conversation_id and not places[0].thread_id
+            and (not accounts or places[0].account_id in {"", "*"} or places[0].account_id in accounts)):
         return places[0], True
     return None, False
 

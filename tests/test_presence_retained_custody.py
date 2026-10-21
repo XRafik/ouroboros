@@ -170,5 +170,6 @@ def test_work_poll_distinguishes_live_then_retained_lost_turn_and_late_terminal(
 
 @pytest.fixture(autouse=True)
 def _focus_admission_enabled(monkeypatch):
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
     monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
     monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

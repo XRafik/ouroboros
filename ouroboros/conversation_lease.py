@@ -55,6 +55,7 @@ class PresenceTurnLease:
         self._ended = False
         self.execution: Any = None
         self.task_id = ""
+        self.intake_agent: Any = None
         self._live_fd: int | None = None
         self._live_path: Path | None = None
 
@@ -109,6 +110,7 @@ class PresenceTurnLease:
                     if resources is not None:
                         self._clear_author()
                 finally:
+                    self.intake_agent = None
                     with _AUTHORS_LOCK:
                         _AUTHORS.pop((self._root(), self.task_id), None)
                     self._clear_live_author()
@@ -352,6 +354,27 @@ def live_author(conversation_key: str, *, drive_root: Any = None) -> str:
         return ""
     finally:
         os.close(fd)
+
+
+def accept_author_mail(drive_root, author: str, conversation_key: str, append: Callable[[], bool]) -> bool:
+    """Accept under the author's own intake/close lock, never a census-to-append race.
+
+    A remote author has no local admission endpoint: leave the arrival to ordinary
+    conversation admission instead of pretending a mailbox append is acceptance.
+    """
+    root = str(Path(drive_root).resolve())
+    with _AUTHORS_LOCK:
+        lease = _AUTHORS.get((root, author))
+    agent = lease.intake_agent if lease is not None else None
+    lock = getattr(agent, "_owner_message_admission_lock", None)
+    if lock is None:
+        return False
+    with lock, lease._lock:
+        if (lease._ended or lease._resources is None or lease.conversation_key != conversation_key
+                or not getattr(agent, "_accepting_owner_messages", False) or not getattr(agent, "_busy", False)
+                or getattr(agent, "_current_task_id", None) != author):
+            return False
+        return append()
 
 
 def live_authors(*, drive_root: Any = None) -> list[str]:

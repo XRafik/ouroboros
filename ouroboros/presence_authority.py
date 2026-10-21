@@ -474,7 +474,7 @@ def presence_effective_refusal(ctx: Any, task_id: str, effective: Any, *, drive_
         if presence_work_refusal(ctx, hop, drive_root=drive_root, same_tree=same_tree):
             return (
                 f"⚠️ PRESENCE_CAPABILITY_BLOCKED: task {task_id}'s effective result continues in work "
-                "that was not started from this Presence binding; a Presence turn reads only that work."
+                "that was not started from this place; a place turn reads only that work."
             )
     return ""
 
@@ -509,7 +509,7 @@ def presence_work_refusal(ctx: Any, task_id: str, *, drive_root: Any = None, sam
             return ""
     return (
         f"⚠️ PRESENCE_CAPABILITY_BLOCKED: task {target or '?'} is not independent work started from "
-        "this Presence binding (same binding_id, any of its conversations); a Presence turn "
+        "this place (any of its conversations); a place turn "
         "addresses only that work."
     )
 

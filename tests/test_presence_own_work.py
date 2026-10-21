@@ -189,7 +189,7 @@ def test_exact_read_admits_own_work_and_tree_and_refuses_the_rest(tmp_path):
     assert "Child result" in registry.execute("get_task_result", {"task_id": "my-child"})
     for task_id in ("foreign", "owner-root", "never-existed"):
         refused = registry.execute("get_task_result", {"task_id": task_id})
-        assert "is not independent work started from this Presence binding" in refused and "Not yours" not in refused
+        assert "is not independent work started from this place" in refused and "Not yours" not in refused
 
     # A profile that explicitly selected the global readers keeps that grant.
     selected = _ceiling(PresenceToolTarget("builtin", "get_task_result"),
@@ -351,12 +351,12 @@ def test_selected_cancel_and_forward_refuse_foreign_work_before_any_effect(tmp_p
     ctx = _cancel_ctx(tmp_path)
     for target in ("foreign", "owner-root"):
         refused = _cancel_task(ctx, target, "stop")
-        assert "is not independent work started from this Presence binding" in refused
+        assert "is not independent work started from this place" in refused
     assert _intents(tmp_path) == {}
 
     selected = _ceiling(PresenceToolTarget("builtin", "forward_to_worker"))
     registry, _ctx = _registry(tmp_path, selected)
-    assert "is not independent work started from this Presence binding" in registry.execute(
+    assert "is not independent work started from this place" in registry.execute(
         "forward_to_worker", {"task_id": "foreign", "message": "stop"})
     sent = registry.execute("forward_to_worker", {"task_id": "mine", "message": "new fact"})
     assert "written to its mailbox as a message from this task" in sent
@@ -450,7 +450,7 @@ def test_context_lists_own_work_from_other_conversations_after_the_pointer_moved
 
     section = build_presence_context_section(tmp_path, value, "promoted-self")
 
-    own = section.split("## Work started from this binding (host-authored facts)", 1)[1]
+    own = section.split("## Work started from this place (host-authored facts)", 1)[1]
     assert "done-room [completed] from conversation slack:T1:C9:0" in own
     assert "The report is ready." in own
     assert "queued-here [scheduled] from this conversation" in own
@@ -488,7 +488,7 @@ def test_an_unavailable_store_leaves_queued_own_work_listed_and_the_gap_named(tm
                                    "source": "queue_snapshot"}
     assert rows["recorded-queued"]["source"] == "queue_snapshot"
     assert page["read_gap"] == {"result_root": "unreadable"}
-    assert "some results are unreadable now: the task store; this binding's work may be among them" in section
+    assert "some results are unreadable now: the task store; this place's work may be among them" in section
 
     # The store answers again: the recorded row replaced its queue row once, and no gap is claimed.
     clean = json.loads(registry.execute("recent_tasks", {"limit": 20}))
@@ -508,7 +508,7 @@ def test_an_effective_redirect_is_judged_before_projection_and_own_retries_still
     registry, _ctx = _registry(tmp_path)
 
     refused = registry.execute("get_task_result", {"task_id": "mine-redirected"})
-    assert "effective result continues in work that was not started from this Presence binding" in refused
+    assert "effective result continues in work that was not started from this place" in refused
     assert "FOREIGN SUCCESSOR BODY" not in refused and "theirs-retry" not in refused
     assert "Retry finished the report." in registry.execute("get_task_result", {"task_id": "mine-timed-out"})
 
@@ -796,7 +796,7 @@ def test_a_presence_child_reads_its_own_tree_and_bindings_work_and_nothing_else(
         assert text in read and "PRESENCE_CAPABILITY_BLOCKED" not in read, read
     for task_id in ("foreign", "owner-root"):
         refused = registry.execute("get_task_result", {"task_id": task_id})
-        assert "is not independent work started from this Presence binding" in refused and "Not yours" not in refused
+        assert "is not independent work started from this place" in refused and "Not yours" not in refused
     listed = json.loads(registry.execute("recent_tasks", {"limit": 20}))
     assert [row["task_id"] for row in listed["tasks"]] == ["done-room"]
     assert listed["presence_scope"] == {"scope": "own_binding", "binding_id": BINDING}
