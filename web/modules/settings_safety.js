@@ -25,7 +25,7 @@ export function safetySectionHtml() {
     return `
         <div class="settings-section-copy">
             A second model judges a step before it runs. Your work: what you asked for. Consciousness: what it does on its own, places included.${notes}
-            <br><strong>Configuration authority:</strong> outside Cyber Pro, Ouroboros cannot lower its own checks. Changes apply on the next task; every step a lower level lets through is recorded.
+            <br><strong>Configuration authority:</strong> outside Cyber Pro, Ouroboros cannot lower its own checks; Cyber Pro also lets it configure Supervisor coverage. Changes apply on the next task; every step a lower level lets through is recorded.
         </div>
         <div class="safety-levels">
             <div class="settings-effort-card">
