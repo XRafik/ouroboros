@@ -53,18 +53,25 @@ def test_physical_icon_limits(source):
     assert icon_spec("ui/icon.svg", SVG)["kind"] == "svg"
 
 
-def staged_icon(tmp_path, *, entries=None):
+def staged_icon(tmp_path, *, entries=None, icon="ui/icon.svg"):
     folder = tmp_path / "skills" / "native" / "connector"
     (folder / "ui").mkdir(parents=True)
     (folder / "plugin.py").write_text("def register(api): pass\n")
     (folder / "skill.json").write_text(json.dumps({"name": "connector", "type": "extension", "entry": "plugin.py",
-        "permissions": ["presence"], "icon": "ui/icon.svg", "contributes": entries if entries is not None else [PLACE],
+        "permissions": ["presence"], "icon": icon, "contributes": entries if entries is not None else [PLACE],
         "tools": [{"name": "send", "effect": "message", "target": ["to", "cc", "bcc"]}]}))
     (folder / "ui/icon.svg").write_text(SVG)
     skill = load_skill(folder, tmp_path)
     api = SimpleNamespace(_staged=SimpleNamespace())
     stage_contributions(api, skill, skill.content_hash)
     return skill, api._staged
+
+
+def test_bad_manifest_icon_falls_back_without_hiding_the_place(tmp_path):
+    _, staged = staged_icon(tmp_path, icon="https://example.test/icon.svg")
+    assert staged.contributions[0]["label"] == "Service"
+    assert staged.contributions[0]["icon_spec"] == {}
+    assert staged.contribution_problems == ["icon: icon must be a host icon name or ui/icon.svg"]
 
 
 @pytest.mark.parametrize("entries", [[PLACE], []])

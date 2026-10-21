@@ -735,7 +735,12 @@ def _validate_contribution(entry: dict, manifest: Any, skill_dir: pathlib.Path |
     item = _contribution_object(entry, "contribution", common + fields)
     item["label"] = _contribution_text(item.get("label"), "label", 40)
     item["title"] = _contribution_text(item.get("title", ""), "title", 200, empty=True)
-    item["icon"] = validate_icon(item.get("icon", getattr(manifest, "raw_extra", {}).get("icon", "")))
+    try:
+        default_icon = validate_icon(getattr(manifest, "raw_extra", {}).get("icon", ""))
+    except ValueError:
+        # Staging reports the manifest icon problem; it must not hide every control/place.
+        default_icon = ""
+    item["icon"] = validate_icon(item.get("icon", default_icon))
     if type(item.get("order", 0)) is not int:
         raise ValueError("order must be an integer")
     item.setdefault("order", 0)
