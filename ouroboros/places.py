@@ -102,6 +102,16 @@ def places_of_connector(drive_root: Any, connector: str) -> list[Place]:
     return [place for place in load_places(drive_root) if place.connector == connector]
 
 
+def place_for_target(drive_root: Any, *, connector: str, targets: Mapping[str, list[str]]) -> tuple[Place | None, bool]:
+    """The place a connector call lands in, from its declared target argument values.
+
+    ``(place, True)`` when attributable; ``(None, True)`` when the call lands in
+    no place of this connector; ``(None, False)`` when it cannot be attributed
+    (no declared target, or a value that matches no account/conversation shape).
+    """
+    return None, not places_of_connector(drive_root, connector)
+
+
 def wake_matches(place: Place, facts: Iterable[str]) -> tuple[WakeItem, ...]:
     """The wake items an event's typed facts match (empty: it is heard, not woken for)."""
     present = {str(fact) for fact in facts}

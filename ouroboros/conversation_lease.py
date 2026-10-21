@@ -16,3 +16,8 @@ from typing import Any
 def live_author(conversation_key: str, *, drive_root: Any = None) -> str:
     """The task id authoring this conversation now, ``""`` when none."""
     return ""
+
+
+def live_authors(*, drive_root: Any = None) -> list[str]:
+    """Every task id authoring a place conversation in this process now (Stop reaches them)."""
+    return []
