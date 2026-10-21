@@ -2,17 +2,15 @@
 ARG UBUNTU_IMAGE=ubuntu:22.04@sha256:0a9887931b0e38af2e3487ed39e29436b0535c4f3f52e57745baaf79d1898956
 FROM ${UBUNTU_IMAGE} AS common
 ARG DEBIAN_FRONTEND=noninteractive
+# Bootstrap trust from this digest-pinned image's signed Ubuntu archive before
+# selecting the snapshot service, whose HTTP endpoint redirects to HTTPS.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 RUN printf '%s\n' \
     'deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/20261020T000000Z jammy main universe' \
     'deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/20261020T000000Z jammy-updates main universe' \
     'deb [check-valid-until=no] https://snapshot.ubuntu.com/ubuntu/20261020T000000Z jammy-security main universe' \
     > /etc/apt/sources.list
-# The base image lacks CA roots: use the signed Ubuntu archive to bootstrap them,
-# then use HTTPS for all remaining package downloads.
-RUN sed -i 's|https://snapshot|http://snapshot|g' /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends ca-certificates \
-    && sed -i 's|http://snapshot|https://snapshot|g' /etc/apt/sources.list \
-    && apt-get update && apt-get install -y --no-install-recommends python3 git curl
+RUN apt-get update && apt-get install -y --no-install-recommends python3 git curl
 FROM common AS builder
 RUN sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/native-sources.list \
     && apt-get update
