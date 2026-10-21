@@ -742,11 +742,20 @@ def _github_read(ctx: ToolContext, method: str = "", repo: str = "", **args) -> 
     return run_read(ctx, method, repo, **args)
 
 
+def _github_write(ctx: ToolContext, method: str = "", repo: str = "", **args) -> str:
+    """``github_write``: the methods and the receipt live in ``github_write``; the transport is this module's."""
+    from ouroboros.tools.github_write import run_write
+
+    return run_write(ctx, method, repo, **args)
+
+
 def get_tools() -> List[ToolEntry]:
     from ouroboros.tools.github_read import SCHEMA as READ_SCHEMA
+    from ouroboros.tools.github_write import SCHEMA as WRITE_SCHEMA
 
     tools = [
         ToolEntry("github_read", READ_SCHEMA, _github_read),
+        ToolEntry("github_write", WRITE_SCHEMA, _github_write),
         ToolEntry("list_github_prs", {
             "name": "list_github_prs",
             "description": (
