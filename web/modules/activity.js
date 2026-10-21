@@ -225,7 +225,7 @@ export function scheduleRowHtml(s, expanded = false) {
                 : consumed
                     ? '<span class="activity-tag">consumed once · history</span>'
                     : `<button type="button" class="btn btn-xs btn-default" data-act="schedule-toggle" data-id="${id}" data-action="${enabled ? 'disable' : 'restore'}">${enabled ? 'Disable' : 'Enable'}</button>`;
-    return `<div class="activity-row activity-schedule${enabled || hold.hold_id || s.followup_wait ? '' : ' off'}">
+    return `<div class="activity-row activity-schedule">
         <div class="activity-row-main">
             <span class="activity-name" data-i18n-authored>${esc(s.display_name || s.name || s.id || 'schedule')}</span>
             ${scheduleTextHtml(s, note, expanded)}

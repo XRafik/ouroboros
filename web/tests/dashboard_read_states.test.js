@@ -421,9 +421,11 @@ test('Activity delete requires confirmation and reports the withdrawal receipt',
 });
 
 test('Activity keeps the retained-history disclosure and focus the owner left open', async (t) => {
-    const { mount, routes, ws } = setup(t);
+    const { mount, routes, ws, calls } = setup(t);
     emptyActivity(routes);
-    routes.set(schedulesUrl, response({ tasks: lifecycleSchedules }));
+    const tasks = lifecycleSchedules.map((row) => row.id !== 'withdrawn' ? row : { ...row,
+        relation: 'related', followup_hold: { hold_id: 'hold-1', reason: 'origin_stopped' }, hold_persisted: true });
+    routes.set(schedulesUrl, response({ tasks }));
     const activity = initActivity({ mount, ws });
     await activity.refresh();
     const schedules = section(mount, 'schedules');
@@ -432,7 +434,7 @@ test('Activity keeps the retained-history disclosure and focus the owner left op
     // The owner opens the history and focuses a control inside it.
     const details = schedules.querySelector('[data-activity-history]');
     details.open = true;
-    const restore = details.querySelector('[data-act="schedule-toggle"][data-id="withdrawn"]');
+    const restore = details.querySelectorAll('button').find((button) => button.textContent === 'Restore');
     restore.focus();
 
     // A poll rebuilds the markup; it must not re-collapse or drop the focus.
@@ -441,14 +443,21 @@ test('Activity keeps the retained-history disclosure and focus the owner left op
     assert.equal(rebuilt.hasAttribute('open'), true, 'a refresh must not close what the owner opened');
     assert.equal(globalThis.document.activeElement.dataset.id, 'withdrawn');
     assert.equal(globalThis.document.activeElement.dataset.act, 'schedule-toggle');
+    assert.equal(globalThis.document.activeElement.textContent, 'Restore', 'withdrawal Restore must not become Restore hold');
+    rebuilt.querySelector('[data-hold-id]').focus();
+    await activity.refresh();
+    assert.equal(globalThis.document.activeElement.dataset.holdId, 'hold-1');
 
     // Collapsing it again is equally durable across the next refresh.
-    rebuilt.open = false;
+    schedules.querySelector('[data-activity-history]').open = false;
     await activity.refresh();
     assert.equal(section(mount, 'schedules').querySelector('[data-activity-history]').hasAttribute('open'), false);
     const objective = schedules.querySelector('[data-schedule-text]');
     objective.open = true;
     objective.querySelector('summary').focus();
+    const reads = calls.length;
+    await mount.fire('click', { target: objective.querySelector('summary') });
+    assert.equal(calls.length, reads, 'expanding authored text does not trigger a lifecycle action or refresh');
     await activity.refresh();
     assert.equal(schedules.querySelector('[data-schedule-text]').hasAttribute('open'), true);
     assert.equal(globalThis.document.activeElement.dataset.act, 'schedule-text');
@@ -478,12 +487,14 @@ test('Activity preserves disclosure and current focus as of render, not request 
     globalThis.document.body.appendChild(moved);
     moved.focus();
     details.open = true;
+    section(mount, 'schedules').querySelector('[data-schedule-text]').open = true;
     finishSchedules(response({ tasks: lifecycleSchedules }));
     await pending;
 
     const rebuilt = section(mount, 'schedules').querySelector('[data-activity-history]');
     assert.equal(rebuilt.hasAttribute('open'), true,
         'a render must retain disclosure state changed while its request was pending');
+    assert.equal(section(mount, 'schedules').querySelector('[data-schedule-text]').hasAttribute('open'), true);
     assert.equal(globalThis.document.activeElement, moved,
         'a render must not steal focus the owner moved while its request was pending');
 });
