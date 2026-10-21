@@ -391,7 +391,8 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                     _resolved_binding: Any = None,
                     _canonical_work_order_fingerprint: str = "",
                     _work_order_source_request: Any = None,
-                    _coordination_context: str = "") -> ToolResult:
+                    _coordination_context: str = "",
+                    _initial_bootstrap: bool = False) -> ToolResult:
     from ouroboros.claudexor_daemon import ensure_owned_gateway
     from ouroboros.delegate_evidence import record_start_blocked
     from ouroboros.gateways.claudexor import ClaudexorUnavailable
@@ -586,8 +587,7 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                               authority_source=authority_source, resource_ref=resource_ref,
                               execution_binding_fingerprint=binding_fingerprint, **continuation.custody)
         requested, claim_refusal = claimed_start_request(
-            drive, claim_target=(target_root if not recovering and authority_source == "skill_payload" else ""),
-            actor_ctx=ctx, enforce_actor_idle=not recovering,
+            drive, actor_ctx=ctx, initial_bootstrap=_initial_bootstrap and not recovering,
             run_id="", task_id=str(getattr(ctx, "task_id", "") or ""),
             idempotency_key=key, invocation_id=invocation_id,
             max_seconds=seconds, max_seconds_basis=seconds_basis, request=request_body, project_id=project_id,
@@ -1326,7 +1326,7 @@ def get_tools() -> List[ToolEntry]:
                 "verification receipts remain yours. Missing/unavailable routes refuse typed: explicitly "
                 "select a configured alternative, wait, narrow or report blocked. Direct starts require "
                 "subagent_id. Fresh configured work starts its leaf before the first round; restored work follows "
-                "its continuation receipt. Never duplicate a run. Replacement with prompt='' requires "
+                "its continuation receipt. Replay an unresolved start with retry_of; a new prompt is a new run. Replacement with prompt='' requires "
                 "verified cancellation/terminal settlement or a typed refusal proving no run exists. "
                 "Recover an unknown start with retry_of, without a new selector; continue finished work "
                 "with continue_from (see arguments). This call requests no extra Claudexor review panel; "
