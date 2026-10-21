@@ -57,9 +57,13 @@ export function questionPresentation(row = {}) {
             return { status: tr('question.status.closure_pending', 'Question closed · update pending') };
         }
         // An accepted late answer whose dispatch witness ended with its process: no retry knows more.
-        return { status: row.question_delivery.reason_code === 'late_answer_delivery_unknown'
+        // An answer in its task's mailbox waits for that task to read it, also through a pause.
+        const reason = row.question_delivery.reason_code;
+        return { status: reason === 'late_answer_delivery_unknown'
             ? tr('question.status.answer_unknown', 'Answer recorded · delivery unknown')
-            : tr('question.status.answer_pending', 'Answer recorded · delivery pending') };
+            : reason === 'awaiting_recipient_read'
+                ? tr('question.status.answer_saved', 'Answer saved · the task reads it when it continues')
+                : tr('question.status.answer_pending', 'Answer recorded · delivery pending') };
     }
     const key = lifecycleKey(row);
     // The English words stay the source (and the Python twin's); the install language reads
