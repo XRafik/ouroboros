@@ -441,9 +441,9 @@ def _call_consolidation_llm(
             if knowledge:
                 # A wait may have re-prepared this same call with another route;
                 # pin its final canonical view before executing the returned tools.
-                from ouroboros.transcript_prefix import count_helper_send
-                count_helper_send(knowledge.context, prepared_values["messages"], prepared_values["tools"],
-                                  round_idx=len(usages), usage=retired_usage)
+                from ouroboros.transcript_prefix import count_accepted_send
+                count_accepted_send(knowledge.context, prepared_values["messages"], prepared_values["tools"],
+                                    round_idx=len(usages), usage=retired_usage)
                 record_context_view(knowledge.context, prepared_values["messages"], prepared_values["tools"])
                 knowledge.accept_delivery()
             if isinstance(usage.get("claudexor"), dict):

@@ -202,8 +202,7 @@ def observe_send(
     current = [message_digest(message) for message in messages]
     reported = getattr(slot, "_reasoning_retirement_break", None)
     setattr(slot, "_reasoning_retirement_break", None)
-    previous = getattr(slot, DIGEST_ATTR, None)
-    before_tools = getattr(slot, TOOLS_DIGEST_ATTR, None)
+    previous, before_tools = _baseline(slot)  # a restored slot compares with its context observation
     current_tools = tools_digest(tools)
     setattr(slot, DIGEST_ATTR, current)
     setattr(slot, TOOLS_DIGEST_ATTR, current_tools)
@@ -326,14 +325,6 @@ def previous_cache_fact(usage: Mapping[str, Any]) -> str:
     return cache
 
 
-def history_drive_root(slot: Any) -> Optional[Path]:
-    """The installation's durable root even for an isolated execution drive."""
-    metadata = getattr(slot, "task_metadata", None)
-    metadata = metadata if isinstance(metadata, Mapping) else {}
-    root = metadata.get("budget_drive_root") or getattr(slot, "budget_drive_root", None) or getattr(slot, "drive_root", None)
-    return Path(root) if root else None
-
-
 def count_history_change(usage: dict, fact: Mapping[str, Any], *, drive_root: Any = None, task_id: str = "") -> None:
     """Count every change of sent history once; its sanction names the change, never exempts it.
 
@@ -348,8 +339,9 @@ def count_history_change(usage: dict, fact: Mapping[str, Any], *, drive_root: An
         _record_history_change(Path(drive_root), history_change_origin(fact), str(task_id or ""))
 
 
-def count_helper_send(slot: Any, messages: list, tools: Any, *, round_idx: int, usage: dict) -> None:
-    """A helper's accepted send counts a change of sent history as Main's observer does.
+def count_accepted_send(slot: Any, messages: list, tools: Any, *, round_idx: int, usage: dict) -> None:
+    """An accepted send outside Main's round observer (helpers, the forced final) counts a
+    change of sent history as that observer does.
 
     Its retirement before the send left the same identity on the slot, so a change it
     already counted is not counted twice; a model without signed reasoning still counts."""
@@ -358,8 +350,10 @@ def count_helper_send(slot: Any, messages: list, tools: Any, *, round_idx: int, 
         return
     from ouroboros.loop_messages import _emit_checkpoint_event
 
+    from ouroboros.preflight_receipts import canonical_data_root
+
     task_id = str(getattr(slot, "task_id", "") or "")
-    count_history_change(usage, fact, drive_root=history_drive_root(slot), task_id=task_id)
+    count_history_change(usage, fact, drive_root=canonical_data_root(slot), task_id=task_id)
     logs = getattr(slot, "drive_logs", None)
     logs = logs() if callable(logs) else (Path(slot.drive_root) / "logs" if getattr(slot, "drive_root", None) else None)
     _emit_checkpoint_event(getattr(slot, "event_queue", None), task_id, logs, fact)
@@ -367,8 +361,9 @@ def count_helper_send(slot: Any, messages: list, tools: Any, *, round_idx: int, 
 
 @functools.lru_cache(maxsize=1)
 def _running_code() -> str:
-    """The commit this process imported (an update restarts every process); a tree without
-    git names its VERSION, so two versions never share one record."""
+    """The commit checked out when this process first counted or read a change; an update
+    restarts every process, while a self-commit before its restart may file a few of the
+    old process's changes under the new commit. A tree without git names its VERSION."""
     from ouroboros.utils import get_git_info
 
     root = Path(__file__).resolve().parents[1]
@@ -470,7 +465,9 @@ def prepare_reasoning_for_send(slot: Any, messages: list, tools: Any, *, round_i
     main_context = context
     context = main_context if main_context is not None else slot
     task_id = str(getattr(context, "task_id", "") or "")
-    count_history_change(usage, checkpoint, drive_root=history_drive_root(slot), task_id=task_id)
+    from ouroboros.preflight_receipts import canonical_data_root
+
+    count_history_change(usage, checkpoint, drive_root=canonical_data_root(slot), task_id=task_id)
     progress = (getattr(main_context, "emit_progress", None) or getattr(slot, "_reasoning_retirement_progress", None)
                 if main_context is not None else None)
     if callable(progress):

@@ -423,8 +423,8 @@ class NativeToolRoundReviewExecutor(ReviewSlotExecutor):
 
     def _observe_sent_view(self, messages: list, schemas: list) -> None:
         from ouroboros.tools.compact_context import record_context_view
-        from ouroboros.transcript_prefix import count_helper_send
-        count_helper_send(self._inspection_ctx, messages, schemas, round_idx=self._rounds_used, usage=self._episode_usage)
+        from ouroboros.transcript_prefix import count_accepted_send
+        count_accepted_send(self._inspection_ctx, messages, schemas, round_idx=self._rounds_used, usage=self._episode_usage)
         record_context_view(self._inspection_ctx, messages, schemas)
         for receipt in self._tool_receipts:
             receipt["delivered"] = True

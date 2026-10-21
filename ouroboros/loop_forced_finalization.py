@@ -902,6 +902,10 @@ def _call_forced_model_once(
             getattr(owner_ctx, "task_metadata", {}), task_type=str(getattr(ctx, "task_type", "") or "")),
     )
     ctx.accumulated_usage["_forced_response_meta"] = response_meta
+    if owner_ctx is not None:  # the forced final is an accepted send outside the round observer
+        from ouroboros.transcript_prefix import count_accepted_send
+        count_accepted_send(owner_ctx, ctx.messages, getattr(ctx, "tool_schemas", None),
+                            round_idx=ctx.round_idx, usage=ctx.accumulated_usage)
     return str((final_msg or {}).get("content") or "").strip()
 
 

@@ -57,7 +57,8 @@ from ouroboros.loop_tool_execution import (
     reclaim_trace_refs,  # noqa: F401 -- the loop module keeps its historical import surface for the L-B leaves
 )
 from ouroboros.loop_llm_call import TRANSPORT_DEATHS_KEY, call_llm_with_retry, emit_llm_usage_event, forced_response_is_incomplete, forced_response_parts, provider_no_call_source  # noqa: F401 -- the loop module keeps its historical import surface for the L-B leaves
-from ouroboros.transcript_prefix import count_history_change, history_drive_root, observe_send as _observe_transcript_send
+from ouroboros.preflight_receipts import canonical_data_root
+from ouroboros.transcript_prefix import count_history_change, observe_send as _observe_transcript_send
 from ouroboros.transcript_prefix import retire_main_reasoning as _retire_main_reasoning  # noqa: F401 -- shared send boundary
 from ouroboros.delegate_hold import (
     close_hold as _delegate_hold_close,
@@ -370,15 +371,16 @@ def _record_transcript_prefix(ctx, messages, round_idx, accumulated_usage,
     """
     from ouroboros.tools.compact_context import record_context_view
 
+    # Before the view replaces it: a restored slot's baseline is its context observation.
+    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx, tools=tool_schemas)
     record_context_view(ctx, messages, tool_schemas, physical_capture=getattr(ctx, "_usable_main_capture", None))
     from ouroboros.context_input_selection import capture_historical_inputs
 
     capture_historical_inputs(ctx)
-    fact = _observe_transcript_send(ctx, messages, round_idx=round_idx, tools=tool_schemas)
     if not fact:
         return
     _emit_checkpoint_event(event_queue, task_id, drive_logs, fact)
-    count_history_change(accumulated_usage, fact, drive_root=history_drive_root(ctx), task_id=task_id)
+    count_history_change(accumulated_usage, fact, drive_root=canonical_data_root(ctx), task_id=task_id)
 
 
 def _measure_tool_result_batch(ctx, messages, schemas, *, round_id):

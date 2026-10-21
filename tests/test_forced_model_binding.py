@@ -382,3 +382,27 @@ def test_a_failed_probe_between_the_candidate_and_the_send_keeps_the_priced_byte
     payload = acting.gateway.uploads[0][0]
     assert payload["nativeContinuation"] == TURN and len(acting.gateway.creates) == 1
     assert acting.tools._ctx.model_turn_state is slot and slot.envelope is None
+
+
+@pytest.mark.parametrize("with_reasoning", [False, True])
+def test_the_forced_final_counts_a_change_once_with_or_without_signed_reasoning(acting, with_reasoning):
+    from ouroboros import transcript_prefix
+    from ouroboros.context_budget import LIVE_IMAGE_BLOCKS_HIGH_WATER
+    from ouroboros.loop_messages import _append_or_merge_user_content
+    from ouroboros.preflight_receipts import canonical_data_root
+    from ouroboros.tools.compact_context import record_context_view
+    from tests.test_reasoning_binding import signed
+
+    ctx, slot = acting.ctx, acting.tools._ctx
+    image = deepcopy(ctx.messages[1]["content"][0])
+    ctx.messages[1]["content"] = [deepcopy(image) for _ in range(LIVE_IMAGE_BLOCKS_HIGH_WATER)]
+    if with_reasoning:
+        ctx.messages.append({"role": "assistant", "content": "Prior response", "reasoning_details": [signed("thought")]})
+    before = deepcopy(ctx.messages)
+    record_context_view(slot, before, ctx.tool_schemas)
+    transcript_prefix.observe_send(slot, before, tools=ctx.tool_schemas, round_idx=1)
+    _append_or_merge_user_content(ctx.messages, [deepcopy(image)], slot=slot)
+    assert forced._call_forced_model_once(ctx) and len(acting.gateway.creates) == 1
+    assert ctx.accumulated_usage.get("prompt_prefix_breaks", 0) == 1
+    record = json.loads(transcript_prefix.history_changes_path(canonical_data_root(slot)).read_text())
+    assert record["origins"]["image_eviction"]["count"] == 1
