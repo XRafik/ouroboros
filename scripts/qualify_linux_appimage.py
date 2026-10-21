@@ -62,11 +62,14 @@ def descendants(pid):
 def find_window(pattern, evidence):
     """Retain the actual X11 observation instead of masking a failed command."""
     args = ['xdotool', 'search', '--onlyvisible', '--name', pattern]
-    observed = subprocess.run(args, text=True, capture_output=True, timeout=10)
+    # The clean image's C locale cannot convert GTK's UTF8_STRING window title.
+    # Keep the application environment unchanged; only the X11 reader uses UTF-8.
+    reader_env = {**os.environ, 'LC_ALL': 'C.UTF-8'}
+    observed = subprocess.run(args, text=True, capture_output=True, timeout=10, env=reader_env)
     (evidence / 'window-search.json').write_text(json.dumps({
         'argv': args, 'returncode': observed.returncode,
         'stdout': observed.stdout, 'stderr': observed.stderr,
-        'DISPLAY': os.environ.get('DISPLAY'),
+        'DISPLAY': os.environ.get('DISPLAY'), 'reader_locale': reader_env['LC_ALL'],
     }, indent=2))
     if observed.returncode not in (0, 1) or observed.stderr:
         raise RuntimeError(f'X11 search failed: {observed.returncode}: {observed.stderr}')
@@ -170,9 +173,14 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     return json.load(response)
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
-                # xdotool may read the legacy X11 title with a substituted Unicode dash.
+                # Match the real GTK title through a UTF-8-capable X11 reader.
                 setup = wait_for(lambda: find_window('^Ouroboros.*Setup$', evidence), 'Setup', process=process)
-                title = run('xprop', '-id', setup.splitlines()[0], '_NET_WM_NAME', 'WM_NAME')
+                legacy = subprocess.run(['xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros.*Setup$'],
+                                        text=True, capture_output=True, timeout=10, env={**os.environ, 'LC_ALL': 'C'})
+                (evidence / 'window-search-C-control.json').write_text(json.dumps({
+                    'returncode': legacy.returncode, 'stdout': legacy.stdout, 'stderr': legacy.stderr}, indent=2))
+                title = run('xprop', '-id', setup.splitlines()[0], '_NET_WM_NAME', 'WM_NAME',
+                            env={**os.environ, 'LC_ALL': 'C.UTF-8'})
                 (evidence / 'setup-title.txt').write_text(title)
                 assert 'Ouroboros' in title and 'Setup' in title, title
                 # Only add a bridge witness; retain the shipped page and its actual UI.
