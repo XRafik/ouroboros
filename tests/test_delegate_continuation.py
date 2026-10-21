@@ -752,5 +752,5 @@ def test_no_resume_causes_are_untouched_by_the_continuation_seam():
 
 @pytest.mark.parametrize("cause", ["vendor_limit", "pool_exhausted"])
 def test_receipt_lines_tolerate_partial_rows(cause):
-    line = continuation._receipt_line("run-1", {"carrier": "native", "cause": cause})
+    line = continuation._receipt_line(frozenset({"run-1"}), {"carrier": "native", "cause": cause})
     assert line.startswith("try None (?): native after " + cause) and "model unattested" in line
