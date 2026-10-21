@@ -329,7 +329,7 @@ def get_tools() -> List[ToolEntry]:
                 "text, naming the skill or knowledge with its living procedure, or a note's verbatim words "
                 "shown without waking a model. Every change requires a reason and is audited. Update "
                 "preserves policy holds and paused state; its receipt says if an unstarted claim was "
-                "reconsidered. A consumed one-shot can re-arm only with a new run_at. "
+                "reconsidered. A consumed one-shot re-arms only with a new run_at or a cron. "
                 "disable/delete stop future dispatch; admitted work keeps running. delete withdraws the "
                 "record, restorable for a while and retained until its accepted work settles and retention "
                 "expires. Generic restore cancels withdrawal or enables a paused row; a consumed one-shot "
