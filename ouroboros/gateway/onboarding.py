@@ -851,7 +851,7 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
         body = None
     if not isinstance(body, dict):
         return unsaved_error("JSON body must be an object.", 400)
-    from ouroboros.gateway.settings import ALLOW_EMPTY_REVIEW_POOL, REVIEW_LANES_KEY, review_pool_save_judgement
+    from ouroboros.gateway.settings import ALLOW_EMPTY_REVIEW_POOL, REVIEW_LANES_KEY, review_pool_save_judgement, _run_settings_writer
 
     allow_empty_pool = body.get(ALLOW_EMPTY_REVIEW_POOL) is True
     owner_draft, draft_error = _configured_owner_draft(body)
@@ -860,7 +860,9 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
 
     # Complete startup migrations before capturing freshness; our own migration is not a concurrent edit.
     from ouroboros.config import load_settings
-    await asyncio.to_thread(load_settings)
+    migration = await _run_settings_writer(lambda *_: load_settings(), request, None)
+    if isinstance(migration, JSONResponse):
+        return migration
     # The fingerprint still precedes the deciding read: concurrent owner changes must refuse the save.
     read_fingerprint = settings_document_digest()
     old_settings, current, error = _prepared_settings(body)
@@ -986,8 +988,6 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
 
     # Lazy, in the direction ``_persist`` already imports (settings.py imports
     # nothing from this module).
-    from ouroboros.gateway.settings import _run_settings_writer
-
     return await _run_settings_writer(_complete_locked, request, body)
 
 
