@@ -1455,6 +1455,8 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
             const receipt = e?.body || e?.payload;
             const confirmedSaved = saved || receipt?.saved === true;
             saveOutcomeUnknown = !confirmedSaved && receipt?.saved !== false;
+            // The checker's keys are saved already: the next Save compares against them, never re-sends them.
+            if (checkerSaved && !confirmedSaved) Object.assign(currentSettings, ownerDraft.safety.checker.settings);
             setStatus(confirmedSaved
                 ? `Settings were saved, but a later step failed: ${e.message}. Your draft is kept.`
                 : saveOutcomeUnknown

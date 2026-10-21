@@ -157,7 +157,8 @@ function checkerValueText(key, value) {
  * loaded document, the roster carrying the second-check mark. Outside Cyber Pro the generic save refuses any
  * change to the checker they resolve (the Safety Supervisor slot, else Light, else Main), so they travel in one
  * owner transaction instead; an unchanged key stays where it was and is never sent there. Returns
- * `{settings, saved}` (the keys to send, the sentence once saved) or null.
+ * `{settings, saved, allowEmptyReviewPool}` (the keys to send, the sentence once saved, the owner's empty-pool
+ * confirmation when the roster moved) or null.
  */
 export function takeCheckerChanges(body, current = {}, mark = recheckDraft()) {
     const settings = {};
@@ -168,9 +169,12 @@ export function takeCheckerChanges(body, current = {}, mark = recheckDraft()) {
     const markChanged = mark !== null && mark !== recheckSaved();
     const roster = parseRoster(body.OUROBOROS_SUBAGENTS ?? (markChanged ? current.OUROBOROS_SUBAGENTS : null));
     const nextRoster = roster && markChanged ? markRecheckRow(roster, mark) : roster;
+    let allowEmptyReviewPool = false;
     if (nextRoster && checkerValueText('OUROBOROS_SUBAGENTS', nextRoster) !== checkerValueText('OUROBOROS_SUBAGENTS', current.OUROBOROS_SUBAGENTS)) {
         settings.OUROBOROS_SUBAGENTS = nextRoster;
-        delete body.allow_empty_review_pool;  // the roster's own save flag leaves with it
+        // The roster's own confirmation (an empty review pool) travels with it to the owner transaction.
+        allowEmptyReviewPool = body.allow_empty_review_pool === true;
+        delete body.allow_empty_review_pool;
     }
     const keys = Object.keys(settings);
     if (!keys.length) return null;
@@ -180,7 +184,7 @@ export function takeCheckerChanges(body, current = {}, mark = recheckDraft()) {
         SAFETY_MODEL_KEY in settings ? (model ? `Safety Supervisor model saved as ${modelName(model)}.` : 'Safety Supervisor uses the Light model.') : '',
         markChanged && settings.OUROBOROS_SUBAGENTS ? (mark ? 'Second check saved.' : 'Second check turned off.') : '',
     ];
-    return { settings, saved: saved.filter(Boolean).join(' ') };
+    return { settings, saved: saved.filter(Boolean).join(' '), allowEmptyReviewPool };
 }
 
 /**
@@ -199,7 +203,7 @@ export function safetyOwnerDraft(root, body = {}, current = {}) {
 /** Save's first write: the checker's changes in one owner transaction; a refusal throws the server's sentence. */
 export async function saveSafetyChecker(draft) {
     if (!draft?.checker) return false;
-    await saveCheckerSettings(draft.checker.settings);
+    await saveCheckerSettings(draft.checker.settings, { allowEmptyReviewPool: draft.checker.allowEmptyReviewPool });
     return true;
 }
 

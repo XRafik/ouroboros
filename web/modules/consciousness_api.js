@@ -238,9 +238,11 @@ export const SAFETY_MODEL_KEYS = Object.freeze([
     'OUROBOROS_SUBAGENTS',
 ]);
 
-/** One owner transaction for any of SAFETY_MODEL_KEYS; a refusal throws the server's sentence. */
-export async function saveCheckerSettings(settings) {
-    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), 'The change');
+/** One owner transaction for any of SAFETY_MODEL_KEYS; a refusal throws the server's sentence. A roster that
+ *  leaves no reviewer saves only with the owner's confirmation, sent beside the settings as the generic save does. */
+export async function saveCheckerSettings(settings, { allowEmptyReviewPool = false } = {}) {
+    const body = allowEmptyReviewPool ? { settings, allow_empty_review_pool: true } : { settings };
+    return ownerAnswer(await jsonPost('/api/owner/safety-model', body), 'The change');
 }
 
 /** The Agents roster as saved (`OUROBOROS_SUBAGENTS`, a JSON string or object), or null when unreadable. */

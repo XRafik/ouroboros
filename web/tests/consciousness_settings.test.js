@@ -288,7 +288,15 @@ function resolvedChecker(doc) {
 function settingsServer(stored) {
     const state = { ...stored };
     const stub = stubFetch((url, body) => {
-        if (url === '/api/owner/safety-model') { Object.assign(state, body.settings); return { ok: true }; }
+        if (url === '/api/owner/safety-model') {
+            // The endpoint's own judgement: a roster with no Reviewer row saves only with the owner's confirmation.
+            const roster = body.settings.OUROBOROS_SUBAGENTS;
+            if (roster && !roster.items.some((item) => item.review_eligible) && body.allow_empty_review_pool !== true) {
+                return { status: 400, json: { saved: false, code: 'empty_review_pool', error: 'No row is marked Reviewer.' } };
+            }
+            Object.assign(state, body.settings);
+            return { ok: true };
+        }
         if (url === '/api/settings' && resolvedChecker({ ...state, ...body }) !== resolvedChecker(state)) {
             return { status: 400, json: { saved: false, error: 'The resolved Safety Supervisor is owner-controlled; use /api/owner/safety-model.' } };
         }
@@ -359,10 +367,32 @@ test('the Agents roster still saves, with the second-check mark in the same one 
         result = await saveSafetyOwnerChanges(draft, LOADED);
     } finally { server.restore(); }
     assert.deepEqual(server.calls.map(({ url }) => url), ['/api/owner/safety-model', '/api/settings']);
-    assert.deepEqual(server.calls[0].body, { settings: { OUROBOROS_SUBAGENTS: markRecheckRow(edited, 'reader') } });
+    assert.deepEqual(server.calls[0].body, { settings: { OUROBOROS_SUBAGENTS: markRecheckRow(edited, 'reader') },
+        allow_empty_review_pool: true }, "the roster's own confirmation travels with it");
     assert.deepEqual(server.state.OUROBOROS_SUBAGENTS.items.map((item) => [item.subagent_id, item.rechecks_flags]),
         [['packet_checker', false], ['reader', true]], 'the new row is kept and carries the mark');
     assert.equal(result.saved, 'Second check saved.');
+});
+
+test('«Save without reviewers»: the owner\'s tick reaches the owner transaction, and without it the server refuses', async () => {
+    syncRecheckState(recheckFromSettings(LOADED), null);
+    const unmarked = { ...ROSTER(), items: ROSTER().items.map((item) => ({ ...item, review_eligible: false })) };
+    for (const ticked of [true, false]) {
+        const server = settingsServer(LOADED);
+        try {
+            const body = { ...collected(), OUROBOROS_SUBAGENTS: unmarked, ...(ticked ? { allow_empty_review_pool: true } : {}) };
+            const draft = safetyOwnerDraft(ownerRoot(), body, LOADED);
+            assert.equal('allow_empty_review_pool' in body, false);
+            if (ticked) {
+                assert.equal(await saveSafetyChecker(draft), true);
+                assert.equal(server.calls[0].body.allow_empty_review_pool, true);
+                assert.deepEqual(server.state.OUROBOROS_SUBAGENTS.items.map((item) => item.review_eligible), [false]);
+            } else {
+                await assert.rejects(saveSafetyChecker(draft), /No row is marked Reviewer/);
+                assert.equal('allow_empty_review_pool' in server.calls[0].body, false);
+            }
+        } finally { server.restore(); }
+    }
 });
 
 test('a refused checker save shows the server\'s sentence; the generic save is not reached', async () => {
