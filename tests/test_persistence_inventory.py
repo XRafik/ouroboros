@@ -822,9 +822,11 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
 # 408 -> 409: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
 # the switch helper (body adoption row).
-# 409 -> 410: ``state/sent_history_changes.json``, the running code's record of sent-history changes
+# 409 -> 414: the place seam (one path the inherited pin missed) plus focus, the gate directory and its
+# author-census member family, documented in section 2.
+# 414 -> 415: ``state/sent_history_changes.json``, the running code's record of sent-history changes
 # (``ouroboros/transcript_prefix.py``, its own section-2 row).
-EXPECTED_SCAN_PATHS = 410
+EXPECTED_SCAN_PATHS = 415
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
