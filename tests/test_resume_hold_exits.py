@@ -21,7 +21,7 @@ def test_release_consumers_do_not_branch_on_hold_names():
     offenders = []
     for directory in ("supervisor", "ouroboros"):
         for path in (root / directory).rglob("*.py"):
-            if path.name == "work_stop.py":
+            if path.name in {"work_stop.py", "work_stop_migration.py"}:
                 continue
             source = path.read_text(encoding="utf-8")
             assert "SELECTABLE_HOLD_REASONS" not in source and "OWNER_ROOT_RESUME_HOLDS" not in source, path

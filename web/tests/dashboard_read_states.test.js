@@ -167,6 +167,10 @@ function setup(t) {
 
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 const queueUrl = '/api/tasks?queue_only=1';
+// Explicit gateway projection fixtures; Activity no longer re-derives stops from queue reason names.
+const projectedWork = (id, activity = 'working', extra = {}) => ({ work_id: id, confirmed: true,
+    activity, transition: 'none', because: [], tails: [], episode: { task_id: id, live: true },
+    controls: activity === 'paused' ? [{ action: 'resume', target: id }] : [], ...extra });
 const backgroundUrl = '/api/state';
 const schedulesUrl = '/api/schedules';
 const logUrl = (name) => `/api/logs/${name}?limit=150`;
@@ -514,7 +518,7 @@ test('Activity unites live direct turns with queue identities and preserves queu
     const now = Date.now;
     Date.now = () => 100000;
     t.after(() => { Date.now = now; });
-    routes.set(backgroundUrl, response({ bg_consciousness_enabled: true,
+    routes.set(backgroundUrl, response({ bg_consciousness_enabled: true, works: [projectedWork('queued-1'), projectedWork('paused-1', 'paused')],
         active_chat_activities_complete: false, active_chat_activities: [
             { activity_id: 'direct-1', kind: 'direct_chat', phase: 'thinking', started_at: 88 },
             { activity_id: 'queued-1', kind: 'direct_chat', phase: 'thinking', started_at: 80 },
@@ -528,8 +532,8 @@ test('Activity unites live direct turns with queue identities and preserves queu
     const queue = section(mount, 'queue');
     const rows = queue.querySelectorAll('.activity-row');
     assert.equal(rows.length, 3, 'partial positive census adds exactly the missing direct identity');
-    assert.match(rows[0].textContent, /Queue title[\s\S]*running · task · 9s/);
-    assert.match(rows[1].textContent, /Paused work[\s\S]*paused \(budget\)/);
+    assert.match(rows[0].textContent, /Queue title[\s\S]*Working · task · 9s/);
+    assert.match(rows[1].textContent, /Paused work[\s\S]*Paused/);
     assert.equal(rows[1].querySelector('button').dataset.budgetPaused, '1');
     // A live census row says its state in the chip's own word (translated at its producer), never the census code.
     assert.equal(rows[2].querySelector('[data-i18n-skip]').textContent, 'Thinking');
@@ -550,18 +554,22 @@ test('Activity names work held by an application stop as held, never as a money 
         { task: { id: 'saved-1', title: 'Saved before Quit', _budget_pause_hold: { reason: 'saved_work_hold' } } },
         { task: { id: 'restart-1', title: 'Held by Restart', _budget_pause_hold: { reason: 'owner_restart_hold' } } },
         { task: { id: 'released-1', title: 'Resumed already',
-            _budget_pause_hold: { reason: 'saved_work_hold', selected: true } } },
+            _resume_selection: { selected_by: 'owner' } } },
     ] } }));
+    routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, works: [
+        projectedWork('saved-1', 'paused', { because: [{ code: 'saved_on_stop', text: 'Saved when the app stopped' }] }),
+        projectedWork('restart-1', 'paused', { because: [{ code: 'after_restart', text: 'Held after a restart' }] }),
+        projectedWork('released-1', 'queued')], active_chat_activities: [] }));
     await initActivity({ mount, ws }).refresh();
     const rows = section(mount, 'queue').querySelectorAll('.activity-row');
     assert.equal(rows.length, 3);
     for (const row of rows.slice(0, 2)) {
-        assert.match(row.textContent, /held after Restart/);
+        assert.match(row.textContent, /Paused/);
         assert.doesNotMatch(row.textContent, /budget/);
         assert.equal(row.querySelector('button').dataset.budgetPaused, '1', 'the same Resume is offered');
     }
     // The owner's Resume released this hold: it is neither held nor paused any more.
-    assert.doesNotMatch(rows[2].textContent, /held after Restart|paused/);
+    assert.doesNotMatch(rows[2].textContent, /Held after a restart|Paused/);
     assert.equal(rows[2].querySelector('button').dataset.budgetPaused, undefined);
 });
 
@@ -816,7 +824,7 @@ test('saved Pause with unreadable tree authority remains unknown in Activity and
     routes.set(backgroundUrl, response({ bg_consciousness_enabled: false,
         active_chat_activities: [{ activity_id: 'held', phase: 'unknown' }], active_chat_activities_complete: false }));
     await initActivity({ mount, ws }).refresh();
-    assert.match(section(mount, 'queue').textContent, /pause status unknown/);
+    assert.match(section(mount, 'queue').textContent, /Activity unconfirmed/);
     assert.doesNotMatch(section(mount, 'queue').textContent, /paused/);
     assert.equal(section(mount, 'queue').querySelector('[data-act="task-control"]').dataset.budgetPaused, undefined);
     let body = '';
@@ -836,11 +844,13 @@ test('Activity Resume follows the root census while owner Pause is settling', as
     for (const phase of ['budget_pausing', 'unknown', undefined, 'budget_paused']) {
         routes.set(backgroundUrl, response({ bg_consciousness_enabled: false,
             active_chat_activities: phase ? [{ activity_id: 'root', phase }] : [],
-            active_chat_activities_complete: phase !== undefined }));
+            active_chat_activities_complete: phase !== undefined,
+            works: phase?.startsWith('budget_') ? [projectedWork('root', 'paused', {
+                members: { states: { child: { activity: 'paused', confirmed: true } } } })] : [] }));
         await activity.refresh();
         for (const id of ['root', 'child']) {
             const button = section(mount, 'queue').querySelector(`[data-id="${id}"]`);
-            assert.equal(button.dataset.budgetPaused, phase === 'budget_paused' ? '1' : undefined, `${id}: ${phase}`);
+            assert.equal(button.dataset.budgetPaused, phase?.startsWith('budget_') ? '1' : undefined, `${id}: ${phase}`);
         }
     }
 });
@@ -853,17 +863,20 @@ test('Activity names saved sleep without claiming a budget pause and preserves o
         _budget_pause: { reason: 'sleep' },
     } }] };
     routes.set(queueUrl, response({ queue }));
+    routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, works: [projectedWork('sleeping-root', 'waiting', {
+        because: [{ code: 'sleeping', text: 'Sleeping until it is woken' }] })] }));
     const activity = initActivity({ mount, ws });
     await activity.refresh();
-    assert.match(section(mount, 'queue').textContent, /sleeping/);
+    assert.match(section(mount, 'queue').textContent, /Sleeping/);
     assert.doesNotMatch(section(mount, 'queue').textContent, /paused \(budget\)/);
-    assert.equal(section(mount, 'queue').querySelector('[data-act="task-control"]').dataset.budgetPaused, '1');
+    assert.equal(section(mount, 'queue').querySelector('[data-act="task-control"]').dataset.budgetPaused, undefined);
     queue.budget_root_fences = [{ root_task_id: 'sleeping-root', status: 'paused', cause: 'owner_pause' }];
     routes.set(backgroundUrl, response({ bg_consciousness_enabled: false,
+        works: [projectedWork('sleeping-root', 'paused')],
         active_chat_activities: [{ activity_id: 'sleeping-root', phase: 'budget_paused' }] }));
     await activity.refresh();
-    assert.match(section(mount, 'queue').textContent, /paused/);
-    assert.doesNotMatch(section(mount, 'queue').textContent, /sleeping|budget/);
+    assert.match(section(mount, 'queue').textContent, /Paused/);
+    assert.doesNotMatch(section(mount, 'queue').textContent, /Sleeping|budget/);
 });
 
 // Census rows as gateway/state.py publishes them: the row's own stored status, axes and checkpoint.
@@ -894,6 +907,9 @@ test('Activity shows a row\'s own known outcome first and its unfinished finaliz
         pending: [{ id: 'queued-root', type: 'task', task: { id: 'queued-root', root_task_id: 'queued-root', title: 'Queued work' } }],
     } }));
     routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, active_chat_activities_complete: true,
+        works: [...['failed-root', 'done-root', 'warn-root', 'cancelled-root', 'live-root'].map((id) => projectedWork(id, 'working')),
+            projectedWork('queued-root', 'queued'), projectedWork('late-root', 'paused'),
+            projectedWork('tree', 'working', { members: { states: { 'child-1': { activity: 'working', confirmed: true } } } })],
         active_chat_activities: [
             outcomeRow('failed-root', 'failed', 'infra_failed', 'finalizing', 'running'),
             outcomeRow('done-root', 'completed', 'ok', 'finalizing', 'pending_once'),
@@ -917,13 +933,13 @@ test('Activity shows a row\'s own known outcome first and its unfinished finaliz
         label: 'Task status: Done with warnings', secondary: '' });
     assert.equal(chip(rowOf(mount, 'cancelled-root')).text, 'Stopped');
     // No known outcome: the queue's own words, exactly as before.
-    for (const [id, word] of [['live-root', /running · task · 9s/], ['queued-root', /Queued work[\s\S]*pending · task/]]) {
+    for (const [id, word] of [['live-root', /Working · task · 9s/], ['queued-root', /Queued work[\s\S]*Queued · task/]]) {
         assert.equal(chip(rowOf(mount, id)), null, id);
         assert.match(rowOf(mount, id).textContent, word);
     }
     // A child never borrows its root's result, even while that root's census row is Failed.
     assert.equal(chip(rowOf(mount, 'child-1')), null);
-    assert.match(rowOf(mount, 'child-1').textContent, /Child of the failed root[\s\S]*running/);
+    assert.match(rowOf(mount, 'child-1').textContent, /Child of the failed root[\s\S]*Working/);
     assert.doesNotMatch(rowOf(mount, 'child-1').textContent, /Failed/);
     // Census-only rows: a known answer with late work, a late Pause beside its Done, a plain turn.
     assert.deepEqual(chip(rowOf(mount, 'answered-direct')).text + '|' + chip(rowOf(mount, 'answered-direct')).secondary,
@@ -987,13 +1003,14 @@ test('Activity keeps pause words for members and paints a host hold beside a kno
     const activities = [outcomeRow('paused-root', 'completed', 'ok', 'budget_paused', 'paused', { pause_cause: 'owner' }),
         outcomeRow('held-root', 'failed', 'infra_failed', 'finalizing', 'running', { project_admission_hold: hold })];
     routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, active_chat_activities: activities,
-        active_chat_activities_complete: false }));
+        active_chat_activities_complete: false, works: [projectedWork('paused-root', 'paused', {
+            members: { states: { 'member-1': { activity: 'paused', confirmed: true } } } })] }));
     const activity = initActivity({ mount, ws });
     await activity.refresh();
     // The root's own row knows its answer; its member keeps the tree's pause word and Resume.
     assert.equal(chip(rowOf(mount, 'paused-root')).text, 'Done');
     assert.equal(chip(rowOf(mount, 'member-1')), null);
-    assert.match(rowOf(mount, 'member-1').textContent, /paused/);
+    assert.match(rowOf(mount, 'member-1').textContent, /Paused/);
     for (const id of ['paused-root', 'member-1']) {
         assert.equal(section(mount, 'queue').querySelector(`[data-id="${id}"]`).dataset.budgetPaused, '1', id);
     }
@@ -1001,11 +1018,11 @@ test('Activity keeps pause words for members and paints a host hold beside a kno
     assert.deepEqual(chip(rowOf(mount, 'held-root')).secondary, hold.label);
     assert.equal(section(mount, 'queue').querySelectorAll('img').length, 0);
     assert.doesNotMatch(section(mount, 'queue').textContent, /Nothing running/);
-    // Without a census the queue rows keep their words; nothing is erased or called idle.
+    // Without a census the rows stay visible, but their stop is unconfirmed.
     routes.set(backgroundUrl, response({}, 503));
     await activity.refresh();
     assert.equal(section(mount, 'queue').querySelectorAll('[data-activity-phase]').length, 0);
-    assert.match(rowOf(mount, 'paused-root').textContent, /paused/);
+    assert.match(rowOf(mount, 'paused-root').textContent, /Activity unconfirmed/);
     assert.equal(section(mount, 'queue').querySelectorAll('.activity-row').length, 2);
 });
 
@@ -1026,6 +1043,9 @@ test('Activity keeps a queue row\'s own wait beside its known outcome and shows 
         ],
     } }));
     routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, active_chat_activities_complete: true,
+        works: [projectedWork('sleep-root', 'waiting', { because: [{ code: 'sleeping', text: 'Sleeping until it is woken' }] }),
+            projectedWork('live-model'), projectedWork('held-queue'), projectedWork('restart-root', 'paused', {
+                because: [{ code: 'saved_on_stop', text: 'Saved when the app stopped' }] }), projectedWork('pending-root', 'queued')],
         active_chat_activities: [
             outcomeRow('sleep-root', 'completed', 'ok', 'finalizing', 'running'),
             outcomeRow('live-model', 'completed', 'ok', 'working', 'running',
@@ -1037,10 +1057,10 @@ test('Activity keeps a queue row\'s own wait beside its known outcome and shows 
     await initActivity({ mount, ws }).refresh();
     const pair = (id) => [chip(rowOf(mount, id)).text, chip(rowOf(mount, id)).secondary];
     // A queue wait outranks the census's merely active phase; the outcome still leads.
-    assert.deepEqual(pair('sleep-root'), ['Done', 'sleeping']);
-    assert.deepEqual(pair('restart-root'), ['Done', 'held after Restart']);
-    assert.deepEqual(pair('pending-root'), ['Failed', 'pending']);
-    assert.equal(chip(rowOf(mount, 'sleep-root')).label, 'Task status: Done, sleeping');
+    assert.deepEqual(pair('sleep-root'), ['Done', 'Waiting']);
+    assert.deepEqual(pair('restart-root'), ['Done', 'Paused']);
+    assert.deepEqual(pair('pending-root'), ['Failed', 'Queued']);
+    assert.equal(chip(rowOf(mount, 'sleep-root')).label, 'Task status: Done, Waiting');
     // Activity carries no model-call telemetry: finalization stays a generic fact.
     assert.deepEqual(pair('live-model'), ['Done', 'Finalizing…']);
     assert.doesNotMatch(section(mount, 'queue').textContent, /request|response/i);
@@ -1461,11 +1481,14 @@ test('Activity says why a held Continue waits, keeps its Resume, and never calls
             detail: "the interrupted task's own work is not proven settled; this Continue waits",
             predecessor_task_id: 'pred-1', blockers: [{ kind: 'delegated_run', task_id: 'pred-1', run_id: 'run-leaf',
                 invocation_id: '', state: 'running', stop_outcome: '', source: 'delegated_subagent' }] } } }] } }));
+    routes.set(backgroundUrl, response({ bg_consciousness_enabled: false, works: [projectedWork('pred-1-s1', 'waiting', {
+        because: [{ code: 'earlier_work_unconfirmed', text: "Continue starts when the earlier attempt's work is confirmed finished" }],
+        controls: [{ action: 'resume', target: 'pred-1-s1' }] })] }));
     const activity = initActivity({ mount, ws });
     await activity.refresh();
     const row = section(mount, 'queue').querySelector('.activity-row');
     assert.match(row.querySelector('.activity-sub').textContent,
-        /^held: earlier work not proven settled · delegated run run-leaf is running$/);
+        /^Waiting · Continue starts when the earlier attempt&#39;s work is confirmed finished$/);
     assert.ok(row.classList.contains('activity-held'), 'its cause wraps instead of ending in an ellipsis');
     assert.doesNotMatch(row.textContent, /paused \(budget\)/);
     const control = row.querySelector('[data-act="task-control"]');

@@ -21,6 +21,7 @@ from typing import Any, Optional
 from ouroboros.contracts.schema_versions import SCHEMA_VERSION_KEY
 from ouroboros.utils import utc_now_iso
 from ouroboros.subagents import subagent_intent_fields
+from supervisor.work_stop_migration import FORMAT_KEY, FORMAT_VERSION, normalize_for_restore
 from supervisor.restart_retention import exact_pause_row as _exact_pause_row
 from supervisor.task_admission import (
     restore_terminalization_retry,
@@ -214,6 +215,7 @@ def persist_queue_snapshot(reason: str = "") -> bool:
             })
         payload = {
             SCHEMA_VERSION_KEY: QUEUE_SNAPSHOT_SCHEMA_VERSION,
+            FORMAT_KEY: FORMAT_VERSION,
             "pending_count": len(pending_items), "running_count": len(running_items),
             "reaping_count": reaping_count,
             "worker_total": worker_total,
@@ -958,6 +960,7 @@ def _restore_pending(key: str, max_age_sec: int, terminalized: Optional[list]) -
     try:
         from ouroboros.queue_observation import load_queue_document, queue_stamp
         snap = load_queue_document(_queue().DRIVE_ROOT)
+        normalized = normalize_for_restore(snap, _queue().DRIVE_ROOT)
         # An unreadable snapshot (its marker reads as empty) names no queue row; a direct root queue init's
         # handover names as caught still restores, over an empty, stale queue (the gate below).
         unread = bool(snap.get("_snapshot_invalid") or snap.get("_snapshot_missing"))
@@ -1033,7 +1036,7 @@ def _restore_pending(key: str, max_age_sec: int, terminalized: Optional[list]) -
                                   direct_roots_incomplete=direct_roots.get("incomplete", False))
             if not unread:  # every row of a READ snapshot decided: this process's publications may replace it
                 _RESTORED.add(key)
-            if restored > 0:
+            if restored > 0 or normalized:
                 _queue().persist_queue_snapshot(reason="queue_restored")
             return restored
         if stale and not snapshot_pending and not restored:
@@ -1041,6 +1044,8 @@ def _restore_pending(key: str, max_age_sec: int, terminalized: Optional[list]) -
                                   direct_roots_incomplete=direct_roots.get("incomplete", False))
             if not unread:  # settling caught direct roots grants no custody of an unread snapshot
                 _RESTORED.add(key)
+                if normalized:
+                    _queue().persist_queue_snapshot(reason="work_stop_format_normalized")
             return 0
 
         skipped_terminal, invalid_depth_restore = 0, []
@@ -1244,7 +1249,7 @@ def _restore_pending(key: str, max_age_sec: int, terminalized: Optional[list]) -
         )
         if not unread:
             _RESTORED.add(key)
-        if restored > 0 or skipped_terminal > 0 or invalid_depth_restore or blocked_restore:
+        if restored > 0 or skipped_terminal > 0 or invalid_depth_restore or blocked_restore or normalized:
             _queue().persist_queue_snapshot(reason="queue_restored")
         return restored
     except Exception:

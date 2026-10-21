@@ -66,7 +66,7 @@ with no task id or no durable root is excluded, and loudly
 Every refusal to restore, grant or dispatch is typed and RETAINS the pause: a
 corrupt or missing source, an unwritable revocation, a lifted root fence over
 a zero-dispatch sibling all become a durable non-dispatch HOLD on the queue
-row (``events_budget.budget_hold_fact``) beside the saved pause, never a
+row (``work_stop.hold_fact``) beside the saved pause, never a
 cancellation and never a silent dispatch; a grant is bound to ONE pause id
 and ONE resume generation, so ``pauseA -> Resume -> pauseB -> restart`` can
 never dispatch on the earlier grant. This module adds no scheduler, ledger or
@@ -1116,13 +1116,7 @@ def exact_pause_marker(row: Dict[str, Any], *, default_root: str = "") -> Dict[s
 # --- the queue row's selection against a root latch (assignment AND reservation) ----------
 
 BUDGET_HOLD_KEY = "_budget_pause_hold"
-
-
-def budget_hold_fact(task) -> Optional[Dict[str, Any]]:
-    """Current decision / writer wait. Refusals belong to continuation custody."""
-    from ouroboros.work_stop import hold_fact
-
-    return hold_fact(task)
+"""Historical name: the current explicit stop/writer wait, removed on release; never a selection."""
 
 
 def budget_fence_selected(task: Any, fence: Any) -> bool:
@@ -1144,11 +1138,11 @@ def budget_fence_selected(task: Any, fence: Any) -> bool:
     later sends. Dispatch still rechecks the live root grant
     (``events_budget.budget_resume_dispatch_allowed``).
     """
-    from ouroboros.work_stop import continuation_refusal
+    from ouroboros.work_stop import continuation_refusal, hold_fact
 
     fence_id = str((fence or {}).get("fence_id") or "") if isinstance(fence, dict) else ""
     if (not isinstance(task, dict) or not fence_id or isinstance(task.get("_budget_pause"), dict)
-            or continuation_refusal(task) or task.get("_budget_pause_consumed") or budget_hold_fact(task) is not None):
+            or continuation_refusal(task) or task.get("_budget_pause_consumed") or hold_fact(task) is not None):
         return False
     handoff = task.get("_budget_pause_resume")
     if isinstance(handoff, dict):

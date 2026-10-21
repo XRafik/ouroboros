@@ -63,7 +63,7 @@ def _recorded_admission(result: Dict[str, Any], predecessor: str, nonce: str) ->
 
 
 def _replay(q: Any, predecessor: str, nonce: str, successor: str) -> Optional[Dict[str, Any]]:
-    from ouroboros.budget_pause import budget_hold_fact
+    from ouroboros.work_stop import hold_fact as budget_hold_fact
     from ouroboros.owner_continue import binding_sha, mark_claim_admitted
     from ouroboros.task_results import load_task_result, write_task_result
 

@@ -64,7 +64,7 @@ RUNNING = {"kind": "delegated_run", "run_id": "run-leaf", "invocation_id": "", "
     ("running_and_unknown_start", [RUNNING, UNBOUND]),
 ])
 def test_the_held_continue_and_its_resume_refusal_carry_the_observed_facts(tmp_path, monkeypatch, blocker, facts):
-    from ouroboros.budget_pause import budget_hold_fact
+    from ouroboros.work_stop import hold_fact as budget_hold_fact
     from ouroboros.gateway.task_continue import api_task_continue
     from ouroboros.gateway.tasks import api_task_resume
 
@@ -141,7 +141,7 @@ PAUSED_HELD = {"running": "running_delegated_leaf", "unknown": "unbound_unknown_
 @pytest.mark.parametrize("condition", ["settled", "running", "unknown", "running_and_unknown", "point_refusal"])
 def test_owner_resume_of_a_paused_held_continue_rechecks_its_predecessor(tmp_path, monkeypatch, condition):
     from ouroboros import owner_pause
-    from ouroboros.budget_pause import budget_hold_fact
+    from ouroboros.work_stop import hold_fact as budget_hold_fact
     from ouroboros.gateway.task_continue import api_task_continue
     from ouroboros.gateway.task_pause import api_task_pause
     from ouroboros.gateway.tasks import api_task_resume
@@ -194,7 +194,7 @@ def test_a_census_past_twenty_rows_reaches_every_continue_consumer_whole(tmp_pat
     """21 running delegated leaves and then an author model request with no result (the census lists
     model attempts after every delegated run): the Continue answer, its persisted hold, its Activity
     row and the held successor's refused Resume carry all 22 facts, and the advice stays withheld."""
-    from ouroboros.budget_pause import budget_hold_fact
+    from ouroboros.work_stop import hold_fact as budget_hold_fact
     from ouroboros.gateway.task_continue import api_task_continue
     from ouroboros.gateway.tasks import api_task_resume
     from tests.test_continue_independent_review import _open_attempt

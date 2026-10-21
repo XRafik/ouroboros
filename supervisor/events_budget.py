@@ -18,12 +18,12 @@ from typing import Any, Dict, Optional
 from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
 from ouroboros.contracts.record_contract import RECORD_CONTRACT_VERSION
 from ouroboros.event_usage import event_token_counts
-# The hold carrier and the row's selection against a latch live with the pause owner,
-# so reservation reads the very predicate assignment does; re-exported here.
-from ouroboros.budget_pause import BUDGET_HOLD_KEY, budget_fence_selected, budget_hold_fact  # noqa: F401
+# Re-export the shared queue/money predicate and the historical hold key.
+from ouroboros.budget_pause import BUDGET_HOLD_KEY, budget_fence_selected  # noqa: F401
 from ouroboros.delegate_recovery import owner_restart_in_progress
 from ouroboros.utils import append_jsonl, utc_now_iso
 from ouroboros.task_results import STATUS_SCHEDULED, write_task_result
+from ouroboros.work_stop import hold_fact as budget_hold_fact  # noqa: F401
 from ouroboros.work_stop import (
     SELECTION_KEY, clear_refusal, continuation_refusal, declare_stop, reason_policy, record_policy,
     release_refusal, resume_selection, selection_record, stop_record,

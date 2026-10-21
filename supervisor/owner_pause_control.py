@@ -499,27 +499,6 @@ def complete_owner_pause_latch(root_task_id: str, fence: Dict[str, Any]) -> Opti
         "paused_at": str(fence.get("requested_at") or utc_now_iso())})
 
 
-def retain_late_phase_latch(drive_root: Any, root_task_id: str) -> None:
-    """Startup: an answered root's deferred late review keeps its owner Pause latch (and so
-    its census row and Resume) even when the restored snapshot was too old to carry it.
-    Never a grant."""
-    from ouroboros.owner_pause import fence_closed, read_fence
-    from supervisor import queue as q
-
-    try:
-        if not getattr(q, "INITIALIZED", False) or (
-                pathlib.Path(q.DRIVE_ROOT).resolve() != pathlib.Path(drive_root).resolve()):
-            return
-        fence = read_fence(drive_root, root_task_id)
-        if not fence_closed(fence):
-            return
-        with q._queue_lock:
-            if complete_owner_pause_latch(root_task_id, fence):
-                q.persist_queue_snapshot(reason="late_phase_pause_retained")
-    except Exception:
-        log.warning("Saved late-phase Pause latch of %s was not retained", root_task_id, exc_info=True)
-
-
 _SETTLE_RECHECK_SEC = 5.0
 _LAST_SETTLE_CHECK: Dict[str, float] = {}
 
