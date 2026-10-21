@@ -119,6 +119,13 @@ def test_create_issue_sends_title_body_and_labels_in_one_request(gh):
 
 
 # ---- update ------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("fields,actor", [({"state": "closed"}, "ouroboros-agent"), ({"title": "New"}, None)])
+def test_update_actor_is_the_closer_or_unknown_never_the_issue_author(gh, fields, actor):
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7, **fields, user={"login": "alice"}, closed_by={"login": "ouroboros-agent"}))
+    _line, receipt = _receipt(gh.write(method="update", target=7, **fields))
+    assert receipt["actor"] == actor and len(gh.calls) == 1
+
+
 def test_update_closes_with_a_reason_and_replaces_labels_in_one_patch(gh):
     gh.answer = lambda p, argv, kw: json.dumps(_issue(7, state="closed", state_reason="not_planned", labels=[{"name": "wontfix"}],
                                                        updated_at="2026-10-22T09:30:00Z", user={"login": "dev"}))
@@ -156,12 +163,36 @@ def test_resolve_thread_is_a_graphql_mutation_read_back_by_its_state(gh, state, 
     parts = _call(*gh.calls[0])
     assert mutation in parts.graphql and parts.fields == {"id": "PRRT_1"}
     assert receipt["effect"] == f"review_thread.{mutation.removesuffix('ReviewThread')}" and receipt["id"] == "PRRT_1"
-    assert receipt["readback"]["verified"] and receipt["at"] == NOW and receipt["at_source"].startswith("local send time")
+    assert receipt["readback"]["verified"] and receipt["at"] == NOW and receipt["at_source"] == "local"
     assert line == f"github_write resolve_thread → owner/selected thread PRRT_1: confirmed at {NOW}"
     assert gh.write(method="resolve_thread", target=7).startswith("⚠️ TOOL_ARG_ERROR: target must be the review thread node id")
 
 
 # ---- api ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("verb,route,actor", [("PATCH", "issues/7", None), ("PATCH", "issues/comments/3", None),
+                                           ("POST", "issues/7/comments", "alice"), ("POST", "issues/7/assignees", None)])
+def test_api_attributes_created_objects_but_not_modified_targets(gh, verb, route, actor):
+    gh.answer = lambda p, argv, kw: json.dumps(_comment(3))
+    _line, receipt = _receipt(gh.write(method="api", http_method=verb, route="repos/{owner}/{repo}/" + route))
+    assert receipt["actor"] == actor and "at_source" not in receipt
+
+
+def test_api_marks_a_locally_stamped_time(gh):
+    gh.answer = lambda p, argv, kw: "{}"
+    _line, receipt = _receipt(gh.write(method="api", http_method="DELETE", route="repos/{owner}/{repo}/issues/comments/3"))
+    assert receipt["at"] == NOW and receipt["at_source"] == "local" and receipt["actor"] is None
+
+
+def test_resolve_receipt_uses_githubs_resolved_by(gh):
+    def answer(p, argv, kw):
+        assert "resolvedBy{login}" in p.graphql
+        return json.dumps({"data": {"resolveReviewThread": {"thread": {"id": "PRRT_1", "isResolved": True,
+                                                                     "resolvedBy": {"login": "ouroboros-agent"}}}}})
+    gh.answer = answer
+    _line, receipt = _receipt(gh.write(method="resolve_thread", target="PRRT_1"))
+    assert receipt["actor"] == "ouroboros-agent" and receipt["at_source"] == "local"
+
+
 @pytest.mark.parametrize("document", [
     'query{search(query:"fix mutation bug",type:ISSUE,first:1){issueCount}}',
     '# mutation Fake { ignored }\nquery { viewer { login } }',

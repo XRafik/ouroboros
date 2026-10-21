@@ -2,7 +2,7 @@
 
 Not a tool module: ``github.py`` registers the tool and owns the transport this module calls.
 Every write returns ONE receipt ``{effect, target, url, id, actor, at, outcome}`` as JSON behind one
-human line; ``actor`` and ``at`` are GitHub's own answer. The response is read back against what was
+human line; ``actor`` is GitHub's acting identity or null, and local times are labelled. The response is read back against what was
 sent where that is cheap. A send whose answer never came (timeout, 5xx, reset) is looked up once by
 its exact body and target; found → confirmed, otherwise the outcome stays ``unknown`` and the text
 says so — nothing is resent. A 4xx is ``not_applied``: GitHub refused and nothing changed.
@@ -26,15 +26,16 @@ REVIEW_EVENTS = {"APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED", 
 STATE_REASONS = ("completed", "not_planned", "reopened", "duplicate")
 HTTP_METHODS = ("POST", "PATCH", "PUT", "DELETE")
 _LOOKUP_SLACK_SEC = 120  # The lookup after an unknown send reads what changed shortly before the send.
+_RESPONSE_ACTOR = object()
 _NUMBER_SEGMENT_RE = re.compile(r"/\d+(?=/|$)")
 _MUTATION_NAME_RE = re.compile(r"mutation\s+([A-Za-z_]\w*)|mutation\s*(?:\([^)]*\))?\s*\{\s*([A-Za-z_]\w*)")
 _GQL = {
     "discussion_id": "query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){discussion(number:$number){id}}}",
     "add_discussion_comment": "mutation($discussionId:ID!,$body:String!,$replyToId:ID){addDiscussionComment(input:{discussionId:$discussionId,"
                               "body:$body,replyToId:$replyToId}){comment{id databaseId url body createdAt author{login} discussion{number}}}}",
-    "resolve": "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}",
-    "unresolve": "mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}",
-    "thread": "query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved}}}",
+    "resolve": "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved resolvedBy{login}}}}",
+    "unresolve": "mutation($id:ID!){unresolveReviewThread(input:{threadId:$id}){thread{id isResolved resolvedBy{login}}}}",
+    "thread": "query($id:ID!){node(id:$id){... on PullRequestReviewThread{id isResolved resolvedBy{login}}}}",
 }
 
 
@@ -83,7 +84,7 @@ class _Write:
 
     # ---- the receipt --------------------------------------------------------------------------
     def receipt(self, effect: str, target: str, *, response: Optional[dict] = None, res: Optional[GhResult] = None,
-                readback: Optional[dict] = None, url: object = None, oid: object = None, actor: object = None,
+                readback: Optional[dict] = None, url: object = None, oid: object = None, actor: object = _RESPONSE_ACTOR,
                 at: object = None, lookup: str = "", extra: Optional[dict] = None) -> str:
         """Publish the one receipt shape; ``res`` is the failed transport answer when there is one."""
         if res is not None and res.failure in ("target", "cli_missing"):
@@ -93,7 +94,7 @@ class _Write:
             "effect": effect, "target": target,
             "url": url if url is not None else response.get("html_url") or response.get("url"),
             "id": oid if oid is not None else response.get("id"),
-            "actor": actor if actor is not None else _actor(response),
+            "actor": _actor(response) if actor is _RESPONSE_ACTOR else actor,
             "at": at if at is not None else response.get("created_at") or response.get("submitted_at") or response.get("updated_at"),
         }
         if res is None or res.ok:
@@ -288,13 +289,13 @@ def _update(write: _Write) -> str:
     if res.ok:
         got = _parse(res) or {}
         return write.receipt("issue.update", f"{write.slug(got.get('html_url'))}#{number}", response=got, readback=compare(got),
-                             at=got.get("updated_at"))
+                             at=got.get("updated_at"), actor=_actor(got, "closed_by") if fields.get("state") == got.get("state") == "closed" else None)
     if _definite(res):
         return write.receipt("issue.update", target, res=res)
     current = _find(write, f"repos/{{owner}}/{{repo}}/issues/{number}", {}, lambda row: compare(row)["verified"])
     if current:
         return write.receipt("issue.update", target, response=current, readback={"verified": True, "mismatch": [], "via": "lookup"},
-                             at=current.get("updated_at"))
+                             at=current.get("updated_at"), actor=_actor(current, "closed_by") if fields.get("state") == "closed" else None)
     return write.receipt("issue.update", target, res=res, lookup=f"github_read(method='get', kind='issue', target={number})")
 
 
@@ -345,15 +346,15 @@ def _resolve_thread(write: _Write) -> str:
     if res.ok:
         node = (((_parse(res) or {}).get("data") or {}).get(f"{name}ReviewThread") or {}).get("thread") or {}
         readback = {"verified": node.get("isResolved") is expected, "mismatch": [] if node.get("isResolved") is expected else ["state"], "via": "response"}
-        return write.receipt(effect, target, oid=node.get("id") or thread, url="", actor="", at=write.sent_at, readback=readback,
-                             extra={"at_source": "local send time; the mutation answer carries no actor or time"})
+        return write.receipt(effect, target, oid=node.get("id") or thread, url="", actor=_actor(node, "resolvedBy") if expected else None,
+                             at=write.sent_at, readback=readback, extra={"at_source": "local"})
     if _definite(res):
         return write.receipt(effect, target, res=res, oid=thread, url="", actor="", at="")
     check = _gh_graphql(write.ctx, _GQL["thread"], {"id": thread}, repo=write.repo, repo_vars=False)
     node = ((_parse(check) or {}).get("data") or {}).get("node") if check.ok else None
     if isinstance(node, dict) and node.get("isResolved") is expected:
-        return write.receipt(effect, target, oid=thread, url="", actor="", at=write.sent_at,
-                             readback={"verified": True, "mismatch": [], "via": "lookup"}, extra={"at_source": "local send time"})
+        return write.receipt(effect, target, oid=thread, url="", actor=_actor(node, "resolvedBy") if expected else None, at=write.sent_at,
+                             readback={"verified": True, "mismatch": [], "via": "lookup"}, extra={"at_source": "local"})
     return write.receipt(effect, target, res=res, oid=thread, url="", actor="", at="",
                          lookup=f"github_read(method='api', graphql=<node(id:{thread!r}) isResolved>)")
 
@@ -386,9 +387,18 @@ def _api(write: _Write) -> str:
     if res.ok:
         got = _parse(res) or {}
         first = _first_object(got)
+        if document:
+            name, payload = next(iter((got.get("data") or {}).items()), ("", {}))
+            created = name.startswith(("add", "create")) and isinstance(payload, dict) and any(
+                key in payload for key in ("comment", "pullRequestReview", "reaction", "issue", "pullRequest", "release"))
+        else:
+            created = http_method == "POST" and route.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] in {
+                "comments", "reviews", "reactions", "replies", "issues", "pulls", "releases"}
+        at = (first.get("created_at") or first.get("createdAt") or first.get("submitted_at")) if created else (
+            first.get("updated_at") or first.get("updatedAt"))
         return write.receipt(effect, target, url=first.get("html_url") or first.get("url") or "", oid=first.get("id") or first.get("node_id") or "",
-                             actor=_actor(first) or "", at=first.get("created_at") or first.get("createdAt") or first.get("updated_at") or write.sent_at,
-                             readback=None)
+                             actor=_actor(first) if created else None, at=at or write.sent_at,
+                             readback=None, extra=None if at else {"at_source": "local"})
     return write.receipt(effect, target, res=res, url="", oid="", actor="", at="",
                          lookup="" if _definite(res) else "github_read(method='api', ...) on the same object")
 
@@ -448,8 +458,8 @@ SCHEMA: Dict[str, Any] = {
     "name": "github_write",
     "description": (
         "Write to GitHub as the configured identity (see github_read whoami) on the active Project or an explicit repo. "
-        "Every call returns one receipt {effect, target, url, id, actor, at, outcome} with actor and time from GitHub's "
-        "answer and a read-back of what was sent; an answer that never came is looked up once and otherwise reported "
+        "Every call returns one receipt {effect, target, url, id, actor, at, outcome}, actor known or null, local time "
+        "labelled, and a read-back of what was sent; an answer that never came is looked up once and otherwise reported "
         "outcome='unknown' (never resend; reconcile with github_read first); a GitHub 4xx is 'not_applied'. "
         "Methods: comment = a conversation comment on an issue or pull request (target = number; kind='discussion' "
         "comments on a discussion, reply_to = its comment node id; reply_to = a review comment id answers inline in a PR "
