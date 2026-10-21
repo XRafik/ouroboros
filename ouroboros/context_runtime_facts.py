@@ -29,7 +29,7 @@ def schedule_store_fact(env: Any) -> Dict[str, Any]:
     from supervisor.followup_policy import observed_store
     from supervisor.queue import ScheduleStoreUnreadable, load_schedule_store
 
-    root = pathlib.Path(env.drive_path("state/scheduled_tasks.json")).parent.parent
+    root = getattr(env, "drive_root", None) or pathlib.Path(env.drive_path("state/scheduled_tasks.json")).parent.parent
     try:
         return observed_store(root, load_schedule_store(root))
     except ScheduleStoreUnreadable as exc:

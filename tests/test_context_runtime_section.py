@@ -19,11 +19,12 @@ from ouroboros.context import build_runtime_section, build_user_content
 from tests._context_shared import _make_health_env
 
 
-def test_schedule_digest_distinguishes_unreadable_from_empty(tmp_path):
+@pytest.mark.parametrize("root_only", [False, True])
+def test_schedule_digest_distinguishes_unreadable_from_empty(tmp_path, root_only):
     from types import SimpleNamespace
     from ouroboros.context import _scheduled_tasks_digest
 
-    env = SimpleNamespace(drive_path=lambda rel: tmp_path / rel)
+    env = SimpleNamespace(drive_root=tmp_path) if root_only else SimpleNamespace(drive_path=lambda rel: tmp_path / rel)
     path = tmp_path / "state" / "scheduled_tasks.json"
     path.parent.mkdir()
     path.write_text("{unreadable", encoding="utf-8")
