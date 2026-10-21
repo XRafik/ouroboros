@@ -54,6 +54,7 @@ DETACH_POLL_SEC = 1.0
 # The author's drain mark outlives any panel window; the supervisor bounds its lease by the task.
 _DRAIN_MARK_SEC = 6 * 3600.0
 ADDRESSED_EVENT = "addressed_event"
+HELPER_EVENT = "helper_result"
 # The author never waits at all (a Presence completion: its speech is never held): its drain leaves at once,
 # no mailbox notice follows, and the wave settles as an unwaited one (``owe_unwaited_review``).
 DEPARTED_EVENT = "author_departed"
@@ -74,9 +75,26 @@ def receptive_binding(ctx: Any) -> Optional[Dict[str, Any]]:
     if not drive_root or not task_id:
         return None
     from ouroboros.owner_mailbox import OwnerMailboxPeek
+    from ouroboros.review_waiting import select_helpers
 
     return {"drive_root": pathlib.Path(drive_root), "task_id": task_id, "attempt": getattr(ctx, "task_attempt", None) or 1,
-            "seen": frozenset(getattr(ctx, "_loop_mailbox_seen_ids", None) or ()), "peek": OwnerMailboxPeek()}
+            "seen": frozenset(getattr(ctx, "_loop_mailbox_seen_ids", None) or ()), "peek": OwnerMailboxPeek(),
+            "budget_drive_root": getattr(ctx, "budget_drive_root", None), **select_helpers(ctx)}
+
+
+def rejoin_binding(ctx: Any, record_id: str) -> Optional[Dict[str, Any]]:
+    """Restore the original selection before draining a repeated paid call."""
+    from ouroboros.review_ledger import ledger_root, load_record
+
+    binding = _RECEPTIVE.get()
+    if not binding:
+        return binding
+    record = load_record(ledger_root(ctx), record_id) or {}
+    state = record.get("waiting") or {}
+    selected = {key: copy.deepcopy(state.get(key) or ({} if key == "selection" else []))
+                for key in ("selection", "seen_helpers", "seen_outcomes")}
+    ctx._review_wait_selection = selected
+    return {**binding, **selected}
 
 
 def departed_binding(ctx: Any) -> Optional[Dict[str, Any]]:
@@ -200,11 +218,17 @@ def author_detaches(operation: Any, pending_entries: Iterable[Any]) -> bool:
 
     if not author_paused(operation):
         departed = bool((_RECEPTIVE.get() or {}).get("departed"))
-        if not departed and not author_hears_mail():
+        from ouroboros.review_waiting import ready_helpers
+
+        binding = _RECEPTIVE.get() or {}
+        reason = DEPARTED_EVENT if departed else ADDRESSED_EVENT if author_hears_mail() else ""
+        if not reason and binding and ready_helpers(SimpleNamespace(**binding), binding):
+            reason = HELPER_EVENT
+        if not reason:
             return False
         for entry in pending_entries:
             if entry is not None:  # read by ``detached_actor`` of this drain
-                entry.author_left_for = DEPARTED_EVENT if departed else ADDRESSED_EVENT
+                entry.author_left_for = reason
         return True
     root_drive, root_task_id, _ = _author_coordinates(operation.wait)
     with launch_lock(root_drive, root_task_id):
@@ -248,14 +272,15 @@ def detached_actor(slot: Any, entry: Any, error_actor: Callable[..., Any], *, us
             operation.author_detached = True
     preparing = bool(entry.pause_before_launch)
     left_for = getattr(entry, "author_left_for", "")
-    yielded = not preparing and left_for in {ADDRESSED_EVENT, DEPARTED_EVENT}
+    yielded = not preparing and left_for in {ADDRESSED_EVENT, HELPER_EVENT, DEPARTED_EVENT}
     unsent = yielded and not episode_armed(entry.episode)
     message = (
         "Nobody waits for this reviewer (the author's speech is never held): it finishes the same check "
         "separately and its outcome settles into the record and a late mark in the author's room. No verdict "
         "yet; nothing was committed or applied."
         if yielded and left_for == DEPARTED_EVENT else
-        "An addressed message reached the author while this reviewer was "
+        ("A chosen helper finished while this reviewer was " if left_for == HELPER_EVENT else
+         "An addressed message reached the author while this reviewer was ")
         + ("preparing its first launch, which still sends" if unsent else "running")
         + ": the author left only its own wait and the reviewer finishes the same check separately. No verdict "
         "yet; nothing was committed or applied. The same unchanged request rejoins this attempt in this process; "
@@ -411,7 +436,7 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
     mailbox. ``None`` when no seat of this wave was left for mail."""
     # Every seat THIS call left (a seat Pause latched earlier included), once one was left for mail.
     rows = [row for row in (getattr(ctx, "_review_detached_operations", None) or []) if row.get("retry_key") == retry_key]
-    if not retry_key or not any(row.get("reason") == ADDRESSED_EVENT for row in rows):
+    if not retry_key or not any(row.get("reason") in {ADDRESSED_EVENT, HELPER_EVENT} for row in rows):
         return None
     from ouroboros.tool_access_paths import canonical_data_root
 
@@ -421,9 +446,19 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
             "attempt": int(attempt or 0), "record_id": str(record_id or ""), "task_id": task_id,
             "reissue": reissue, "owner": PROCESS_TOKEN, "done": False, "unknown_seats": 0,
             "msg_id": f"{surface}-review-settled:" + hashlib.sha256(identity.encode()).hexdigest()[:24]}
+    from ouroboros.review_waiting import save_wait
+
+    wait.update(copy.deepcopy(getattr(ctx, "_review_wait_selection", None) or {}))
+    wait["review_reference"] = {"record_id": str(record_id), "surface": surface, "task_id": task_id}
+    wait["duty_id"] = _left_mark_id(wait)
+    if record_id:
+        saved = save_wait(ctx, record_id, wait)
+        if saved is None:
+            return None  # No notice can claim a revision that was never made durable.
     ctx._left_review_wait = wait
     named = f"attempt #{wait['attempt']}" if wait["attempt"] else f"record {wait['record_id'] or retry_key[-12:]}"
-    record = {key: wait[key] for key in ("surface", "task_id", "attempt", "record_id", "retry_key", "msg_id")}
+    record = {key: wait[key] for key in ("surface", "task_id", "attempt", "record_id", "retry_key", "msg_id",
+                                         "selection", "seen_helpers", "seen_outcomes", "review_reference") if key in wait}
     # The late mark's root and the author's drive, bound by value; the duty lands before this call returns.
     record.update(unknown_seats=0, drive_root=str(drive_root), canonical_root=str(canonical_data_root(ctx)))
     _owe_left_review(record)
@@ -432,10 +467,12 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
         from ouroboros.owner_mailbox import mailbox_drain_ended, write_task_message
 
         record.update(unknown_seats=int(unknown))
+        verdict = _settled_aggregate(record)
+        if not verdict:
+            unknown = max(1, unknown)
         status = "[Review custody] The local wait ended for" if unknown else "[Review settled] The reviewers finished"
-        verdict = "" if unknown else _settled_aggregate(record)
-        text = (f"{status} the paid {surface} review ({named}) you left for an addressed message"
-                + (f"; its record reads {verdict}" if verdict else "") + ". "
+        text = (f"{status} the paid {surface} review ({named}) you left while a chosen event was ready"
+                + (f"; durable revision {record.get('revision')} reads {verdict}" if verdict else "") + ". "
                 f"That review call committed or applied nothing. Re-issue {reissue} to collect its outcome at $0 "
                 "(no second dispatch), or choose another course.")
         if unknown:
@@ -446,7 +483,8 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
             ended_left_review(record)
             return
         feedback = {key: record[key] for key in ("surface", "task_id", "attempt", "record_id", "retry_key",
-                                                 "msg_id", "unknown_seats")}
+                                                 "msg_id", "unknown_seats") if key in record}
+        feedback.update({key: record[key] for key in ("revision", "review_reference") if key in record})
         written = write_task_message(drive_root, text, task_id, source_task_id=task_id, provenance="system",
                                      msg_id=wait["msg_id"], review_feedback={**feedback, "settled": not unknown})
         # Done only once the notice is in the mailbox (a park starting now still wakes on it);
@@ -481,7 +519,9 @@ def left_review_custody_note(wait: Dict[str, Any]) -> str:
     return (f"[Review custody] The {wait.get('surface') or 'change'} review you left for an addressed message is "
             "no longer in this process's live custody (a restart or new execution). Nothing was committed or "
             f"applied. Re-issue {wait.get('reissue') or 'the same unchanged call'} to collect what its reviewers "
-            "recorded at $0; a seat without a recorded outcome stays unknown and is never sent again.")
+            "recorded at $0; a seat without a recorded outcome stays unknown and is never sent again. "
+            f"Original reference: {json.dumps(wait.get('review_reference') or {'record_id': wait.get('record_id')})}. "
+            f"Selected helpers: {json.dumps(wait.get('selection') or {})}.")
 
 
 def wake_restored_left_review(ctx: Any) -> bool:
@@ -493,19 +533,18 @@ def wake_restored_left_review(ctx: Any) -> bool:
     if not isinstance(wait, dict) or wait.get("owner") == PROCESS_TOKEN:
         return False
     if wait.get("done") and wait.get("noticed"):
-        ctx._left_review_wait = None
+        wait["owner"] = PROCESS_TOKEN
         return False
     from ouroboros.owner_mailbox import write_task_message
 
     task_id = str(getattr(ctx, "task_id", "") or "")
     note = left_review_custody_note(wait)
+    custody_msg_id = f"{wait.get('msg_id') or 'left-review'}:custody-ended"
     written = write_task_message(pathlib.Path(ctx.drive_root), note, task_id,
                                  source_task_id=task_id, provenance="system",
-                                 msg_id=f"{wait.get('msg_id') or 'left-review'}:custody-ended")
-    if written:
-        ctx._left_review_wait = None
-    else:  # The cold callback runs BEFORE the loop: it must also see the ended custody.
-        wait.update(done=True, noticed=False, notice=note, wake_reason="review_custody_ended")
+                                 msg_id=custody_msg_id)
+    wait.update(owner=PROCESS_TOKEN, done=True, noticed=bool(written), notice=note, msg_id=custody_msg_id,
+                wake_reason="review_custody_ended")
     return written
 
 
@@ -513,7 +552,7 @@ _LEFT_TOOLS = {"commit": "commit_reviewed", "change": "review_change", "result":
 # the mark's writer surface (late_review_marks)
 _LEFT_SURFACES = {"commit": "commit_gate", "change": "change", "result": "result", "skill": "skill"}
 _SEAT_FACTS = ("model", "status", "operation_id", "operation_state", "late_result_pending", "raw_text", "error",
-               "failure_code", "response_ref")
+               "failure_code", "response_ref", "usage", "cost_usd", "outcome_id", "usage_ref")
 
 
 def _left_mark_id(record: Dict[str, Any]) -> str:
@@ -637,6 +676,8 @@ def ended_left_review(record: Dict[str, Any]) -> str:
         attempt, seats, gap = _left_seats(record)
         prior_state = _record_state(record)
         settled = None if gap else _settle_left_record(record, seats, final=True)
+        if settled and settled.get("state") == "pending":
+            return "waiting"
         if record.get("left") == "unwaited" and prior_state == "settled":
             return "collected"  # its author's own re-issue collected it while the task ran
         return publish_late_review(record.get("canonical_root") or record["drive_root"],
@@ -707,12 +748,13 @@ def _settle_left_record(record: Dict[str, Any], seats: List[Dict[str, Any]], *, 
     for seat in seats:
         slot = str(seat.get("slot_id") or "")
         unknown = _seat_unknown(seat)
-        if unknown and not final:
+        if unknown and str(seat.get("operation_state") or "") != "custody_lost":
             continue  # its answer may still arrive: the record stays pending
         row_parts[slot] = tuple(seat.get("parts") or ("change",))
         result = {"model": str(seat.get("model") or ""), "slot_id": slot,
                   "operation_id": str(seat.get("operation_id") or ""),
-                  **{key: seat[key] for key in ("failure_code",) if seat.get(key)}}
+                  **{key: seat[key] for key in ("failure_code", "usage", "cost_usd", "response_ref",
+                                               "outcome_id", "usage_ref") if seat.get(key) is not None}}
         raw = str(seat.get("raw_text") or "")
         if unknown:
             result.update(verdict="ERROR", text="", operation_state="custody_lost",
@@ -737,10 +779,14 @@ def _settle_left_record(record: Dict[str, Any], seats: List[Dict[str, Any]], *, 
 
 def _settled_aggregate(record: Dict[str, Any]) -> str:
     """Settle a left wave's record once every seat settled in this process; its verdict word, "" when none."""
-    _attempt, seats, gap = _left_seats(record)
+    attempt, seats, gap = _left_seats(record)
     settled = None if gap else _settle_left_record(record, seats, final=False)
     if not settled or settled.get("state") != "settled":
         return ""
+    from ouroboros.tools.review_change_custody import settle_collected_attempt
+
+    settle_collected_attempt(_left_review_root(record), attempt, seats, settled)
+    record["revision"] = settled["revision"]
     return str((settled.get("verdict") or {}).get("aggregate") or "")
 
 
@@ -753,7 +799,7 @@ def _left_review_mark(record: Dict[str, Any], attempt: Any, seats: List[Dict[str
     drive, attempt_no = pathlib.Path(record["drive_root"]), int(record.get("attempt") or 0)
     source = {"kind": "left_review_settlement", "gap": gap, "seats": seats,
               **{key: record.get(key) for key in ("surface", "task_id", "attempt", "record_id", "retry_key",
-                                                  "unknown_seats", "msg_id", "left")},
+                                                  "unknown_seats", "msg_id", "left", "selection", "seen_helpers", "seen_outcomes", "review_reference")},
               "attempt_row": {key: getattr(attempt, key, None) for key in (
                   "repo_key", "tool_name", "attempt", "review_record_id", "pre_review_fingerprint", "phase",
                   "status", "block_reason")} if attempt is not None else None}

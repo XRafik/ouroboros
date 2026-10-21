@@ -300,9 +300,9 @@ def test_the_schema_is_the_planned_call() -> None:
 
     [entry] = rc.get_tools()
     params = entry.schema["parameters"]
-    assert entry.name == "review_change" and params["required"] == ["subject"]
+    assert entry.name == "review_change" and params["required"] == []
     assert list(params["properties"]) == [
-        "root", "workspace_root", "subject", "base", "head", "surface", "answer", "goal", "scope", "author_questions",
+        "review_reference", "root", "workspace_root", "subject", "base", "head", "surface", "answer", "goal", "scope", "author_questions",
         "reviewers", "reason", "coupling_only", "reviewer_effort", "review_rebuttal", "treat_as_body"]
     props = params["properties"]
     assert props["root"]["enum"] == ["active_workspace", "system_repo"] and props["root"]["default"] == "active_workspace"

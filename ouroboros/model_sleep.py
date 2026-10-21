@@ -246,13 +246,40 @@ def acknowledge_question_delivery(ctx: Any, text: str) -> None:
         record_question_notice(ctx, result["questions"])
 
 
+def terminal_readiness(ctx: Any, chosen: Dict[str, Any], seen: Any = (), *, ordinary_only: bool = False) -> list:
+    """Peek selected terminal facts only: no mailbox materialization or acknowledgement."""
+    from ouroboros.delegate_custody import TERMINAL_STATES
+    from ouroboros.task_status import SETTLED_STATUSES
+    from ouroboros.task_store import task_versions
+
+    ready, errors, delivered = [], [], set(seen)
+    try:
+        versions = task_versions(_canonical_root(ctx), chosen["tasks"]) if chosen.get("tasks") else {}
+        for task_id, (_, status, _) in versions.items():
+            identity = f"task:{task_id}"
+            if status in SETTLED_STATUSES and identity not in delivered:
+                ready.append({"id": identity, "reason": f"{identity}:{status}"})
+    except Exception as exc:
+        errors.append(exc)
+    try:
+        owned = _owned_runs(ctx) if chosen.get("runs") else {}
+        for run_id in chosen.get("runs") or ():
+            run, identity = owned.get(run_id), f"run:{run_id}"
+            if (run is not None and (not ordinary_only or not run.review_owned) and identity not in delivered
+                    and (run.terminal_state in TERMINAL_STATES or run.settled)):
+                ready.append({"id": identity, "reason": identity})
+    except Exception as exc:
+        errors.append(exc)
+    if not ready and errors:
+        raise errors[0]
+    return ready
+
+
 def wake_reason(ctx: Any, chosen: Dict[str, Any]) -> str:
     """Why the sleep is ready now (``""`` = not yet). Owner input is never filtered."""
     from ouroboros.deadline_utils import parse_deadline_ts, utc_now
     from ouroboros.owner_mailbox import KIND_CARD_INPUT, KIND_OWNER_TEXT, KIND_QUIZ_ANSWER, KIND_QUIZ_CLOSED, KIND_TASK_MESSAGE
     from ouroboros.owner_wait import _wait_entries
-    from ouroboros.task_status import SETTLED_STATUSES
-
     first_error = None
 
     def read_source(read, *args, **kwargs):
@@ -277,24 +304,11 @@ def wake_reason(ctx: Any, chosen: Dict[str, Any]) -> str:
         if (entry.get("provenance") == "descendant_task" or chosen.get("any_mail")
                 or source in chosen.get("senders", [])):
             return f"mail:{source or 'unknown'}"
-    if chosen.get("tasks"):
-        from ouroboros.task_store import task_versions
-
-        versions = read_source(task_versions, _canonical_root(ctx), chosen["tasks"]) or {}
-        for task_id in chosen["tasks"]:
-            status = versions.get(task_id, (0, "", False))[1]
-            if status in SETTLED_STATUSES:
-                return f"task:{task_id}:{status}"
-    from ouroboros.delegate_custody import TERMINAL_STATES
+    ready = read_source(terminal_readiness, ctx, chosen)
+    if ready:
+        return ready[0]["reason"]
     from ouroboros.sleep_custody import seen_interactions
 
-    # A selected terminal waits on contention like any arm-time read; the pollers
-    # bound their whole readiness pass to a probe instead.
-    owned = (read_source(_owned_runs, ctx) or {}) if chosen.get("runs") else {}
-    for run_id in chosen.get("runs") or ():
-        run = owned.get(run_id)
-        if run is not None and (run.terminal_state in TERMINAL_STATES or run.settled):
-            return f"run:{run_id}"
     # Questions need their responsible author, even when it selected another
     # branch. Reviewer custody belongs to its panel, never to this sleeper.
     seen = seen_interactions(ctx)
