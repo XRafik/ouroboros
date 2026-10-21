@@ -224,6 +224,7 @@ def _schedule_commitment(ctx: ToolContext, route_kind: str, emission: Dict[str, 
     if route_kind == "api_model":
         return "ordinary recursive API actor"
     from ouroboros.subagent_runtime import cognitive_route_billing_basis, current_cognitive_route_and_billing
+    from ouroboros.supervisor_route import cognitive_route_provenance
 
     nanny_spec = emission.get("parent_cognitive_route")
     if isinstance(nanny_spec, dict) and str(nanny_spec.get("model") or "").strip():
@@ -236,8 +237,10 @@ def _schedule_commitment(ctx: ToolContext, route_kind: str, emission: Dict[str, 
         nanny_route, nanny_billing = current_cognitive_route_and_billing(
             getattr(ctx, "task_metadata", None), ctx=ctx,
         )
+    provenance = cognitive_route_provenance(nanny_spec)
     return (
-        f"recursive nanny on {nanny_route} (bills as {nanny_billing}); "
+        f"recursive nanny on {nanny_route} (bills as {nanny_billing})"
+        + (f", {provenance}" if provenance else "") + "; "
         "exact route/work-order authority is frozen before its first model call"
     )
 
@@ -807,16 +810,21 @@ def _schedule_task(ctx: ToolContext, internal: Dict[str, Any] | None = None, /, 
     if execution_left is not None and execution_left <= 0:
         return _publish_scheduling_refusal(ctx, "error", "TOOL_ERROR", _EXECUTION_SPENT, reason="task_lifetime_exhausted")
     try:
+        from ouroboros.supervisor_route import capture_cognitive_route
+
+        settings = effective_runtime_subagent_settings(runtime_settings(settings_reader=_ctl().load_settings))
         configured_subagent, legacy_selection = select_subagent_snapshot(
-            effective_runtime_subagent_settings(runtime_settings(settings_reader=_ctl().load_settings)),
+            settings,
             subagent_id=str(params.get("subagent_id") or ""), access=params.get("access"),
             legacy_model_lane=params.get("model_lane"),
             legacy_executor=params.get("executor"),
             legacy_model_lane_supplied="model_lane" in params,
             legacy_executor_supplied="executor" in params,
         )
+        parent_cognitive_route = capture_cognitive_route(
+            ctx, configured_subagent, settings, **({"supervisor": params["supervisor"]} if "supervisor" in params else {}))
     except SubagentSelectionError as exc:
-        return _publish_scheduling_refusal(ctx, "error", "TOOL_ARG_ERROR", f"⚠️ {exc.code}: {exc.detail}")
+        return _publish_scheduling_refusal(ctx, "error", "TOOL_ARG_ERROR", f"⚠️ {exc.code}: {exc.detail}", reason=exc.code)
     route = configured_subagent.get("route") if isinstance(configured_subagent.get("route"), dict) else {}
     if fields.get("directory_strategy") == "copy" and route.get("kind") != "agent_session":
         return _publish_scheduling_refusal(
@@ -905,11 +913,6 @@ def _schedule_task(ctx: ToolContext, internal: Dict[str, Any] | None = None, /, 
     tid = uuid.uuid4().hex[:8]
     created_at = utc_now_iso()
     root_task_id = root_task_id_seed or tid
-    parent_cognitive_route = {
-        "model": str(getattr(ctx, "active_model", "") or metadata.get("model") or ""),
-        "effort": str(getattr(ctx, "active_effort", "") or metadata.get("reasoning_effort") or ""),
-        "use_local_model": bool(getattr(ctx, "active_use_local", metadata.get("use_local_model", False))),
-    }
     child_drive, _drive_err = _prepare_child_drive(
         tid, status_drive_root, memory_mode, parent_project_id)
     if _drive_err:

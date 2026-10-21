@@ -37,6 +37,15 @@ def schedule_subagent_properties() -> Dict[str, Any]:
                 "edits cannot retarget it."
             ),
         },
+        "supervisor": {
+            "type": "string",
+            "description": (
+                "Optional enabled API-model row id from Available subagents for an Agent-session "
+                "child's supervisor, including subscription-backed models. Captures its model, "
+                "effort, account and processing preference. Omit to inherit my actual current "
+                "send binding. Agent-session rows cannot supervise; API children have no separate supervisor."
+            ),
+        },
         "access": {"type": "string", "enum": ["inherit", *SESSION_ACCESS_LOWERING], "default": "inherit", "description":
             "inherit (default/omitted) preserves owner-selected Agent-session access; readonly or "
             "workspace_write may only lower it. API-model rows ignore it with disclosure. It grants "
