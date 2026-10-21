@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-from ouroboros.artifacts import stage_task_attachments
+from ouroboros.artifacts import stage_task_attachments, resolve_attachment_manifest
 from ouroboros.contracts.task_contract import attach_task_contract
 from ouroboros.presence_admission import PresenceAdmission
 from ouroboros.presence_authority import presence_ceiling_payload
@@ -798,7 +798,7 @@ def _log_dialogue(
         "task_id": task_id,
         **({"place_id": task["metadata"]["presence"]["place_id"]}
            if task["metadata"]["presence"].get("place_id") else {}),
-        **({"attachment_manifest": task["attachment_manifest"]} if task.get("attachment_manifest") else {}),
+        **{key: task[key] for key in ("attachment_manifest", "attachment_manifest_ref") if key in task},
     }
     if direction == "in":
         # Retain the transport's exact contextual observations before publishing their address.
@@ -978,14 +978,14 @@ def capture_presence_event(admission: PresenceAdmission, event: PresenceTurnEven
     task_id = _task_id(admission, event)
     identity = presence_event_identity(admission.binding_id, event)
     gate = _configured_gate(drive_root)
-    key, lock = gate._conversation("intake:" + task_id)
+    key, lock = gate._conversation("intake:" + event.conversation_key)
     with lock, gate._file_lock(gate._conversation_file(key)):
         rows = _live_task_rows(drive_root, task_id, event.conversation_key)
         prior = next((row for row in rows if row.get("direction") == "in"), None)
         if prior is not None and prior.get("presence_event_identity") != identity:
             raise PresenceTurnError("presence_event_identity_conflict", "source_event_id", turn_ref=task_id)
         task = _build_task(admission, event, drive_root=drive_root, staged_files=staged_files,
-                           retained_manifest=list(prior.get("attachment_manifest") or []) if prior else None)
+                           retained_manifest=resolve_attachment_manifest(drive_root, task_id, prior) if prior else None)
         if prior is None:
             _log_dialogue(drive_root, direction="in", chat_id=task["chat_id"],
                           user_id=_stable_numeric_id("presence-actor-log", str(task["actor_id"])),
@@ -1079,7 +1079,7 @@ def run_presence_turn(
             drive_root=Path(drive_root),
             staged_files=tuple(Path(item) for item in staged_files),
             physical_task_id=task_id,
-            retained_manifest=next((list(r.get("attachment_manifest") or []) for r in prior_rows
+            retained_manifest=next((resolve_attachment_manifest(drive_root, task_id, r) for r in prior_rows
                                     if r.get("direction") == "in"), None),
         )
         chat_id = int(task["chat_id"])

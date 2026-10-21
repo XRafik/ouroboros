@@ -330,4 +330,14 @@ def live_author(conversation_key: str, *, drive_root: Any = None) -> str:
 def live_authors(*, drive_root: Any = None) -> list[str]:
     root = str(Path(drive_root).resolve()) if drive_root is not None else ""
     with _AUTHORS_LOCK:
-        return [task for (where, task) in _AUTHORS if not root or where == root]
+        found = {task for (where, task) in _AUTHORS if not root or where == root}
+    if root:
+        for path in (Path(root) / "state" / "presence_turn_gate").glob("*.author.json"):
+            try:
+                row = json.loads(path.read_text(encoding="utf-8"))
+                task = live_author(row["conversation_key"], drive_root=root)
+                if task:
+                    found.add(task)
+            except (FileNotFoundError, ValueError, KeyError):
+                continue  # release can remove a projection during this census
+    return sorted(found)

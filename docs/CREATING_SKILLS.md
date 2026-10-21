@@ -888,91 +888,54 @@ Panic in every command mode, including strict; it sends once. Its clock-dependen
 and boundary-second limits are defined in `CLIENT_CONTRACT.md` §15. A rejected message's previous outcome
 is unknown, not definitely undelivered.
 
-### Presence behavior profiles and transport ingress
+### Places and focus transport ingress
 
-Presence separates two ordinary reviewed skills: a **behavior skill** declares
-how an external conversation should be handled, while a **transport skill**
-authenticates provider events and relays them through the loopback Host Service.
-The behavior is portable; provider credentials, room ids, exact tool names, and
-installation-specific resource locations do not belong in its profile.
+A reviewed connector declares `permissions: [presence]` and `provides: place`.
+The owner connects it in Consciousness > Places or through `configure_presence`.
+A place stores its state (Active, Silent or Paused), authored wake facts and notes,
+confirmed owner accounts, working-folder address and model choice. Connector updates
+never replace those choices. The old behavior skill's `presence:` block is migration
+input only: its instructions, topics, folder and model are copied once, and its skill
+stays enabled. Frozen old task ceilings remain readable; new focuses have no ceiling.
 
-A behavior skill may add a strict `presence:` block to its manifest:
+Use the connector's ordinary content-hash-bound skill token for:
 
-```yaml
-presence:
-  schema_version: 1
-  instructions_file: presence.md
-  context_topics:
-    - public-conversation-notes
-  runtime_defaults:
-    model_slot: main             # main | light
-    inline_max_rounds: 10
-  capability_requests:
-    - id: research
-      kind: tool                 # tool | script | resource
-      required: false
-      purpose: Look up current public information when a reply needs it.
-    - id: notes
-      kind: resource
-      required: true
-      operations: [read, write]
-      purpose: Maintain conversation notes in a selected confined resource.
-```
-
-Use either non-empty inline `instructions` or `instructions_file`, never both.
-An instructions file must be UTF-8 inside the reviewed payload surface.
-`context_topics` names full knowledge topics to inject for each turn.
-`runtime_defaults` is optional and resolves to a bounded `main` or `light` turn;
-the host clamps `inline_max_rounds` to its global limit. Capability request ids
-are stable portable concepts. After installation, `configure_presence` maps
-them to exact built-in, extension, MCP, script, or confined resource targets;
-required requests must all be selected before admission. These selections and
-runtime overrides are host-owned state. Changing a request's id, kind, or
-resource operations invalidates its selection instead of silently retargeting
-it.
-
-A transport extension declares `permissions: [presence]`, obtains its ordinary
-content-hash-bound skill token, and sends:
-
-- `POST /presence/turn` with exactly `binding_id`, `event`, and optional
-  `staged_files` and negotiated `delivery_reporting_version` and `continuation_version`. The event carries the provider/account/conversation/thread,
-  stable source-event and conversation ids, structured actor/conversation/message
-  facts, and text. Files must already be under that transport skill's state root.
-- `GET /presence/work/{work_ref}?binding_id=...` to poll only late work created
-  by the same owner binding.
+- `POST /presence/turn`: `event`, optional legacy `binding_id`, `staged_files`,
+  `delivery_reporting_version` and `continuation_version`. The event still carries
+  `source_event_id`, `provider`, `account_id`, `conversation_id`, `thread_id`,
+  `conversation_key`, `actor`, `conversation`, `message` and `text`. The host derives
+  its own canonical conversation key. Files stay confined to the connector's state root.
+- Optional `event.facts`: a list of `direct_message`, `group_dm`, `mention`,
+  `reply_to_me`, `my_thread`, `new_issue`, `new_pull_request`, `any_message`, `from_bot`.
+  These are observed provider facts, never text classification. Absent facts mean
+  `legacy_addressed` for older connectors that already filtered events. Empty facts
+  are distinct from absent facts. Bots require an explicit bot wake item.
+- `GET /presence/place?provider=&account_id=&conversation_id=`: returns
+  `{place_id, label, state}` for the connector's outbox recheck. `/identity`
+  advertises `places_version: 1`.
+- `GET /presence/work/{work_ref}?binding_id=...`: reads correlated late work,
+  including after a place is Paused or disconnected. The binding query is optional;
+  the authenticated connector must still own the stored work.
 - `POST /presence/work/{continuation_ref}` with `binding_id` and `transport_queue`
-  to refresh the same continuing turn's observed transport inbox facts, under the same token and binding.
+  retains dated inbox observations without making them owner directives.
 
-The nested fact maps may include optional provider evidence such as the agent's
-own account identity, explicit mention occurrences and the thread-root author.
-Keep unknowns and source meanings intact: neither a mention nor root authorship
-establishes the current addressee or an obligation to answer.
+The host captures an event once into its room before deciding whether to wake.
+Paused, consciousness Off/Panic, or no matching wake returns `silent` (heard).
+An exhausted or unknown allowance returns `consciousness_allowance_exhausted`,
+`disposition: retry` and `retry_after` seconds. Physical capacity keeps the existing
+`presence_capacity_full` retry response. A matching event focuses consciousness in
+that room under the owner's autonomy level and allowance, independently of its own
+clock. A current author can receive later arrivals as typed context-only mail.
 
-The owner-created binding fixes the authenticated transport skill, behavior
-skill, origin scope, and exact proactive destination. The origin is either one
-exact conversation/thread or the explicit account-wide conversation id `*`;
-the latter admits any conversation on that exact provider account while each
-event still receives its own canonical conversation key. For each turn the host
-rechecks install, enablement, executable review, binding identity, and required
-selections, then compiles an immutable positive capability ceiling. A fresh
-agent receives only that ceiling, reviewed instructions, exact event facts, and
-declared context topics. Completion is typed as `message`, `silent`,
-`tool_delivered`, or `deferred`; `deferred` includes a correlated `work_ref`
-only after successful promotion. Promotion and one-shot or recurring follow-up keep the same
-ceiling and reply context rather than widening authority.
+A focus uses ordinary `finish_task`, including `silent=true`. The host derives
+`message`, `silent`, `tool_delivered` or `deferred` from the final, delivery receipts
+and successfully started long work. Automatic speech passes the `place_reply`
+Safety check; a flag returns to the mind. Silent/Paused destinations hold the reply
+with a System fact. Late receipts still record what happened and add a visible
+warning. Proactive speech uses the connector's own tools; `presence_finish` and
+`initiate_presence` are no longer public tools.
 
-Transport custody preserves provider arrival order before Host admission; the
-host serializes one conversation and enforces the installation-wide active-turn
-limit across processes. By default, the host-provided own-work readers, messaging
-and cancellation reach only independent work started from the same nonempty binding,
-across its conversations. A profile that explicitly selects global `recent_tasks` or
-`get_task_result` retains those readers' global scope, including other bindings and
-owner work; binding-scoped steering and cancellation do not widen with those reads.
-Owner chat or Background Consciousness may initiate an existing binding, but
-its cycle must use an explicitly selected transport tool and finish
-`tool_delivered` to claim an external message was sent.
-
-A turn's source identity is its binding, source event ID, provider/account,
+A turn's source identity uses its first legacy binding id (otherwise its place id), source event ID, provider/account,
 conversation/thread, actor ID and text. Keep those facts stable on retry;
 `staged_files` paths and delivery-reporting negotiation may change. A collision
 returns HTTP 409 `presence_event_identity_conflict` with `disposition: rejected`,

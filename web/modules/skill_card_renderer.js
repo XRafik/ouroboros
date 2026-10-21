@@ -545,38 +545,6 @@ function publicationRow(skill) {
     return detailRow('Publication', `${line}${destination ? ` · ${escapeHtml(String(destination))}` : ''} <button type="button" class="skills-link-button" ${actionAttrs(skill.name, 'forget_publication')}>Forget this record</button>`);
 }
 
-function presenceRuntimeBlock(skill) {
-    const runtime = skill.presence_runtime;
-    if (!runtime || typeof runtime !== 'object') return '';
-    if (runtime.error) return `<div class="skills-load-error">Presence runtime unavailable: ${escapeHtml(runtime.error)}</div>`;
-    const defaults = runtime.defaults || {};
-    const overrides = runtime.overrides || {};
-    const modelOverride = ['main', 'light'].includes(overrides.model_slot) ? overrides.model_slot : '';
-    const roundsOverride = Number.isInteger(overrides.inline_max_rounds) ? overrides.inline_max_rounds : '';
-    const fingerprint = String(runtime.state_fingerprint || '');
-    return `<form class="skills-presence-runtime" data-presence-runtime-form data-skill-name="${escapeHtml(skill.name)}" data-state-fingerprint="${escapeHtml(fingerprint)}">
-        <div class="skills-presence-runtime-title">Presence runtime</div>
-        <label class="ui-field">Model
-            <select name="model_slot" class="ui-control">
-                <option value="" ${modelOverride ? '' : 'selected'}>Reviewed default (${escapeHtml(defaults.model_slot || 'main')})</option>
-                <option value="main" ${modelOverride === 'main' ? 'selected' : ''}>Main</option>
-                <option value="light" ${modelOverride === 'light' ? 'selected' : ''}>Light</option>
-            </select>
-        </label>
-        <label class="ui-field">Inline rounds
-            <input name="inline_max_rounds" class="ui-control" type="number" min="1" step="1" value="${escapeHtml(roundsOverride)}" placeholder="${escapeHtml(defaults.inline_max_rounds || 10)}">
-        </label>
-        <label class="ui-field skills-presence-workspace">Working folder
-            <input name="workspace_root" class="ui-control" type="text" value="${escapeHtml(runtime.workspace_root || '')}" placeholder="No external folder">
-        </label>
-        <div class="skills-presence-runtime-actions">
-            <button type="submit" class="btn btn-default btn-sm">Save</button>
-            <button type="button" class="btn btn-ghost btn-sm" data-presence-runtime-reset>Use reviewed defaults</button>
-        </div>
-        <div class="muted">Applies to new Presence turns only. Memory stays shared.</div>
-    </form>`;
-}
-
 function provenanceRows(skill) {
     const prov = sourceTag(skill) === 'clawhub' && skill.provenance && typeof skill.provenance === 'object' ? skill.provenance : null;
     if (!prov) return '';
@@ -689,7 +657,6 @@ export function renderInstalledSkillCard(skill, reviewingSkills = new Set(), rep
                 ${submit.visible && submit.disabled && submit.reason ? detailRow('Publishing', escapeHtml(submit.reason)) : ''}
                 ${provenanceRows(skill)}
             </div>
-            ${presenceRuntimeBlock(skill)}
         </div>
     </details>`;
     return `<article class="skills-card skills-installed-card" data-skill="${safeName}"${skill.lifecycle_virtual ? ' data-lifecycle-virtual' : ''}${model.needs ? ' data-needs-you' : ''}${reviewing ? ' data-reviewing="1"' : ''}${repairing ? ' data-repairing="1"' : ''}>

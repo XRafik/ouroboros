@@ -101,7 +101,7 @@ def _admit_presence(ctx: host.HostServiceContext, skill_name: str, binding_id: s
 
 
 async def _api_presence_turn(request: Request) -> JSONResponse:
-    """Run one non-owner event under a host-resolved reviewed profile ceiling.
+    """Capture a connector event and run its matched focus under consciousness authority.
 
     Authentication, admission and file confinement run off the event loop. The turn is
     host work this request only waits on (``presence_runner.PresenceTurnExecutions``): it
@@ -211,7 +211,16 @@ async def _api_presence_turn(request: Request) -> JSONResponse:
         # A settled turn answers from its durable row without queueing behind its conversation.
         result = await host._bounded_host_read(ctx, functools.partial(
             presence_turn_replay, ctx.data_dir, turn_id, event.conversation_key, identity, continuing))
-        if result is None and admission.place is not None:
+        from ouroboros.presence_runner import _stored_turn
+        from ouroboros.conversation_lease import live_author
+        # A retry of work already admitted belongs to its frozen custody, even if the
+        # owner has since switched Off. Never certify a running/unknown attempt silent.
+        started = turn_id in ctx.presence_turns.live() or bool(await host._bounded_host_read(
+            ctx, functools.partial(_stored_turn, ctx.data_dir, turn_id, identity)))
+        if not started:
+            started = await host._bounded_host_read(ctx, functools.partial(
+                live_author, event.conversation_key, drive_root=ctx.data_dir)) == turn_id
+        if result is None and admission.place is not None and not started:
             from ouroboros.place_intake import decide_attention, offer_to_author, settle_heard
             decision, allowance = await host._bounded_host_read(ctx, functools.partial(
                 decide_attention, ctx.data_dir, admission, event))

@@ -210,7 +210,7 @@ def test_retry_reuses_retained_attachments(focus):
 def test_author_projection_uses_the_cross_process_lock(tmp_path):
     import subprocess
     import sys
-    from ouroboros.conversation_lease import live_author
+    from ouroboros.conversation_lease import live_author, live_authors
     code = '''
 import sys
 from pathlib import Path
@@ -225,9 +225,11 @@ lease.release()
     try:
         assert child.stdout.readline().strip() == "held"
         assert live_author("room", drive_root=tmp_path) == "other-process-author"
+        assert live_authors(drive_root=tmp_path) == ["other-process-author"]
         child.communicate("release\n", timeout=10)
         assert child.returncode == 0
         assert not live_author("room", drive_root=tmp_path)
+        assert not live_authors(drive_root=tmp_path)
     finally:
         if child.poll() is None:
             child.kill()
@@ -272,3 +274,76 @@ def test_focus_ordinary_finish_traverses_reply_check(focus, monkeypatch, silent)
         assert len(calls) == 2 and len(checks) == 2
         assert any("Reconsider this reply" in str(row.get("content")) for row in calls[-1])
         assert result["outcome"] == "message" and result["text"] == "Hello"
+
+
+@pytest.mark.parametrize("state,facts,enabled,available,expected", [
+    ("active", ["mention"], True, True, "message"),
+    ("paused", ["mention"], True, True, "silent"),
+    ("active", ["mention"], False, True, "silent"),
+    ("active", [], True, True, "silent"),
+    ("active", ["mention"], True, False, "retry"),
+])
+def test_new_host_payload_captures_before_attention(focus, monkeypatch, state, facts, enabled, available, expected):
+    from starlette.testclient import TestClient
+    from ouroboros.gateway import host_service
+    from ouroboros import dialogue_store
+    root, place, _admission, event = focus
+    p.edit_place(root, place.place_id, "set_state", author="owner", state=state)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _r: enabled)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _r: {
+        "status": "available" if available else "exhausted", "remaining_usd": 2 if available else 0})
+    async def authenticated(*_args):
+        return "bridge", {}
+    monkeypatch.setattr(host_service, "_authenticated", authenticated)
+    calls = []
+    def run(**kw):
+        rows = list(dialogue_store.iter_rows(root, "chat"))
+        assert len(rows) == 1 and rows[0].row["text"] == event.text
+        calls.append(kw)
+        return SimpleNamespace(outcome="message", text="Hello", task_id="focus", work_ref="")
+    body = {"event": {k: v for k, v in event.__dict__.items() if k not in {"delivery_reporting_version", "continuation_version"}}}
+    body["event"]["facts"] = facts
+    with TestClient(host_service.create_host_service_app(root, presence_runner=run)) as client:
+        response = client.post("/presence/turn", json=body)
+        if expected == "retry":
+            assert response.status_code == 429
+            assert response.json()["code"] == "consciousness_allowance_exhausted"
+            assert response.json()["disposition"] == "retry" and response.json()["retry_after"] > 0
+        else:
+            assert response.status_code == 200, response.text
+            assert response.json()["outcome"] == expected
+        assert bool(calls) == (expected == "message")
+        rows = list(dialogue_store.iter_rows(root, "chat"))
+        assert len(rows) == 1
+        lookup = client.get("/presence/place", params={"provider": "chat", "account_id": "a", "conversation_id": "r"})
+        assert lookup.status_code == 200 and lookup.json()["place_id"] == place.place_id
+
+
+def test_off_retry_keeps_unknown_attempt_custody(focus, monkeypatch):
+    from starlette.testclient import TestClient
+    from ouroboros.gateway import host_service
+    from ouroboros.presence_bindings import conversation_key
+    from ouroboros.presence_runner import run_presence_turn
+    from ouroboros.task_results import write_task_result, load_task_result
+    root, _place, admission, event = focus
+    event = replace(event, conversation_key=conversation_key("chat", "a", "r", ""))
+    task = capture_presence_event(admission, event, drive_root=root)
+    write_task_result(root, task["id"], "running", metadata=task["metadata"])
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _r: False)
+    async def authenticated(*_args):
+        return "bridge", {}
+    monkeypatch.setattr(host_service, "_authenticated", authenticated)
+    calls = []
+    def factory(**_kw):
+        calls.append(True)
+        raise AssertionError("an unknown attempt must not generate again")
+    def run(**kw):
+        return run_presence_turn(repo_dir=root, drive_root=root, agent_factory=factory, **kw)
+    body = {"event": {k: v for k, v in event.__dict__.items() if k not in {"delivery_reporting_version", "continuation_version"}}}
+    with TestClient(host_service.create_host_service_app(root, presence_runner=run)) as client:
+        response = client.post("/presence/turn", json=body)
+    assert response.status_code == 409
+    assert response.json()["code"] == "presence_attempt_outcome_unknown"
+    assert not calls and load_task_result(root, task["id"])["status"] == "running"
+    assert settle_heard(root, task, event) is None
+    assert load_task_result(root, task["id"])["status"] == "running"

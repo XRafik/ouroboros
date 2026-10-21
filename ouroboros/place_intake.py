@@ -44,6 +44,8 @@ def settle_heard(root: Path, task: dict, event):
                       metadata=metadata, chat_id=task["chat_id"], _is_direct_chat=True,
                       source=task["source"], result="", terminal_origin="host_notice")
     row = load_task_result(root, task["id"], strict=True)
+    if row.get("status") not in {"completed", "failed"}:
+        return None  # another request already admitted it; the Host joins its custody
     return replace(presence_result_from_stored(row, task["id"]), continuation_version=event.continuation_version)
 
 
@@ -57,7 +59,7 @@ def offer_to_author(root, task: dict, event) -> bool:
     import json
     text = json.dumps({"actor": dict(event.actor), "event": event.text,
                        "source_event_id": event.source_event_id, "conversation_key": event.conversation_key,
-                       "attachment_manifest": task.get("attachment_manifest", [])}, ensure_ascii=False)
+                       **{key: task[key] for key in ("attachment_manifest", "attachment_manifest_ref") if key in task}}, ensure_ascii=False)
     if not write_task_message(root, text, author, source_task_id=task["id"], provenance="place_event",
                               msg_id="place-event:" + task["metadata"]["presence_event_identity"],
                               sender_origin={"place_id": task["metadata"]["focus"]["place_id"],

@@ -353,6 +353,8 @@ def focus_metadata(admission: Any, event: Any, task_id: str, chat_id: int) -> di
     from ouroboros.places import FACT_LEGACY_ADDRESSED, is_owner_account, wake_matches
     place = admission.place
     facts = event.facts if event.facts is not None else (FACT_LEGACY_ADDRESSED,)
+    if event.actor.get("is_bot") is True:
+        facts = (*facts, "from_bot")
     actor = str(event.actor.get("platform_actor_id") or event.actor.get("id") or "")
     allowance = dict(admission.allowance or {})
     metadata = {

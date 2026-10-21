@@ -238,6 +238,7 @@ def place_for_target(drive_root: Any, *, connector: str, targets: Mapping[str, l
     if not values:
         return None, False
     exact = [p for p in places if (p.conversation_id and p.conversation_id in values)
+             or ((p.destination or {}).get("conversation_id") in values)
              or (not p.conversation_id and p.account_id and p.account_id in values)]
     if exact:
         # A caller passing several targets must not hide a blocked one behind an active one.

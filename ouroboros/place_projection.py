@@ -47,7 +47,8 @@ def place_view(root, place, *, declarations: list[dict] | None = None, allowance
                   reply_destination=place.destination,
                   destination=row.get("destination") or "vendor:" + place.provider,
                   icon=row.get("icon") if isinstance(row.get("icon"), dict) else {"name": row["icon"]} if row.get("icon") else {}, wake_suggestions=list(row.get("wakes") or []),
-                  unanswered=activity["unanswered"], last_activity_at=activity["last_activity_at"], spent_24h_usd=spend)
+                  unanswered=activity["unanswered"], last_activity_at=activity["last_activity_at"],
+                  activity_coverage="captured_place_events", spent_24h_usd=spend)
     if not row:
         result["status"] = {"text": "Connector unavailable", "tone": "warn"}
     return result

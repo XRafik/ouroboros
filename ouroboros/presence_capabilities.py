@@ -10,19 +10,12 @@ from types import MappingProxyType
 from typing import Any, Mapping, TypeAlias
 
 from ouroboros.contracts.skill_manifest import canonical_skill_name
-PRESENCE_STATE_SCHEMA_VERSION = 1
 
 _TOOL_KINDS = frozenset({"builtin", "extension", "mcp"})
 _BINDING_SOURCES = frozenset({"static", "conversation", "actor", "message", "destination", "resource"})
 _CONTEXT_BINDING_SOURCES = frozenset({"conversation", "actor", "message", "destination"})
 _HEX_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
-_STATE_FIELDS = frozenset({"schema_version", "selections", "runtime_overrides"})
-_SELECTION_FIELDS = frozenset({"request_fingerprint", "target", "argument_bindings"})
-_TOOL_TARGET_FIELDS = frozenset({"type", "kind", "name", "provider"})
-_SCRIPT_TARGET_FIELDS = frozenset({"type", "skill", "script"})
-_RESOURCE_TARGET_FIELDS = frozenset({"type", "root", "operations", "path_prefix", "bucket", "skill_name"})
-_RUNTIME_OVERRIDE_FIELDS = frozenset({"model_slot", "inline_max_rounds"})
 
 
 class PresenceStateError(ValueError):
@@ -319,5 +312,3 @@ class PresenceArgumentBinding:
             self.resource_request_fingerprint,
             field_name="binding.resource_request_fingerprint",
         )
-
-

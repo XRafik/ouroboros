@@ -279,16 +279,14 @@ test('Details keep the record: review sentence and verdict, what it can use, the
     assert.match(worker, />Loaded · worker</);
 });
 
-test('Presence runtime keeps the working folder and its reset, inside Details', () => {
+test('retired Presence runtime is not rendered even for an older payload', () => {
     const html = renderInstalledSkillCard(skill({
         presence_runtime: {
             defaults: { model_slot: 'main', inline_max_rounds: 10 }, overrides: { model_slot: 'light', inline_max_rounds: 7 },
             workspace_root: '/work/reports & notes', state_fingerprint: 'a'.repeat(64),
         },
     }));
-    assert.match(html, /name="workspace_root"[^>]+value="\/work\/reports &amp; notes"/);
-    assert.match(html, /Memory stays shared/);
-    assert.match(html, /data-presence-runtime-reset/);
+    assert.doesNotMatch(html, /data-presence-runtime|name="workspace_root"|Presence runtime/);
     assert.doesNotMatch(renderInstalledSkillCard(skill()), /skills-presence-runtime/);
 });
 

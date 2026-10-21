@@ -17,7 +17,7 @@ def record_notice(root, *, place_id: str, conversation_key: str, task_id: str, t
            "presence_provenance": {"binding_id": place_id, "conversation_key": conversation_key}}
     from ouroboros.presence_runner import _configured_gate
     gate = _configured_gate(root)
-    key, lock = gate._conversation("notice:" + identity)
+    key, lock = gate._conversation("notice:" + conversation_key)
     with lock, gate._file_lock(gate._conversation_file(key)):
         existing = dialogue_store.rows_by_client_id(root, row["client_message_id"], chat_id=row["chat_id"])
         if existing:
@@ -72,6 +72,12 @@ def record_late_delivery(root, skill: str, payload: dict, client_id: str):
         return
     place = resolve_place(root, connector=skill, provider=payload["provider"], account_id=payload["account_id"],
                           conversation_id=payload["conversation_id"], thread_id=payload["thread_id"])
+    if place is None:
+        from ouroboros.places import places_of_connector
+        place = next((p for p in places_of_connector(root, skill) if p.destination and
+                      all(p.destination.get(key, "") in (payload[source], "*") for key, source in
+                          (("transport", "provider"), ("account_id", "account_id"),
+                           ("conversation_id", "conversation_id"), ("thread_id", "thread_id")))), None)
     if place is None or place.state not in {"silent", "paused"}:
         return
     from ouroboros.presence_bindings import conversation_key
