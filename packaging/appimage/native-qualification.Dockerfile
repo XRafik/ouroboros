@@ -27,8 +27,11 @@ RUN curl -fLsS https://github.com/astral-sh/uv/releases/download/0.12.1/uv-x86_6
     && echo '90b2f223fb69d19db49e117da601f64978593417988530aa733d456141b4bcbb  /tmp/uv.tar.gz' | sha256sum -c - \
     && tar -xzf /tmp/uv.tar.gz -C /opt && ln -s /opt/uv-x86_64-unknown-linux-gnu/uv /usr/local/bin/uv
 FROM common AS desktop
+# libGL/libEGL/libGLESv2 (libglvnd), Mesa, gbm and drm are the declared host
+# graphics ABI. The shipped libepoxy aborts when a non-GLX GLES2 context needs
+# libGLESv2.so.2 and dlopen fails (run 39636484833 had no libgles2).
 RUN apt-get install -y --no-install-recommends xvfb openbox xdotool x11-utils x11-apps \
-    dbus-x11 fonts-dejavu-core libgl1-mesa-dri libgl1 libegl1 libgbm1 libdrm2 imagemagick \
+    dbus-x11 fonts-dejavu-core libgl1-mesa-dri libgl1 libegl1 libgles2 libgbm1 libdrm2 imagemagick \
     && for package in libwebkit2gtk-4.1-0 libgtk-3-0 gir1.2-webkit2-4.1 python3-gi; do \
          if dpkg-query -W "$package" 2>/dev/null; then exit 1; fi; \
        done

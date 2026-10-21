@@ -23,13 +23,18 @@ import urllib.request
 import uuid
 
 
+HOST_GRAPHICS = ('libGL.so.1', 'libEGL.so.1', 'libGLESv2.so.2', 'libGLdispatch.so.0', 'libgbm.so.1', 'libdrm.so.2')
+
+
 def run(*args, **kwargs):
     return subprocess.check_output(args, text=True, **kwargs).strip()
 
 
-def wait_for(read, description, timeout=180):
+def wait_for(read, description, timeout=180, process=None):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(f'{description}: AppImage exited first with {process.returncode}')
         try:
             value = read()
             if value:
@@ -102,7 +107,10 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
     evidence.mkdir(parents=True)
     # Preserve safe_test process ownership markers; replace the fixture's data roots.
     env = dict(os.environ)
-    for key in ('APPDIR', 'APPIMAGE', 'LD_LIBRARY_PATH', 'GI_TYPELIB_PATH', 'PYWEBVIEW_GUI'):
+    # PIP_REQUIRE_VIRTUALENV is safe_test's host guard. The product's own pip
+    # installs --user into the disposable data dir and must not be refused.
+    for key in ('APPDIR', 'APPIMAGE', 'LD_LIBRARY_PATH', 'GI_TYPELIB_PATH', 'PYWEBVIEW_GUI',
+                'PIP_REQUIRE_VIRTUALENV'):
         env.pop(key, None)
     for name in ('home', 'data', 'app', 'tmp', 'cache', 'config', 'xdg-data'):
         (state / name).mkdir(parents=True, exist_ok=True)
@@ -141,14 +149,14 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
     try:
         with (evidence / 'stdout.log').open('w') as log:
             process = subprocess.Popen(command or [str(appimage)], env=env, stdout=log, stderr=subprocess.STDOUT)
-            launcher_pid = wait_for(lambda: int(pid_file.read_text()), 'launcher pid')
-            port = wait_for(lambda: int(port_file.read_text()), 'server port')
+            launcher_pid = wait_for(lambda: int(pid_file.read_text()), 'launcher pid', process=process)
+            port = wait_for(lambda: int(port_file.read_text()), 'server port', process=process)
             def health():
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/health', timeout=2) as response:
                     return json.load(response)
-            (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health'), indent=2))
+            (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
-                setup = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros — Setup$'), 'Setup')
+                setup = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros — Setup$'), 'Setup', process=process)
                 # Only add a bridge witness; retain the shipped page and its actual UI.
                 page = state / 'app/repo/web/index.html'
                 original = page.read_text()
@@ -167,8 +175,8 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
                 run('xdotool', 'windowactivate', '--sync', setup.splitlines()[0])
                 run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
-                window = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros v'), 'Main window').splitlines()[0]
-                proof = wait_for(lambda: received[0] if received else None, 'real MainApi shell_info roundtrip')
+                window = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros v'), 'Main window', process=process).splitlines()[0]
+                proof = wait_for(lambda: received[0] if received else None, 'real MainApi shell_info roundtrip', process=process)
                 (evidence / 'bridge.json').write_text(json.dumps(proof, indent=2))
                 assert proof['info']['source_launcher'] is source, proof
                 assert proof['info']['source_revision'] == run('git', '-C', str(state / 'app/repo'), 'rev-parse', 'HEAD')
@@ -228,7 +236,9 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
         if logs.exists():
             shutil.copytree(logs, evidence / 'logs', dirs_exist_ok=True)
         if not (evidence / 'result.json').exists():
-            (evidence / 'result.json').write_text('{"status":"incomplete_or_failed"}\n')
+            (evidence / 'result.json').write_text(json.dumps({
+                'status': 'incomplete_or_failed',
+                'returncode': None if process is None else process.poll()}) + '\n')
 
 
 def main():
@@ -242,6 +252,10 @@ def main():
     ldconfig = run('/sbin/ldconfig', '-p')
     (evidence / 'desktop-ldconfig.txt').write_text(ldconfig)
     assert not any(name in ldconfig for name in ('libwebkit', 'libjavascriptcoregtk', 'libgtk-3', 'libgirepository'))
+    # The declared host graphics ABI (bundle_linux_gtk.HOST_LIBRARIES plus the
+    # GLES front-end the shipped libepoxy dlopens) must be the host's own.
+    for soname in HOST_GRAPHICS:
+        assert f'\t{soname} (' in ldconfig, f'host graphics ABI missing: {soname}'
     assert not any(key in os.environ for key in ('WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS', 'WEBKIT_DISABLE_SANDBOX'))
     for package in ('libwebkit2gtk-4.1-0', 'libgtk-3-0', 'gir1.2-webkit2-4.1', 'python3-gi'):
         assert subprocess.run(['dpkg-query', '-W', package], capture_output=True).returncode != 0, package

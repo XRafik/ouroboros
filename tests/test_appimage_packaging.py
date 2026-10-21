@@ -376,3 +376,71 @@ def test_native_qualifier_records_webkit_sandbox_without_requiring_it():
         'sandbox_helpers': ['bwrap'], 'webkit_sandbox_variables': ['WEBKIT_FORCE_SANDBOX']}
     asserts = [ast.unparse(node) for node in ast.walk(ast.parse(script.read_text())) if isinstance(node, ast.Assert)]
     assert asserts and not any('mount_namespace' in text or 'ns/mnt' in text for text in asserts)
+
+
+def test_native_fixture_declares_the_gles_front_end_libepoxy_dlopens():
+    import re
+    import runpy
+
+    recipe = (REPO / 'packaging/appimage/native-qualification.Dockerfile').read_text()
+    desktop = recipe.split('FROM common AS desktop')[1].split('RUN useradd')[0]
+    packages = set(re.findall(r'[\w.+-]+', desktop.split('--no-install-recommends')[1].split('&&')[0]))
+    # Run 39636484833: "Couldn't open libGLESv2.so.2" and no Setup window.
+    assert {'libgl1', 'libegl1', 'libgles2', 'libgbm1', 'libdrm2', 'libgl1-mesa-dri'} <= packages
+    script = runpy.run_path(str(REPO / 'scripts/qualify_linux_appimage.py'))
+    host = runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))['HOST_LIBRARIES']
+    assert 'libGLESv2.so.2' in script['HOST_GRAPHICS']
+    # Everything but the dlopened GLES front-end is already a declared host exception.
+    assert [name for name in script['HOST_GRAPHICS'] if not host.fullmatch(name)] == ['libGLESv2.so.2']
+
+
+def test_native_qualifier_does_not_leak_the_test_pip_guard(tmp_path, monkeypatch):
+    import json
+    import runpy
+    import types
+
+    qualify = runpy.run_path(str(REPO / 'scripts/qualify_linux_appimage.py'))
+    seen = {}
+
+    class Aborted:
+        """An AppImage that exits before any window, as the launcher did in run 39636484833."""
+        returncode = -6
+
+        def __init__(self, args, env, **kwargs):
+            seen.update(env)
+
+        def poll(self):
+            return self.returncode
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    monkeypatch.setenv('PIP_REQUIRE_VIRTUALENV', 'true')
+    monkeypatch.setitem(qualify['one_case'].__globals__, 'subprocess', types.SimpleNamespace(
+        Popen=Aborted, CalledProcessError=subprocess.CalledProcessError, STDOUT=subprocess.STDOUT))
+    # A dead process is reported at once, with its exit status, not after 180 s.
+    with pytest.raises(RuntimeError, match='launcher pid: AppImage exited first with -6'):
+        qualify['one_case'](tmp_path / 'x.AppImage', tmp_path / 'state', tmp_path / 'evidence')
+    assert 'PIP_REQUIRE_VIRTUALENV' not in seen
+    assert seen['OUROBOROS_DATA_DIR'] == str(tmp_path / 'state/data')
+    assert json.loads((tmp_path / 'evidence/result.json').read_text()) == {
+        'status': 'incomplete_or_failed', 'returncode': -6}
+
+
+def test_native_qualifier_wait_reports_an_early_exit_not_a_timeout():
+    import runpy
+
+    wait_for = runpy.run_path(str(REPO / 'scripts/qualify_linux_appimage.py'))['wait_for']
+
+    class Process:
+        def __init__(self, returncode):
+            self.returncode = returncode
+
+        def poll(self):
+            return self.returncode
+
+    with pytest.raises(RuntimeError, match=r'^Setup: AppImage exited first with 134$'):
+        wait_for(lambda: None, 'Setup', timeout=1, process=Process(134))
+    # A live process still gets the ordinary deadline.
+    with pytest.raises(RuntimeError, match=r'^Timed out: Setup$'):
+        wait_for(lambda: None, 'Setup', timeout=0.3, process=Process(None))
