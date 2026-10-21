@@ -72,6 +72,13 @@ jobs:
                   openbox > /evidence/openbox.log 2>&1 &
                   python3 -I -S scripts/qualify_linux_appimage.py /evidence/*.AppImage /evidence/native
                 '\''' 2>&1 | tee "$RUNNER_TEMP/ob688-evidence/native.log"
+      - name: Return container evidence to the runner
+        if: always()
+        run: |
+          if test -d "$RUNNER_TEMP/ob688-evidence"; then
+            sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/ob688-evidence"
+            chmod -R u+rwX "$RUNNER_TEMP/ob688-evidence"
+          fi
       - name: Preserve every successful and failed attempt
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

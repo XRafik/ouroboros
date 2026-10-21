@@ -18,7 +18,7 @@ FROM common AS builder
 RUN sed -n 's/^deb /deb-src /p' /etc/apt/sources.list > /etc/apt/sources.list.d/native-sources.list \
     && apt-get update && apt-get -y --no-install-recommends dist-upgrade
 # Jammy's libwebkit2gtk-4.1-dev does not depend on the WebKit2 typelib package.
-RUN apt-get install -y --no-install-recommends build-essential pkg-config \
+RUN apt-get install -y --no-install-recommends build-essential pkg-config file \
     libgirepository1.0-dev libcairo2-dev libwebkit2gtk-4.1-dev gir1.2-webkit2-4.1 \
     libgtk-3-bin librsvg2-common glib-networking gsettings-desktop-schemas \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good bubblewrap xdg-dbus-proxy \
