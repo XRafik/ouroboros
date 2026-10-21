@@ -291,7 +291,7 @@ def enqueue_task(
     ``timeout_retry``: the reaper's own retry admission (``apply_budget_root_admission_fence``)."""
     t = dict(task)
     from ouroboros.consciousness_authority import work_kind
-    metadata = dict(t.get("metadata") or {})
+    metadata = t.get("metadata") if isinstance(t.get("metadata"), dict) else {}
     metadata["work_kind"] = work_kind({"origin_message_ref": t.get("origin_message_ref"), **metadata})
     t["metadata"] = metadata
     if not restoring_snapshot:
