@@ -194,6 +194,7 @@ def test_workspace_direct_argv_keeps_windows_paths_as_literal_data(tmp_path, mon
 
 
 def test_workspace_shell_keeps_symlinked_workspace_absolute_paths_allowed(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     system_repo = tmp_path / "system"
     real_workspace = tmp_path / "real_workspace"
@@ -366,7 +367,8 @@ def test_workspace_shell_git_ls_remote_requires_network_contract(tmp_path):
         assert result and "RESOURCE_CONSTRAINT_BLOCKED" in result, (cmd, result)
 
 
-def test_workspace_run_shell_allows_absolute_cwd_under_workspace_and_child_drive(tmp_path):
+def test_workspace_run_shell_allows_absolute_cwd_under_workspace_and_child_drive(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     system_repo = tmp_path / "system"
     workspace = tmp_path / "workspace"
     parent_data = tmp_path / "data"
