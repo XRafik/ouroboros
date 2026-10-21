@@ -804,6 +804,11 @@ def _admit_promoted_workspace(evt: dict, ctx: Any, task: dict, *, pid: str, tid:
             )
             + "[END_HEADLESS_WORKSPACE]"
         )
+    if _presence_promotion(evt):
+        # Ordinary admission owns this root's folder, including no folder.
+        # Do not let the promoter's retained workspace override it on attachment.
+        task["task_contract"] = {key: value for key, value in task["task_contract"].items()
+                                 if key not in {"workspace", "workspace_root", "workspace_mode"}}
     return None
 
 
