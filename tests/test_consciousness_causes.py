@@ -138,7 +138,10 @@ def test_counted_roots_are_exactly_autonomous_independent_roots(tmp_path, monkey
                       _task("owner-commission", {**STARTED, "work_kind": "owner"}),
                       _task("kid", STARTED, parent_task_id="started", delegation_role="subagent"),
                       _task("kid-role-missing", STARTED, parent_task_id="started"),
-                      _task("continuation", STARTED, _consciousness_continuation=True)])
+                      _task("continuation", STARTED, _consciousness_continuation=True),
+                      # Unmarked system/owner work is checked at the consciousness level, yet
+                      # it is not the mind's own task: it takes no slot and no allowance.
+                      _task("unmarked-system", {})])
     q.RUNNING.update(started={"task": _task("started", STARTED)}, other={"task": _task("other", STARTED)})
     assert q.live_consciousness_root_count() == 2
     assert {r["task_id"] for r in q.live_consciousness_roots()} == {"started", "other"}
