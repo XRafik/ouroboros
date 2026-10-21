@@ -424,5 +424,6 @@ def test_reporting_v1_receipts_own_outgoing_history_and_reach_the_resuming_autho
 
 @pytest.fixture(autouse=True)
 def _focus_authority_available(monkeypatch):
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
     monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
     monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

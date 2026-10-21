@@ -37,8 +37,13 @@ def _finish_presence(ctx: ToolContext, outcome: str, message: str = "", action: 
 
 
 def legacy_registry(*args, **kwargs):
-    from ouroboros.tools.registry import ToolEntry, ToolRegistry
+    from ouroboros.tools.registry import ToolRegistry
     registry = ToolRegistry(*args, **kwargs)
+    return register_legacy_completion(registry)
+
+
+def register_legacy_completion(registry):
+    from ouroboros.tools.registry import ToolEntry
     registry.register(ToolEntry(name="presence_finish", handler=_finish_presence,
         schema={"name": "presence_finish", "description": "Frozen pre-migration completion fixture.",
                 "parameters": {"type": "object", "properties": {"outcome": {"type": "string"},
@@ -145,3 +150,18 @@ def legacy_tools():
     from ouroboros.tools.registry import ToolEntry
     return [*get_tools(), ToolEntry(name="initiate_presence", handler=_initiate_presence,
             schema={"name": "initiate_presence", "parameters": {"type": "object", "properties": {}}})]
+
+
+def focus_response(response):
+    """Old lifecycle scripts select the ordinary finish tool for a new focus."""
+    import copy
+    response = copy.deepcopy(response)
+    for tool in response.get("tool_calls", []):
+        function = tool["function"]
+        if function["name"] == "presence_finish":
+            old = json.loads(function["arguments"])
+            outcome, message = old.pop("outcome"), old.pop("message", "")
+            function.update(name="finish_task", arguments=json.dumps({
+                "action": "finish", **old,
+                **({"silent": True} if outcome in {"silent", "tool_delivered"} else {"answer": message})}))
+    return response

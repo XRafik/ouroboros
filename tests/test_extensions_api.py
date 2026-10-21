@@ -112,7 +112,27 @@ class _FakeUvicornServer:
         await asyncio.sleep(0)
 
 
-def _patch_lifespan_for_drive_root_test(monkeypatch, srv, settings: dict):
+def _patch_lifespan_for_drive_root_test(monkeypatch, srv, settings: dict, request):
+    # These two lifecycle tests own the import thread their TestClient starts.
+    import threading
+    imports = []
+    original_import = srv.store_switch._run
+
+    def tracked_import(*args, **kwargs):
+        imports.append(threading.current_thread())
+        return original_import(*args, **kwargs)
+
+    def join_imports():
+        for thread in imports:
+            thread.join(60)
+            assert not thread.is_alive(), "the fixture's store import did not stop"
+
+    async def no_host_listener(*_args):
+        pass
+
+    monkeypatch.setattr(srv.store_switch, "_run", tracked_import)
+    monkeypatch.setattr(srv.server_boot, "serve_host_service", no_host_listener)
+    request.addfinalizer(join_imports)
     monkeypatch.setattr(srv, "load_settings", lambda: dict(settings))
     monkeypatch.setattr(srv, "save_settings", lambda *_a, **_k: None)
     monkeypatch.setattr(srv, "apply_runtime_provider_defaults", lambda s: (s, False, []))
@@ -142,7 +162,7 @@ def _boot_step_ended(client, name: str, timeout: float = 30.0) -> None:
     raise AssertionError(f"boot step {name} did not end")
 
 
-def test_testclient_lifespan_reload_all_uses_app_state_drive_root(tmp_path, monkeypatch):
+def test_testclient_lifespan_reload_all_uses_app_state_drive_root(tmp_path, monkeypatch, request):
     from starlette.testclient import TestClient
     import server as srv
     from ouroboros import extension_loader
@@ -172,7 +192,7 @@ def test_testclient_lifespan_reload_all_uses_app_state_drive_root(tmp_path, monk
     assert calls == [(drive_root, str(repo_root))]
 
 
-def test_testclient_settings_hot_reload_uses_app_state_drive_root(tmp_path, monkeypatch):
+def test_testclient_settings_hot_reload_uses_app_state_drive_root(tmp_path, monkeypatch, request):
     from starlette.testclient import TestClient
     import server as srv
     from ouroboros import extension_loader
@@ -186,7 +206,7 @@ def test_testclient_settings_hot_reload_uses_app_state_drive_root(tmp_path, monk
     srv.app.app.state.drive_root = drive_root  # type: ignore[attr-defined]
     srv.app.app.state.repo_dir = tmp_path / "repo"  # type: ignore[attr-defined]
     settings = {"OUROBOROS_SKILLS_REPO_PATH": str(old_repo), "OUROBOROS_RUNTIME_MODE": "advanced"}
-    _patch_lifespan_for_drive_root_test(monkeypatch, srv, settings)
+    _patch_lifespan_for_drive_root_test(monkeypatch, srv, settings, request)
     # The POST persists through the gateway's owner writer (``config.SETTINGS_PATH``), not
     # through the ``server.save_settings`` name patched above: keep the document it writes
     # in this test's tree instead of the worker-shared pytest data root.

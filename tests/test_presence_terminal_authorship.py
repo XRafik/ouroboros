@@ -194,6 +194,8 @@ def native_agent(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_module, "validate_task_authority_sources", lambda *_a: None)
     monkeypatch.setattr(agent_module.OuroborosAgent, "_start_task_heartbeat_loop", lambda *_a: None)
     agent = agent_module.OuroborosAgent(agent_module.Env(repo_dir=tmp_path, drive_root=tmp_path))
+    from tests.presence_legacy_helpers import register_legacy_completion
+    register_legacy_completion(agent.tools)
     ctx = agent.tools._ctx
     monkeypatch.setattr(agent, "_prepare_task_context", lambda *_a: (ctx, [], {}))
     return agent, ctx
