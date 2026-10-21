@@ -1,5 +1,6 @@
 """Integrator seams: connector custody, live authors and bounded room intake."""
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 import json
 import subprocess
 import sys
@@ -170,7 +171,10 @@ def test_room_and_activity_indexes_are_independent_of_heard_history(focus, monke
     from ouroboros import place_arrivals, task_store
     root, place, admission, event = focus
     assert places.place_room_index(root, place.place_id) == []
+    captured_at = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr('ouroboros.presence_runner.utc_now_iso', lambda: captured_at.isoformat())
     task = capture_presence_event(admission, event, drive_root=root)
+    assert place_activity(root, place)['last_activity_at'] == captured_at.isoformat()
     assert places.place_room_index(root, place.place_id)[0]['unanswered_count'] is None  # no task store yet
     write_task_result(root, task['id'], 'running', metadata=task['metadata'], chat_id=task['chat_id'])
     assert places.place_room_index(root, place.place_id) == [{'room_chat_id': task['chat_id'], 'unanswered_count': 1,
@@ -183,7 +187,7 @@ def test_room_and_activity_indexes_are_independent_of_heard_history(focus, monke
         seq = conn.execute("SELECT MAX(seq+length) FROM dialogue WHERE stream='chat'").fetchone()[0]
         for i in range(2000):
             row = {'type': 'place_arrival', 'place_id': place.place_id, 'chat_id': task['chat_id'],
-                   'ts': f'2026-10-21T13:{i:04}', 'text': 'heard', 'direction': 'in'}
+                   'ts': (captured_at + timedelta(seconds=i+1)).isoformat(), 'text': 'heard', 'direction': 'in'}
             body = dialogue_store.encode(row)
             dialogue_store.insert_row(conn, 'chat', seq+i*1000, row, body, length=len(body)+1, segment=1, ordinal=i+1, pos=None)
     from contextlib import contextmanager
@@ -203,7 +207,8 @@ def test_room_and_activity_indexes_are_independent_of_heard_history(focus, monke
                 conn.set_progress_handler(None, 0)
     monkeypatch.setattr(dialogue_store, 'transaction', bounded)
     monkeypatch.setattr(task_store, 'read_document', lambda *a, **kw: pytest.fail('per-row task document load'))
-    assert place_activity(root, place) == {'unanswered': 0, 'last_activity_at': '2026-10-21T13:1999'}
+    assert place_activity(root, place) == {'unanswered': 0,
+                                         'last_activity_at': (captured_at + timedelta(seconds=2000)).isoformat()}
     assert len(places.place_room_index(root, place.place_id)) == 1
     assert place_arrivals.account_candidates(root, place.place_id) == []  # bounded despite 2,000 old arrivals
     monkeypatch.setattr(place_arrivals, '_open_counts', lambda *_: None)
@@ -229,7 +234,11 @@ def test_partial_migration_preserves_successes_failures_and_source_bytes(tmp_pat
     assert len(imported) == 1 and imported[0].notes[0].text == 'Exact words'
     problems = places.migration_problems(tmp_path)
     assert len(problems) == 3 and {p['binding_id'] for p in problems} == {f'{i:032x}' for i in (2, 3, 4)}
-    assert all(p['code'] and p['detail'] for p in problems)
+    assert {p['code']: p['detail'] for p in problems} == {
+        'places_migration_source_invalid': 'its presence profile could not be read',
+        'places_migration_instructions_missing': 'the behavior skill empty has no instructions',
+        'places_migration_source_missing': 'the behavior skill missing is not installed',
+    }
     assert source.read_bytes() == before
     monkeypatch.setattr('ouroboros.skill_loader.find_skill', lambda *_: pytest.fail('migration repeated'))
     assert places.load_places(tmp_path) == imported
@@ -243,6 +252,27 @@ def test_partial_migration_preserves_successes_failures_and_source_bytes(tmp_pat
         assert owner.get('/api/places').json()['migration_problems'] == problems
     new = places.connect_place(tmp_path, connector='bridge', provider='chat', conversation_id='missing')
     assert new in places.load_places(tmp_path)
+
+
+@pytest.mark.parametrize('error,code,detail', [
+    (OSError('private filesystem path'), 'places_migration_source_invalid', 'its presence profile could not be read'),
+    (ValueError('raw JSON bytes'), 'places_migration_source_invalid', 'its presence profile could not be read'),
+    (places.PlaceError('unexpected_import_error', 'internal field'), 'unexpected_import_error',
+     'the old connection could not be imported'),
+])
+def test_migration_problem_uses_owner_fragment_without_losing_code(tmp_path, monkeypatch, error, code, detail):
+    from ouroboros import places_migration
+    good = places.Place('good', 'bridge', 'chat')
+    monkeypatch.setattr('ouroboros.presence_bindings.list_presence_bindings', lambda _: [
+        SimpleNamespace(binding_id='bad', behavior_skill='behavior'), SimpleNamespace(binding_id='good')])
+    def migrate(_root, binding):
+        if binding.binding_id == 'bad':
+            raise error
+        return good
+    monkeypatch.setattr(places_migration, '_legacy_place', migrate)
+    imported, problems = places_migration.legacy_places(tmp_path)
+    assert imported == [good]
+    assert problems == [{'binding_id': 'bad', 'code': code, 'detail': detail}]
 
 
 def test_author_lifetime_closes_its_handle_before_removing_the_file(tmp_path, monkeypatch):
