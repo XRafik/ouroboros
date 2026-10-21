@@ -201,8 +201,8 @@ Every task pays for the body, so it is bounded at 16384 UTF-8 bytes
 (`MAX_ALWAYS_IN_CONTEXT_BODY_BYTES`): keep a compact core and move detail into
 reference files the body names, which stay read on demand. The field is refused
 on other skill types, on an empty body (a `skill.json` manifest has none) and on
-any value other than `true` or `false`. The context presents the text as reviewed
-guidance that never outranks BIBLE.md, the safety rules or an explicit instruction
+any value other than `true` or `false`. The context presents the text as guidance
+that never outranks BIBLE.md, the safety rules or an explicit instruction
 for the task. Say in `model_experience` that the body is always loaded.
 
 ### Passive context snapshots (extensions only)

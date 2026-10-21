@@ -333,10 +333,9 @@ def _parse_model_experience(raw: Any) -> Optional[Dict[str, str]]:
 
 def _parse_always_in_context(data: Dict[str, Any], body: str) -> bool:
     """Opt an instruction body into every task's context; refusals teach."""
-    raw = data.get("always_in_context")
-    if raw is None or raw is False:
+    if "always_in_context" not in data or data["always_in_context"] is False:
         return False
-    if raw is not True:
+    if data["always_in_context"] is not True:  # a present null is a malformed declaration, not an opt-out
         raise SkillManifestError(
             "'always_in_context' must be true or false",
             fix_hint="write always_in_context: true, or omit the field (the body is then read on demand)",

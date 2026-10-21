@@ -51,9 +51,10 @@ def always_in_context_section(skills: Any) -> str:
     if not chosen:
         return ""
     parts = ["## Always-in-context skills\n\n"
-             "Enabled instruction skills whose manifests declare always_in_context and whose current text is "
-             "admitted by skill review. Each text applies wherever it bears on the work, as if the skill had been "
-             "opened; it never outranks BIBLE.md, the safety rules or an explicit instruction for the current task."]
+             "Enabled instruction skills whose manifests declare always_in_context and whose current text the skill "
+             "gate admits for use (each review status is on its Installed Skills line). Each text applies wherever it "
+             "bears on the work, as if the skill had been opened; it never outranks BIBLE.md, the safety rules or an "
+             "explicit instruction for the current task."]
     for skill in chosen:
         parts.append(f"### {skill.name} (version {skill.manifest.version or 'unversioned'})\n"
                      f"Files it names: read_file(root='skill_payload', bucket='{skill.location}', "
@@ -96,7 +97,7 @@ def session_skill_index(ctx: Any) -> str:
         return "\n\nHOST SKILL REFERENCES unavailable; ask the host for relevant instruction files."
     if not rows:
         return ""
-    guidance = ("\n\nALWAYS-IN-CONTEXT HOST GUIDANCE\nThe host applies these reviewed instruction texts to all "
+    guidance = ("\n\nALWAYS-IN-CONTEXT HOST GUIDANCE\nThe host applies these admitted instruction texts to all "
                 "of its work. Follow each wherever it bears on yours; none outranks an explicit instruction "
                 "in your assignment.\n\n" + "\n\n".join(always)) if always else ""
     return ("\n\nHOST SKILL REFERENCES (read-only)\n"

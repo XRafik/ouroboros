@@ -34,7 +34,8 @@ def input_source_selection_receipt(task: Mapping[str, Any]) -> dict[str, Any]:
             "(with the words that started its project) and the memory marks of that room and the global ones",
             "the owner's words that caused this work (shared children receive them verbatim; include them in "
             "context if this case needs them)",
-            "shared review history, health narratives, update letters, registry and installed-skill summaries",
+            "shared review history, health narratives, update letters, registry, installed-skill summaries "
+            "and always-in-context skill texts",
             "parent context, notes, review_notes, predecessor narrative and inherited attachments",
             "task-tree blackboard, routing manifests and other-task summaries",
         ],

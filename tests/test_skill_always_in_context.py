@@ -61,6 +61,9 @@ def test_field_parses_and_defaults_off():
 @pytest.mark.parametrize("text, problem", [
     (_manifest("'yes'"), "must be true or false"),
     (_manifest("1"), "must be true or false"),
+    # A present null (blank or `null`) is a malformed declaration; only an absent key opts out silently.
+    (_manifest(""), "must be true or false"),
+    (_manifest("null"), "must be true or false"),
     (_manifest(kind="extension"), "instruction skills only"),
     (_manifest(kind="script"), "instruction skills only"),
     (_manifest(body=""), "non-empty SKILL.md body"),
@@ -74,6 +77,19 @@ def test_refusals_teach_the_repair(text, problem):
         parse_skill_manifest_text(text)
     assert problem in excinfo.value.problem
     assert excinfo.value.fix_hint and excinfo.value.fix_hint in str(excinfo.value)
+
+
+@pytest.mark.parametrize("declared", [True, False])
+def test_clawhub_adaptation_keeps_the_declaration(tmp_path, declared):
+    from ouroboros.marketplace.adapter import adapt_openclaw_skill
+
+    (tmp_path / "SKILL.md").write_text(_manifest("true" if declared else None), encoding="utf-8")
+    result = adapt_openclaw_skill(tmp_path, slug="guide")
+    assert result.ok, result.blockers
+    assert result.manifest.always_in_context is declared
+    rendered = (tmp_path / "SKILL.md").read_text(encoding="utf-8")
+    assert ("always_in_context: true" in rendered) is declared
+    assert parse_skill_manifest_text(rendered).always_in_context is declared
 
 
 # --- selection and rendering ----------------------------------------------
@@ -105,7 +121,7 @@ def test_catalog_marks_the_always_on_skill_from_the_same_discovery(tmp_path):
     _install(tmp_path, "optout", always=False)
     section = _build_installed_skills_section(SimpleNamespace(drive_root=tmp_path))
     entries = {block.split(" ", 1)[0]: block for block in section.split("\n- ")[1:]}
-    assert "Context: always; its reviewed text is in the Always-in-context skills section." in entries["kept"]
+    assert "Context: always; its text is in the Always-in-context skills section." in entries["kept"]
     assert "Context: always" not in entries["optout"]
     assert "KEPT_SENTINEL" not in section  # the catalog stays metadata
     assert _build_installed_skills_section(SimpleNamespace(drive_root=tmp_path), skills=[]) == ""

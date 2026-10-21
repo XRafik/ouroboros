@@ -1140,7 +1140,7 @@ def _build_installed_skills_section(env: Any, *, max_lines: int = 100, skills: O
         if when:
             lines.append(f"  Trigger: {when}")
         if skill.get("name") in always_on:
-            lines.append("  Context: always; its reviewed text is in the Always-in-context skills section.")
+            lines.append("  Context: always; its text is in the Always-in-context skills section.")
         # CPL-7 Model Experience: bounded prose; absent section renders nothing.
         experience = skill.get("model_experience")
         if isinstance(experience, dict):
