@@ -23,6 +23,7 @@ import uuid
 from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable, Dict, Iterator, Literal, Optional, Tuple, get_args
 
+from ouroboros.physical_attempt_context import PhysicalAttemptContext
 from ouroboros.pricing import estimate_cost_optional
 from ouroboros._usage_response import (
     _normalized_input_token_usage, _reported_token_count, processing_receipt, observed_processing_mode, usage_from_response,
@@ -269,20 +270,6 @@ class UsageScope:
     # The wave a caller named to own its prompt-cache split (skill, plan review). A round the review
     # derives (#1544: retry_key or a fresh id) is attribution only; the split stays per task.
     cache_wave: str = ""
-@dataclass(frozen=True)
-class PhysicalAttemptContext:
-    profile: Literal["owner_max", "owner_low", "owner_nano", "task_local_low", "task_local_nano"]
-    rendered_mode: Literal["max", "low", "nano"]
-    measurement_basis: Literal["fresh_route_usage", "fresh_model_usage", "cold_estimate"]
-    route_fp: str
-    round_id: str
-    target_total_tokens: Optional[int]
-    capacity_total_tokens: Optional[int]
-    context_target_miss: bool
-    automatic_pass_used: bool
-    # Main's calibration (real tokens per estimated token) of the measurement above;
-    # the send finalizer sizes the reply with it. None on rows written before it existed.
-    measurement_density: Optional[float] = None
 @dataclass(frozen=True)
 class AttemptRequest:
     model: str
