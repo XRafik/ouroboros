@@ -9,7 +9,7 @@ import {
     AUTONOMY_LEVELS, PLACE_STATES, SAFETY_LEVELS, SILENT_CARD, durationText, placeStatusText, usdText, wakesForText,
 } from '../modules/consciousness_words.js';
 import {
-    connectPlace, normalizeConsciousness, normalizePlacesResponse, normalizeRecheck, saveSafetyLevel, saveSafetyModel,
+    connectPlace, normalizeConsciousness, normalizePlacesResponse, recheckFromSettings, saveSafetyLevel, saveSafetyModel,
     saveSafetyRecheck, saveSafetyRules, updatePlace, disconnectPlace,
 } from '../modules/consciousness_api.js';
 import {
@@ -95,7 +95,7 @@ test('every write sends exactly the contract keys and announces the confirmed pl
         await saveSafetyLevel('full', 'consciousness');
         await saveSafetyRules('No posts from my folders.');
         await saveSafetyModel('', false);
-        await saveSafetyRecheck('');
+        await saveSafetyRecheck('', FIXTURE.settings);
     } finally { stub.restore(); }
     assert.deepEqual(stub.calls.map(({ url, method, body }) => [method, url, body]), [
         ['POST', '/api/places', { connector: 'agentrq-bridge' }],
@@ -104,8 +104,9 @@ test('every write sends exactly the contract keys and announces the confirmed pl
         ['POST', '/api/owner/safety-mode', { mode: 'light' }],
         ['POST', '/api/owner/safety-mode', { mode: 'full', kind: 'consciousness' }],
         ['POST', '/api/owner/safety-rules', { rules: 'No posts from my folders.' }],
-        ['POST', '/api/owner/safety-model', { model: '', use_local: false }],
-        ['POST', '/api/owner/safety-recheck', { row_id: '' }],
+        ['POST', '/api/owner/safety-model', { settings: { OUROBOROS_MODEL_SAFETY: '' } }],
+        ['POST', '/api/owner/safety-model', { settings: { OUROBOROS_SUBAGENTS: { ...FIXTURE.settings.OUROBOROS_SUBAGENTS,
+            items: FIXTURE.settings.OUROBOROS_SUBAGENTS.items.map((item) => ({ ...item, rechecks_flags: false })) } } }],
     ]);
 });
 
@@ -135,12 +136,13 @@ test('the checker and second-check lines name what really checks', () => {
     const settings = FIXTURE.settings;
     assert.equal(checkerText(settings), 'Checked by: the Light model');
     assert.equal(checkerText({ ...settings, OUROBOROS_MODEL_SAFETY: 'anthropic::claude-opus-5.5' }), 'Checked by: claude-opus-5.5');
-    const recheck = normalizeRecheck(settings._meta.policy_state.safety_recheck);
+    const recheck = recheckFromSettings(settings);
     assert.equal(agentRowHandle('packet_checker', settings), 'gpt-5.6');
     assert.equal(secondCheckText(recheck, settings), 'Second check: gpt-5.6 re-checks flagged actions');
-    assert.equal(secondCheckText(normalizeRecheck({ row_id: '', eligible_rows: ['a'] }), settings), 'Second check: Off');
-    assert.match(secondCheckText(normalizeRecheck({ row_id: '', eligible_rows: [] }), settings), /^Second check: Off\. No Agents row can re-check yet/);
-    assert.equal(secondCheckText(normalizeRecheck(undefined), settings), 'Second check: Off', 'an older server says nothing more');
+    const unmarked = { enabled: true, items: settings.OUROBOROS_SUBAGENTS.items.map((item) => ({ ...item, rechecks_flags: false })) };
+    assert.equal(secondCheckText(recheckFromSettings({ OUROBOROS_SUBAGENTS: unmarked }), settings), 'Second check: Off');
+    assert.match(secondCheckText(recheckFromSettings({ OUROBOROS_SUBAGENTS: { enabled: true, items: [] } }), settings), /^Second check: Off\. No Agents row can re-check yet/);
+    assert.equal(secondCheckText(recheckFromSettings({}), settings), 'Second check: Off', 'an unreadable roster says nothing more');
 });
 
 function draftRoot(values) {
@@ -151,7 +153,7 @@ function draftRoot(values) {
 
 test('Save writes only what changed, each through its owner endpoint; lowering asks first', async () => {
     const settings = { ...FIXTURE.settings, OUROBOROS_SAFETY_MODE: 'full', OUROBOROS_CONSCIOUSNESS_SAFETY_MODE: 'full' };
-    syncRecheckState(normalizeRecheck(settings._meta.policy_state.safety_recheck), null);
+    syncRecheckState(recheckFromSettings(settings), null);
     const stub = stubFetch(() => ({ ok: true }));
     const asked = [];
     let result;
@@ -163,7 +165,7 @@ test('Save writes only what changed, each through its owner endpoint; lowering a
     assert.deepEqual(asked, ['Lower a safety level']);
     assert.deepEqual(stub.calls.map(({ url, body }) => [url, body]), [
         ['/api/owner/safety-mode', { mode: 'light' }],
-        ['/api/owner/safety-model', { model: 'anthropic::claude-opus-5.5' }],
+        ['/api/owner/safety-model', { settings: { OUROBOROS_MODEL_SAFETY: 'anthropic::claude-opus-5.5' } }],
     ]);
     assert.equal(result.error, '');
     assert.match(result.saved, /Safety for your work saved as Light\. Safety Supervisor model saved as claude-opus-5\.5\./);
@@ -184,7 +186,9 @@ test('a refused lowering keeps the level and still saves the rest; an unknown se
 });
 
 test('the second-check mark shows only on eligible rows, one row at a time, and saves as the owner chose', async () => {
-    syncRecheckState(normalizeRecheck({ row_id: 'a', eligible_rows: ['a', 'b'] }), null);
+    const packet = (id, marked = false) => ({ subagent_id: id, route: { kind: 'api_model', target_id: 'openai::gpt-5.6' }, delivery: 'packet', rechecks_flags: marked });
+    const roster = { enabled: true, items: [packet('a', true), packet('b')] };
+    syncRecheckState(recheckFromSettings({ OUROBOROS_SUBAGENTS: roster }), null);
     assert.match(recheckMarkHtml({ subagent_id: 'a', _uiKey: 'k1' }, 1), /checked> Re-checks flagged actions/);
     assert.match(recheckMarkHtml({ subagent_id: 'b' }, 2), /data-recheck-row="b"><input/);
     assert.doesNotMatch(recheckMarkHtml({ subagent_id: 'b' }, 2), /checked>/);
@@ -198,10 +202,11 @@ test('the second-check mark shows only on eligible rows, one row at a time, and 
     assert.equal(recheckDraft(), '', 'unticked: no row re-checks');
     const stub = stubFetch(() => ({ ok: true }));
     try {
-        const result = await saveSafetyOwnerChanges({ yourWork: 'full', consciousness: 'full', rules: null, recheck: recheckDraft(), model: null }, {});
+        const result = await saveSafetyOwnerChanges({ yourWork: 'full', consciousness: 'full', rules: null, recheck: recheckDraft(), model: null }, { OUROBOROS_SUBAGENTS: roster });
         assert.equal(result.saved, 'Second check turned off.');
     } finally { stub.restore(); }
-    assert.deepEqual(stub.calls.map(({ url, body }) => [url, body]), [['/api/owner/safety-recheck', { row_id: '' }]]);
+    assert.deepEqual(stub.calls.map(({ url, body }) => [url, body]), [['/api/owner/safety-model', { settings: { OUROBOROS_SUBAGENTS: {
+        enabled: true, items: [packet('a'), packet('b')] } } }]]);
 });
 
 test('the roster keeps the owner\'s second-check mark exactly as loaded and refuses a malformed one', () => {

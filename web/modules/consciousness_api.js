@@ -222,25 +222,48 @@ export async function saveSafetyRules(rules) {
     return ownerAnswer(await jsonPost('/api/owner/safety-rules', { rules: String(rules ?? '') }), 'Your rules');
 }
 
-/** The Safety Supervisor model; empty inherits the Light model. */
+/** One owner transaction for the resolved checker: the Safety Supervisor model and/or the Agents roster. */
+async function saveCheckerSettings(settings, what) {
+    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), what);
+}
+
+/** The Safety Supervisor model; empty inherits the Light model. A local model carries the ` (local)` label. */
 export async function saveSafetyModel(model, useLocal = undefined) {
-    const body = { model: String(model ?? '') };
-    if (typeof useLocal === 'boolean') body.use_local = useLocal;
-    return ownerAnswer(await jsonPost('/api/owner/safety-model', body), 'The Safety Supervisor model');
+    let value = String(model ?? '').trim();
+    if (useLocal === false) value = value.replace(/ \(local\)$/, '');
+    if (value && useLocal === true && !value.endsWith(' (local)')) value = `${value} (local)`;
+    return saveCheckerSettings({ OUROBOROS_MODEL_SAFETY: value }, 'The Safety Supervisor model');
 }
 
-/** The Agents row that re-checks flagged actions, or '' for none. */
-export async function saveSafetyRecheck(rowId) {
-    return ownerAnswer(await jsonPost('/api/owner/safety-recheck', { row_id: String(rowId || '') }), 'The second check');
+/** The Agents roster as saved (`OUROBOROS_SUBAGENTS`, a JSON string or object), or null when unreadable. */
+export function parseRoster(raw) {
+    try {
+        const value = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+        return object(value) && Array.isArray(value.items) ? value : null;
+    } catch { return null; }
 }
 
-/** `policy_state.safety_recheck` (contract §3), tolerant: an absent fact is no row and no eligible rows. */
-export function normalizeRecheck(raw) {
-    const recheck = object(raw) || {};
+/** Mark one Agents row (or none, with '') as the row that re-checks flagged actions, in the saved roster. */
+export async function saveSafetyRecheck(rowId, settings = {}) {
+    const roster = parseRoster(settings.OUROBOROS_SUBAGENTS);
+    if (!roster) throw new Error('The Agents roster could not be read, so the second check was not saved.');
+    const items = roster.items.map((item) => ({ ...item, rechecks_flags: Boolean(rowId) && text(item?.subagent_id) === rowId }));
+    return saveCheckerSettings({ OUROBOROS_SUBAGENTS: { ...roster, items } }, 'The second check');
+}
+
+/** The second-check facts read from the saved roster: the marked row, the rows that may be marked
+ *  (an enabled API model row with Packet delivery) and whether a replay measured it (never, yet). */
+export function recheckFromSettings(settings = {}) {
+    const roster = parseRoster(settings.OUROBOROS_SUBAGENTS);
+    if (!roster) return { known: false, rowId: '', eligibleRows: [], measured: false };
+    const items = roster.items.filter(object);
+    const eligible = items.filter((item) => text(item.route?.kind).toLowerCase() === 'api_model'
+        && text(item.delivery || 'native').toLowerCase() === 'packet' && item.enabled !== false);
+    const marked = items.find((item) => item.rechecks_flags === true);
     return {
-        known: Boolean(object(raw)),
-        rowId: text(recheck.row_id),
-        eligibleRows: [...new Set(list(recheck.eligible_rows).map(text).filter(Boolean))],
-        measured: recheck.measured === true,
+        known: true,
+        rowId: marked ? text(marked.subagent_id) : '',
+        eligibleRows: [...new Set(eligible.map((item) => text(item.subagent_id)).filter(Boolean))],
+        measured: false,
     };
 }

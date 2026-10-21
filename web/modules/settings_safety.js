@@ -8,7 +8,7 @@ import { apiClient } from './api_client.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { settingsWriteFailure, syncEffortSegments } from './settings_controls.js';
 import { parseModelSource } from './route_editor_primitives.js';
-import { saveSafetyLevel, saveSafetyModel, saveSafetyRecheck, saveSafetyRules, normalizeRecheck } from './consciousness_api.js';
+import { saveSafetyLevel, saveSafetyModel, saveSafetyRecheck, saveSafetyRules, recheckFromSettings } from './consciousness_api.js';
 import { SAFETY_KINDS, SAFETY_LEVELS, SAFETY_RANK, safetyLevelOf } from './consciousness_words.js';
 import { bindRecheckMarks, recheckDraft, recheckSaved, syncRecheckState } from './safety_recheck.js';
 
@@ -65,7 +65,7 @@ export function checkerText(settings = {}) {
     return `Checked by: ${own ? modelName(own) : 'the Light model'}`;
 }
 
-/** The second-check line from `policy_state.safety_recheck` and the Agents rows that name its row. */
+/** The second-check line from the saved Agents roster (the marked row and the rows that may be marked). */
 export function secondCheckText(recheck, settings = {}) {
     if (!recheck.rowId) {
         return recheck.known && !recheck.eligibleRows.length
@@ -89,7 +89,7 @@ export function agentRowHandle(rowId, settings = {}) {
 
 function paintLines(root, settings) {
     const meta = settings?._meta || {};
-    const recheck = normalizeRecheck(meta.policy_state?.safety_recheck);
+    const recheck = recheckFromSettings(settings);
     const set = (selector, html) => { const node = root.querySelector(selector); if (node) node.innerHTML = html; };
     set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · ${settingsLinkHtml('models', 'Change in Models')}`);
     set('[data-safety-second-check]', `${escapeHtml(secondCheckText(recheck, settings))}${recheck.known
@@ -204,7 +204,7 @@ export async function saveSafetyOwnerChanges(draft, current = {}, { askOwner = o
     }
     if (draft.recheck !== null && draft.recheck !== recheckSaved()) {
         await run('The second check', async () => {
-            await saveSafetyRecheck(draft.recheck);
+            await saveSafetyRecheck(draft.recheck, current);
             return draft.recheck ? 'Second check saved.' : 'Second check turned off.';
         });
     }

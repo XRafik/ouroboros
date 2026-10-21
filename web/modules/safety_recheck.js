@@ -1,7 +1,7 @@
-// The second check's one control: a row-level mark «Re-checks flagged actions» on the Agents rows the server
-// says can re-check (`policy_state.safety_recheck.eligible_rows`: an API model row with Packet delivery). At
-// most one row carries it. The mark is a draft like the other Settings fields; Save writes the chosen row
-// through the owner endpoint (settings_safety.js), never through the roster, so the agent cannot set it.
+// The second check's one control: a row-level mark «Re-checks flagged actions» on the Agents rows that can
+// re-check (an enabled API model row with Packet delivery, read from the saved roster). At most one row
+// carries it. The mark is a draft like the other Settings fields; Save writes it through the owner checker
+// transaction (settings_safety.js → /api/owner/safety-model), never through a generic save.
 
 const state = { eligible: new Set(), saved: '', draft: null, known: false };
 
