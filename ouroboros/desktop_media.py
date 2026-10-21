@@ -110,6 +110,37 @@ def attach_media_permissions(window, origin):
     return window
 
 
+def prepare_linux_bundle(bundle_dir) -> None:
+    """Restore the shipped GTK resource paths after frozen GI runtime hooks.
+
+    AppRun sets the loader path before exec. The source handoff inherits it and
+    this cwd; server subprocesses already select their own repo cwd explicitly.
+    Source installs without a native bundle keep their ordinary backend choice.
+    """
+    import os
+    from pathlib import Path
+
+    root = Path(bundle_dir) / "linux-gtk"
+    if not (root / "manifest.json").is_file():
+        return
+    lib = root / "lib/x86_64-linux-gnu"
+    paths = {
+        "GI_TYPELIB_PATH": lib / "girepository-1.0", "GIO_MODULE_DIR": lib / "gio/modules",
+        "GIO_EXTRA_MODULES": lib / "gio/modules", "GSETTINGS_SCHEMA_DIR": root / "share/glib-2.0/schemas",
+        "GTK_DATA_PREFIX": root, "GTK_EXE_PREFIX": root, "GTK_PATH": lib / "gtk-3.0",
+        "GTK_IM_MODULE_FILE": lib / "gtk-3.0/3.0.0/immodules.cache",
+        "GDK_PIXBUF_MODULE_FILE": lib / "gdk-pixbuf-2.0/2.10.0/loaders.cache",
+        "GST_PLUGIN_SYSTEM_PATH_1_0": lib / "gstreamer-1.0",
+        "GST_PLUGIN_SCANNER": lib / "gstreamer1.0/gstreamer-1.0/gst-plugin-scanner",
+    }
+    os.environ.update({key: str(path) for key, path in paths.items()})
+    share = str(root / "share")
+    existing = os.environ.get("XDG_DATA_DIRS", "/usr/local/share:/usr/share").split(":")
+    os.environ["XDG_DATA_DIRS"] = ":".join([share, *(p for p in existing if p != share)])
+    os.environ["PYWEBVIEW_GUI"] = "gtk"
+    os.chdir(root)
+
+
 def display_ready(backend) -> tuple[bool, str]:
     """Check GTK's display before creating a window: importing bindings is insufficient.
 

@@ -958,19 +958,19 @@ def _request_skill_key_grant(skill: str, keys: list, confirm_fn, *, enable_after
 def _webview_ready() -> tuple[bool, str]:
     """Probe whether pywebview can actually run a GUI window here.
 
-    pywebview 5.x picks its backend LAZILY inside webview.start(), so
-    `import webview` succeeds without GTK/QT and the process would only die
-    later, at the first window site (#56). initialize() reuses pywebview's
-    own backend selection as the SSOT (PYWEBVIEW_GUI, session detection);
-    its second run inside webview.start() is cheap. On Linux the import
-    answer is then refined by `_display_ready`; macOS/Windows keep the
-    import-only answer — `_detect_headless` never calls this there.
+    Lazy backend selection lets import succeed without GTK/QT (#56). initialize()
+    uses PYWEBVIEW_GUI/session selection and is safe to repeat at start(). Linux
+    also checks `_display_ready`; macOS/Windows stay import-only and `_detect_headless` skips them.
     """
     if IS_LINUX and not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
         # BEFORE initialize(): even SELECTING a Qt backend constructs a
         # QGuiApplication, which can ABORT on a display-less box.
         return False, "no DISPLAY or WAYLAND_DISPLAY in the environment"
     try:
+        if IS_LINUX:
+            from ouroboros.desktop_media import prepare_linux_bundle
+
+            prepare_linux_bundle(_bundle_dir())
         import webview  # noqa: F401  (can itself fail on bare source checkouts)
         from webview.guilib import initialize
 

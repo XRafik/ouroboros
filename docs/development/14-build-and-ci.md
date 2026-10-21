@@ -126,6 +126,6 @@ The artifact pipeline (per-platform archive smokes, native Linux packages, the A
 - Proof and notes carry each consumed job's actual conclusion, never a fixed pass; the `v7.7.0` owner exception (ARCHITECTURE §8) is disclosed separately.
 - Publication is draft-first under a per-tag concurrency group; the remote annotated tag is revalidated against the event SHA before the draft and again before publishing, and a rerun never overwrites a published release.
 - Vendor-distribution smokes (Astra, RED OS) are reported evidence, never release authority: third-party registry reachability is outside the pipeline's control.
-- The AppImage smoke makes no native GTK/Qt claim; packaged native webview coverage is a separate Linux distribution contract.
+- Release AppImage smoke stays headless. [Native GTK qualification](../../packaging/appimage/README.md) is separate.
 - `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1` is a local-builder escape hatch only: it skips Playwright's host-library installation, not browser-binary bundling, and a build using it must disclose that browser host compatibility was not locally proven.
 - Never represent a later checksum inventory as build-time provenance, an SBOM, or packaged smoke evidence that the original build did not create.

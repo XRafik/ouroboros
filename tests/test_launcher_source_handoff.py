@@ -599,3 +599,17 @@ def test_a_successor_keeps_an_attached_console_and_is_hidden_only_without_one(mo
     monkeypatch.setattr(platform_layer, "ctypes", ctypes, raising=False)
     assert platform_layer.inherited_console_kwargs() == ({"creationflags": flags} if flags else {})
     assert asked == ([1] if windows else []), "elsewhere nothing is asked"
+
+
+def test_linux_source_handoff_keeps_native_bundle_environment(hand_over, monkeypatch):
+    native = {'LD_LIBRARY_PATH': '/seed/_internal:/seed/_internal/linux-gtk/lib/x86_64-linux-gnu',
+              'GI_TYPELIB_PATH': '/seed/_internal/linux-gtk/lib/x86_64-linux-gnu/girepository-1.0',
+              'GIO_MODULE_DIR': '/seed/_internal/linux-gtk/lib/x86_64-linux-gnu/gio/modules',
+              'PYWEBVIEW_GUI': 'gtk'}
+    for key, value in native.items():
+        monkeypatch.setenv(key, value)
+    with pytest.raises(Handover):
+        hand_over([], windows=False, frozen=True)
+    executed = next(call for call in hand_over.calls if isinstance(call, tuple) and call[0] == 'exec')
+    assert all(executed[3][key] == value for key, value in native.items())
+    assert '--seed-bundle' in executed[2]

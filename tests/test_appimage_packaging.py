@@ -24,6 +24,8 @@ def test_appdir_layout_wraps_the_existing_pyinstaller_payload(tmp_path: pathlib.
     internal.mkdir()
     (internal / "repo.bundle").write_bytes(b"bundle")
     (internal / "VERSION").write_text("6.96.2\n", encoding="utf-8")
+    (internal / "linux-gtk").mkdir()
+    (internal / "linux-gtk/manifest.json").write_text("{}\n", encoding="utf-8")
     embedded_python = internal / "python-standalone/bin/python3"
     embedded_python.parent.mkdir(parents=True)
     embedded_python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -208,3 +210,66 @@ def test_appimage_builder_pins_tool_and_embedded_runtime():
     assert "releases/download/${RUNTIME_VERSION}/runtime-${TOOL_ARCH}" in script
     assert 'fetch_verified "$RUNTIME" "$RUNTIME_URL" "$RUNTIME_SHA256"' in script
     assert '"$TOOL" --runtime-file "$RUNTIME" "$APPDIR" "$OUTPUT"' in script
+
+
+def test_appdir_refuses_payload_without_native_closure(tmp_path):
+    payload = tmp_path / 'Ouroboros'
+    payload.mkdir()
+    (payload / 'Ouroboros').write_text('#!/bin/sh\nexit 0\n')
+    (payload / 'Ouroboros').chmod(0o755)
+    result = subprocess.run(['bash', 'scripts/build_appimage.sh', '--appdir-only'],
+                            cwd=REPO, env={**os.environ, 'OUROBOROS_DIST_DIR': str(tmp_path)},
+                            capture_output=True, text=True)
+    assert result.returncode != 0
+    assert 'GTK/WebKit closure is missing' in result.stderr
+
+
+def test_webkit_relocation_is_bounded_and_preserves_elf_offsets():
+    import runpy
+
+    relocate = runpy.run_path(str(REPO / 'scripts/bundle_linux_gtk.py'))['relocate_webkit']
+    original = (b'\x7fELF\0/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1\0'
+                b'/usr/share/webkitgtk-4.1\0/usr/bin/bwrap\0/usr/bin/xdg-dbus-proxy\0'
+                b'/usr/libexec/webkit2gtk-4.1/WebKitWebProcess\0/usr/unrelated\0'
+                b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.10\0'
+                b'https://example.invalid/usr/bin/bwrap\0')
+    changed, edits = relocate(original)
+    assert len(changed) == len(original)
+    assert b'././/lib/x86_64-linux-gnu/webkit2gtk-4.1\0' in changed
+    assert b'/usr/unrelated\0' in changed
+    assert b'/usr/lib/x86_64-linux-gnu/webkit2gtk-4.10\0' in changed
+    assert b'https://example.invalid/usr/bin/bwrap\0' in changed
+    assert b'././/libexec/webkit2gtk-4.1/WebKitWebProcess\0' in changed
+    assert b'././/bin/xdg-dbus-proxy\0' in changed
+    assert len(edits) == 5
+    with pytest.raises(RuntimeError, match='sandbox helper paths changed'):
+        relocate(original.replace(b'/usr/bin/bwrap', b'/unknown/bwrap'))
+    with pytest.raises(RuntimeError, match='prefix changed'):
+        relocate(b'\x7fELF\0/a/new/upstream/layout\0')
+
+
+def test_desktop_bundle_environment_survives_exec_and_preserves_cli_cwd(tmp_path):
+    appdir = tmp_path / 'AppDir'
+    payload = appdir / 'usr/lib/ouroboros'
+    root = payload / '_internal/linux-gtk'
+    root.mkdir(parents=True)
+    (root / 'manifest.json').write_text('{}')
+    (root / 'desktop-env.sh').write_bytes((REPO / 'packaging/appimage/desktop-env.sh').read_bytes())
+    apprun = appdir / 'AppRun'
+    apprun.write_bytes((REPO / 'packaging/appimage/AppRun').read_bytes())
+    apprun.chmod(0o755)
+    successor = payload / 'successor'
+    successor.write_text('#!/bin/sh\nprintf "%s\\n" "$PWD" "$PYWEBVIEW_GUI" "$LD_LIBRARY_PATH"\n')
+    successor.chmod(0o755)
+    launcher = payload / 'Ouroboros'
+    launcher.write_text('#!/bin/sh\nexec "$OUROBOROS_BUNDLE_DIR/../successor"\n')
+    launcher.chmod(0o755)
+    env = {**os.environ, 'APPDIR': str(appdir), 'PYWEBVIEW_GUI': 'qt', 'LD_LIBRARY_PATH': '/caller/lib'}
+    result = subprocess.run([str(apprun)], env=env, cwd=tmp_path, capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == [str(root), 'gtk', f'{payload}/_internal:{root}/lib/x86_64-linux-gnu:/caller/lib']
+    cli = payload / 'bin/ouroboros'
+    cli.parent.mkdir()
+    cli.write_bytes(successor.read_bytes())
+    cli.chmod(0o755)
+    result = subprocess.run([str(apprun), '--cli'], env=env, cwd=tmp_path, capture_output=True, text=True, check=True)
+    assert result.stdout.splitlines() == [str(tmp_path), 'qt', '/caller/lib']

@@ -21,6 +21,14 @@ fi
 
 echo "=== Building Ouroboros for Linux (v${VERSION}) ==="
 
+# GI/Cairo sdists must use this builder's compiler, not python-build-standalone's
+# recorded build-machine toolchain. The native closure's baseline is Ubuntu 22.04.
+export CC="${CC:-gcc}" CXX="${CXX:-g++}" LDSHARED="${LDSHARED:-gcc -shared}"
+if ! pkg-config --exists gtk+-3.0 webkit2gtk-4.1 gobject-introspection-1.0 cairo; then
+    echo "ERROR: GTK/WebKit build inputs are missing. See packaging/appimage/README.md." >&2
+    exit 1
+fi
+
 if [ ! -f "python-standalone/bin/python3" ]; then
     echo "ERROR: python-standalone/ not found."
     echo "Run first: bash scripts/download_python_standalone.sh"
@@ -56,6 +64,7 @@ BUILD_VENV="build/linux-pyinstaller-venv"
 BUILD_PYTHON="$BUILD_VENV/bin/python"
 BUILD_REQUIREMENTS="$BUILD_VENV/build-requirements.txt"
 uv export --locked --no-dev --extra browser --extra desktop --extra build \
+    --extra linux-desktop \
     --no-emit-project --no-hashes --no-annotate --output-file "$BUILD_REQUIREMENTS"
 uv pip install --python "$BUILD_PYTHON" -q -r "$BUILD_REQUIREMENTS"
 
@@ -63,7 +72,7 @@ echo "--- Installing agent dependencies into python-standalone ---"
 uv pip install --python "$PORTABLE_PYTHON" -q -r requirements-runtime.lock
 # The source-launcher handoff cannot import the frozen launcher's private PYZ.
 DESKTOP_REQUIREMENTS="build/linux-desktop-requirements.txt"
-uv export --locked --no-dev --extra desktop \
+uv export --locked --no-dev --extra desktop --extra linux-desktop \
     --no-emit-project --no-hashes --no-annotate --output-file "$DESKTOP_REQUIREMENTS"
 uv pip install --python "$PORTABLE_PYTHON" -q -r "$DESKTOP_REQUIREMENTS"
 
@@ -86,6 +95,9 @@ echo "--- Building embedded managed repo bundle ---"
 
 echo "--- Running PyInstaller ---"
 "$BUILD_PYTHON" -m PyInstaller Ouroboros.spec --clean --noconfirm
+
+# The native shell is independent of Playwright's WebKit browser-tool runtime.
+"$BUILD_PYTHON" scripts/bundle_linux_gtk.py dist/Ouroboros/_internal
 
 echo "--- Installing packaged CLI wrappers ---"
 mkdir -p dist/Ouroboros/bin
