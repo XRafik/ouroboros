@@ -263,6 +263,7 @@ def get_tools() -> List[ToolEntry]:
                 "parameters": {
                     "type": "object",
                     "properties": {
+                        "name": {"type": "string", "description": "Optional label for this promise, in your own words."},
                         "relation": {"type": "string", "enum": ["related", "independent"],
                                      "description": "Explicit relationship to this work. Related preserves its original money and hard deadline; independent is separate work. Author/cron/text do not decide this. A note is always independent."},
                         "run_at": {
@@ -516,10 +517,10 @@ def _handle_schedule_followup(ctx: ToolContext, **params) -> str:
         with schedule_transaction(drive_root):
             if notify:
                 return _register_note(ctx, task_id, drive_root, objective, trigger, cron, timezone,
-                                      timezone_note, origin, relation)
+                                      timezone_note, origin, relation, name=str(params.get("name") or "").strip())
             return _register_followup(ctx, task_id, drive_root, objective, context,
                                       trigger, cron, timezone, timezone_note, origin, relation,
-                                      reasoning_effort=effort)
+                                      reasoning_effort=effort, name=str(params.get("name") or "").strip())
     except ScheduleStoreUnreadable as exc:
         # A missed table lock (ScheduleLockTimeout) or an unparseable table: the
         # follow-up was NOT registered, and the refusal says so in the text ABI
@@ -543,15 +544,14 @@ def followup_resource_intent(ctx: Any, metadata: Any, project_id: str) -> Dict[s
 
 def _pending_for_task(task_id: str, drive_root: Any) -> list:
     """This task's pending follow-ups (notes included): a fact for the reply, never a cap."""
-    from supervisor.queue import list_scheduled_tasks
+    from supervisor.queue import load_schedule_store
 
-    records = [r for r in (list_scheduled_tasks(drive_root).get("tasks") or []) if isinstance(r, dict)]
-    return _pending_followups(records, task_id)
+    return _pending_followups(load_schedule_store(drive_root)["tasks"], task_id)
 
 
 def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: str,
                    trigger: Dict[str, Any], cron: str, timezone: str, notes: str,
-                   origin: dict, relation: dict) -> str:
+                   origin: dict, relation: dict, *, name: str = "") -> str:
     """A note: the same table and lifecycle as a follow-up, but no task template.
 
     The row keeps the words and when they were written; the scheduler tick shows
@@ -561,8 +561,8 @@ def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: s
 
     pending = _pending_for_task(task_id, drive_root)
     record = {
-        "id": f"followup-{task_id}-{uuid.uuid4().hex[:6]}", "name": f"Reminder of task {task_id}",
-        "description": objective, "kind": "notify", "source": FOLLOWUP_SOURCE, "enabled": True,
+        "id": f"followup-{task_id}-{uuid.uuid4().hex[:6]}", "name": name or f"Reminder of task {task_id}",
+        "kind": "notify", "source": FOLLOWUP_SOURCE, "enabled": True,
         "timezone": timezone, "trigger": trigger,
         "notification": {"text": objective, "set_at": utc_now_iso()},
     }
@@ -586,7 +586,8 @@ def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: s
     audit_note = "" if audit == "recorded" else (
         f" AUDIT_INCOMPLETE: the row is durable, but its audit outcome fact could not be written (audit={audit or 'unknown'}).")
     return (
-        f"FOLLOWUP_SCHEDULED: note {stored.get('id')} registered {timing}. Nothing wakes then: the host shows "
+        f"FOLLOWUP_SCHEDULED: note {stored.get('id')} registered {timing}. "
+        f"Next due: {stored.get('next_run_at') or 'not determined'}. Nothing wakes then: the host shows "
         "your objective verbatim in the owner's chat as a System row signed with when you wrote it and when "
         "it was due (after downtime, at the next start with both times). Pending follow-ups for this task: "
         f"{len(pending) + 1}; the owner can disable or delete it from the Schedules "
@@ -597,7 +598,7 @@ def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: s
 def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
                        objective: str, context: str, trigger: Dict[str, Any], cron: str,
                        timezone: str, timezone_note: str, origin: dict, relation: dict,
-                       *, reasoning_effort: str = "") -> str:
+                       *, reasoning_effort: str = "", name: str = "") -> str:
     """The pending read, the record build and the write — all under the schedule lock."""
     from supervisor.queue import upsert_scheduled_task
 
@@ -614,8 +615,7 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
         source_chat_id = metadata_src.get("chat_id")
     record = {
         "id": f"followup-{task_id}-{uuid.uuid4().hex[:6]}",
-        "name": f"Follow-up of task {task_id}",
-        "description": objective,
+        "name": name or f"Follow-up of task {task_id}",
         "source": FOLLOWUP_SOURCE,
         "enabled": True,
         "timezone": timezone,
@@ -623,7 +623,6 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
         "task": {
             "type": "task",
             "text": objective,
-            "description": objective,
             **({"context": context} if context else {}),
             **({"reasoning_effort": reasoning_effort} if reasoning_effort else {}),
             **({"project_id": project_id} if project_id else {}),
@@ -697,7 +696,8 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
         f"be written (audit={audit or 'unknown'}), so this registration is not fully "
         "accounted for in logs/events.jsonl.")
     return (
-        f"FOLLOWUP_SCHEDULED: follow-up {stored.get('id')} registered as {timing}. Future enqueue "
+        f"FOLLOWUP_SCHEDULED: follow-up {stored.get('id')} registered as {timing}. "
+        f"Next due: {stored.get('next_run_at') or 'not determined'}. Future enqueue "
         "requires eligible relationship/controls and ordinary supervisor admission; "
         f"pending follow-ups for this task: {len(pending) + 1}. The "
         f"record is durable in state/scheduled_tasks.json and {lifecycle}; the owner can "
