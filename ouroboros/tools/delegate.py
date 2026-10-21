@@ -1441,8 +1441,9 @@ def get_tools() -> List[ToolEntry]:
                 "rows carrying its messageId (message.* receipts and the harness status "
                 "row whose outcome reads delivered) carry messageId and outcome."
             ),
-            "parameters": {"type": "object", "required": ["run_id"], "properties": {
-                "run_id": {"type": "string", "description": "Run id from delegate_start."},
+            "parameters": {"type": "object", "properties": {
+                "run_id": {"type": "string", "description": "One run id; exclusive with runs."},
+                "runs": {"type": "array", "items": {"type": "string"}, "description": "Run ids to supervise; wake on any selected run. Exclusive with run_id."},
                 "since_seq": {"type": "integer", "description": "Event cursor: advances past it are recorded as progress."},
                 "checkpoint_after_sec": {"type": "integer", "description":
                     "Optional one-shot future inspection time. Requires checkpoint_reason; "
