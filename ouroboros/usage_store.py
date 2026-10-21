@@ -43,8 +43,9 @@ from ouroboros._usage_money import (
     render_cash, rounded_cash,
 )
 from ouroboros._usage_rows import (
-    BINDING_KEYS, REVIEW_ATTRIBUTION_KEYS, _BINDING_CAPS, BindingIndex, Bucket, row_ts_epoch, summary_delta,
+    REVIEW_ATTRIBUTION_KEYS, BindingIndex, Bucket, row_ts_epoch, summary_delta,
 )
+from ouroboros.usage_origin import bind_root_attribution
 from ouroboros import store as _core
 from ouroboros.store import (
     TIER_ENFORCED, TIER_NAME, busy as _busy, file_identity as _identity, fsync_directory as _fsync_directory,
@@ -563,7 +564,7 @@ class Txn:
                     f"VALUES ({','.join('?' * len(_SUMMARY_COLUMNS))})", _bucket_record(scope, key, bucket))
             else:
                 self.conn.execute("DELETE FROM summaries WHERE scope=? AND key=?", (scope, key))
-        self._bind(stored)
+        bind_root_attribution(self.conn, stored)
         for owner in dict.fromkeys((str(stored.get("task_id") or ""), str(stored.get("root_task_id") or ""))):
             if owner:
                 self.conn.execute("INSERT INTO dirty_owners (owner_id, revision) VALUES (?, ?) ON CONFLICT(owner_id) "
@@ -587,20 +588,6 @@ class Txn:
             self.bucket(scope, key).add(delta, sign, cap=cap if scope in {"root", "group"} else None)
             touched.add((scope, key))
         return touched
-
-    def _bind(self, row: Dict[str, Any]) -> None:
-        """The earliest ORIGINAL row carrying a cap binds its root and group
-        (``BindingIndex.fold`` for an original row)."""
-        if row.get("root_task_id") and row.get("consciousness_cause"):
-            self.conn.execute("INSERT OR IGNORE INTO bindings (scope, key, binding) VALUES ('consciousness', ?, ?)",
-                              (str(row["root_task_id"]), _json({"cause": row["consciousness_cause"]})))
-        if not any(cap in row for cap in _BINDING_CAPS):
-            return
-        binding = _json(durable_literals({key: row[key] for key in BINDING_KEYS if key in row}))
-        for scope, key in (("root", monetary_scope_key(row)), ("group", billing_group_key(row))):
-            if key:
-                self.conn.execute("INSERT OR IGNORE INTO bindings (scope, key, binding) VALUES (?, ?, ?)",
-                                  (scope, key, binding))
 
     def recorded_one_shot(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """The stored one-shot of ``row``'s id when its identity is identical;

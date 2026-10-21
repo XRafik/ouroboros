@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import pathlib
 from dataclasses import dataclass
 from typing import Optional
@@ -95,3 +96,20 @@ def stamp_root_cause(txn, row: dict) -> None:
         cause = {"consciousness": "own", "consciousness_task": "started"}.get(row.get("category"), "")
     if cause in {"own", "started"} or cause.startswith("place:") and cause[6:]:
         row["consciousness_cause"] = cause
+
+
+def bind_root_attribution(conn, row: dict) -> None:
+    """Immutable root/group cap and cause attribution, in the caller's ledger transaction."""
+    from ouroboros._usage_money import billing_group_key, durable_literals, monetary_scope_key
+    from ouroboros._usage_rows import BINDING_KEYS, _BINDING_CAPS
+
+    if row.get("root_task_id") and row.get("consciousness_cause"):
+        conn.execute("INSERT OR IGNORE INTO bindings (scope, key, binding) VALUES ('consciousness', ?, ?)",
+                     (str(row["root_task_id"]), json.dumps({"cause": row["consciousness_cause"]})))
+    if not any(cap in row for cap in _BINDING_CAPS):
+        return
+    binding = json.dumps(durable_literals({key: row[key] for key in BINDING_KEYS if key in row}),
+                         sort_keys=True, separators=(",", ":"), default=str)
+    for scope, key in (("root", monetary_scope_key(row)), ("group", billing_group_key(row))):
+        if key:
+            conn.execute("INSERT OR IGNORE INTO bindings (scope, key, binding) VALUES (?, ?, ?)", (scope, key, binding))
