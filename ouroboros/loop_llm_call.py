@@ -1232,7 +1232,7 @@ def _take_response_facts(usage: Dict[str, Any], msg: Dict[str, Any], accumulated
     model_facts = usage.get("claudexor") or {}
     accumulated_usage["_model_route"] = dict(model_facts.get("route") or {})
     accumulated_usage["_model_substitutions"] = model_facts.get("substituted") or []
-    for stale in ("_last_llm_error", "_last_llm_error_kind", "_last_llm_failure", "_last_llm_retry_same_request",
+    for stale in ("_last_llm_error", "_last_llm_error_kind", "_last_llm_failure", "_acting_route_failure", "_last_llm_retry_same_request",
                   "_last_llm_status_code", "_last_llm_provider_code", "_last_llm_provider_message",
                   "_last_llm_provider_fields", "_last_llm_provider_message_cut", "_last_llm_resource_refusal",
                   "_last_llm_output_exhausted", "_last_llm_attempt_custody"):
@@ -1362,7 +1362,7 @@ def call_llm_with_retry(
     activity_attempt = task_attempt if task_attempt is not None or not owner or owner.task_id != task_id else owner.attempt
     response_cache_bypass_requested = False
     for attempt in range(transient_budget):
-        accumulated_usage.pop("_last_llm_failure", None)  # a pre-send refusal cannot borrow the previous attempt
+        for stale in ("_last_llm_failure", "_acting_route_failure"): accumulated_usage.pop(stale, None)  # a pre-send refusal cannot borrow the previous attempt
         if _deadline_not_dispatched(
             deadline_ts, accumulated_usage, drive_logs,
             task_id=task_id, model=model, round_idx=round_idx, round_id=round_id, reserve_sec=transport_reserve_sec,

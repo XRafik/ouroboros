@@ -112,8 +112,10 @@ def same_route_refusal(accumulated_usage: dict) -> bool:
 
 
 def capability_refused(accumulated_usage: dict) -> bool:
-    """The round's LAST failure itself, not an earlier sticky code, is an engine capability refusal."""
-    return str((accumulated_usage.get("_last_llm_failure") or {}).get("provider_code") or "") == "model_capability_refused"
+    """The acting route's own current failure, not an earlier sticky code nor a failed configured
+    fallback's (``_acting_route_failure``, left by a walk with no answer), is an engine capability refusal."""
+    failure = accumulated_usage.get("_acting_route_failure") or accumulated_usage.get("_last_llm_failure") or {}
+    return str(failure.get("provider_code") or "") == "model_capability_refused"
 
 
 def stamp_substitutions(accumulated_usage: dict, error: Any) -> None:
