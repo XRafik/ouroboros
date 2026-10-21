@@ -136,7 +136,7 @@ def decide(tmp_path, monkeypatch):
     monkeypatch.setattr(mb, "_BRIDGE", bridge)
     monkeypatch.setattr(td, "request_drive_root", lambda request: tmp_path)
     monkeypatch.setattr(td, "_live_root_task",
-                        lambda task_id: ({"id": task_id}, "") if state["live"] else (None, "task_not_live"))
+                        lambda task_id, **_: ({"id": task_id}, "") if state["live"] else (None, "task_not_live"))
     monkeypatch.setattr(q, "_task_drive_for_task", lambda task, task_id: tmp_path, raising=False)
     client = TestClient(Starlette(routes=[Route("/api/decisions", endpoint=td.api_decision_answer, methods=["POST"])]))
 
