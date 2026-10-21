@@ -30,10 +30,10 @@ def _errors(root):
     return [row for line in path.read_text().splitlines() if (row := json.loads(line))["type"] == "review_model_error"] if path.exists() else []
 
 
-def _produce(root, text, parts):
+def _produce(root, text, parts, *, cost=None):
     class Answer:
         def chat(self, **_kwargs):
-            return {"content": text}, {"provider": "openai", "resolved_model": "observed/model"}
+            return {"content": text}, {"provider": "openai", "resolved_model": "observed/model", "cost": cost}
 
     ctx = SimpleNamespace(drive_root=root, task_id="truth", task_metadata={}, event_queue=queue.Queue(), pending_events=[])
     request = ReviewRequest(surface="multi_model_review", task_id="truth", goal="review", policy={"parts": parts})

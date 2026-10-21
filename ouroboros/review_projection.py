@@ -51,6 +51,8 @@ def _sub():
 
 def _transport_error_status(error: Any, *, failure_phase: str = "") -> str:
     """Classify transport failures without depending on a non-empty message."""
+    if getattr(error, "review_run_state", "") in {"cancelled", "interrupted"}:
+        return "interrupted"
     if failure_phase == "authority":
         return "authority_error"
     error_type = type(error).__name__ if isinstance(error, BaseException) else ""
@@ -204,6 +206,9 @@ def _review_actor_projection(actor: Any, surface: str) -> Dict[str, Any]:
         # Flat, redacted pointer to the private full response artifact.
         "response_ref": _response_ref_projection(row.get("response_ref")),
     }
+    if outcome:
+        projection.update(transport_status=outcome["transport"], parse_status=outcome["parse"],
+                          semantic_verdict=outcome["verdict"])
     # Since when this row has been waiting, published only where the host wrote
     # a real instant on a row the two wait predicates still call unanswered. An
     # absent key is a hole, never a back-filled or inferred moment.
@@ -307,12 +312,12 @@ def _ledger_seat_actor(seat: Dict[str, Any], record: Dict[str, Any]) -> Dict[str
     """One ledger seat as a card reviewer: the parts it was asked, each part's answer
     with its findings COUNTED (the bodies ride once, bounded, in ``findings``), and the
     observed model, else the requested one (``panel_facts`` counts the unobserved)."""
-    status, surface = str(seat.get("status") or ""), str(record.get("surface") or "review")
     outcome = seat.get("outcome") or {}
+    status, surface = str(outcome.get("status") or seat.get("status") or ""), str(record.get("surface") or "review")
     requested = seat.get("requested") if isinstance(seat.get("requested"), dict) else {}
     observed = str(seat.get("observed_model") or "")
     model = observed if observed not in ("", "unknown") else str(requested.get("model") or "")
-    answers = seat.get("answers") if isinstance(seat.get("answers"), dict) else {}
+    answers = outcome.get("answers") or (seat.get("answers") if isinstance(seat.get("answers"), dict) else {})
     parts = [str(part) for part in seat.get("parts") or [] if part in answers] or list(answers)
     findings: List[Dict[str, Any]] = []
     counted: Dict[str, Dict[str, Any]] = {}

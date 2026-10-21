@@ -220,6 +220,11 @@ def _review_exception_projection(
         and not isinstance(http_status, int)
         else str((exc.cause if isinstance(exc, ControlAuthorityUnavailable) else getattr(exc, "code", "")) or "")
     )
+    terminal = str(getattr(exc, "review_run_state", "") or "")
+    if terminal:
+        failure_custody.update(review_run_state=terminal, review_run_failure_code=getattr(exc, "code", ""))
+    if terminal in {"cancelled", "interrupted"}:
+        operation_state, failure_code = "settled", "review_run_cancelled"
     # Origin is a producer fact, not the rendered transport label (which can
     # contain error prose). Ledger/admission and authority refusals stay
     # independent of the owner's advisory review enforcement.

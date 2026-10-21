@@ -137,6 +137,7 @@ def _actor_record(
     raw_text: str,
     parsed_items: Optional[List[Dict[str, Any]]] = None,
 ) -> ReviewActorRecord:
+    cost = actor.get("cost_estimate") if actor.get("cost_estimate") is not None else actor.get("cost_usd")
     return ReviewActorRecord(
         model_id=model_label,
         status=status,
@@ -144,9 +145,9 @@ def _actor_record(
         parsed_items=parsed_items or [],
         tokens_in=int(actor.get("tokens_in", 0) or 0),
         tokens_out=int(actor.get("tokens_out", 0) or 0),
-        cost_usd=(float(actor["cost_estimate"]) if actor.get("cost_estimate") is not None else None),
+        cost_usd=float(cost) if cost is not None else None,
         additional=bool(actor.get("additional")),
-        cost_kind=str(actor.get("cost_kind") or ("measured" if actor.get("cost_estimate") is not None else "unknown")),
+        cost_kind=str(actor.get("cost_kind") or ("measured" if cost is not None else "unknown")),
         slot=idx + 1,
         slot_id=str(actor.get("slot_id") or ""),
         prompt_ref=dict(actor.get("prompt_ref") or {}),

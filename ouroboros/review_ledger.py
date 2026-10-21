@@ -157,7 +157,7 @@ def index_path(drive_root: Any) -> pathlib.Path:
 
 @contextlib.contextmanager
 def _ledger_lock(drive_root: Any) -> Iterator[None]:
-    """Exclusive lock around compare-revision-then-write; fail-soft and loud."""
+    """Exclusive lock around compare-revision-then-write; failure permits no mutation."""
     from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
 
     lock_path = pathlib.Path(drive_root) / "locks" / LEDGER_LOCK_NAME
@@ -166,7 +166,7 @@ def _ledger_lock(drive_root: Any) -> Iterator[None]:
     except Exception:
         fd = None
     if fd is None:
-        log.warning("review ledger lock unavailable at %s; writing unlocked", lock_path)
+        raise OSError(f"review ledger lock unavailable at {lock_path}")
     try:
         yield
     finally:
@@ -870,10 +870,12 @@ def _legacy_change_answer(raw: Dict[str, Any], answered: bool, status: str) -> D
 
 def _apply_raw(seat: Dict[str, Any], raw: Dict[str, Any]) -> None:
     from ouroboros.review_records import TYPED_FAILURE_FACT_KEYS
+    from ouroboros.reviewer_slot_config import review_cost_facts
 
-    status = str(raw.get("status") or "") or seat["status"]
+    outcome = raw.get("outcome") or {}
+    status = str(outcome.get("status") or raw.get("status") or "") or seat["status"]
     answered = status in ANSWERED_STATUSES
-    answers = raw.get("answers") if isinstance(raw.get("answers"), dict) else {}
+    answers = outcome.get("answers") or (raw.get("answers") if isinstance(raw.get("answers"), dict) else {})
     for part in answer_keys(seat["parts"]):
         if part not in seat["parts"]:
             continue
@@ -891,8 +893,11 @@ def _apply_raw(seat: Dict[str, Any], raw: Dict[str, Any]) -> None:
                 raw_text=str(raw.get("raw_text") or ""),
                 critical_count=sum(int(seat["answers"][p].get("critical") or 0) for p in seat["parts"]),
                 operation_state=str(raw.get("operation_state") or ("settled" if answered else status)))
-    if raw.get("outcome"):
-        seat["outcome"] = dict(raw["outcome"])
+    seat.update(review_cost_facts(seat["usd"], route=seat["requested"]["route"], model=seat["requested"]["model"]))
+    if outcome:
+        seat["outcome"] = dict(outcome)
+    else:
+        seat.pop("outcome", None)  # A legacy terminal cannot retain an earlier pending interpretation.
     seat.update({key: raw[key] for key in TYPED_FAILURE_FACT_KEYS if key in raw})
     if not answered and not seat_open(seat) and not seat.get("reported_cause"):
         # The row outlives the raw answer and the side files: a failed seat keeps its producer's own
@@ -1196,12 +1201,13 @@ ROW_PROVENANCE_FIELDS = ("subagent_id", "parts", "additional", "requested", "bri
 
 
 def _merge_evidence(*groups: Iterable[Any]) -> list:
-    """Findings merge by their seat/question/item identity; diagnostics by exact value."""
+    """Explicit finding identities merge; otherwise only identical complete evidence deduplicates."""
     merged = {}
     for group in groups:
         for value in group:
-            key = (tuple(str(value.get(name) or "") for name in ("seat_id", "part", "item", "obligation_id"))
-                   if isinstance(value, dict) and value.get("item") else json.dumps(value, sort_keys=True, default=str))
+            identity = (value.get("finding_id") or value.get("obligation_id")) if isinstance(value, dict) else None
+            key = ((str(value.get("seat_id") or ""), str(value.get("part") or ""), str(identity))
+                   if identity else json.dumps(value, sort_keys=True, default=str))
             merged[key] = value
     return list(merged.values())
 
@@ -1232,8 +1238,10 @@ def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict
             continue
         refs = [ref for ref in kept.get("source_refs") or [] if str(ref.get("role") or "") != "response"]
         refs += [ref for ref in row.get("source_refs") or [] if str(ref.get("role") or "") == "response"]
-        rows.append({**kept, **row, **{field: kept[field] for field in ROW_PROVENANCE_FIELDS if field in kept},
-                     "source_refs": refs})
+        merged = {**kept, **row, **{field: kept[field] for field in ROW_PROVENANCE_FIELDS if field in kept}, "source_refs": refs}
+        if not row.get("outcome"):
+            merged.pop("outcome", None)
+        rows.append(merged)
     settled["rows"] = rows
     still_open = any(seat_open(row) for row in rows)
     counted = [row for row in rows if not row.get("additional")]
@@ -1317,7 +1325,7 @@ def settle_from_collected(drive_root: Any, record_id: str, raws: Iterable[Dict[s
             raw = by_slot.get(str(seat.get("seat_id") or ""))
             if (raw is not None and seat_open(seat) and (not seat.get("operation_id")
                     or not raw.get("operation_id") or seat["operation_id"] == raw["operation_id"])):
-                if isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
+                if not raw.get("outcome") and isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
                     raw = {**raw, "answers": {part: apply_severity_policy(answer, policy)
                                               for part, answer in raw["answers"].items()}}
                 _apply_raw(seat, raw)

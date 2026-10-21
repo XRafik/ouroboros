@@ -144,6 +144,49 @@ def test_fast_completion_subscribes_after_record_and_attempt(author, monkeypatch
     assert "durable revision" in str(_notices(a, "change"))
 
 
+@pytest.mark.parametrize("failure", ["ledger", "attempt", "none"])
+def test_change_subscribes_only_after_successful_persistence(h, monkeypatch, failure):  # noqa: F811
+    (h.project / "project.txt").write_text("changed\n")
+    subscribed = []
+    def watch(ctx, **kwargs):
+        subscribed.append(kwargs)
+    monkeypatch.setattr(review_pause, "watch_left_review", watch)
+    if failure == "ledger":
+        def unwritable(*_args, **_kwargs):
+            raise OSError("injected ledger persistence failure")
+        monkeypatch.setattr(change, "write_record", unwritable)
+    elif failure == "attempt":
+        monkeypatch.setattr(change, "settle_attempt", lambda *_a, **_kw: False)
+    payload = h.run(root="active_workspace", subject="worktree", goal="check this change")
+    assert payload["durable"] is (failure == "none")
+    assert bool(subscribed) is (failure == "none")
+
+
+@pytest.mark.parametrize("failure", ["missing", "unwritable", "none"])
+def test_wait_subscribes_only_after_successful_persistence(tmp_path, monkeypatch, failure):
+    from types import SimpleNamespace
+    from ouroboros import review_waiting
+    from tests.test_review_ledger_settlement import _record
+
+    record = _record(tmp_path)
+    ctx = SimpleNamespace(task_id="task-1", drive_root=tmp_path, budget_drive_root=None,
+        _review_detached_operations=[{"retry_key": "key", "reason": review_pause.HELPER_EVENT}],
+        _review_wait_selection={"selection": {"tasks": ["child"]}})
+    subscribed = []
+    monkeypatch.setattr(review_pause, "notify_when_settled", lambda *_a, **_kw: subscribed.append(True))
+    record_id = "rl-absent" if failure == "missing" else record["record_id"]
+    if failure == "unwritable":
+        def unwritable(*_args, **_kwargs):
+            raise OSError("injected wait persistence failure")
+        monkeypatch.setattr(review_waiting, "save_wait", unwritable)
+        with pytest.raises(OSError, match="wait persistence failure"):
+            review_pause.watch_left_review(ctx, surface="commit", retry_key="key", record_id=record_id, reissue="collect")
+    else:
+        wait = review_pause.watch_left_review(ctx, surface="commit", retry_key="key", record_id=record_id, reissue="collect")
+        assert bool(wait) is (failure == "none")
+    assert bool(subscribed) is (failure == "none")
+
+
 @pytest.mark.parametrize("proof", ["missing", "different", "exact"])
 def test_public_preflight_exhibit_requires_exact_subject(h, monkeypatch, proof):  # noqa: F811
     from ouroboros import preflight_receipts

@@ -76,9 +76,9 @@ def test_findings_merge_by_key_and_a_fresh_gate_block_is_kept(tmp_path):
     original = _record(tmp_path)
     complete = ledger.settle_from_collected(tmp_path, original["record_id"],
                                              [_raw(seat, seat, parts=BOTH) for seat in ("a", "b")])
-    original["verdict"]["advisory_findings"] = [{"seat_id": "a", "part": "change", "item": "issue", "reason": "old"}]
+    original["verdict"]["advisory_findings"] = [{"seat_id": "a", "part": "change", "item": "issue", "obligation_id": "same", "reason": "old"}]
     complete["verdict"].update(reason="gate_block:binding_mismatch", aggregate="NOT_PERFORMED",
-        advisory_findings=[{"seat_id": "a", "part": "change", "item": "issue", "reason": "new"}])
+        advisory_findings=[{"seat_id": "a", "part": "change", "item": "issue", "obligation_id": "same", "reason": "new"}])
     merged = ledger.settle_pending_payload(original, complete)
     assert len(merged["verdict"]["advisory_findings"]) == 1
     assert merged["verdict"]["reason"] == "gate_block:binding_mismatch"
@@ -86,3 +86,53 @@ def test_findings_merge_by_key_and_a_fresh_gate_block_is_kept(tmp_path):
     assert ledger.settle_pending_payload(original, complete)["verdict"]["aggregate"] == "PASS"
 
 
+@pytest.mark.parametrize("writer", ["collected", "pending_payload"])
+def test_distinct_findings_on_one_item_survive_and_identical_replay_deduplicates(tmp_path, writer):
+    from tests.test_review_ledger import _answer
+
+    original = _record(tmp_path)
+    findings = [{"item": "rollback", "verdict": "FAIL", "severity": "critical", "reason": reason}
+                for reason in ("a.py:1 loses state", "b.py:2 loses a different state")]
+    raw = _raw("a", "a", parts=BOTH, operation_id="a",
+               answers={"change": _answer("change", "FAIL", findings + findings[:1]), "coupling": _answer("coupling")})
+    fresh = ledger.build_commit_gate_record(_facts([raw], critical_findings=ledger.seat_findings([raw], set())[0]),
+                                             drive_root=tmp_path).to_dict()
+    if writer == "collected":
+        merge = lambda: ledger.settle_from_collected(tmp_path, original["record_id"], [raw])
+    else:
+        merge = lambda: ledger.revise_record(tmp_path, original["record_id"],
+                                             lambda now: ledger.settle_pending_payload(now, fresh))
+    first, replay = merge(), merge()
+    assert first["verdict"]["critical_findings"] == replay["verdict"]["critical_findings"]
+    assert {f["reason"] for f in replay["verdict"]["critical_findings"]} == {f["reason"] for f in findings}
+    assert len(replay["verdict"]["critical_findings"]) == 2
+
+
+@pytest.mark.parametrize("operation", ["write", "revise", "collect"])
+@pytest.mark.parametrize("lock_failure", ["unavailable", "raises"])
+def test_unavailable_lock_writes_nothing_and_normal_lock_recovers(tmp_path, monkeypatch, operation, lock_failure):
+    from ouroboros import platform_layer
+
+    original = _record(tmp_path)
+    before = {p: p.read_bytes() for p in ledger.ledger_dir(tmp_path).iterdir() if p.is_file()}
+    raw = _raw("a", "a", parts=BOTH, operation_id="a")
+    if operation == "write":
+        mutate = lambda: ledger.write_record(tmp_path, {**original, "revision": 2})
+    elif operation == "revise":
+        mutate = lambda: ledger.revise_record(tmp_path, original["record_id"], lambda row: {**row, "test_mark": True})
+    else:
+        mutate = lambda: ledger.settle_from_collected(tmp_path, original["record_id"], [raw])
+    def unavailable(*_args, **_kwargs):
+        if lock_failure == "raises":
+            raise OSError("lock storage unavailable")
+        return None
+    with monkeypatch.context() as patch:
+        patch.setattr(platform_layer, "acquire_exclusive_file_lock", unavailable)
+        patch.setattr(ledger, "_write_and_index", lambda *_a: pytest.fail("wrote without acquiring the lock"))
+        with pytest.raises(OSError, match="ledger lock unavailable"):
+            mutate()
+    assert before == {p: p.read_bytes() for p in ledger.ledger_dir(tmp_path).iterdir() if p.is_file()}
+    recovered = mutate()
+    assert recovered["revision"] == 2
+    if operation == "collect":
+        assert recovered["rows"][0]["status"] == "responded"

@@ -50,6 +50,8 @@ def finalize_seat_outcome(request: Any, slot: Any, actor: Any) -> dict:
     actor.review_wave_id = str(actor.review_wave_id or request.resolved_wave_id or "")
     answers, items, findings, manifest, read_coverage = {}, [], [], {}, ""
     if parts:
+        from ouroboros.review_ledger import row_verdict
+
         row = {**asdict(actor), "text": actor.raw_text,
                "verdict": "ERROR" if actor.status in {"error", "not_dispatched"} else "",
                "native_read_coverage": usage.get("native_read_coverage"),
@@ -59,8 +61,8 @@ def finalize_seat_outcome(request: Any, slot: Any, actor: Any) -> dict:
         read_coverage, manifest = record.coverage, record.context_manifest
         findings = [finding for answer in answers.values() for finding in answer.get("findings", [])]
         usable = [answer for answer in answers.values() if answer.get("status") == "responded"]
-        actor.signal = ("FAIL" if any(answer["verdict"] == "FAIL" for answer in usable)
-                        else "PASS" if usable else "DEGRADED")
+        verdict = row_verdict(record.to_dict())
+        actor.signal = verdict if verdict in {"PASS", "FAIL"} else "DEGRADED"
         actor.parsed = {"verdict": actor.signal, "findings": findings, "answers": answers} if usable else None
         actor.reason = next((str(item.get("reason") or "") for item in items if item.get("reason")), actor.reason)
         actor.parse_status = "valid" if usable else "awaiting" if status == "pending" else "malformed"
@@ -78,13 +80,17 @@ def finalize_seat_outcome(request: Any, slot: Any, actor: Any) -> dict:
     truth = _review_actor_projection(actor, request.surface)
     for key in ("model", "transport_status", "parse_status", "semantic_verdict", "provider", "coverage", "reason"):
         setattr(actor, key, truth[key])
+    if parts and usable:
+        actor.semantic_verdict = verdict
     if status == "pending":
         actor.transport_status = actor.parse_status = "awaiting"
         actor.semantic_verdict = ""
     if actor.transport_status == "interrupted":
         status, actor.parse_status, actor.semantic_verdict = "interrupted", "unavailable", ""
-    actor.quorum_contribution = status == "responded" and actor.signal in {"PASS", "FAIL"} and not policy.get("additional")
-    actor.enforcement_impact = ("veto" if actor.signal == "FAIL" else "supports_pass") if actor.quorum_contribution else "abstains"
+    participates = bool(usable) if parts else actor.signal in {"PASS", "FAIL"}
+    actor.quorum_contribution = status == "responded" and participates and not policy.get("additional")
+    actor.enforcement_impact = ({"FAIL": "veto", "PASS": "supports_pass"}.get(actor.signal, "abstains")
+                                if actor.quorum_contribution else "abstains")
     suffix = "error" if actor.status == "error" else "response"
     actor.outcome = {
         "outcome_id": f"{actor.operation_id}:{actor.slot_id}", "operation_id": actor.operation_id,

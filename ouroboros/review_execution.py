@@ -891,14 +891,15 @@ def run_delegated_review_session(
         if run_state != "succeeded":
             state.pop("pending_invocation_id", None)
             state.pop("delegated_run_id", None)
-            raise run_failure_error(run_id, run_state, summary.get("failure"))
+            failure = run_failure_error(run_id, run_state, summary.get("failure"))
+            failure.review_run_state = run_state
+            raise failure
         text = _full_session_text(gateway, run_id, detail)
         spend, estimated, combined_summary = _combined_session_usage(custody, stopped_summaries, summary)
         thread_receipt: Dict[str, Any] = {}
         if use_thread:
-            thread_receipt, thread_id, turn_id = _session_thread_receipt(
-                gateway, thread_id, run_id, turn_id, route, observed, continued=bool(continuations),
-                run_names=custody.held_run_names(detail, run_id))
+            thread_receipt, thread_id, turn_id = _session_thread_receipt(gateway, thread_id, run_id, turn_id, route, observed,
+                continued=bool(continuations), run_names=custody.held_run_names(detail, run_id))
         state.pop("pending_invocation_id", None)
         state.pop("delegated_run_id", None)
         return {
