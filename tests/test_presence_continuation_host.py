@@ -428,4 +428,3 @@ def test_reporting_v1_receipts_own_outgoing_history_and_reach_the_resuming_autho
     final = receipt(late["output_ref"], first["turn_ref"], "telegram:bot-1:42", ANSWER)
     assert h.client.post("/presence/delivery", headers=_HEADERS, json=final).status_code == 200
     assert [row["text"] for row in dialogue_test.log_rows(chat) if row.get("direction") == "out"] == ["Noted.", ANSWER]
-

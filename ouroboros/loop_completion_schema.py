@@ -23,5 +23,3 @@ def completion_schema(tools: Any, schemas: list | None = None) -> str:
         getattr(ctx, "messages", []).append({"role": "user", "content":
             "[SYSTEM NOTICE] Current permitted completion schema loaded: " + name + ". The schema prefix changed."})
     return name
-
-

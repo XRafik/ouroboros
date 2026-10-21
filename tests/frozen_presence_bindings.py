@@ -58,4 +58,3 @@ def save_presence_binding(data_root: Path, binding: PresenceBinding) -> Presence
     except (OSError, TimeoutError, ValueError) as exc:
         raise PresenceBindingError("presence_bindings_write_failed", "presence_bindings") from exc
     return binding
-

@@ -79,5 +79,3 @@ def build_presence_capability_ceiling(
     return PresenceCapabilityCeiling(
         **{**provisional.__dict__, "digest": payload["digest"]}
     )
-
-

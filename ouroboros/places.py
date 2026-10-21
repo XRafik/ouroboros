@@ -375,4 +375,3 @@ def _change_place(old: Place | None, action: str, author: str, values: dict) -> 
             entries += (OwnerAccount(actor, str(values.get("label", "")), utc_now_iso(), account),)
         return replace(old, owner_accounts=entries)
     raise PlaceError("place_action_invalid", "action")
-
