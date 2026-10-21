@@ -62,7 +62,8 @@ from ouroboros.utils import utc_now_iso
 log = logging.getLogger(__name__)
 
 # Host-owned row fields: never authored by a payload, never copied into a task.
-OCCURRENCE_FIELDS = ("occurrence", "hold", "continuation_of", "delete_requested_at")
+OCCURRENCE_FIELDS = ("occurrence", "hold", "continuation_of", "delete_requested_at",
+                     "delete_requested_by", "delete_reason")
 _FINGERPRINT_FIELDS = ("task", "trigger", "timezone", "cron", "name", "description", "enabled", "manual_override",
                        "followup_origin", "followup_relation")
 _SETTLED = "settled"

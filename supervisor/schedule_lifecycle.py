@@ -41,6 +41,51 @@ log = logging.getLogger(__name__)
 UNCHANGED_STATUSES: frozenset[str] = frozenset({"consumed_not_rearmed"})
 
 
+def adopt_legacy_skill_row(record: Dict[str, Any]) -> bool:
+    """Keep a former manifest row as an ordinary promise, without changing its work."""
+    if not {"manual_override", "skill_content_hash"}.intersection(record):
+        return False
+    from supervisor.schedule_occurrence import remember_claim_basis
+
+    remember_claim_basis(record)
+    override = str(record.pop("manual_override", "") or "").strip().lower()
+    record.pop("skill_content_hash", None)
+    if override in {"disabled", "deleted"}:
+        record["enabled"] = False
+    if override == "deleted":
+        record.setdefault("delete_requested_at", utc_now_iso())
+        record["delete_requested_by"] = "host:skill_schedule_adoption"
+        record["delete_reason"] = "deleted while skills managed schedules"
+    return True
+
+
+def _adoption_audit(root, before):
+    return dict(drive_root=root, operation_id=uuid.uuid4().hex[:12],
+                actor="host:skill_schedule_adoption", task_id="", action="adopt",
+                schedule_id=str(before.get("id") or ""), reason="skills no longer manage schedules")
+
+
+def _adopt_stored_row(root, data, record) -> bool:
+    """Adopt under the caller's transaction, before lifecycle/policy eligibility."""
+    after = copy.deepcopy(record)
+    if not adopt_legacy_skill_row(after):
+        return False
+    before, audit = copy.deepcopy(record), _adoption_audit(root, record)
+    if not _audit_schedule_mutation(phase="intent", result="intended", before=before, **audit):
+        raise ScheduleRefused("audit_unavailable", "schedule adoption audit unavailable; nothing was changed")
+    record.clear()
+    record.update(after)
+    try:
+        _write_scheduled_tasks(data, root)
+    except Exception:
+        record.clear()
+        record.update(before)
+        raise
+    if not _audit_schedule_mutation(phase="outcome", result="adopted", before=before, after=record, **audit):
+        log.error("schedule %s adopted but its audit outcome is incomplete", record.get("id"))
+    return True
+
+
 def _merge_onto_current(existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
     """Merge an owner-authored record onto the CURRENT row, under the write lock.
 
@@ -126,10 +171,13 @@ def upsert_scheduled_task(record: Dict[str, Any], *, drive_root: pathlib.Path | 
         tasks = list(data.get("tasks") or [])
         from supervisor.schedule_occurrence import OCCURRENCE_FIELDS, fingerprint
 
-        incoming = {key: value for key, value in dict(record).items() if key not in OCCURRENCE_FIELDS}
+        incoming = {key: value for key, value in dict(record).items()
+                    if key not in (*OCCURRENCE_FIELDS, "manual_override", "skill_content_hash")}
         schedule_id = str(incoming.get("id") or "").strip() or uuid.uuid4().hex[:8]
         incoming["id"] = schedule_id
         existing = next((item for item in tasks if str(item.get("id") or "") == schedule_id), None)
+        if existing is not None:
+            _adopt_stored_row(root, data, existing)
         from supervisor.followup_policy import HOST_FIELDS, origin_of, normalize_template, policy_view, control_guard
         # Host-only keyword is never populated from a template or public payload.
         for key in HOST_FIELDS:
@@ -252,6 +300,11 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
             if current is None:
                 return {"ok": False, "changed": False, "status": "not_found",
                         "schedule_id": wanted, "audit": "not_written"}
+            try:
+                _adopt_stored_row(root, data, current)
+            except ScheduleRefused as exc:
+                return {"ok": False, "changed": False, "status": exc.status,
+                        "schedule_id": wanted, "audit": "not_written", "detail": str(exc)}
             # An exact release request never becomes generic enable on replay,
             # and a relationship decision only resolves an observed hold.
             if operation == "restore" and (expected_hold_id or resolved or current.get("followup_hold") or

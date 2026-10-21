@@ -65,14 +65,14 @@ SCHEDULE_ACTIONS: frozenset[str] = frozenset({"disable", "delete", "restore"})
 _RUNTIME_OWNED_FIELDS: tuple[str, ...] = (
     "source", "skill", "created_at", "last_run_at", "last_task_id", "last_error",
     # The occurrence protocol's host facts (supervisor/schedule_occurrence.py).
-    "occurrence", "hold", "continuation_of", "delete_requested_at",
+    "occurrence", "hold", "continuation_of", "delete_requested_at", "delete_requested_by", "delete_reason",
 )
 # What an audit event may say about a row: lifecycle facts only. The task template
 # is a private objective, never audit material, and would also be unbounded.
 _AUDIT_ROW_KEYS: tuple[str, ...] = (
     "id", "name", "enabled", "source", "skill", "trigger", "timezone",
     "created_at", "updated_at", "last_run_at", "last_task_id", "completed_at",
-    "next_run_at",
+    "next_run_at", "delete_requested_at", "delete_requested_by", "delete_reason",
     "followup_relation", "followup_origin", "followup_hold", "followup_wait",
 )
 # ``manage_schedules`` is a model-facing tool.  Keep one page comfortably below
@@ -697,6 +697,12 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         for record in list(data.get("tasks") or []):
             if not isinstance(record, dict):
+                continue
+            from supervisor.schedule_lifecycle import _adopt_stored_row
+
+            try:
+                _adopt_stored_row(root, data, record)
+            except ScheduleRefused:
                 continue
             prior, view = observed.get(str(record.get("id") or ""), (None, None))
             if (record != prior or data.get("followup_restart") != snapshot.get("followup_restart")):
