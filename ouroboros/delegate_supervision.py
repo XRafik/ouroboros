@@ -791,6 +791,10 @@ def stage_pending_wake_exposure(ctx: Any, delivered: Any) -> None:
     pending = state.get("pending_wake") or {}
     if not pending.get("wake_id") or pending["wake_id"] not in _wake_ids(payload):
         return
+    _record_exposure(ctx, payload, pending, str(state.get("run_id") or ""))
+
+
+def _record_exposure(ctx: Any, payload: Any, pending: dict[str, Any], run_id: str) -> None:
     wake = payload.get("wake", payload) if isinstance(payload, dict) else {}
     if isinstance(wake, dict) and isinstance(wake.get("wake_events"), list):
         seen_mail = getattr(ctx, "_loop_mailbox_seen_ids", None)
@@ -798,7 +802,6 @@ def stage_pending_wake_exposure(ctx: Any, delivered: Any) -> None:
             seen_mail = ctx._loop_mailbox_seen_ids = set()
         seen_mail.update(_text_mailbox_ids(wake["wake_events"]))
     shown = _interaction_ids(payload) & set(pending.get("interaction_ids") or [])
-    run_id = str(state.get("run_id") or "")
     if shown and run_id:
         seen = dict(getattr(ctx, "_sleep_interaction_seen", None) or {})
         seen[run_id] = sorted(set(seen.get(run_id) or ()) | shown)
@@ -888,9 +891,6 @@ def acknowledge_pending_wake(ctx: Any, delivered: Any = None) -> bool:
         _REPORTED_INTERACTIONS[run_id] = frozenset(
             set(_REPORTED_INTERACTIONS.get(run_id, frozenset())) | set(interaction_ids)
         )
-    # Compatibility for direct ACK consumers (the UNKNOWN hold): their successful
-    # receipt still records exposure. Loop/startup consumers stage BEFORE saving.
-    stage_pending_wake_exposure(ctx, payload)
     prior_mailbox_ids = (
         state.get("mailbox_acknowledged_ids") or []
         if str(state.get("mailbox_acknowledged_attempt_key") or "") == attempt
@@ -913,6 +913,11 @@ def acknowledge_pending_wake(ctx: Any, delivered: Any = None) -> bool:
     state["pending_wake"] = {}
     state["status"] = "awake"
     _save_state(ctx, state)
+    # Compatibility for direct ACK consumers (the UNKNOWN hold): only a saved receipt
+    # records exposure, since the hold drops a receipt whose ACK failed (#2142).
+    # Loop/startup consumers stage BEFORE saving.
+    if expected:
+        _record_exposure(ctx, payload, pending, str(state.get("run_id") or ""))
     return True
 
 
