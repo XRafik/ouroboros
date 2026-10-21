@@ -177,7 +177,7 @@ _REPLAY_OMITTED_CVAR: contextvars.ContextVar = contextvars.ContextVar(
 
 
 def note_replay_omission(omitted: bool) -> None:
-    """Record whether the send the provider answered dropped the replayed reasoning."""
+    """Record whether the send whose generated answer came back dropped the replayed reasoning."""
     _REPLAY_OMITTED_CVAR.set(bool(omitted))
 
 

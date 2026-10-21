@@ -123,8 +123,11 @@ def test_signature_retry_leaves_a_textual_context_overflow_to_size_recovery():
     kwargs = {"messages": _thinking_history(), "extra_body": {"provider": {"allow_fallbacks": False}}}
     too_long = "prompt is too long: 1000794 tokens > 1000000 maximum"
     bound = "messages.3.content.0: Invalid `signature` in `thinking` block: bound to a different conversation"
-    assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(too_long)) is None
-    assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(bound, too_long)) is None
+    from ouroboros.loop_llm_call import classify_llm_exception
+
+    for overflow in (routed(too_long), routed(bound, too_long)):
+        assert inst._openrouter_signature_retry_kwargs(target, kwargs, overflow) is None
+        assert classify_llm_exception(overflow).kind == "context_overflow"  # the loop takes it over
     assert inst._openrouter_signature_retry_kwargs(target, kwargs, routed(bound)) is not None
 
 

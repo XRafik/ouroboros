@@ -524,7 +524,7 @@ def test_an_answered_send_without_the_replayed_reasoning_is_what_history_keeps(
 def test_a_transcript_adopts_only_its_own_answered_omission(case):
     """Both sides, with no clock policy (a child or helper loop): only an omission noted
     by this scope's own answered send strips the transcript; a fact left by an earlier
-    raised ladder, or a raised send, leaves it as it was."""
+    scope that raised, or a raised send, leaves it as it was."""
     from ouroboros.reasoning_artifacts import note_replay_omission, pop_replay_omission
 
     thought = {"type": "reasoning.text", "text": "t", "signature": "s", "format": "anthropic-claude-v1", "index": 0}
