@@ -78,6 +78,29 @@ def _comment(cid, **extra):
             "issue_url": f"{API}/repos/owner/selected/issues/7", "body": f"comment {cid}", **extra}
 
 
+@pytest.mark.parametrize("retired,kind", [("get_github_issue", "comment"), ("get_github_pr", "comment"),
+                                         ("get_github_pr", "review_comment"), ("get_github_pr", "review")])
+def test_retired_detail_names_withhold_target_lists_but_allow_repo_sweeps(gh, monkeypatch, retired, kind):
+    from ouroboros.tools.registry import ToolRegistry
+
+    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    gh.ctx.task_metadata["task_contract"] = {"disabled_tools": [retired]}
+    registry = ToolRegistry(repo_dir=gh.ctx.repo_dir, drive_root=gh.ctx.drive_root)
+    registry.set_context(gh.ctx)
+    gh.answer = lambda p, argv, kw: _rest([])
+    refused = registry.execute("github_read", {"method": " list ", "kind": f" {kind} ", "target": " 7 "})
+    assert refused.startswith("⚠️ RESOURCE_CONSTRAINT_BLOCKED") and retired in refused and not gh.calls
+    # Reviews require a PR; comments and review comments also offer repository-wide sweeps.
+    sweep = kind if kind != "review" else "comment"
+    for target in (None, "", 0):
+        args = {"method": "list", "kind": sweep, **({"target": target} if target is not None else {})}
+        text = registry.execute("github_read", args)
+        assert text.startswith("github_read list "), text
+        assert _payload(text)[1]["complete"] is True
+    assert len(gh.calls) == 3
+
+
 @pytest.fixture
 def gh(monkeypatch, tmp_path):
     """A recording fake gh: ``world.answer(parts, argv, kwargs)`` returns stdout, ``(code, stderr)`` or raises."""

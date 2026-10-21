@@ -360,12 +360,14 @@ _GITHUB_TOKEN_TOOLS = frozenset({
 # same objects. `comment_on_issue` withholds the whole comment method: an issue and a pull request
 # share one number space, so the one verb cannot be split without a read. Each row:
 # retired name -> (successor, ((method, {argument: value}), ...)); an empty constraint withholds
-# every call of that method. The dead name stays in the set too (harmless: nothing registers it).
+# every call of that method; target='*' means a positive issue/PR target, never a repo-wide sweep.
+# The dead name stays in the set too (harmless: nothing registers it).
 _RETIRED_GITHUB_TOOLS: dict[str, tuple[str, tuple[tuple[str, dict[str, str]], ...]]] = {
     "list_github_issues": ("github_read", (("list", {"kind": "issue"}), ("search", {}), ("api", {}))),
-    "get_github_issue": ("github_read", (("get", {"kind": "issue"}), ("api", {}))),
+    "get_github_issue": ("github_read", (("get", {"kind": "issue"}), ("list", {"kind": "comment", "target": "*"}), ("api", {}))),
     "list_github_prs": ("github_read", (("list", {"kind": "pr"}), ("search", {}), ("api", {}))),
-    "get_github_pr": ("github_read", (("get", {"kind": "pr"}), ("api", {}))),
+    "get_github_pr": ("github_read", (("get", {"kind": "pr"}), ("list", {"kind": "review", "target": "*"}),
+                                    ("list", {"kind": "review_comment", "target": "*"}), ("list", {"kind": "comment", "target": "*"}), ("api", {}))),
     "get_github_checks": ("github_read", (("checks", {}), ("api", {}))),
     "comment_on_issue": ("github_write", (("comment", {}), ("api", {}))),
     "comment_on_pr": ("github_write", (("comment", {}), ("review", {}), ("api", {}))),
@@ -384,11 +386,14 @@ def _retired_github_method_refusal(ctx: Any, name: str, args: Any) -> str:
     args = _canonical_github_args(args if isinstance(args, dict) else {})
     disabled = _disabled_tools(ctx)
     method = str(args.get("method") or "")
+    target = str(args.get("target") or "").strip()
+    has_target = not isinstance(args.get("target"), bool) and target.isdigit() and int(target) > 0
     for retired, (successor, rows) in _RETIRED_GITHUB_TOOLS.items():
         if retired not in disabled or successor != name:
             continue
         for withheld, constraint in rows:
-            if withheld == method and all(str(args.get(key) or "") == value for key, value in constraint.items()):
+            if withheld == method and all(has_target if key == "target" and value == "*" else str(args.get(key) or "") == value
+                                          for key, value in constraint.items()):
                 call = ", ".join([f"method={method!r}"] + [f"{key}={value!r}" for key, value in constraint.items()])
                 return (f"⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.disabled_tools withholds {retired!r}, "
                         f"which {name}({call}) would carry out for this task.")
