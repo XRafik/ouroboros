@@ -362,7 +362,8 @@ def _schedule_projection_row(raw: Dict[str, Any]) -> Dict[str, Any]:
     row["active"] = status == "active"
     row["consumed"] = status == "consumed"
     row["retained"] = status in {"consumed", "held", "delete_pending"}
-    row["restorable"] = status == "delete_pending" or bool(raw.get("followup_hold") and raw.get("hold_persisted", True))
+    row["restorable"] = (status == "delete_pending" and not _is_consumed_once(raw)) or bool(
+        raw.get("followup_hold") and raw.get("hold_persisted", True))
     row["delete_pending"] = status == "delete_pending"
     if row["delete_pending"]:
         row["delete_requested_at"] = _bounded_projection_text(raw.get("delete_requested_at"), 64)

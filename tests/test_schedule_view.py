@@ -120,3 +120,12 @@ def test_tool_and_activity_share_facts_and_bound_after_decoration():
     page = schedule_tool_projection({"tasks": [large, large]}, result_limit=5000)
     assert len(page["tasks"]) == 1 and page["next_offset"] == 1
     assert len(json.dumps(page, ensure_ascii=False, separators=(",", ":"))) <= 4000
+
+
+@pytest.mark.parametrize("consumed", [True, False])
+def test_withdrawal_restore_labels_do_not_promise_to_rearm_consumed_history(consumed):
+    raw = row(delete_requested_at="then", enabled=False, **({"completed_at": "done"} if consumed else {}))
+    for projection in (schedule_activity_projection, schedule_tool_projection):
+        view = projection({"tasks": [raw]})["tasks"][0]
+        assert view["restorable"] is not consumed and view["withdrawal"]["restorable"] is not consumed
+        assert view["status"] == "delete_pending" and view["retained"]

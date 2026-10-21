@@ -244,8 +244,8 @@ def work_settled(record: Dict[str, Any], *, drive_root: Optional[pathlib.Path] =
     """Occurrence settlement is not task settlement: keep its control row until both.
 
     A receipt-less claim positively never started, and a row that never admitted
-    anything owes nothing: neither needs the queue, so a worker without a fresh
-    snapshot deletes it at once. Otherwise the admitted task must be absent from
+    anything owes nothing: neither needs a queue observation to prove settlement.
+    Otherwise the admitted task must be absent from
     the queue and settled; a collected result of a task no occurrence still
     names is settled history. Unreadable or unknown evidence keeps the row.
     """
@@ -274,7 +274,7 @@ def work_settled(record: Dict[str, Any], *, drive_root: Optional[pathlib.Path] =
 
 
 def deletion_settled(record: Dict[str, Any], *, drive_root: Optional[pathlib.Path] = None) -> bool:
-    """Whether a deferred delete/GC may drop the row: nothing retained still needs it.
+    """Whether withdrawal/GC has settled work: nothing retained still needs the row.
 
     An independent schedule's row has no role once its accepted run starts. A
     continuation (related, or an unrecorded published relationship) is the
