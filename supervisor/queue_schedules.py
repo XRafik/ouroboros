@@ -32,7 +32,7 @@ from supervisor.schedule_time import (
     schedule_next_run as _schedule_next_run,  # noqa: F401 -- lifecycle writer seam
     timezone_for_schedule as _timezone_for_schedule,
 )
-from supervisor.schedule_view import decorate
+from supervisor.schedule_view import _is_consumed_once, decorate, schedule_lifecycle_status  # noqa: F401 -- shared lifecycle words
 
 log = logging.getLogger(__name__)
 
@@ -274,30 +274,6 @@ def load_schedule_store(drive_root: pathlib.Path | None = None) -> Dict[str, Any
     data.setdefault("schema_version", 1)
     data["tasks"] = rows
     return data
-
-
-def _is_consumed_once(record: Dict[str, Any]) -> bool:
-    """A one-shot that already fired: a durable receipt, not a standing schedule."""
-    trigger = record.get("trigger") if isinstance(record.get("trigger"), dict) else {}
-    return str(trigger.get("type") or "") == "once" and bool(record.get("completed_at"))
-
-
-def schedule_lifecycle_status(record: Dict[str, Any]) -> str:
-    """The one lifecycle word every surface says about a row.
-
-    ``consumed`` is retained history, never an active schedule.
-    ``delete_pending`` outranks them: a withdrawal stays visible through retention
-    and until any work that needs its row has settled.
-    """
-    if record.get("delete_requested_at"):
-        return "delete_pending"
-    if _is_consumed_once(record):
-        return "consumed"
-    if record.get("followup_hold"):
-        return "held"
-    if record.get("followup_wait"):
-        return "waiting"
-    return "active" if record.get("enabled", True) else "disabled"
 
 
 def _bounded_projection_text(value: Any, limit: int = _SCHEDULE_FIELD_CHARS) -> str:

@@ -11,6 +11,30 @@ from supervisor.schedule_time import parse_schedule_time, timezone_for_schedule
 _LEGACY_NAME = re.compile(r"^(Follow-up|Reminder) of task \S+$")
 
 
+def _is_consumed_once(record: dict[str, Any]) -> bool:
+    """A one-shot that already fired: a durable receipt, not a standing schedule."""
+    trigger = record.get("trigger") if isinstance(record.get("trigger"), dict) else {}
+    return str(trigger.get("type") or "") == "once" and bool(record.get("completed_at"))
+
+
+def schedule_lifecycle_status(record: dict[str, Any]) -> str:
+    """The one lifecycle word every surface says about a row.
+
+    ``consumed`` is retained history, never an active schedule.
+    ``delete_pending`` outranks them: a withdrawal stays visible through retention
+    and until any work that needs its row has settled.
+    """
+    if record.get("delete_requested_at"):
+        return "delete_pending"
+    if _is_consumed_once(record):
+        return "consumed"
+    if record.get("followup_hold"):
+        return "held"
+    if record.get("followup_wait"):
+        return "waiting"
+    return "active" if record.get("enabled", True) else "disabled"
+
+
 def decorate(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
     """Add display facts without changing the definition or reading task stores."""
     out = dict(row)
@@ -35,7 +59,7 @@ def decorate(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
                              "followup_wait": str(row.get("followup_wait") or "")}
     out.pop("withdrawal", None)
     if row.get("delete_requested_at"):
-        consumed = (row.get("trigger") or {}).get("type") == "once" and bool(row.get("completed_at"))
+        consumed = _is_consumed_once(row)
         work_in_flight = True if isinstance(row.get("occurrence"), dict) or row.get("previous_run_open") else (
             False if observed else None)
         out["withdrawal"] = {"at": row["delete_requested_at"], "by": row.get("delete_requested_by", ""),
@@ -45,8 +69,6 @@ def decorate(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
 
 
 def _entry(row: dict[str, Any], now: datetime.datetime) -> dict[str, Any]:
-    from supervisor.queue_schedules import schedule_lifecycle_status
-
     view = decorate(row, now)
     trigger = row.get("trigger") or {}
     entry = {"id": row.get("id"), "name": view["display_name"][:96], "status": schedule_lifecycle_status(row),

@@ -578,8 +578,8 @@ hover-only tooltip. Retained rows (consumed and withdrawn) collapse into one
 History & withdrawn disclosure rather than padding the standing list or
 disappearing: history the owner can still open, read and act on. A withdrawn
 row says who withdrew it, when and why, and keeps Restore through the retention
-window; Restore cancels the withdrawal and never re-arms a one-shot that already
-fired. A consumed row keeps only Delete, since Enable on a schedule that cannot
+window once no hold remains on it; Restore cancels the withdrawal and never
+re-arms a one-shot that already fired. A consumed row keeps only Delete, since Enable on a schedule that cannot
 fire again would be a lie. A withdrawn row still finishing work it already
 accepted stays in the standing list and says so; an exact hold release (Restore
 hold) stays separate and preserves the withdrawal.
