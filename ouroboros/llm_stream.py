@@ -111,14 +111,29 @@ def _index(value: Any) -> int:
 def _adjacent(last: Any, item: dict) -> bool:
     """Continuation of the last record: ``type`` and ``id`` absent on either side or equal.
 
-    Discreteness of opaque payloads (``reasoning.encrypted`` data, signatures)
-    rides on the provider's ``id``: two id-less records of one type would fuse.
-    Every recorded encrypted record carries an id; text records must stay
-    id-less-mergeable, which is the #856 fix itself.
+    Unsigned text records must stay id-less-mergeable (the #856 fix itself); a signed
+    record is closed by its signature (``_closed_by_signature``). Opaque
+    ``reasoning.encrypted`` data stays discrete only by the provider's ``id``: it
+    usually carries one, and two id-less encrypted records in a row would fuse
+    (recorded without an id, never yet two in a row).
     """
     return isinstance(last, dict) and all(
         last.get(key) is None or item.get(key) is None or last.get(key) == item.get(key)
         for key in ("type", "id"))
+
+
+def _closed_by_signature(last: dict, item: dict) -> bool:
+    """A signature is the last fact of the record it signs: content after it opens the next one.
+
+    OpenRouter streams the thinking blocks of one Anthropic answer id-less, each ending
+    in a signature-only delta (a signature arrives whole, in one delta), and their
+    ``index`` is a block ordinal there while Gemini repeats 0, so ``index`` cannot be
+    the boundary; a delta that adds nothing still joins the signed record. A record
+    fused from two blocks is refused on replay; OpenRouter's own SDK fuses them too
+    (keeping the first signature), so it is no reference for this boundary.
+    """
+    return (isinstance(last.get("signature"), str) and bool(last["signature"])
+            and any(item.get(field) for field in ("text", "summary", "data", "signature")))
 
 
 def _snapshot(target: dict, update: dict) -> None:
@@ -188,9 +203,9 @@ def _delta(target: dict, update: dict, note: Callable[[str], None], *,
 def _merge_list_item(key: str, current: list, item: Any, note: Callable[[str], None], *,
                      chat_path: tuple | None = None) -> None:
     """List identity is a property of the wire field: ``reasoning_details`` records are
-    reassembled by type transition (every delta repeats a frame-local ``index`` that is
-    not a record key, as the wire's own reference client documents); every other list
-    keys on ``index``, and an index-less tool-call fragment continues the last call."""
+    reassembled by type transition and closed by their signature (the ``index`` they
+    carry is no record key on every route); every other list keys on ``index``, and an
+    index-less tool-call fragment continues the last call."""
     if not isinstance(item, dict):
         current.append(copy.deepcopy(item))
         return
@@ -198,7 +213,7 @@ def _merge_list_item(key: str, current: list, item: Any, note: Callable[[str], N
     if key == "reasoning_details":
         if "type" not in item:
             note(f"{key}: item without type")
-        if current and _adjacent(current[-1], item):
+        if current and _adjacent(current[-1], item) and not _closed_by_signature(current[-1], item):
             match = current[-1]
     else:
         index = item.get("index")
