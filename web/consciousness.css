@@ -25,6 +25,9 @@
     border-radius: var(--radius-xs);
 }
 .consciousness-inline-link:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: 2px; }
+/* The shells give every button a finger's minimum box; a link inside a sentence keeps the sentence's lines and
+   takes the hit extension instead (.ui-hit-area, DESIGN §10). */
+:is(.dashboard-shell, .settings-shell) button.consciousness-inline-link { min-inline-size: 0; min-block-size: 0; }
 @media (hover: hover) { .consciousness-inline-link:hover { text-decoration: underline; text-underline-offset: 3px; } }
 /* The owner's own words keep the owner's voice: the blue tint and its ink, here in an editable field. */
 textarea.ui-control.consciousness-owner-words {
@@ -103,8 +106,9 @@ textarea.ui-control.consciousness-owner-words {
 .consciousness-root { gap: var(--space-4); container: consciousness / inline-size; }
 .consciousness-read-status:empty { display: none; }
 .consciousness-summary-text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
-.consciousness-headline { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
-.consciousness-headline .storage-total { display: inline-flex; align-items: center; flex-wrap: wrap; min-width: 0; }
+.consciousness-headline { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); min-width: 0; }
+/* The words and the moving mark flow as one line box, so the mark follows the last word wherever it wraps. */
+.consciousness-headline .storage-total { min-width: 0; }
 .btn.btn-ghost.consciousness-stop { flex: 0 0 auto; }
 .consciousness-why { margin: var(--space-1) 0 0; color: var(--text-primary); font-size: var(--type-body); line-height: var(--line-body); }
 .consciousness-next { margin: 2px 0 0; color: var(--text-meta); font-size: var(--type-body); line-height: var(--line-body); }
@@ -201,10 +205,12 @@ textarea.ui-control.consciousness-owner-words {
     .consciousness-card-head { flex-wrap: wrap; }
     .consciousness-dash-place { grid-template-columns: minmax(0, 1fr); grid-template-areas: "main" "meta" "spend"; }
     .consciousness-spend { text-align: start; padding-inline-start: calc(18px + var(--space-3)); }
-    .consciousness-headline { flex-wrap: wrap; }
 }
 
 /* ---- the place sheet and the Connect flow: the document reader's dialog geometry ------------------------------- */
+/* On the desk the Connect list is as tall as its rows (a phone keeps the reader's full sheet). */
+:root[data-layout="docked"] .document-reader.place-connect { height: auto; }
+:root[data-layout="docked"] .place-connect .document-reader-panel { max-height: min(var(--document-reader-size), calc(100dvh - 2 * var(--space-5))); }
 .place-sheet .document-reader-title { display: flex; align-items: center; gap: var(--space-3); white-space: normal; }
 .place-sheet-body { display: flex; flex-direction: column; gap: var(--space-5); container: placesheet / inline-size; }
 .place-sheet-section { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; max-width: 720px; margin: 0 auto; }

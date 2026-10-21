@@ -28,10 +28,13 @@ export function liveWake(snapshot) {
         || (snapshot.liveWakeTaskId ? { cause: 'own_clock', taskId: snapshot.liveWakeTaskId } : null);
 }
 
+// A line never starts with a separator: the dot keeps to the word before it («Slack · Acme» wraps before «Slack»).
+const keepDots = (text) => String(text || '').replace(/ · /g, '\u00a0· ');
+
 /** The headline: what it is doing now, in words, with the moving mark only while work runs. */
 export function headlineView(snapshot) {
     const live = snapshot.enabled === false ? null : liveWake(snapshot);
-    if (live?.cause === 'focus') return { text: `Awake now in ${live.placeLabel || 'a place'}`, moving: true };
+    if (live?.cause === 'focus') return { text: `Awake now in ${keepDots(live.placeLabel || 'a place')}`, moving: true };
     if (live) return { text: 'Awake now on its own clock', moving: true };
     if (snapshot.enabled === null) return { text: 'State unknown', moving: false };
     if (!snapshot.enabled) return { text: 'Off', moving: false };
@@ -181,13 +184,18 @@ export function initConsciousnessDashboard({ mount, ws, state, openSettingsTab, 
     let destroyed = false;
     const shown = () => !document.hidden && state?.activePage === 'dashboard' && state?.dashboardActiveSubtab === 'consciousness';
 
+    // A refresh that found nothing new leaves a region's nodes alone, so focus and reading position stay.
+    const painted = new Map();
+    const put = (region, html) => {
+        if (painted.get(region) === html) return;
+        painted.set(region, html);
+        region.innerHTML = html;
+    };
     function paint({ placesError = '' } = {}) {
-        if (snapshot) {
-            regions.summary.innerHTML = summaryHtml(snapshot, { placeCount: places ? places.length : null, hasSocket: Boolean(ws?.send) });
-        }
+        if (snapshot) put(regions.summary, summaryHtml(snapshot, { placeCount: places ? places.length : null, hasSocket: Boolean(ws?.send) }));
         const awake = snapshot ? liveWake(snapshot) : null;
-        regions.places.innerHTML = placesCardHtml(places, { error: placesError, awakeIn: awake?.cause === 'focus' ? awake.placeId : '' });
-        regions.wakes.innerHTML = wakesCardHtml(snapshot ? snapshot.recentWakes : null);
+        put(regions.places, placesCardHtml(places, { error: placesError, awakeIn: awake?.cause === 'focus' ? awake.placeId : '' }));
+        put(regions.wakes, wakesCardHtml(snapshot ? snapshot.recentWakes : null));
     }
 
     async function refresh() {

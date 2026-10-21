@@ -19,7 +19,7 @@ const strip = (html) => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 test('the headline says what it does now; work in a place outranks its own clock', () => {
     const snapshot = full();
     assert.equal(liveWake(snapshot).taskId, 'w-live');
-    assert.deepEqual(headlineView(snapshot), { text: 'Awake now in Slack · Acme', moving: true });
+    assert.deepEqual(headlineView(snapshot), { text: 'Awake now in Slack\u00a0· Acme', moving: true }, 'the dot keeps to its word');
     const own = { ...fromState(), liveWakeTaskId: 'w-9' };
     assert.deepEqual(headlineView(own), { text: 'Awake now on its own clock', moving: true });
     assert.match(headlineView(fromState()).text, /^Sleeping until \d\d:\d\d$/);
@@ -136,11 +136,11 @@ test('a failed read keeps the earlier values and says so', async () => {
     });
     try {
         await controller.refresh();
-        assert.match(mount.regions.get('[data-cx-summary]').innerHTML, /Awake now in Slack · Acme/);
+        assert.match(mount.regions.get('[data-cx-summary]').innerHTML, /Awake now in Slack\u00a0· Acme/);
         fail = true;
         await controller.refresh();
         assert.match(mount.regions.get('[data-cx-status]').textContent, /Could not read consciousness: offline\. Earlier values are shown\./);
-        assert.match(mount.regions.get('[data-cx-summary]').innerHTML, /Awake now in Slack · Acme/);
+        assert.match(mount.regions.get('[data-cx-summary]').innerHTML, /Awake now in Slack\u00a0· Acme/);
         assert.match(mount.regions.get('[data-cx-summary]').innerHTML, /data-enabled="1" disabled>Stop</, 'no socket, no toggle press');
     } finally {
         controller.destroy();

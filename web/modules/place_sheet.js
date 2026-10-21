@@ -150,9 +150,9 @@ export function placeSheetBodyHtml(place, ui = {}) {
 
 export const placeSheetMetaText = (place) => [place.connectorLabel, placeScopeText(place)].filter(Boolean).join(' · ');
 
-function sheetShell(titleHtml, metaText) {
+function sheetShell(titleHtml, metaText, modifier = '') {
     const dialog = document.createElement('dialog');
-    dialog.className = 'document-reader place-sheet';
+    dialog.className = `document-reader place-sheet${modifier ? ` ${modifier}` : ''}`;
     dialog.setAttribute('aria-labelledby', 'place-sheet-title');
     dialog.innerHTML = `<div class="document-reader-panel">
         <div class="document-reader-head">
@@ -365,7 +365,7 @@ export function connectListHtml({ connectors = null, error = '', status = {} } =
 
 /** Open the Connect flow; a connected place opens its own sheet at once. */
 export function openConnectPlace({ returnFocus = document.activeElement, read = readPlaces, connect = connectPlace } = {}) {
-    const dialog = sheetShell('Connect a place', 'From the connectors installed here');
+    const dialog = sheetShell('Connect a place', 'From the connectors installed here', 'place-connect');
     const sheet = showSheet(dialog, { returnFocus });
     const view = { connectors: null, error: '', status: {} };
     const paint = () => { sheet.body.innerHTML = connectListHtml(view); };
