@@ -70,6 +70,7 @@ def recent_wakes(drive_root, places) -> list[dict]:
     timing/check evidence stays absent; no log scan or parallel history store.
     """
     from ouroboros.consciousness_authority import wake_cause
+    from ouroboros.cost_projection import cost_projection
     from ouroboros.task_store import documents_by_ids, newest_ids
 
     ids = newest_ids(drive_root, limit=50)
@@ -87,6 +88,7 @@ def recent_wakes(drive_root, places) -> list[dict]:
                      "place_label": cause_label(f"place:{place_id}", places or ()) if place_id else "",
                      "started_at": row.get("started_at"), "first_reply_at": row.get("first_reply_at"),
                      "finished_at": row.get("finished_at"), "outcome": row.get("status", "unknown"),
-                     "cost_usd": row.get("cost_usd"), "unmetered": bool(row.get("unknown_unmetered")),
+                     "accounted_upper_bound_usd": cost_projection(row)["accounted_upper_bound_usd"],
+                     "unmetered": bool(row.get("unknown_unmetered")),
                      "checks": row.get("safety_checks", []), "summary": str(row.get("result") or "")})
     return rows

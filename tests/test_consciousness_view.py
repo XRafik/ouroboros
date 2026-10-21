@@ -2,6 +2,8 @@
 
 import pathlib
 
+import pytest
+
 from ouroboros import consciousness_view as view, places
 from ouroboros.consciousness_wake import PLACEHOLDERS, render_wake_message
 
@@ -52,14 +54,18 @@ def test_prompt_carries_labels_counts_and_one_allowance():
     assert "allowance known spend (last 24 h): at least 2.50 / 20.00 USD" in text
 
 
-def test_recent_wakes_read_a_bounded_existing_index(monkeypatch, tmp_path):
+@pytest.mark.parametrize("money,amount", [({}, None), ({"accounted_upper_bound_usd": 2.5}, 2.5),
+                                        ({"accounted_upper_bound_usd": 2.5, "cost_usd": 3.0}, 3.0)])
+def test_recent_wakes_read_a_bounded_existing_index(monkeypatch, tmp_path, money, amount):
     from ouroboros import task_store
     calls = []
     monkeypatch.setattr(task_store, "newest_ids", lambda root, *, limit: calls.append(limit) or ["focus", "owner", "own"])
-    documents = {"focus": {"metadata": {"wake_cause": "focus", "focus": {"place_id": "mail"}}, "status": "completed"},
+    documents = {"focus": {"metadata": {"wake_cause": "focus", "focus": {"place_id": "mail"}}, "status": "completed", **money},
                  "owner": {"metadata": {}}, "own": {"metadata": {"wake_cause": "own_clock"}}}
     monkeypatch.setattr(task_store, "documents_by_ids", lambda root, ids: documents)
     rows = view.recent_wakes(tmp_path, [{"place_id": "mail", "label": "Inbox"}])
     assert calls == [50] and [row["task_id"] for row in rows] == ["focus", "own"]
     assert rows[0]["place_label"] == "Inbox" and rows[0]["first_reply_at"] is None
-    assert rows[0]["cost_usd"] is None
+    assert rows[0]["accounted_upper_bound_usd"] == amount
+    assert rows[1]["accounted_upper_bound_usd"] is None
+    assert all("cost_usd" not in row for row in rows)
