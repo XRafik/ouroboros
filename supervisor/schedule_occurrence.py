@@ -63,7 +63,7 @@ log = logging.getLogger(__name__)
 
 # Host-owned row fields: never authored by a payload, never copied into a task.
 OCCURRENCE_FIELDS = ("occurrence", "hold", "continuation_of", "delete_requested_at",
-                     "delete_requested_by", "delete_reason")
+                     "delete_requested_by", "delete_reason", "last_outcome", "previous_run_open")
 _FINGERPRINT_FIELDS = ("task", "trigger", "timezone", "cron", "name", "description", "enabled", "manual_override",
                        "followup_origin", "followup_relation")
 _SETTLED = "settled"
@@ -131,6 +131,7 @@ def set_hold(record: Dict[str, Any], reason: str, detail: str = "", *, retry_sec
 
 def claim(record: Dict[str, Any], due_at: str) -> Dict[str, Any]:
     """A new occurrence for a due row: one token, one task id, kept across retries."""
+    record.pop("previous_run_open", None)
     record["occurrence"] = {"token": uuid.uuid4().hex[:16], "task_id": uuid.uuid4().hex[:8],
                             "due_at": str(due_at), "phase": "claimed", "claimed_at": utc_now_iso(),
                             "fingerprint": fingerprint(record)}
@@ -443,6 +444,14 @@ def _prepare(claimed: Dict[str, Any]) -> Dict[str, Any]:
         "schedule_id": claimed["schedule_id"], "token": occ["token"],
         "due_at": str(occ.get("due_at") or ""), "claimed_at": str(occ.get("claimed_at") or ""),
     }
+    previous_id = str(record.get("last_task_id") or "")
+    if previous_id:
+        outcome = record.get("last_outcome") or {}
+        task["metadata"]["schedule_occurrence"].update(
+            previous_task_id=previous_id,
+            previous=(copy.deepcopy(outcome) if outcome.get("task_id") == previous_id
+                      else {"task_id": previous_id, "state": "pending_observation"}),
+        )
     try:
         hold, basis = resolve_resource(task, record)
     except Exception as exc:

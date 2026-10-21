@@ -64,6 +64,7 @@ SCHEDULE_ACTIONS: frozenset[str] = frozenset({"disable", "delete", "restore"})
 # be stale, so these are always taken from the row on disk instead of the payload.
 _RUNTIME_OWNED_FIELDS: tuple[str, ...] = (
     "source", "skill", "created_at", "last_run_at", "last_task_id", "last_error",
+    "last_outcome", "previous_run_open",
     # The occurrence protocol's host facts (supervisor/schedule_occurrence.py).
     "occurrence", "hold", "continuation_of", "delete_requested_at", "delete_requested_by", "delete_reason",
 )
@@ -524,7 +525,7 @@ def _rows_hold_schedule(rows: Any, schedule_id: str, task_id: str = "") -> bool:
             continue
         task = row.get("task") if isinstance(row.get("task"), dict) else row
         meta = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
-        if str(meta.get("schedule_id") or "") == schedule_id or (task_id and task.get("id") == task_id):
+        if (schedule_id and str(meta.get("schedule_id") or "") == schedule_id) or (task_id and task.get("id") == task_id):
             return True
     return False
 
@@ -543,7 +544,7 @@ def _schedule_running_or_queued(schedule_id: str, drive_root: pathlib.Path | Non
     a dispatch, a task finishing), so it is the authoritative out-of-process
     record; when it is absent or unreadable the answer is unknown, not false.
     """
-    if not schedule_id:
+    if not (schedule_id or task_id):
         return False
     if not in_worker_process():
         return (_rows_hold_schedule(_queue().PENDING, schedule_id, task_id)
@@ -653,6 +654,39 @@ def _task_from_schedule(record: Dict[str, Any], *, task_id: str = "") -> Dict[st
     return task
 
 
+def _scan_outcomes(root, snapshot):
+    """Observe canonical settled results off-lock; missing/nonterminal reads retry.
+
+    This is a cache of terminal-time facts. Once an id is observed, later result
+    enrichment does not revise it; projections never open the task store.
+    """
+    from ouroboros.task_results import load_task_result
+    from ouroboros.task_status import SETTLED_STATUSES
+    from ouroboros.task_finalization import terminal_host_notice_text
+    from ouroboros.terminal_time import terminal_time_fact
+
+    observed = {}
+    for row in snapshot.get("tasks") or []:
+        task_id = str(row.get("last_task_id") or "")
+        if not task_id or (row.get("last_outcome") or {}).get("task_id") == task_id:
+            continue
+        try:
+            result = load_task_result(root, task_id, strict=True)
+            if not result or result.get("status") not in SETTLED_STATUSES:
+                continue
+            notice = terminal_host_notice_text(result)
+            silent = result.get("wake_silent") is True
+            text = str(notice if silent else result.get("result") or "").strip()
+            observed[str(row.get("id") or "")] = {
+                "task_id": task_id, "state": result["status"], "quiet": silent and not bool(notice),
+                "notice": bool(notice), "ended_at": terminal_time_fact(result)["occurred_at"],
+                "line": text.splitlines()[-1][:160] if text else "",
+            }
+        except Exception:
+            log.debug("schedule result %s not observed this pass", task_id, exc_info=True)
+    return observed
+
+
 def _remove_withdrawn(data, root, cutoff_epoch):
     """Stage audited removals only after retention and settled work permit them.
 
@@ -708,6 +742,7 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
         except ScheduleStoreUnreadable:
             log.error("Scheduled task store is unreadable; skipping this scheduler pass")
             return
+    outcomes = _scan_outcomes(root, snapshot)
     observed = scan_policy(root, snapshot)
     claims: List[Dict[str, Any]] = []
     due_notes: List[Dict[str, Any]] = []
@@ -726,6 +761,15 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
         for record in list(data.get("tasks") or []):
             if not isinstance(record, dict):
                 continue
+            unchanged = copy.deepcopy(record)
+            outcome = outcomes.get(str(record.get("id") or ""))
+            if outcome and record.get("last_task_id") == outcome["task_id"] and record.get("last_outcome") != outcome:
+                record["last_outcome"] = outcome
+                changed = True
+            previous_open = record.get("previous_run_open")
+            if previous_open and _schedule_running_or_queued("", root, task_id=previous_open["task_id"]) is False:
+                record.pop("previous_run_open", None)
+                changed = True
             from supervisor.schedule_lifecycle import _adopt_stored_row
 
             try:
@@ -733,7 +777,7 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
             except ScheduleRefused:
                 continue
             prior, view = observed.get(str(record.get("id") or ""), (None, None))
-            if (record != prior or data.get("followup_restart") != snapshot.get("followup_restart")):
+            if (unchanged != prior or data.get("followup_restart") != snapshot.get("followup_restart")):
                 continue
             try:
                 with control_guard(root, record):
@@ -776,10 +820,6 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
                 changed = True
             trigger = record.get("trigger") if isinstance(record.get("trigger"), dict) else {}
             trigger_type = str(trigger.get("type") or "cron").strip().lower()
-            if _schedule_running_or_queued(schedule_id, root) is not False:
-                # Unknown reads as "still in flight": re-dispatching a schedule
-                # whose previous run may be alive is worse than waiting a pass.
-                continue
             tz = _timezone_for_schedule(record)
             now = now_utc.astimezone(tz)
             if trigger_type == "once":
@@ -815,6 +855,13 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
                 if next_run > now:
                     continue
                 due_at = next_run.isoformat()
+            running = _schedule_running_or_queued(schedule_id, root)
+            if running is not False:
+                previous = str(record.get("last_task_id") or "")
+                if running is True and previous and (record.get("previous_run_open") or {}).get("task_id") != previous:
+                    record["previous_run_open"] = {"task_id": previous, "since": now_utc.isoformat()}
+                    changed = True
+                continue  # unknown queue state never licenses a duplicate firing
             if view.get("hold") or view["wait"] or record.get("followup_hold"):
                 continue
             if notes.is_note(record):
