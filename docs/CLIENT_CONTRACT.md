@@ -518,7 +518,7 @@ A refused action answers `SkillActionRefusal`: `error`, the `status_code` it was
 - `GET /api/extensions/{skill}/module/{entry}` serves reviewed module code (never cached, any origin may load it).
 - `POST /api/widgets/fault` (`WidgetFaultRequest`, `WidgetFaultResponse`) keeps one fault a running module widget's card shows as a `widget_fault` row of `GET /api/logs/events`: the card's `skill`, `tab_id` and `revision`, `where` (`board` or `message`) and the frame's `kind`, `message` (at most 500 characters), `source` (200) and `line`. The row has no task and is the page's report, not a verified execution. At most 10 rows per widget and 100 together are written per minute; past that the answer is `logged: false` and the widget's next row carries `suppressed_count`. `400` another shape, `413` a body past 8 KiB, `503` not written. A client may skip reporting.
 
-**Contributions (controls and speech engines):** `GET /api/ui/contributions`
+**Contributions (controls, speech engines and places):** `GET /api/ui/contributions`
 (`UiContributionsResponse`, `Cache-Control: no-store`) returns `contributions`,
 `offers.stt`, `icons`, `problems` (skill → warning strings), `preferences` and
 `voice`. The same fields appear beside `skills`/`live` in `GET /api/extensions`;
@@ -533,8 +533,17 @@ plus either `placement` or `provides`. Placement entries carry `action` and chip
 carry `source: {url, refresh_s}`. For `skill.request`, `action.url` and `route_url`
 name the host-computed absolute route; providers use `route_url`. Optional
 provider fields are `runtime`, `destination`, `languages`, `formats`,
-`install_size`, `max_bytes` and `max_seconds`. `icons` is the validator's icon
-catalog. `offers.stt` lists non-live built-in providers as
+`install_size`, `max_bytes` and `max_seconds`. Place providers require an extension
+with the `presence` permission, `id`, `label`, and `destination: vendor:<Name>`;
+`scope` defaults to `account` (or `conversation`), `wakes` lists typed wake facts,
+`source` uses the chip contract, `settings` names a section, and `read_only: provider`
+indicates provider support. Their `tools` list carries full names and declared
+`effect`, `target`, `conversation`, `thread` facts. No speech-engine runtime/route
+is required. `icon_spec` is `{kind:"host", name}` or `{kind:"svg", svg}` with
+sanitized geometry, else `{}` for the fallback; the `icon` declaration remains
+a host name or `ui/icon.svg`. SVG assets carry sandbox CSP. Installed and Browse
+rows expose `connects` (boolean) and `icon` (the same spec); absent catalog fields
+remain compatible. `icons` is the host glyph catalog. `offers.stt` lists non-live built-in providers as
 `{skill, skill_label, id, label, destination, install_size, enabled: false, installed}`;
 `installed: false` names a built-in this install has not installed (clients send the
 owner to the Skills page's Browse, where the built-in source installs it).
