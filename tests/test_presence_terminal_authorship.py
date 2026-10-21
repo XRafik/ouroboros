@@ -13,7 +13,7 @@ from ouroboros.presence_authority import presence_ceiling_payload
 from ouroboros.presence_runner import PresenceTurnError, _cached_result, build_presence_result_event
 from ouroboros.task_results import load_task_result, write_task_result
 from ouroboros.task_finalization import provider_terminal_body
-from ouroboros.tools.registry import ToolRegistry
+from tests.presence_legacy_helpers import legacy_registry as ToolRegistry
 from tests.test_host_service_api import _seed_presence_behavior, _seed_token
 from tests.test_presence_completion import _call
 from tests.test_presence_failed_handoff import _failed_parent
@@ -291,3 +291,9 @@ def test_empty_deferred_final_keeps_only_confirmed_child_polling(tmp_path, monke
     assert result["outcome"] == cached.outcome == ("deferred" if admission == "scheduled" else "silent")
     assert result["work_ref"] == cached.work_ref == ("managed-child" if admission == "scheduled" else "")
     assert result["text"] == cached.text == ""
+
+
+@pytest.fixture(autouse=True)
+def _focus_authority_available(monkeypatch):
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

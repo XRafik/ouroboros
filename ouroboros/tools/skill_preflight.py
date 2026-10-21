@@ -642,58 +642,6 @@ def _plugin_permission_findings(skill_dir: pathlib.Path, manifest: Optional[Skil
     return findings
 
 
-def _presence_profile_findings(
-    skill_dir: pathlib.Path,
-    manifest: SkillManifest,
-) -> List[Dict[str, Any]]:
-    """Validate the optional reviewed presence declaration without live state."""
-    try:
-        from ouroboros.presence_profile import (
-            PresenceProfileError,
-            parse_presence_profile,
-            presence_profile_fingerprint,
-        )
-    except Exception as exc:
-        log.exception("presence profile preflight failed")
-        return [{
-            "item": "presence_profile",
-            "ok": False,
-            "code": "presence_internal_error",
-            "field": "presence",
-            "detail": f"{type(exc).__name__}: presence validation failed",
-        }]
-    try:
-        profile = parse_presence_profile(manifest, skill_dir)
-    except PresenceProfileError as exc:
-        return [{
-            "item": "presence_profile",
-            "ok": False,
-            "code": exc.code,
-            "field": exc.field,
-            "detail": str(exc),
-        }]
-    except Exception as exc:
-        log.exception("presence profile preflight failed")
-        return [{
-            "item": "presence_profile",
-            "ok": False,
-            "code": "presence_internal_error",
-            "field": "presence",
-            "detail": f"{type(exc).__name__}: presence validation failed",
-        }]
-    if profile is None:
-        return []
-    return [{
-        "item": "presence_profile",
-        "ok": True,
-        "code": "",
-        "field": "presence",
-        "detail": "ok",
-        "profile_fingerprint": presence_profile_fingerprint(profile),
-        "capability_requests": len(profile.capability_requests),
-    }]
-
-
 def _handle_skill_preflight(
     ctx: ToolContext,
     skill: str = "",
@@ -739,7 +687,7 @@ def _handle_skill_preflight(
             manifest_findings.append({"item": "manifest_parse", "ok": True, "detail": "ok"})
             widget_findings.extend(_widget_schema_findings(skill_dir, manifest))
             permission_findings.extend(_plugin_permission_findings(skill_dir, manifest))
-            presence_findings.extend(_presence_profile_findings(skill_dir, manifest))
+            # Legacy presence declarations are migration input, not an executable profile.
             if manifest.entry:
                 entry = (skill_dir / manifest.entry).resolve()
                 ok = entry.is_file()

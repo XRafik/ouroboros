@@ -289,7 +289,7 @@ def test_a_parked_author_still_live_in_this_process_stays_pending_and_is_never_r
 
 
 def _initiate(h, *args):
-    from ouroboros.tools.presence import get_tools
+    from tests.presence_legacy_helpers import legacy_tools as get_tools
     from ouroboros.tools.registry import ToolContext
 
     initiate = next(item for item in get_tools() if item.name == "initiate_presence")
@@ -308,7 +308,7 @@ def test_initiated_turn_outlives_the_callers_operation_bound(host, monkeypatch):
 
     h = host
     monkeypatch.setenv("OUROBOROS_TASK_REVIEW_MODE", "off")
-    monkeypatch.setattr("ouroboros.tools.presence._INITIATION_MARGIN_SEC", 0.5)
+    monkeypatch.setattr("tests.presence_legacy_helpers._INITIATION_MARGIN_SEC", 0.5)
     monkeypatch.setattr("ouroboros.presence_runner.run_presence_turn",
                         functools.partial(run_presence_turn, agent_factory=lambda **_kw: h.Agent()))
     gate = threading.Event()
@@ -419,3 +419,9 @@ def test_reporting_v1_receipts_own_outgoing_history_and_reach_the_resuming_autho
     final = receipt(late["output_ref"], first["turn_ref"], "telegram:bot-1:42", ANSWER)
     assert h.client.post("/presence/delivery", headers=_HEADERS, json=final).status_code == 200
     assert [row["text"] for row in dialogue_test.log_rows(chat) if row.get("direction") == "out"] == ["Noted.", ANSWER]
+
+
+@pytest.fixture(autouse=True)
+def _focus_authority_available(monkeypatch):
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

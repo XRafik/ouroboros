@@ -54,7 +54,7 @@ from ouroboros.task_results import (
     write_task_result,
 )
 from ouroboros.task_status import execution_owner_record, reconcile_orphaned_running_tasks
-from ouroboros.tools.presence import _finish_presence
+from tests.presence_legacy_helpers import _finish_presence
 from ouroboros.utils import append_jsonl
 from tests.test_host_service_api import _seed_presence_behavior, _seed_token
 from tests.test_presence_runner import _admission, _event

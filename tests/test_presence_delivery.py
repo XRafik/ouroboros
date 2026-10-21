@@ -334,7 +334,7 @@ def test_deferred_work_echoes_original_persisted_mode(tmp_path, status, version)
 def test_inbound_initiated_and_receipt_paths_derive_one_conversation_identity(tmp_path, monkeypatch):
     from ouroboros.presence_bindings import PresenceBinding, PresenceEndpoint, new_presence_binding_id, save_presence_binding
     from ouroboros.presence_runner import _stable_numeric_id
-    from ouroboros.tools.presence import get_tools
+    from tests.presence_legacy_helpers import legacy_tools as get_tools
     from ouroboros.tools.registry import ToolContext
 
     _seed_token(tmp_path, skill="telegram-bot", token="receipt-token",

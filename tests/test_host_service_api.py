@@ -34,7 +34,7 @@ class FakeBridge:
 
 
 @pytest.fixture
-def panic_bridge(native_guard, monkeypatch):
+def panic_bridge(native_guard, monkeypatch):  # noqa: F811 — imported pytest fixture
     from ouroboros.server_control import PanicIngress
 
     bridge = FakeBridge()
@@ -953,3 +953,9 @@ def test_chat_inject_allows_slash_command_caption_even_with_text(tmp_path: pathl
     assert response.status_code == 202
     assert bridge.messages[0]["text"] == "photo"
     assert bridge.messages[0]["image_caption"] == "/panic"
+
+
+@pytest.fixture(autouse=True)
+def _focus_authority_available(monkeypatch):
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

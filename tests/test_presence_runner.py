@@ -215,7 +215,7 @@ def test_presence_context_loads_declared_topic_and_completion_contract(tmp_path)
     )
     assert "Participate helpfully." in section
     assert "Alex prefers concise replies." in section
-    assert "presence_finish" in section
+    assert "finish_task" in section
 
 
 def test_configured_presence_parallelism_is_bounded(monkeypatch, tmp_path):

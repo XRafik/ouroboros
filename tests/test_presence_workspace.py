@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ouroboros.presence_admission import PresenceAdmissionError, admit_presence_turn
+from ouroboros.presence_admission import admit_presence_turn
 from ouroboros.presence_capabilities import (
     PresenceState,
     PresenceStateError,
@@ -64,14 +64,14 @@ def installed(tmp_path, monkeypatch):
     save_enabled(data, skill.name, True)
     save_review_state(data, skill.name, SkillReviewState(status="pass", content_hash=skill.content_hash))
     ctx = ToolContext(repo_dir=repo, drive_root=data)
-    for name in tools:
-        _configure_presence(ctx, "select", behavior_skill=skill.name, request_id=name,
-                            target_type="tool", target_name=name)
-    _configure_presence(ctx, "select", behavior_skill=skill.name, request_id="files",
-                        target_type="resource", root="active_workspace",
-                        operations=["read", "write", "shell"])
-    _configure_presence(ctx, "workspace", behavior_skill=skill.name, workspace_root=str(workspace))
     binding = _binding(data)
+    from ouroboros.places import load_places, edit_place
+    place = load_places(data)[0]
+    edit_place(data, place.place_id, "set_working_folder", author="owner", working_folder=str(workspace))
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})
+    monkeypatch.setattr("ouroboros.place_projection.place_declarations", lambda _root: [])
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_AUTONOMY", "full")
     return SimpleNamespace(repo=repo, data=data, workspace=workspace, ctx=ctx,
                            skill=skill, binding=binding, skill_dir=skill_dir)
 
@@ -116,51 +116,27 @@ def test_legacy_state_shape_and_fingerprint_stay_identical(tmp_path):
         PresenceState(workspace_root="relative/folder")
 
 
-def test_owner_changes_preserve_selection_and_admitted_snapshot(installed):
+def test_owner_changes_preserve_admitted_snapshot(installed):
     original = _admit(installed)
-    for action, params in (
-        ("runtime", {"model_slot": "light", "inline_max_rounds": 6}),
-        ("select", {"request_id": "read_file", "target_type": "tool", "target_name": "read_file"}),
-        ("runtime", {"reset_runtime": True}),
-    ):
-        _configure_presence(installed.ctx, action, behavior_skill=installed.skill.name, **params)
-        assert load_presence_state(installed.data, installed.skill.name).workspace_root == str(installed.workspace)
-    inspected = json.loads(_configure_presence(installed.ctx, "inspect", behavior_skill=installed.skill.name))
-    assert inspected["workspace_root"] == str(installed.workspace)
-    profile_path = installed.skill_dir / "SKILL.md"
-    profile_path.write_text(profile_path.read_text().replace(
-        "Work in the selected folder.", "Read and update the selected folder."), encoding="utf-8")
-    revised = load_skill(installed.skill_dir, installed.data)
-    save_review_state(installed.data, revised.name, SkillReviewState(status="pass", content_hash=revised.content_hash))
-    assert _admit(installed).workspace_root == original.workspace_root
     other = installed.workspace.with_name("other")
     other.mkdir()
-    _configure_presence(installed.ctx, "workspace", behavior_skill=installed.skill.name, workspace_root=str(other))
+    _configure_presence(installed.ctx, "set_working_folder", place_id=original.place.place_id, working_folder=str(other))
     updated = _admit(installed)
     assert updated.workspace_root == str(other)
-    assert updated.state_fingerprint != original.state_fingerprint
     assert original.workspace_root == str(installed.workspace)
     with pytest.raises(FrozenInstanceError):
         original.workspace_root = str(other)
     task = _build_task(original, _event(), drive_root=installed.data, staged_files=())
     assert task["task_contract"]["workspace"] == {"root": str(installed.workspace), "mode": "external"}
-    _configure_presence(installed.ctx, "workspace", behavior_skill=installed.skill.name, workspace_root="")
-    legacy_task = _build_task(_admit(installed), _event(), drive_root=installed.data, staged_files=())
-    assert "workspace_root" not in legacy_task and "memory_mode" not in legacy_task
+    _configure_presence(installed.ctx, "set_working_folder", place_id=original.place.place_id, working_folder="")
+    cleared = _build_task(_admit(installed), _event(), drive_root=installed.data, staged_files=())
+    assert "workspace_root" not in cleared and "memory_mode" not in cleared
 
 
-def test_invalid_or_disappeared_folder_never_falls_back_to_system_repo(installed):
-    from ouroboros.workspace_admission import WorkspaceRootError
-
-    for invalid in (installed.repo, installed.data, installed.workspace / "absent"):
-        with pytest.raises(WorkspaceRootError):
-            _configure_presence(installed.ctx, "workspace", behavior_skill=installed.skill.name,
-                                workspace_root=str(invalid))
-        assert load_presence_state(installed.data, installed.skill.name).workspace_root == str(installed.workspace)
+def test_folder_remains_an_address_even_if_temporarily_unavailable(installed):
+    original = _admit(installed)
     installed.workspace.rmdir()
-    with pytest.raises(PresenceAdmissionError, match="not a directory") as failure:
-        _admit(installed)
-    assert failure.value.code == "presence_workspace_unusable"
+    assert _admit(installed).workspace_root == original.workspace_root
 
 
 def test_admitted_registry_reads_writes_and_runs_script_in_external_folder(installed):

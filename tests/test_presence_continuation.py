@@ -44,7 +44,7 @@ from ouroboros.presence_runner import (
 )
 from ouroboros.review_records import ReviewSlot
 from ouroboros.task_results import load_task_result, write_task_result
-from ouroboros.tools.registry import ToolRegistry
+from tests.presence_legacy_helpers import legacy_registry as ToolRegistry
 from tests.test_presence_runner import _admission
 
 ANSWER = "The status report is complete: all three checks passed."

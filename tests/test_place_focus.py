@@ -1,0 +1,274 @@
+"""Place intake, focus authority, reply boundaries and ordinary completion."""
+from dataclasses import replace
+from types import SimpleNamespace
+import json
+import string
+
+import pytest
+
+from ouroboros import places as p
+from ouroboros.presence_admission import admit_presence_turn
+from ouroboros.presence_runner import PresenceTurnEvent, _build_task, capture_presence_event, presence_turn_replay
+from ouroboros.place_intake import decide_attention, settle_heard
+
+
+@pytest.fixture
+def focus(tmp_path, monkeypatch):
+    place = p.connect_place(tmp_path, connector="bridge", provider="chat", account_id="a", conversation_id="r", wakes=["mention"])
+    event = PresenceTurnEvent("event1", "chat", "a", "r", "", "chat:a:r", {"platform_actor_id": "person"}, {}, {}, "hello", facts=("mention",))
+    admission = admit_presence_turn(drive_root=tmp_path, authenticated_transport_skill="bridge", provider="chat", account_id="a", conversation_id="r")
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 2, "settled_usd": 1})
+    monkeypatch.setattr("ouroboros.presence_context._own_work_section", lambda *_args: "Already started: task1")
+    return tmp_path, place, admission, event
+
+
+def task_for(focus):
+    root, _place, admission, event = focus
+    return _build_task(replace(admission, allowance={"status": "available", "remaining_usd": 2}), event, drive_root=root, staged_files=())
+
+
+def test_focus_no_ceiling_host_actor_prompt(focus):
+    from ouroboros.presence_context import frame_focus_content, PLACEHOLDERS
+    from pathlib import Path
+    task = task_for(focus)
+    meta = task["metadata"]
+    assert meta["wake_cause"] == "focus" and meta["work_kind"] == "consciousness"
+    assert meta["usage_category"] == "consciousness" and meta["runtime_mode_cap"] == "light"
+    assert meta["focus"]["actor"]["owner_confirmed"] is False
+    assert meta["focus"]["event_identity"] == meta["presence_event_identity"]
+    assert "capability_ceiling" not in task["task_contract"]
+    assert task["_is_direct_chat"] and task["_presence_turn"]
+    assert meta["root_cost_ceiling_usd"] <= 2 and "configure_presence" in meta["disabled_tools"]
+    template = Path("prompts/FOCUS.md").read_text()
+    assert {key for _lit, key, _fmt, _conv in string.Formatter().parse(template) if key} == set(PLACEHOLDERS)
+    rendered = frame_focus_content(task, "The untrusted event")
+    assert "The untrusted event" in rendered and "Already started: task1" in rendered
+    assert "connector" in rendered and "folder" in rendered.lower()
+
+
+@pytest.mark.parametrize("state,facts,enabled,allowance,decision", [
+    ("active", ("mention",), True, "available", "focus"),
+    ("silent", ("mention",), True, "available", "focus"),
+    ("paused", ("mention",), True, "available", "silent"),
+    ("active", (), True, "available", "silent"),
+    ("active", ("mention",), False, "available", "silent"),
+    ("active", ("mention",), True, "exhausted", "retry"),
+    ("active", ("mention",), True, "allowance_unknown", "retry"),
+])
+def test_capture_before_attention_and_replay(focus, monkeypatch, state, facts, enabled, allowance, decision):
+    from ouroboros import dialogue_store
+    root, place, admission, event = focus
+    p.edit_place(root, place.place_id, "set_state", author="owner", state=state)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _r: enabled)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _r: {"status": allowance})
+    event = replace(event, facts=facts)
+    task = capture_presence_event(admission, event, drive_root=root)
+    capture_presence_event(admission, event, drive_root=root)
+    rows = list(dialogue_store.iter_rows(root, "chat"))
+    assert len(rows) == 1
+    assert rows[0].row["text"] == "hello"
+    actual, info = decide_attention(root, admission, event)
+    assert actual == decision
+    if decision == "retry":
+        assert info["retry_after"] > 0
+    if decision == "silent":
+        result = settle_heard(root, task, event)
+        assert result.outcome == "silent"
+        replay = presence_turn_replay(root, task["id"], event.conversation_key, task["metadata"]["presence_event_identity"])
+        assert replay == result
+
+
+def test_identity_conflict_and_legacy_facts(focus):
+    root, place, admission, event = focus
+    capture_presence_event(admission, event, drive_root=root)
+    with pytest.raises(ValueError, match="identity_conflict"):
+        capture_presence_event(admission, replace(event, text="different"), drive_root=root)
+    assert decide_attention(root, admission, replace(event, facts=None))[0] == "silent"
+    p.edit_place(root, place.place_id, "add_wake", author="owner", fact="legacy_addressed")
+    assert decide_attention(root, admission, replace(event, facts=None))[0] == "focus"
+    assert decide_attention(root, admission, replace(event, actor={"is_bot": True}))[0] == "silent"
+
+
+def test_reply_guard_flag_reissue_silent_and_receipted(focus, monkeypatch):
+    from ouroboros.place_reply import prepare_focus_reply
+    root, place, _admission, _event = focus
+    task = task_for(focus)
+    ctx = SimpleNamespace(task_metadata=task["metadata"], task_id=task["id"], drive_root=root)
+    monkeypatch.setattr("ouroboros.tool_access.canonical_data_root", lambda _ctx: root)
+    monkeypatch.setattr("ouroboros.presence_context.confirmed_delivery_receipts", lambda _ctx: frozenset())
+    calls = []
+    def check(name, args, **kw):
+        calls.append((name, args, kw))
+        return (len(calls) > 1, "Reconsider")
+    monkeypatch.setattr("ouroboros.safety.check_safety", check)
+    assert prepare_focus_reply(ctx, "Hello") == (False, "Reconsider")
+    assert not getattr(ctx, "_presence_completion_accepted", False)
+    assert prepare_focus_reply(ctx, "Hello")[0]
+    assert len(calls) == 2 and calls[0][0] == "place_reply"
+    assert ctx._presence_completion["outcome"] == "message"
+    prepare_focus_reply(ctx, "Hello")
+    assert len(calls) == 2  # final result projection does not recheck accepted identical bytes
+    prepare_focus_reply(ctx, "Changed")
+    assert len(calls) == 3
+    p.edit_place(root, place.place_id, "set_state", author="owner", state="silent")
+    assert prepare_focus_reply(ctx, "Changed")[0]
+    assert ctx._presence_completion["outcome"] == "silent" and "Reply held" in ctx._focus_reply_hold
+    p.edit_place(root, place.place_id, "set_state", author="owner", state="active")
+    monkeypatch.setattr("ouroboros.presence_context.confirmed_delivery_receipts", lambda _ctx: frozenset({"receipt"}))
+    assert prepare_focus_reply(ctx, "Duplicate")[0]
+    assert ctx._presence_completion["outcome"] == "tool_delivered"
+
+
+def test_owner_verb_authorship_and_atomic_api(focus, monkeypatch):
+    from ouroboros.tools.presence import _configure_presence, get_tools
+    from ouroboros.gateway.places_api import update_place
+    root, place, _admission, _event = focus
+    monkeypatch.setattr("ouroboros.tool_access.canonical_data_root", lambda _ctx: root)
+    monkeypatch.setattr("ouroboros.place_projection.place_declarations", lambda _r: [])
+    ctx = SimpleNamespace(task_metadata=task_for(focus)["metadata"], is_direct_chat=True)
+    refusal = _configure_presence(ctx, "confirm_owner_account", place.place_id, platform_actor_id="person")
+    assert "RESOURCE_CONSTRAINT_BLOCKED" in refusal and not p.get_place(root, place.place_id).owner_accounts
+    ctx.task_metadata = {"origin_message_ref": {"client_message_id": "owner1", "chat_id": 1}}
+    assert json.loads(_configure_presence(ctx, "confirm_owner_account", place.place_id, platform_actor_id="person"))["ok"]
+    assert p.is_owner_account(p.get_place(root, place.place_id), "person", "a")
+    saved = update_place(root, place.place_id, {"state": "silent", "add_note": "Owner choice"})["place"]
+    assert saved["state"] == "silent" and saved["notes"][0]["author"] == "owner"
+    assert saved["notes"][0]["note_id"]
+    before = p.get_place(root, place.place_id)
+    with pytest.raises(p.PlaceError):
+        update_place(root, place.place_id, {"state": "active", "wakes": ["not_a_fact"]})
+    assert p.get_place(root, place.place_id) == before
+    assert {t.name for t in get_tools()} == {"configure_presence", "presence_cancel_work"}
+
+
+def test_author_lending_and_stop(focus):
+    from ouroboros.conversation_lease import PresenceTurnGate, live_author, live_authors
+    root, _place, _admission, event = focus
+    gate = PresenceTurnGate(max_active=2, state_root=root / "state")
+    lease = gate.acquire(event.conversation_key)
+    try:
+        lease.bind_author("author")
+        assert live_author(event.conversation_key, drive_root=root) == "author"
+        assert live_authors(drive_root=root) == ["author"]
+        assert lease.lend()
+        assert not live_author(event.conversation_key, drive_root=root)
+        assert live_authors(drive_root=root) == ["author"]
+        assert not lease.reacquire(lambda: True)
+        assert lease.reacquire(lambda: False)
+        assert live_author(event.conversation_key, drive_root=root) == "author"
+    finally:
+        lease.release()
+    assert not live_authors(drive_root=root) and not live_author(event.conversation_key, drive_root=root)
+
+
+def test_place_arrival_is_context_only_and_deduplicated(focus):
+    from ouroboros.place_intake import offer_to_author
+    from ouroboros.conversation_lease import PresenceTurnGate
+    from ouroboros.owner_mailbox import _mailbox_path, CONTEXT_ONLY_TASK_PROVENANCES, deliver_task_message
+    root, _place, admission, event = focus
+    task = capture_presence_event(admission, event, drive_root=root)
+    assert not offer_to_author(root, task, event)
+    lease = PresenceTurnGate(state_root=root / "state").acquire(event.conversation_key)
+    try:
+        lease.bind_author("another-author")
+        assert offer_to_author(root, task, event)
+        assert offer_to_author(root, task, event)
+        rows = [json.loads(line) for line in _mailbox_path(root, "another-author").read_text().splitlines()]
+        assert len(rows) == 1 and rows[0]["provenance"] in CONTEXT_ONLY_TASK_PROVENANCES
+        messages = []
+        deliver_task_message(rows[0], "another-author", None, messages.append)
+        assert "never an owner directive" in messages[0]
+    finally:
+        lease.release()
+
+
+def test_late_receipt_warns_only_when_destination_closed(focus):
+    from ouroboros.place_reply import record_late_delivery
+    from ouroboros import dialogue_store
+    root, place, _admission, _event = focus
+    receipt = {"state": "delivered", "provider": "chat", "account_id": "a", "conversation_id": "r", "thread_id": "", "text": "Sent"}
+    record_late_delivery(root, "bridge", receipt, "receipt1")
+    assert not list(dialogue_store.iter_rows(root, "chat"))
+    p.edit_place(root, place.place_id, "set_state", author="owner", state="paused")
+    record_late_delivery(root, "bridge", receipt, "receipt1")
+    record_late_delivery(root, "bridge", receipt, "receipt1")
+    rows = [r.row for r in dialogue_store.iter_rows(root, "chat")]
+    assert len(rows) == 1 and rows[0]["direction"] == "system" and "Paused" in rows[0]["text"]
+
+
+def test_retry_reuses_retained_attachments(focus):
+    root, _place, admission, event = focus
+    source = root / "incoming.txt"
+    source.write_text("original bytes")
+    first = capture_presence_event(admission, event, drive_root=root, staged_files=[source])
+    source.write_text("changed bytes")
+    retry = capture_presence_event(admission, event, drive_root=root, staged_files=[source])
+    assert retry["attachment_manifest"] == first["attachment_manifest"]
+
+
+def test_author_projection_uses_the_cross_process_lock(tmp_path):
+    import subprocess
+    import sys
+    from ouroboros.conversation_lease import live_author
+    code = '''
+import sys
+from pathlib import Path
+from ouroboros.conversation_lease import PresenceTurnGate
+lease = PresenceTurnGate(state_root=Path(sys.argv[1]) / "state").acquire("room")
+lease.bind_author("other-process-author")
+print("held", flush=True)
+sys.stdin.readline()
+lease.release()
+'''
+    child = subprocess.Popen([sys.executable, "-c", code, str(tmp_path)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+    try:
+        assert child.stdout.readline().strip() == "held"
+        assert live_author("room", drive_root=tmp_path) == "other-process-author"
+        child.communicate("release\n", timeout=10)
+        assert child.returncode == 0
+        assert not live_author("room", drive_root=tmp_path)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait(timeout=10)
+
+
+@pytest.mark.parametrize("silent", [False, True])
+def test_focus_ordinary_finish_traverses_reply_check(focus, monkeypatch, silent):
+    import queue
+    from ouroboros import loop
+    from ouroboros.tools.registry import ToolRegistry
+    from ouroboros.presence_runner import build_presence_result_event
+    root, _place, _admission, _event = focus
+    task = task_for(focus)
+    registry = ToolRegistry(repo_dir=root, drive_root=root)
+    registry._ctx.task_metadata = task["metadata"]
+    registry._ctx.task_contract = task["task_contract"]
+    registry._ctx.is_direct_chat = True
+    monkeypatch.setenv("OUROBOROS_TASK_REVIEW_MODE", "off")
+    monkeypatch.setattr("ouroboros.presence_context.confirmed_delivery_receipts", lambda _ctx: frozenset())
+    checks, calls = [], []
+    def check(name, arguments, **kw):
+        if name != "place_reply":
+            return True, ""
+        checks.append(arguments)
+        return len(checks) > 1, "Reconsider this reply."
+    monkeypatch.setattr("ouroboros.safety.check_safety", check)
+    def respond(_llm, messages, *_args, **_kwargs):
+        calls.append(messages.copy())
+        assert len(calls) <= 2
+        return {"content": None, "tool_calls": [{"id": "finish" + str(len(calls)), "type": "function",
+            "function": {"name": "finish_task", "arguments": json.dumps({"action": "finish", **({"silent": True} if silent else {"answer": "Hello"})})}}]}, 0.0
+    monkeypatch.setattr(loop, "call_llm_with_retry", respond)
+    text, usage, _trace = loop.run_llm_loop([{"role": "user", "content": "Hello"}], registry,
+        SimpleNamespace(default_model=lambda: "test-model"), root / "logs", lambda *_a, **_k: None,
+        queue.Queue(), task_id=task["id"], drive_root=root)
+    result = build_presence_result_event(task, text, registry._ctx, terminal_origin=usage["terminal_origin"])
+    if silent:
+        assert len(calls) == 1 and not checks
+        assert result["outcome"] == "silent" and result["text"] == ""
+    else:
+        assert len(calls) == 2 and len(checks) == 2
+        assert any("Reconsider this reply" in str(row.get("content")) for row in calls[-1])
+        assert result["outcome"] == "message" and result["text"] == "Hello"
