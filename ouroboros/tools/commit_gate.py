@@ -662,7 +662,7 @@ def _record_commit_attempt(
                 else None
             )
             if status == "reviewing":
-                if not _attempt_accepts_reviewing_update(existing):
+                if not _attempt_accepts_reviewing_update(existing) and getattr(ctx, "_collect_commit_source", None) is None:
                     attempt_no = state.next_attempt_number(repo_key, tool_name, task_id)
                     existing = None
                 ctx._current_review_attempt_number = attempt_no
@@ -1168,7 +1168,9 @@ def _return_commit_feedback(ctx: ToolContext, message: str, started: float, befo
                             else "or stop; informed continuation needs received feedback. ")
         left = getattr(ctx, "_left_review_wait", None) or {}
         if left.get("surface") == "commit" and left.get("retry_key") == getattr(ctx, "_current_review_retry_key", ""):
-            note = ("An addressed message reached you while the reviewers ran: this call returned and their paid "
+            event = ("A chosen helper finished" if any(row.get("reason") == "helper_result" for row in
+                     getattr(ctx, "_review_detached_operations", []) or []) else "An addressed message reached you")
+            note = (event + " while the reviewers ran: this call returned and their paid "
                     "work continues separately; a [Review settled] notice follows the whole wave. " + note)
     if not pending:
         git_mod.run_cmd(["git", "reset", "HEAD"], cwd=ctx.repo_dir)
@@ -1450,7 +1452,7 @@ def settle_commit_review_ledger(ctx: ToolContext, commit_message: str, *, goal: 
         rejoined = attempt is not None and bool(retry_key) and str(getattr(attempt, "review_retry_key", "") or "") == retry_key
         prior = str(getattr(attempt, "review_record_id", "") or "") if rejoined else ""
         existing = ledger.load_record(root, prior) if prior else None
-        if existing is not None and existing.get("state") == ledger.STATE_PENDING:
+        if existing is not None:
             # Settling in place: the dispatching attempt's provenance (subject, brief with
             # its rules, panel, fingerprints, the seats' prompt refs) stays; this attempt
             # contributes the late answers, the verdict, the cost and the state.

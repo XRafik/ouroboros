@@ -539,6 +539,10 @@ def _sleep_wake(ctx: Any, checkpoint: dict) -> str | None:
         binding = (checkpoint or {}).get("review_binding")
         if binding and isinstance(left, dict) and left.get("binding") == binding and left.get("done"):
             return str(left.get("wake_reason") or "review_settled")
+        if binding and isinstance(left, dict) and left.get("binding") == binding:
+            from ouroboros.review_waiting import ready_helpers
+            if ready_helpers(ctx, left):
+                return "helper_result"
         return "question_closed" if _question_closed(ctx, checkpoint) else None
     from ouroboros.model_sleep import wake_reason
     from ouroboros.store import acquisition_budget
@@ -852,6 +856,9 @@ def append_wake_notice(ctx: Any, checkpoint: dict, outcome: Any, messages: list)
     outcome = str(outcome or "")
     if checkpoint.get("reason") == REASON_OWNER_PAUSE_WARM:
         return  # ``park_owner_pause_warm`` writes the Resume notice itself
+    if checkpoint.get("review_binding") and outcome == "helper_result":
+        from ouroboros.review_waiting import append_helper_notice
+        append_helper_notice(ctx, messages)
     if checkpoint.get("review_binding") or not (
             outcome in {"timeout", "hurry", "unknown", "question_closed"} or outcome.startswith("mail")):
         return
@@ -943,6 +950,8 @@ def park_for_left_review(tools: Any, limit_ctx: Any, content: Any, emit_progress
         return False
     restored = wait.get("owner") != PROCESS_TOKEN
     if str(wait.get("msg_id") or "") in limit_ctx.owner_msg_seen:
+        ctx._review_wait_selection = dict(wait)
+        ctx._left_review_wait = None
         return False  # its notice was read: that wave is over
     from ouroboros.loop_messages import _emit_round_progress
 

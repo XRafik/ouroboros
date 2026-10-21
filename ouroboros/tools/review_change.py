@@ -479,7 +479,12 @@ def _wave_context(ctx: ToolContext, wave: _Wave) -> Iterator[None]:
         ctx._review_history, ctx._review_iteration_count, ctx._coupling_review_history = [], 0, {}
         ctx._review_dispute_history, ctx._review_dispute_input = None, None
         ctx._preflight_execution = wave.execution
-        yield
+        from ouroboros import review_pause
+        if wave.rejoin is not None:
+            with review_pause.receptive_author(review_pause.rejoin_binding(ctx, wave.record_id)):
+                yield
+        else:
+            yield
     finally:
         for name, value in saved.items():
             if value is missing:
@@ -633,11 +638,13 @@ def subject_facts(frozen: Any, retention: Optional[Dict[str, Any]] = None) -> Di
 def _assigned_verdict(record: Any, rows: List[Dict[str, Any]], outcome: Dict[str, Any]) -> Dict[str, Any]:
     """The decision over the ASSIGNED seats only; added seats never count. The
     quorum is ``adaptive_quorum`` of the assigned seats — one number, as the gate's."""
+    from ouroboros.review_ledger import seat_open
+
     reason = str(outcome.get("block_reason") or "")
     verdict = reduce_verdict(
         rows, quorum_required=adaptive_quorum(len(rows)) if rows else 0,
         gate_blocked=bool(outcome.get("blocked")) and reason not in _ROW_STATED_BLOCKS, gate_reason=reason,
-        dispatch_refusal=record.dispatch_refusal, pending=record.state == "pending")
+        dispatch_refusal=record.dispatch_refusal, pending=any(seat_open(row) for row in rows))
     verdict["per_row"] = {**{str(s.get("seat_id") or ""): row_verdict(s) for s in record.rows}, **verdict["per_row"]}
     return verdict
 
@@ -676,25 +683,21 @@ def _finish_record(record: Any, wave: _Wave, outcome: Dict[str, Any], *, reuse_k
             record.panel.pop(key, None)
 
 
-_SUBJECT_IDENTITY = ("root_kind", "root", "kind", "base", "head", "tree_sha", "diff_sha", "governance_root")
-
-
 def _write(drive: Any, record: Any, *, rejoin: bool = False) -> Tuple[Dict[str, Any], bool]:
     """Write the one record (a rejoin revises the record its open operation left pending, keeping what that
     dispatch's seats read: the subject's identity, the brief and the fingerprints with the reuse key over its
     rebuttal; the seats' answers, refs and custody facts are the settling wave's); an unwritten record is
     answered from memory and says so."""
     def settle(prior: Dict[str, Any]) -> Dict[str, Any]:
+        from ouroboros.review_ledger import STATE_SETTLED, settle_pending_payload
+
         fresh = record.to_dict()
-        retry = (prior.get("fingerprints") or {}).get("retry_key")
-        if not retry or retry != (fresh.get("fingerprints") or {}).get("retry_key"):
-            return fresh
-        # The same round keeps what its seats read, also when a late collector settled it a moment earlier;
-        # what the dispatching record lacks (a lost dispute-input binding) is the settling wave's.
-        identity = {key: value for key, value in dict(prior.get("subject") or {}).items() if key in _SUBJECT_IDENTITY}
-        kept = {key: {**dict(fresh.get(key) or {}), **dict(prior[key] or {})}
-                for key in ("brief", "fingerprints") if key in prior}
-        return {**fresh, **kept, "subject": {**dict(fresh.get("subject") or {}), **identity}}
+        merged = settle_pending_payload(prior, fresh)
+        if fresh.get("state") == merged.get("state") == STATE_SETTLED:
+            # Checkout retention is custody, not the immutable reviewed subject.
+            merged["subject"].update({key: fresh["subject"][key] for key in
+                                      ("retained_checkout", "retention") if key in fresh.get("subject", {})})
+        return merged
 
     try:
         revised = revise_record(drive, record.record_id, settle) if rejoin else None
@@ -724,7 +727,7 @@ def _settle(ctx: ToolContext, wave: _Wave, facts: Dict[str, Any], outcome: Dict[
     # another surface keeps its own.
     with contextlib.suppress(Exception):
         bind_reviewer_slot_record_id(dict(facts.get("slot_executions") or {}), str(payload.get("record_id") or ""))
-    settle_attempt(ctx, wave, outcome, payload, facts)
+    durable = settle_attempt(ctx, wave, outcome, payload, facts) is not False and durable
     result = review_result(payload, reused=False)
     result["durable"] = durable
     if wave.request.surface not in SINGLE_QUESTION:
@@ -739,6 +742,10 @@ def review_result(record: Dict[str, Any], *, reused: bool) -> Dict[str, Any]:
     checklist = dict((record.get("brief") or {}).get("checklist") or {})
     return {
         "record_id": str(record.get("record_id") or ""), "state": str(record.get("state") or ""),
+        "revision": record.get("revision", 1),
+        "review_reference": {"record_id": str(record.get("record_id") or ""),
+                             "task_id": str(record.get("task_id") or ""),
+                             "surface": record.get("surface") if record.get("surface") in SINGLE_QUESTION else "change"},
         "aggregate": str(verdict.get("aggregate") or ""), "per_question": dict(verdict.get("per_question") or {}),
         "quorum": dict(verdict.get("quorum") or {}), "panel": dict(record.get("panel") or {}),
         "rows": list(record.get("rows") or []), "subject": dict(record.get("subject") or {}),
@@ -937,6 +944,7 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
     # In-process callers (the commit gate's look, the contributor lane) hand the test
     # execution they established; the tool surface has no such argument.
     supplied_execution = args.pop("_preflight_execution", None)
+    public_execution = args.pop("_public_execution", False)
     # The host collecting a running wave it did not start names that wave's recorded round
     # (its retry key): it rejoins the open operation at $0 and never buys another wave.
     rejoin_key = str(args.pop("_rejoin_retry_key", "") or "")
@@ -1018,6 +1026,10 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
             panel = single_question_panel(supplied_panel, request.surface)
         else:
             panel = compose_panel(request, body=layer == "body")
+        if public_execution and (supplied_execution or {}).get("tested", {}) != {}:
+            tested = supplied_execution["tested"]
+            if (tested.get("head"), tested.get("tree")) != (frozen.parent_sha, frozen.tree_sha):
+                supplied_execution = None
         with _panel_in_force(panel):
             wave = dataclasses.replace(_prepare_wave(ctx, request, frozen, panel, root=root, fact=fact, layer=layer,
                                                      rejoin=rejoin),
@@ -1042,11 +1054,10 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
                 from ouroboros import review_pause
 
                 kind = request.surface if request.surface in SINGLE_QUESTION else "change"
-                left = review_pause.watch_left_review(ctx, surface=kind, retry_key=wave.retry_key,
-                                                      record_id=wave.record_id,
-                                                      reissue=(f"the same unchanged skill_review(skill={wave.root.name!r}) call"
-                                                               if kind == SKILL else "the same unchanged review_change call"))
-            settled = _settle(ctx, wave, wave_facts(ctx, wave, outcome=outcome, forensic=forensic), outcome, retention)
+                settled = _settle(ctx, wave, wave_facts(ctx, wave, outcome=outcome, forensic=forensic), outcome, retention)
+                left = (review_pause.watch_left_review(ctx, surface=kind, retry_key=wave.retry_key,
+                        record_id=wave.record_id, reissue="review_change(review_reference=the original reference)")
+                        if settled.get("durable") else None)
             if settled.get("state") == "pending" and left is None:
                 # Nobody waits for these seats any more: their record settles once they finish
                 # (at the latest when this task ended), whether or not the call is re-issued.
@@ -1084,7 +1095,7 @@ def _read_subject(ctx: ToolContext, spec: Any, request: ReviewChangeRequest, ret
         yield freeze_subject(ctx, spec)
 
 
-def _handle_review_change(
+def _handle_new_review_change(
     ctx: ToolContext, root: str = "active_workspace", workspace_root: str = "", subject: str = "",
     base: str = "", head: str = "", surface: str = SURFACE, goal: str = "", scope: str = "",
     author_questions: Optional[List[str]] = None, reviewers: Optional[List[str]] = None, reason: str = "",
@@ -1099,6 +1110,8 @@ def _handle_review_change(
                                 ["subject=skill is skill_review's own: call skill_review(skill=...) for a skill payload"],
                                 effect="No reviewer was dispatched.")
     try:
+        from ouroboros.preflight_receipts import execution_exhibit
+        exhibit = execution_exhibit(ctx)
         # The tool's interactive author may leave the wave on an addressed message (the
         # operator script's synchronous entry binds nothing).
         with review_pause.receptive_author(review_pause.receptive_binding(ctx)):
@@ -1106,16 +1119,44 @@ def _handle_review_change(
                 ctx, root=root, workspace_root=workspace_root, subject=subject, base=base, head=head, surface=surface,
                 goal=goal, scope=scope, author_questions=author_questions, reviewers=reviewers, reason=reason,
                 coupling_only=coupling_only, reviewer_effort=reviewer_effort, review_rebuttal=review_rebuttal,
-                treat_as_body=treat_as_body, answer=answer, _resolved_binding=_resolved_binding)
+                treat_as_body=treat_as_body, answer=answer, _resolved_binding=_resolved_binding,
+                _preflight_execution=exhibit if exhibit.get("status") == "passed" else None, _public_execution=True)
     except ReviewChangeArgumentError as exc:
         return argument_refusal(ctx, "TOOL_ARG_ERROR (review_change)", [str(exc)], effect="No reviewer was dispatched.")
     result.pop("usage", None)
     if (getattr(ctx, "_left_review_wait", None) or {}).get("surface") in {"change", RESULT, SKILL}:
-        result["message"] = ("An addressed message reached you while the reviewers ran: this call returned and their "
+        event = ("A chosen helper finished" if any(row.get("reason") == "helper_result" for row in
+                 getattr(ctx, "_review_detached_operations", []) or []) else "An addressed message reached you")
+        result["message"] = (event + " while the reviewers ran: this call returned and their "
                              "paid work continues separately; a [Review settled] notice follows the whole wave. "
                              + str(result.get("message") or ""))
     text = json.dumps(result, ensure_ascii=False, indent=2, default=str)
     return f"{result['message']}\n\n{text}" if result.get("message") else text
+
+
+def _handle_review_change(ctx: ToolContext, review_reference: Any = None, *,
+                          _resolved_binding: Any = None, **args: Any) -> str:
+    from ouroboros.review_waiting import publish_delivery
+    from ouroboros.tools.review_collection import collect_change
+
+    if review_reference is None:
+        text = _handle_new_review_change(ctx, _resolved_binding=_resolved_binding, **args)
+        # The record id is also returned to direct callers; the metadata is for the loop.
+        try:
+            payload = json.loads(text[text.index("{"):])
+        except (ValueError, TypeError):
+            return text
+    else:
+        try:
+            if args:
+                raise ValueError("review_reference cannot be combined with subject, brief or panel arguments")
+            payload = collect_change(ctx, review_reference)
+            text = json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+        except (ValueError, LookupError) as exc:
+            return argument_refusal(ctx, "TOOL_ARG_ERROR (review_change)", [str(exc)],
+                                    effect="No reviewer was dispatched.")
+    record = load_record(ledger_root(ctx), str(payload.get("record_id") or "")) if payload.get("record_id") else None
+    return publish_delivery(ctx, text, record) if record else text
 
 
 def _review_change_tool_timeout_sec() -> float:
@@ -1133,7 +1174,7 @@ _DESCRIPTION = (
     "tests.policy=NOT_RUN). Subjects: base..head (commits), index (staged) or worktree (live) against base "
     "(default HEAD), frozen and read in an isolated checkout of its tree (only a synchronous caller reads the body's "
     "own staged index live). An addressed message while the wave runs returns its pending outcome: the reviewers "
-    "continue, a [Review settled] notice follows, and the same unchanged call collects it at $0. "
+    "continue, a [Review settled] notice follows, and review_reference collects the original subject at $0 even after edits. "
     "Rules follow the subject: the body is read against the body "
     "layer, anything else against the universal core checklist. Panel: Blocking own-body reviews widen to the whole "
     "pool; Advisory may narrow with a reason (missing reason is a typed $0 refusal); Cyber Pro composes freely. "
@@ -1162,6 +1203,7 @@ def _names(description: str) -> Dict[str, Any]:
 
 def get_tools() -> List[ToolEntry]:
     properties = {
+        "review_reference": {"type": "object", "description": "Collect the original paid review at $0; supply no other arguments."},
         "root": _string("The bound repository: the active workspace or the system repository.",
                         enum=list(ROOTS), default="active_workspace"),
         "workspace_root": _string("A registered folder to review instead (schedule_subagent's workspace_root policy)."),
@@ -1190,5 +1232,5 @@ def get_tools() -> List[ToolEntry]:
             "body layer. A recognized body and a recognized foreign root are unchanged; the record notes the raise.")},
     }
     schema = {"name": "review_change", "description": _DESCRIPTION,
-              "parameters": {"type": "object", "properties": properties, "required": ["subject"]}}
+              "parameters": {"type": "object", "properties": properties, "required": []}}
     return [ToolEntry("review_change", schema, _handle_review_change, timeout_sec=_review_change_tool_timeout_sec())]
