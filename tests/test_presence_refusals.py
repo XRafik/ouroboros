@@ -630,8 +630,6 @@ def test_inline_turn_recovers_lost_response_without_replaying_event(tmp_path, mo
     """A lost pure response follows the shared same-turn recovery path; the event never reruns."""
     from ouroboros import agent_task_pipeline as pipeline
 
-    # The automatic reply crosses the Supervisor; with no checker here a consciousness reply is held.
-    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_k: (True, ""))
     monkeypatch.setenv("OUROBOROS_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("OUROBOROS_SETTINGS_PATH", str(tmp_path / "settings.json"))
     monkeypatch.setenv("TOTAL_BUDGET", "100")
