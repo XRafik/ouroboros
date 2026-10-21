@@ -3,7 +3,7 @@
 One table (``state/scheduled_tasks.json``), reached only through
 ``supervisor/queue_schedules.py``, which owns its locking, lifecycle and audit:
 ``schedule_followup`` WRITES a future row, and ``manage_schedules`` sees and
-governs the rows that are already there — listing is a read any task may do,
+governs the rows that are already there — listing and getting are reads any task may do,
 while changing one (including restoring a disabled or withdrawn row) stays with
 the owner/root turn and is audited with a reason.  Observe visibility does not
 change that original schedule authority.
@@ -60,8 +60,8 @@ def _manage_schedules(
 ) -> str:
     """See, or apply one narrow audited change to, the rows already in the table.
 
-    The authority is argument-aware rather than name-wide: LISTING is a read any
-    member of the tree may do, while CHANGING the owner's schedules stays with
+    The authority is argument-aware rather than name-wide: READING is allowed to any
+    member of the tree, while CHANGING the owner's schedules stays with
     the root turn. A Presence conversation gets neither — an admitted guest room
     is not a place from which this mind's own schedule table is read or rewritten.
     """
@@ -166,8 +166,8 @@ def _manage_schedules(
         "ok", "changed", "status", "schedule_id", "operation_id", "running_or_queued", "audit",
         "detail", "detail_truncated", "schedule_omitted_reason",
     ) if key in outcome}
-    # ``detail`` is already bounded above and often names the actual blocker
-    # (``skill_not_ready``); keep it rather than replacing the one explanation
+    # ``detail`` is already bounded above and often names the actual blocker;
+    # keep it rather than replacing the one explanation
     # the receipt carries with a generic note about its own size.
     compact.setdefault(
         "detail", "schedule action completed; full row omitted to fit the tool result limit")
@@ -244,21 +244,20 @@ def get_tools() -> List[ToolEntry]:
             schema={
                 "name": "schedule_followup",
                 "description": (
-                    "Register a deferred follow-up task that the supervisor scheduler "
-                    "enqueues as an ordinary root task, or with notify=true a note: nothing wakes, and at "
-                    "the trigger the host shows objective verbatim to the owner as a System row signed with "
-                    "when you wrote it and when it was due. A note is right when its text will still be true "
-                    "at that time; if the words depend on what happens by then, schedule a wake-up instead. "
-                    "Explicitly choose related work (original "
-                    "verified money/deadline and Stop controls) or independent work; a task of either relation may "
-                    "read this task's task_drive/artifact_store (read-only, one hop), so name the paths it needs. "
-                    "Root tasks only; subagents report the proposed follow-up to their parent. Supply exactly one "
-                    "trigger: run_at "
-                    "for a one-shot ISO 8601 instant (naive = UTC), or cron for a recurring "
-                    "5-field expression with an optional IANA timezone. Write the objective "
-                    "in your own words — it becomes each future task's text verbatim. The "
-                    "owner can disable or delete the record from the Schedules surface; each registration "
-                    "reports how many follow-ups this task holds."
+                    "Create a named future task or note in the supervisor schedule table. Supply run_at "
+                    "for a one-shot ISO 8601 instant (naive = UTC), or cron for a recurring 5-field "
+                    "expression with an optional IANA timezone. The receipt includes the next due instant "
+                    "and this task's pending count. Schedules fire only while Ouroboros runs; after downtime "
+                    "a missed occurrence catches up once, without replaying every missed cron tick. "
+                    "A task wakes as an ordinary root through normal admission; objective becomes its text "
+                    "and can name the skill or knowledge containing the living procedure. With notify=true "
+                    "nothing wakes: the host shows objective verbatim in the owner's chat as a System row "
+                    "with written/due times, without a model call or context. Choose related work to keep "
+                    "the original verified money/deadline and Stop controls, or independent work; notes are "
+                    "independent. Either task relation can read this task's task_drive/artifact_store "
+                    "read-only, one hop, at paths you name. Root tasks only; Presence cannot leave notes. "
+                    "manage_schedules gets full definitions, updates a promise in place, disables future "
+                    "dispatch, or withdraws it with delete; withdrawal remains restorable for a while."
                 ),
                 "parameters": {
                     "type": "object",
@@ -312,21 +311,24 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("manage_schedules", {
             "name": "manage_schedules",
             "description": (
-                "See and govern your own existing supervisor schedules. action='list' shows every "
-                "row with its lifecycle and relationship: active, disabled, held, waiting, suppressed, "
-                "consumed (a one-shot that already fired) or delete_pending. disable/delete stop FUTURE "
-                "dispatch — a task already admitted from the schedule keeps running — and restore brings a "
-                "suppressed or disabled row back, re-checking the skill rather than enabling it. A deleted "
-                "row still owed accepted work stays delete_pending (a follow-up of your work: until its "
-                "task settles) and then disappears. Generic restore can cancel a pending deletion; "
-                "Held restore requires the observed hold_id; an unknown relation must first be resolved. "
-                "Exact hold release preserves enabled/deletion state, pending task identity, money/deadline and other holds. "
-                "Every change needs a concrete reason and is audited. A consumed one-shot is "
-                "history: schedule a new run_at instead of trying to re-arm it. Deleting a skill "
-                "row keeps it as a suppressed record so the skill lifecycle cannot resurrect it. "
-                "Only your own root turn may change a schedule; a delegated task may only list. "
-                "list accepts offset and limit (bounded pages) and returns total/next_offset; "
-                "each row contains only a bounded objective preview, never full context."
+                "Read and change existing supervisor schedules. list pages bounded previews with "
+                "offset/limit and total/next_offset. get returns one full authored definition and current "
+                "lifecycle/outcome facts; oversized results stay readable through the persisted result source. "
+                "update changes supplied name, objective, context, run_at or cron, timezone, and starting "
+                "reasoning_effort in place; blank strings mean unchanged. objective is the future task's "
+                "text, naming the skill or knowledge with its living procedure, or a note's verbatim words "
+                "shown without waking a model. Every change requires a reason and is audited. Update "
+                "preserves policy holds and paused state; its receipt says if an unstarted claim was "
+                "reconsidered. A consumed one-shot can re-arm only with a new run_at. "
+                "disable/delete stop future dispatch; admitted work keeps running. delete withdraws the "
+                "record, restorable for a while and retained until its accepted work settles and retention "
+                "expires. Generic restore cancels withdrawal or enables a paused row; a consumed one-shot "
+                "stays consumed. Held restore needs the observed hold_id; an unknown relation must first "
+                "be resolved. Exact hold release preserves enabled/deletion state, pending task identity, "
+                "money/deadline and other holds. Changes belong to a root turn; delegated tasks may "
+                "list/get only; Observe cannot update; "
+                "Presence cannot use this tool. Schedules fire only while Ouroboros runs, with one late "
+                "catch-up after downtime rather than replaying missed cron ticks."
             ),
             "parameters": {"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["list", "get", "update", "disable", "delete", "restore"]},
