@@ -23,21 +23,11 @@ jobs:
       - name: Native primitive probe; skips remain incomplete
         shell: pwsh
         run: |
-          $root = Join-Path $env:RUNNER_TEMP 'probe1297'
-          $evidence = Join-Path $env:RUNNER_TEMP 'probe1297-evidence'
-          New-Item -ItemType Directory -Path $root,$evidence -Force | Out-Null
-          python -c "import sys,platform; print(sys.version); print(platform.platform())" | Out-File "$evidence/platform.txt"
-          Get-FileHash .platform-probe/windows_relative_probe.py -Algorithm SHA256 | Format-List | Out-File "$evidence/source-sha256.txt"
-          python -B .platform-probe/windows_relative_probe.py --work-dir $root --timeout 90 1> "$evidence/result.jsonl" 2> "$evidence/stderr.txt"
-          $code = $LASTEXITCODE
-          $code | Out-File "$evidence/exit-code.txt"
-          Get-Content "$evidence/result.jsonl"
-          Get-Content "$evidence/stderr.txt"
-          exit $code
+          & ./.platform-probe/rerun-disposable-windows.ps1 -AcknowledgeDisposableRunner
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: windows-1297-feasibility
-          path: ${{ runner.temp }}/probe1297-evidence
+          path: ${{ env.probe1297_evidence }}
           if-no-files-found: error
           retention-days: 14

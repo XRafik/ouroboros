@@ -265,14 +265,24 @@ class Win:
 
     def reparse_io(self, path, code, data=b""):
         # Fixture creation/inspection only: OPEN_REPARSE_POINT never follows it.
+        setting = code == 0x900A4  # FSCTL_SET_REPARSE_POINT
+        check((setting and bool(data)) or (code == 0x900A8 and not data),
+              "expected SET with input or GET without input")
         with self.owned(self.create(str(path), 0x40000000 if data else 0,
                                    7, None, 3, 0x02200000, None)) as h:
-            output, used = C.create_string_buffer(16384), C.c_uint32()
+            # SET has no output buffer. GET returns the reparse data for verification.
+            output = None if setting else C.create_string_buffer(16384)
+            output_size = 0 if setting else len(output)
+            used = C.c_uint32()  # Required for synchronous DeviceIoControl, even SET.
             payload = C.create_string_buffer(data) if data else None
-            if not self.ioctl(h.value, code, payload, len(data), output, len(output),
+            if not self.ioctl(h.value, code, payload, len(data), output, output_size,
                               C.byref(used), None):
-                raise C.WinError(C.get_last_error())
-            return output.raw[:used.value]
+                error = C.get_last_error()
+                emit("fixture_error", operation="FSCTL_SET_REPARSE_POINT" if setting
+                     else "FSCTL_GET_REPARSE_POINT", path=str(path), winerror=error,
+                     input_bytes=len(data), output_bytes=output_size)
+                raise C.WinError(error)
+            return b"" if setting else output.raw[:used.value]
 
     def junction(self, path, target, existing=False):
         if not existing:
@@ -322,33 +332,47 @@ class LoopbackObserver:
     Some Windows configurations cannot capture loopback with SIO_RCVALL. Such a
     run MUST SKIP the UNC case. Accepted connections alone are not the oracle.
     """
+    @staticmethod
+    def setup(stage, operation, **fields):
+        # An unavailable fixture says nothing about native no-contact support.
+        emit("unc_setup", stage=stage, status="START", **fields)
+        try:
+            result = operation()
+        except OSError as exc:
+            emit("unc_setup", stage=stage, status="UNAVAILABLE", errno=exc.errno,
+                 winerror=getattr(exc, "winerror", None), error=str(exc), **fields)
+            raise Skip(f"UNC setup {stage} {fields}: {exc}") from exc
+        emit("unc_setup", stage=stage, status="READY", **fields)
+        return result
+
     def __enter__(self):
         self.stack = contextlib.ExitStack()
         try:
             self.listeners = []
             for port in (445, 139):
-                listener = self.stack.enter_context(socket.socket())
-                listener.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
-                listener.bind(("127.0.0.1", port))
-                listener.listen(8)
+                listener = self.stack.enter_context(self.setup("sink_socket", socket.socket, port=port))
+                self.setup("sink_exclusive", lambda: listener.setsockopt(
+                    socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1), port=port)
+                self.setup("sink_bind", lambda: listener.bind(("127.0.0.1", port)), port=port)
+                self.setup("sink_listen", lambda: listener.listen(8), port=port)
                 self.listeners.append(listener)
-            self.raw = self.stack.enter_context(socket.socket(
-                socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP))
-            self.raw.bind(("127.0.0.1", 0))
-            self.raw.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON)
+            self.raw = self.stack.enter_context(self.setup("raw_socket", lambda: socket.socket(
+                socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_IP)))
+            self.setup("raw_bind", lambda: self.raw.bind(("127.0.0.1", 0)))
+            self.setup("raw_rcvall_on", lambda: self.raw.ioctl(socket.SIO_RCVALL, socket.RCVALL_ON))
             self.stack.callback(self.raw.ioctl, socket.SIO_RCVALL, socket.RCVALL_OFF)
             for port in (445, 139):
-                with socket.create_connection(("127.0.0.1", port), timeout=2):
+                with self.setup("tcp_control_connect", lambda: socket.create_connection(
+                        ("127.0.0.1", port), timeout=2), port=port):
                     pass  # plain TCP only, sends no SMB request or credentials
-            calibration = self.observe(1.0)
+            calibration = self.setup("tcp_control_observe", lambda: self.observe(1.0))
+            emit("unc_calibration", phase="plain_tcp", observed=calibration)
             if set(calibration["syn_ports"]) != {445, 139} or calibration["connections"] != 2:
                 raise Skip(f"loopback packet observer did not calibrate: {calibration}")
             self.calibration = calibration
             return self
-        except BaseException as exc:
+        except BaseException:
             self.stack.close()
-            if isinstance(exc, OSError):
-                raise Skip(f"UNC trap unavailable (ports or raw capture rights): {exc}") from exc
             raise
 
     def observe(self, seconds):
@@ -569,6 +593,8 @@ def cases(api, base, run):
                         if control.poll() is None:
                             control.kill()
                         control.wait()
+                emit("unc_calibration", phase="filesystem_unc", observed=redirector,
+                     control_returncode=control.returncode)
                 if 445 not in redirector["syn_ports"] or redirector["connections"] < 1:
                     raise Skip(f"real UNC control did not calibrate: {redirector}; negative={observation}")
                 return dict(status=status, target=target, started_ns=started,
