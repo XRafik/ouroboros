@@ -220,6 +220,28 @@ def _capability_mismatch_message(selected_profile: str, missing_caps: Any) -> st
     )
 
 
+def _schedule_commitment(ctx: ToolContext, route_kind: str, emission: Dict[str, Any]) -> str:
+    if route_kind == "api_model":
+        return "ordinary recursive API actor"
+    from ouroboros.subagent_runtime import cognitive_route_billing_basis, current_cognitive_route_and_billing
+
+    nanny_spec = emission.get("parent_cognitive_route")
+    if isinstance(nanny_spec, dict) and str(nanny_spec.get("model") or "").strip():
+        nanny_route, nanny_billing = cognitive_route_billing_basis(
+            str(nanny_spec.get("model") or ""),
+            use_local=bool(nanny_spec.get("use_local_model")),
+            ctx=ctx,
+        )
+    else:
+        nanny_route, nanny_billing = current_cognitive_route_and_billing(
+            getattr(ctx, "task_metadata", None), ctx=ctx,
+        )
+    return (
+        f"recursive nanny on {nanny_route} (bills as {nanny_billing}); "
+        "exact route/work-order authority is frozen before its first model call"
+    )
+
+
 def _finalize_schedule_emission(ctx: ToolContext, emission: Dict[str, Any]) -> str:
     """Record the scheduled wave, emit swarm_fanout telemetry, and build the
     tool-result string. Extracted from _schedule_task to keep that function
@@ -310,11 +332,7 @@ def _finalize_schedule_emission(ctx: ToolContext, emission: Dict[str, Any]) -> s
             )
         except Exception:
             coop_note = f"\nshared coop tree: {coop_shared_tree}"
-    commitment = (
-        "ordinary recursive API actor"
-        if route_kind == "api_model"
-        else "recursive nanny; exact route/work-order authority is frozen before its first model call"
-    )
+    commitment = _schedule_commitment(ctx, route_kind, emission)
     legacy_note = (
         "\nDEPRECATED_LEGACY_SELECTOR: deterministically mapped to this exact configured row; "
         "future calls must pass subagent_id."
@@ -1034,7 +1052,7 @@ def _schedule_task(ctx: ToolContext, internal: Dict[str, Any] | None = None, /, 
         "root_task_id": root_task_id_seed or current_task_id,
         "emitted_modes": [_emit_control_event(ctx, evt)],
         "write_surface": requested_surface,
-        "configured_subagent": configured_subagent,
+        "configured_subagent": configured_subagent, "parent_cognitive_route": parent_cognitive_route,
         "legacy_selection": legacy_selection,
         "requested_access": params.get("access"),
         "requested_effort": fields["requested_effort"],

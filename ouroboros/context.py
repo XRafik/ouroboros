@@ -1297,7 +1297,7 @@ def _capture_context_core(
     else:
         docs_need_development = _task_requires_development_context(task)
 
-    semi_stable_parts = []
+    semi_stable_parts, subagent_catalog = [], None
     try:
         from ouroboros.subagent_runtime import current_model_visible_subagent_catalog
 
@@ -1342,9 +1342,12 @@ def _capture_context_core(
     if health_section:
         dynamic_parts.append(health_section)
     try:
-        from ouroboros.subagent_runtime import review_records_block
+        from ouroboros.subagent_runtime import review_records_block, subagent_supervision_fact_line
 
-        dynamic_parts.append(review_records_block(drive_root=canonical_root, task_id=str(task.get("id") or "")))
+        dynamic_parts.extend(filter(None, (
+            review_records_block(drive_root=canonical_root, task_id=str(task.get("id") or "")),
+            subagent_supervision_fact_line(task, ctx=ctx, catalog=subagent_catalog),
+        )))
     except Exception:
         log.warning("Failed to build the Review records block", exc_info=True)
     dynamic_parts.extend(build_memory_sections(context_memory, partition="volatile", include_scratchpad=not is_child))
