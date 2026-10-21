@@ -18,6 +18,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import time
 import uuid
 import zipfile
@@ -153,7 +154,13 @@ def isolated_environment(root, source, inherited):
     require(sys.platform == "win32", "requires_native_windows")
     win = Path(inherited.get("SystemRoot", inherited.get("SYSTEMROOT", "C:/Windows"))).resolve()
     require(win.is_absolute() and (win / "System32/kernel32.dll").is_file(), "invalid_windows_root")
+    # Python 3.11 platform.machine() reads PROCESSOR_ARCHITECTURE on Windows.
+    # Restore only this non-secret OS fact after validating the actual interpreter;
+    # the probe's scrubbed environment otherwise makes the product see no arch.
+    require(sysconfig.get_platform() == "win-amd64" and ctypes.sizeof(ctypes.c_void_p) == 8,
+            "requires_native_amd64_interpreter")
     env = {k: v for k, v in inherited.items() if SCOPE.fullmatch(k) and v == "1"}
+    env["PROCESSOR_ARCHITECTURE"] = "AMD64"
     env.update({"SystemRoot": str(win), "WINDIR": str(win), "ComSpec": str(win / "System32/cmd.exe"),
                 "PATH": str(win / "System32"), "PATHEXT": ".COM;.EXE;.BAT;.CMD",
                 "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",
@@ -426,7 +433,9 @@ class Probe:
             self.record["source"] = self.verify_source()
             self.record["environment"] = {k: env[k] for k in ("PATH", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "CLAUDEXOR_CONFIG_DIR", "CODEX_HOME")}
             self.record["custody_markers"] = sorted(k for k in env if SCOPE.fullmatch(k))
-            self.record["platform"] = {"sys_platform": sys.platform, "windows_version": list(sys.getwindowsversion()[:3])}
+            self.record["platform"] = {"sys_platform": sys.platform, "windows_version": list(sys.getwindowsversion()[:3]),
+                                       "python_platform": sysconfig.get_platform(), "pointer_bytes": ctypes.sizeof(ctypes.c_void_p),
+                                       "processor_architecture": env["PROCESSOR_ARCHITECTURE"]}
             sys.path.insert(0, str(source))
             from ouroboros import claudexor_runtime as runtime, harness_maintenance as service
             from ouroboros.claudexor_daemon import get_owned_daemon
