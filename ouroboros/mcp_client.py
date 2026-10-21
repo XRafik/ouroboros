@@ -1095,8 +1095,11 @@ class MCPManager:
     def _adopt_catalog(self, runtime: MCPServerRuntime, envelope: Optional[dict]) -> None:
         """ONE post-listing item path for live publication, boot seed and adoption."""
         runtime.catalog = envelope
+        items = envelope["items"] if envelope else []
         runtime.tools, runtime.tool_name_collisions, notes = normalize_listing(
-            runtime.config, envelope["items"] if envelope else [], bool(envelope and envelope["complete"]))
+            runtime.config, items, bool(envelope and envelope["complete"]))
+        from ouroboros.tool_effects import record_mcp_annotations  # every process learns the published hints
+        record_mcp_annotations(runtime.config.id, items)
         attempt = envelope["latest_attempt"] if envelope else {}
         runtime.last_refreshed = (envelope.get("listed_at") or "") if envelope else ""
         runtime.last_attempted = attempt.get("at", "")

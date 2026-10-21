@@ -1341,7 +1341,7 @@ def _maybe_auto_attach_image(
         observation = {"status": "unavailable"}
         from ouroboros.tools.vision import attach_local_image_to_context
 
-        ok, note = attach_local_image_to_context(ctx, path)
+        ok, note = attach_local_image_to_context(ctx, path, stamp=getattr(tools, "_ctx", None))  # the live slot, not a staged copy
         observation["status"] = "attached" if ok else "unavailable"
         if not ok:
             log.debug("auto-attach skipped for %s: %s", path, note)

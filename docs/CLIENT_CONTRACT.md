@@ -377,8 +377,8 @@ data: {"seq":12,"type":"task_result","task_id":"…","data":{…}}
 - **Disable, delete, restore:** `POST /api/schedules/{id}/action` (`ScheduleActionRequest`: `action` and a required `reason`); `DELETE /api/schedules/{id}` also deletes. A refusal is also 200, with `ok: false`: `changed` is the durable fact and `status` says what happened. An action governs future runs only; `running_or_queued` reports a run it already admitted (`null` when unknown).
 
 **Downloading a result file:**
-- **Where:** `GET /api/tasks/{id}/artifacts/{name}` (optionally `relpath`, `archive` or `source`).
-- **Partial downloads:** byte ranges are supported. A `206` response is a byte slice, possibly an incomplete JSON document even when the original file was JSON, so do not parse it as a complete one.
+- **Where:** `GET /api/tasks/{id}/artifacts/{name}` (optionally one of `relpath`, `archive`, `source` or `wrap_up`).
+- **Partial downloads:** `206` is a byte slice, not whole JSON. Wrap up's copy is regenerated per request; never join its ranges across requests.
 - **Checking the bytes:** the `x-ouroboros-artifact-sha256` header gives the checksum when the core verified the bytes.
 - **Changed after recording:** `409 artifact_identity_changed` means the file changed after it was recorded.
 
@@ -413,7 +413,7 @@ data: {"seq":12,"type":"task_result","task_id":"…","data":{…}}
 
 `stop_policy` is `immediate` (also the omitted/empty default) or `finalize_then_cancel`. A graceful request cannot soften a previously recorded immediate Stop. Task detail has `cancel_state:"pending"` while cancellation is owed, otherwise the field is absent; there is no public `cancel_state:"settled"`.
 
-**Partial work.** There is no single `status:"partial"` lifecycle. Read `result`, artifacts and `outcome_axes` separately: the axes distinguish lifecycle, execution, objective, artifacts and review. Graceful wrap-up can produce best-effort output, immediate cancellation salvage, and natural completion wins a race with Stop. Cancellation does not delete recorded results/artifact evidence, but capture can fail or be missing. Artifact states include `pending`, `finalizing`, `ready`, `ready_with_changes`, `ready_no_changes`, `failed`, `missing`, and an inapplicable axis can say `not_applicable`. Read the actual file list rather than treating cancellation as no output.
+**Partial work.** No `status:"partial"` exists; read `result`, artifacts and `outcome_axes` separately. Graceful wrap-up can produce best-effort output, immediate cancellation salvage, and natural completion wins a race with Stop. Wrap up's `delegate_terminal_reconciliation.owner_stop_children` keeps child/run material and readers on any exit; detail `wrap_up_document` names its on-read Markdown; terminal execution is not final accounting; engine continuity grants no session transfer. Cancellation keeps recorded evidence; capture can fail or be missing. Artifact states: `pending`, `finalizing`, `ready`, `ready_with_changes`, `ready_no_changes`, `failed`, `missing`, `not_applicable`; read the file list.
 
 **Pause, continue, resume, hurry:**
 - **Pause:** `POST /api/tasks/{id}/pause` takes `{request_id}` and may declare who pressed: an interface sends `actor: "owner"` for the owner's own press, and a caller acting for Ouroboros sends `actor: "ouroboros"` with a `reason`, one sentence of at most 400 characters that the owner reads under the work's name. The declaration only names the Pause's author and grants no power; an `actor` the core does not know declares nobody, and a Pause that declared nobody is never shown as the owner's. Any other field answers 400. `202` with `latch_pending` means the pause is recorded and still taking hold; repeat the same `request_id`.
@@ -504,7 +504,7 @@ Files produced by tasks are covered in §6.
 - **Review:** `POST /api/skills/{skill}/review` answers 200 with the review's outcome (`SkillReviewResponse`). A review already running for the same revision answers `status: "pending"` with its `job_id`. `GET /api/skills/{skill}/review-history/{job_id}` renders a finished review.
 - **Attest a review:** `POST /api/owner/skills/{skill}/attest-review` records the owner's verdict: 200 with `ok: true` (possibly pending above), otherwise 409.
 - **Delete:** `POST /api/skills/{skill}/delete` removes an external or self-authored skill and its state; a repeat answers 404.
-- **Presence runtime:** `POST /api/owner/skills/{skill}/presence-runtime` changes a presence profile's runtime choice, compare-and-set on `expected_state_fingerprint`.
+- **Places:** `GET /api/places` returns place records and installed connector declarations; `POST /api/places` connects one connector. `POST /api/places/{place_id}` atomically edits owner-authored state, wakes, notes, confirmed accounts, folder and model; optional `expected_revision` detects concurrent edits. `DELETE /api/places/{place_id}` disconnects it while keeping room history. The detailed record and connector ingress are described in CREATING_SKILLS, “Places and focus transport ingress”.
 - **Publication check:** `POST /api/skills/{skill}/publish-preflight` is read-only; every status answers the same shape, and `state: "hard_block"` is a refusal. An optional body `{destination: {source_id, mode}}` (`SkillPublishPreflightRequest`; mode `origin`, `entry` or `new_entry`) picks where it would go; the answer's `repository` is that destination (default: where the skill came from, else the hub). Missing publication prerequisites may answer `409` before the skill is looked up; read `reason_code`, not an assumed `404` for an unknown name.
 - **Reconcile:** `POST /api/skills/{skill}/reconcile` brings one extension's live state in line with its saved state.
 
@@ -518,7 +518,7 @@ A refused action answers `SkillActionRefusal`: `error`, the `status_code` it was
 - `GET /api/extensions/{skill}/module/{entry}` serves reviewed module code (never cached, any origin may load it).
 - `POST /api/widgets/fault` (`WidgetFaultRequest`, `WidgetFaultResponse`) keeps one fault a running module widget's card shows as a `widget_fault` row of `GET /api/logs/events`: the card's `skill`, `tab_id` and `revision`, `where` (`board` or `message`) and the frame's `kind`, `message` (at most 500 characters), `source` (200) and `line`. The row has no task and is the page's report, not a verified execution. At most 10 rows per widget and 100 together are written per minute; past that the answer is `logged: false` and the widget's next row carries `suppressed_count`. `400` another shape, `413` a body past 8 KiB, `503` not written. A client may skip reporting.
 
-**Contributions (controls and speech engines):** `GET /api/ui/contributions`
+**Contributions (controls, speech engines and places):** `GET /api/ui/contributions`
 (`UiContributionsResponse`, `Cache-Control: no-store`) returns `contributions`,
 `offers.stt`, `icons`, `problems` (skill → warning strings), `preferences` and
 `voice`. The same fields appear beside `skills`/`live` in `GET /api/extensions`;
@@ -533,8 +533,17 @@ plus either `placement` or `provides`. Placement entries carry `action` and chip
 carry `source: {url, refresh_s}`. For `skill.request`, `action.url` and `route_url`
 name the host-computed absolute route; providers use `route_url`. Optional
 provider fields are `runtime`, `destination`, `languages`, `formats`,
-`install_size`, `max_bytes` and `max_seconds`. `icons` is the validator's icon
-catalog. `offers.stt` lists non-live built-in providers as
+`install_size`, `max_bytes` and `max_seconds`. Place providers require an extension
+with the `presence` permission, `id`, `label`, and `destination: vendor:<Name>`;
+`scope` defaults to `account` (or `conversation`), `wakes` lists typed wake facts,
+`source` uses the chip contract, `settings` names a section, and `read_only: provider`
+indicates provider support. Their `tools` list carries full names and declared
+`effect`, `target`, `conversation`, `thread` facts. No speech-engine runtime/route
+is required. `icon_spec` is `{kind:"host", name}` or `{kind:"svg", svg}` with
+sanitized geometry, else `{}` for the fallback; the `icon` declaration remains
+a host name or `ui/icon.svg`. SVG assets carry sandbox CSP. Installed and Browse
+rows expose `connects` (boolean) and `icon` (the same spec); absent catalog fields
+remain compatible. `icons` is the host glyph catalog. `offers.stt` lists non-live built-in providers as
 `{skill, skill_label, id, label, destination, install_size, enabled: false, installed}`;
 `installed: false` names a built-in this install has not installed (clients send the
 owner to the Skills page's Browse, where the built-in source installs it).
