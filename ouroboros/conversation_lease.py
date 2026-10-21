@@ -80,14 +80,19 @@ class PresenceTurnLease:
             path.unlink(missing_ok=True)
 
     def release(self) -> None:
-        with self._lock:
-            resources, self._resources, self._ended = self._resources, None, True
+        resources = None
+        try:
+            with self._lock:
+                resources, self._resources, self._ended = self._resources, None, True
+                try:
+                    if resources is not None:
+                        self._clear_author()
+                finally:
+                    with _AUTHORS_LOCK:
+                        _AUTHORS.pop((self._root(), self.task_id), None)
+        finally:
             if resources is not None:
-                self._clear_author()
-            with _AUTHORS_LOCK:
-                _AUTHORS.pop((self._root(), self.task_id), None)
-        if resources is not None:
-            resources.close()
+                resources.close()
 
     def lendable(self) -> bool:
         """Held, minted by a gate and not ended: ``lend`` can return it and ``reacquire`` take it back."""

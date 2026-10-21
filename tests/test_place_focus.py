@@ -384,3 +384,24 @@ def test_focus_work_facts_use_ordinary_readers(tmp_path, monkeypatch):
     assert "report [running]" in text and "get_task_result(task_id)" in text
     assert "presence_scope" not in text and "presence_cancel_work" not in text
     assert "not addressable" not in text
+
+
+def test_author_projection_cleanup_failure_still_releases_the_gate(tmp_path, monkeypatch):
+    from ouroboros.conversation_lease import PresenceTurnGate, live_author, live_authors
+    gate = PresenceTurnGate(1, state_root=tmp_path / "state")
+    lease = gate.acquire("room")
+    lease.bind_author("author")
+    assert live_author("room", drive_root=tmp_path) == "author"
+    resources = lease._resources
+    def unavailable():
+        raise OSError("projection cleanup unavailable")
+    monkeypatch.setattr(lease, "_clear_author", unavailable)
+    try:
+        with pytest.raises(OSError, match="projection cleanup"):
+            lease.release()
+        assert live_author("room", drive_root=tmp_path) == ""
+        assert live_authors(drive_root=tmp_path) == []
+        with gate.acquire_resources("room", lambda: False):
+            pass
+    finally:
+        resources.close()
