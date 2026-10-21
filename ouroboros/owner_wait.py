@@ -350,12 +350,8 @@ def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False, e
     if not isinstance(handoff, dict):
         return False
     root = pathlib.Path(root)
-    try:  # Panic never returns work; the owner's Restart returns only what its acknowledged transaction names
-        if (root / "state" / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic":
-            return False
-    except FileNotFoundError:
-        pass
-    except OSError:
+    from ouroboros.delegate_recovery import owner_restart_in_progress
+    if owner_restart_in_progress(root):
         return False
     _ack_direct_exec_successor(root)
     task_id = str(task.get("id") or "")

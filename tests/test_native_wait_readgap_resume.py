@@ -110,7 +110,7 @@ def test_recovered_native_wait_needs_explicit_resume_then_dispatches_once(restar
 
 
 @pytest.mark.parametrize("fault", ["result", "source", "transaction", "unacknowledged", "spent",
-                                   "terminal", "cancel", "panic", "deadline"])
+                                   "terminal", "cancel", "owner_restart", "deadline"])
 def test_explicit_resume_keeps_current_native_authority_refusals(restart_case, monkeypatch, fault):
     from ouroboros.cancel_intents import request_cancel
 
@@ -132,8 +132,9 @@ def test_explicit_resume_keeps_current_native_authority_refusals(restart_case, m
         task_results.write_task_result(case.root, case.task_id, "completed", result="Already finished")
     elif fault == "cancel":
         request_cancel(case.root, case.task_id, reason="owner Stop")
-    elif fault == "panic":
-        (case.root / "state/panic_stop.flag").write_text("panic", encoding="utf-8")
+    elif fault == "owner_restart":
+        from tests._work_stop_helpers import live_restart
+        live_restart(case.root, monkeypatch)
     else:
         task["deadline_at"] = "2000-01-01T00:00:00+00:00"
     before = copy.deepcopy(task)

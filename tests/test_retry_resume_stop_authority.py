@@ -149,15 +149,16 @@ def test_unknown_root_identity_refuses_without_member_grant(host, monkeypatch, c
 
 
 @pytest.mark.parametrize("door", ["warm", "exact", "queued", "unsaved"])
-@pytest.mark.parametrize("veto", ["unreadable_cancel", "legacy_cancel", "panic", "restart"])
+@pytest.mark.parametrize("veto", ["unreadable_cancel", "legacy_cancel", "restart"])
 def test_unknown_cancel_and_existing_stop_carriers_keep_the_pause(host, monkeypatch, clock, reaper, door, veto):  # noqa: F811
     from ouroboros.task_store import patch_document
 
     task, _child, _plan = paused_retry(host, monkeypatch, clock, reaper, door)
     if veto == "legacy_cancel":
         patch_document(host.root, "held", lambda row: {**row, "status": "cancel_requested"})
-    elif veto in {"panic", "restart"}:
-        (host.root / "state" / ("panic_stop.flag" if veto == "panic" else "owner_restart_no_resume.flag")).touch()
+    elif veto == "restart":
+        from tests._work_stop_helpers import live_restart
+        live_restart(host.root, monkeypatch)
     before = copy.deepcopy(owner_pause.read_fence(host.root, "held"))
     latch = copy.deepcopy(queue.BUDGET_ROOT_FENCES)
     with monkeypatch.context() as fault:

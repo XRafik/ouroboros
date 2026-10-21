@@ -23,6 +23,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from ouroboros.control_actor import control_actor, observed_control_stop
+from ouroboros.delegate_recovery import owner_restart_in_progress
 from ouroboros.work_stop import clear_refusal, continuation_refusal, release_refusal
 from ouroboros.work_stop import SELECTION_KEY, retain_consumed_selection
 from ouroboros.utils import utc_now_iso
@@ -184,8 +185,7 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
     if not fence_closed(fence) or not warm:
         return None
     fence_id = str(fence.get("fence_id") or "")
-    if any((pathlib.Path(q.DRIVE_ROOT) / "state" / name).exists()
-           for name in ("owner_restart_no_resume.flag", "panic_stop.flag")):
+    if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
     try:
         # Cascade Stop belongs to the logical root; SINGLE Stop to the physical attempt.
@@ -376,8 +376,7 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
     if refusal := release_refusal(observed_control_stop(
             result_root, task, budget=q.BUDGET_ROOT_FENCES), control_actor()):
         return refusal
-    if any((pathlib.Path(q.DRIVE_ROOT) / "state" / name).exists()
-           for name in ("owner_restart_no_resume.flag", "panic_stop.flag")):
+    if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
     try:
         result_row = load_task_result(result_root, task_id, strict=True) or {}
@@ -607,9 +606,7 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
             task, reason=HOLD_REVOCATION_UNWRITTEN,
             detail=f"snapshot_not_persisted:{detail}",
             extra={"pause_id": pause_id, "grant_id": str(grant["grant_id"]),
-                   "root_task_id": root_task_id,
-                   **({"prior_hold_reason": str(released_hold.get("reason") or "")}
-                      if released_hold else {})},
+                   "root_task_id": root_task_id},
             result_root=result_root)
         return {"ok": False, "error": "snapshot_not_persisted",
                 "held": HOLD_REVOCATION_UNWRITTEN, "grant_id": str(grant["grant_id"])}
@@ -891,8 +888,7 @@ def _late_phase_refusal(q: Any, root: pathlib.Path, task_id: str, row: Dict[str,
     from supervisor.events_budget import budget_hold_fact
     from supervisor.state import budget_remaining
 
-    if any((pathlib.Path(q.DRIVE_ROOT) / "state" / name).exists()
-           for name in ("owner_restart_no_resume.flag", "panic_stop.flag")):
+    if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
     try:
         if has_active_intent(root, task_id, strict=True):

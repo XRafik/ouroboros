@@ -76,7 +76,11 @@ def test_ready_detach_arms_then_parks_same_id_and_sleep_grant_is_single_use(tmp_
         assert regrant["grant_id"] != grant["grant_id"], "the pre-restart grant stays single-use"
         return
     assert not woke
-    (tmp_path / "state" / flag).unlink()
+    if door == "owner_restart":
+        from ouroboros.delegate_recovery import consume_owner_restart, pending_owner_restart
+        consume_owner_restart(tmp_path, pending_owner_restart(tmp_path))
+    else:
+        (tmp_path / "state" / flag).unlink()
     assert q.resume_budget_paused_task("head")["ok"], "explicit Resume can release the retained sleep"
 
 

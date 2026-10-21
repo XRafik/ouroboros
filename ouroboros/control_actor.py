@@ -51,13 +51,7 @@ def mind_control(actor_task_id: str, reason: str):
 
 
 def observed_control_stop(root, task=None, *, budget=None, owner=None) -> dict:
-    """Feed observed control facts to the pure stop reader.
-
-    The legacy installation input remains until the separate installation-door
-    change; it does not become another per-task record.
-    """
-    from pathlib import Path
+    """Feed observed work and tree controls to the pure stop reader."""
     from ouroboros.work_stop import current_stop
 
-    installation = {"cause": "panic", "release": "owner"} if (Path(root) / "state" / "panic_stop.flag").exists() else {}
-    return current_stop(task, {"budget": budget or {}, "owner": owner or {}, "installation": installation})
+    return current_stop(task, {"budget": budget or {}, "owner": owner or {}})

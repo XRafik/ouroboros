@@ -214,6 +214,8 @@ def authorize_row(data_dir: pathlib.Path, row: Dict[str, Any], commit: str, *, r
     }
     # The helper is captured from the body that is running, never from the candidate.
     shutil.copyfile(pathlib.Path(body_switch.__file__), directory / "switch.py")
+    from ouroboros import installation_stop
+    shutil.copyfile(pathlib.Path(installation_stop.__file__), directory / "installation_stop.py")
     _git(serving, "update-ref", f"{PIN_PREFIX}{handoff['id']}", cand)
     body_switch.record(str(directory), handoff, "authorized", f"restart reason: {reason}")
     _log(data_dir, "body_adoption_authorized", handoff, branch=branch, paths=len(rows))
@@ -343,7 +345,7 @@ def arm(data_dir: Any, *, worker_exits: Any, live_children: Any, owned_stop: Any
             ("worker_exits_unconfirmed", census is None or bool(census.get("unconfirmed"))),
             ("child_processes_alive", bool(live_children)),
             ("owned_work_unconfirmed", stop.get("state") != "completed" or bool(stop.get("unconfirmed"))),
-            ("panic_stop", (pathlib.Path(data_dir) / "state" / "panic_stop.flag").exists()),
+            ("panic_stop", body_switch.installation_panic(data_dir)),
         ) if blocked]
         directory = str(helper_dir(data_dir))
         if blockers:

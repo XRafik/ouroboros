@@ -269,7 +269,8 @@ def test_settled_continue_observes_off_lock_and_revalidates_owner_authority(tmp_
                 elif race == "stop":
                     request_cancel(tmp_path, successor, reason="new owner Stop", source="owner")
                 elif race == "panic":
-                    (tmp_path / "state" / "panic_stop.flag").write_text("panic")
+                    from supervisor.events_budget import hold_budget_row
+                    hold_budget_row(task, reason="panic_hold", result_root=tmp_path)
                 elif race == "same_bytes":
                     workers.PENDING[:] = [dict(task)]
                 elif race == "replacement":

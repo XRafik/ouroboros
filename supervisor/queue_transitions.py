@@ -559,7 +559,7 @@ def resume_budget_paused_task(task_id: str, *, selected_by: str = "") -> Dict[st
                 return {"ok": False, "error": "selection_authority_unavailable"}
             if task is not observation["candidate"] or current != observation["authority"]:
                 return {"ok": False, "error": "selection_authority_changed"}
-            if current["cancel_pending"] or current["stop_flags"]:
+            if current["cancel_pending"] or current["owner_restart"]:
                 return {"ok": False, "error": "selection_owner_held"}
         elif budget_pause_fact(task) is not None:
             return {"ok": False, "error": "selection_observation_required"}

@@ -226,11 +226,6 @@ def pending_deadline_expirable(task: Dict[str, Any]) -> bool:
         # The durable Pause precedes its queue latch; an unavailable root is not open.
         if member_fence(SimpleNamespace(task_id=task_id, root_task_id=root_id, budget_drive_root=result_root)):
             return False
-        try:
-            if (result_root / "state" / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic":
-                return False
-        except FileNotFoundError:
-            pass
         selected = _pending_continuation(task)
         marker = task.get("_terminalization_retry") or {}
         unsubmitted = marker.get("unsubmitted_launch")

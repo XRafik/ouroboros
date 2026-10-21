@@ -52,7 +52,7 @@ def test_explicit_resume_relaxes_the_last_fit_two_reservation_rail(monkeypatch):
     assert calls == [2, 2]
 
 
-def test_restore_refusal_is_typed_and_a_panic_flag_is_a_resume_refusal_not_a_restore_one(tmp_path, monkeypatch):
+def test_restore_refusal_is_typed_and_an_installation_flag_is_not_work_authority(tmp_path, monkeypatch):
     from ouroboros import budget_pause
 
     queue, _state, workers = _install_queue(tmp_path, monkeypatch)
@@ -61,7 +61,7 @@ def test_restore_refusal_is_typed_and_a_panic_flag_is_a_resume_refusal_not_a_res
     (tmp_path / "state").mkdir(exist_ok=True)
     (tmp_path / "state" / "panic_stop.flag").write_text("panic")
     assert budget_pause.budget_pause_restore_refusal(tmp_path, task) == ""  # restorable; not dispatchable
-    assert queue.resume_budget_paused_task("typed-1")["error"] == "restart_no_resume"
+    assert queue.resume_budget_paused_task("typed-1")["ok"]
     (tmp_path / "state" / "panic_stop.flag").unlink()
     assert budget_pause.budget_pause_restore_refusal(tmp_path, {"id": "typed-1"}) == budget_pause.RESTORE_REFUSAL_NOT_EXACT
     assert budget_pause.budget_pause_restore_refusal(tmp_path, {
@@ -430,7 +430,7 @@ def test_root_resume_holds_a_fence_bound_child_marker_instead_of_stranding_it(tm
     assert granted["ok"] is True and granted["held_siblings"] == ["child-f3"]
     assert "_budget_pause" not in child
     hold = budget_hold_fact(child)
-    assert hold["reason"] == HOLD_ROOT_FENCE_LIFTED and hold["replaced_fence_marker"] is True
+    assert hold["reason"] == HOLD_ROOT_FENCE_LIFTED and "replaced_fence_pause" in hold
     assert hold["root_grant_id"] == granted["grant_id"]
     sent = []
     _idle_worker(workers, sent)

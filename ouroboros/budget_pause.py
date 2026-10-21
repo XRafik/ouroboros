@@ -564,8 +564,8 @@ def _hold_control_reason(ctx: Any) -> str:
     """The task's EXISTING controls, read during a hold. This adds none of its own.
 
     A live model wait already owns Stop/Panic, cancel intent, owner deadlines
-    and the finite lifetime; its reader answers first. The owner-stop flags and
-    cancel intents the restore gate reads are consulted either way, so a Stop
+    and the finite lifetime; its reader answers first. The task's
+    cancel intents are consulted either way, so a Stop
     still lands when no wait is bound or when the wait reports something else.
     """
     try:
@@ -580,9 +580,6 @@ def _hold_control_reason(ctx: Any) -> str:
         log.debug("Model-wait control reader unavailable during a budget pause hold", exc_info=True)
     try:
         root = pathlib.Path(getattr(ctx, "budget_drive_root", None) or ctx.drive_root)
-        if any((root / "state" / name).exists()
-               for name in ("panic_stop.flag", "owner_restart_no_resume.flag")):
-            return "panic"
         from ouroboros.cancel_intents import cancel_pending
 
         from ouroboros.store import acquisition_budget

@@ -391,21 +391,21 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
     from supervisor.events_budget import (HOLD_OWNER_RESTART, HOLD_PANIC, HOLD_RESTORE_REFUSED_PREFIX,
                                           budget_hold_fact, hold_budget_row, hold_restored_budget_pause)
     from supervisor.restart_retention import (fresh_return_transaction, hold_after_stop, hold_for_owner_restart,
-                                              hold_stopped_queue, never_started, panic_recorded, park_saved_pause, pause_ids,
+                                              hold_stopped_queue, never_started, park_saved_pause, pause_ids,
                                               recover_saved_running,
-                                              retained_pending, saved_sleep_hold_reason, unseen_pause)
+                                              retained_pending, HOLD_SAVED_SLEEP_RECOVERY, unseen_pause)
     from supervisor.schedule_occurrence import first_attempt, first_dispatch_unsent, restore_verdict
 
-    from ouroboros.work_stop import clear_refusal, continuation_refusal
+    from ouroboros.work_stop import clear_refusal, continuation_refusal, current_stop
 
-    sleep_hold_reason = saved_sleep_hold_reason(_queue().DRIVE_ROOT)
-    owner_restart, panic = sleep_hold_reason == HOLD_OWNER_RESTART, sleep_hold_reason == HOLD_PANIC
-    # A returning stop (fresh acknowledged Restart/update) names what it returns;
-    # any other stop holds the same saved work for an explicit Resume. Panic never returns.
-    panicked = panic or panic_recorded(_queue().DRIVE_ROOT)  # it wins over an owner Restart's flag
+    from ouroboros.delegate_recovery import boot_door
+    door = boot_door(_queue().DRIVE_ROOT)
+    owner_restart, panicked = door == "owner_restart", door == "panic"
+    panic = panicked
+    sleep_hold_reason = HOLD_PANIC if panicked else HOLD_OWNER_RESTART if owner_restart else HOLD_SAVED_SLEEP_RECOVERY
     transaction = {} if panicked else fresh_return_transaction(_queue().DRIVE_ROOT)
     returning_queue = set(transaction.get("queue_ids") or []) | set(transaction.get("return_ids") or [])
-    stop_cause = "panic" if panicked else "restart_unacknowledged" if owner_restart else "app_stop"
+    stop_door = door or "app_stop"
     prior_roots = {str(task["id"]): copy.deepcopy(task) for task in
                    snapshot_pending + [row.get("task") for row in running_rows if isinstance(row, dict)]
                    if isinstance(task, dict) and task.get("id")
@@ -458,7 +458,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
     recovered = recover_saved_running(
         [row for row in list(running_rows) + direct_saved if isinstance(row, dict)
          and str((row.get("task") or {}).get("id") or "") not in taken],
-        _queue().DRIVE_ROOT, transaction=transaction, cause=stop_cause)
+        _queue().DRIVE_ROOT, transaction=transaction, cause=stop_door)
     if handoffs is not None:
         handoffs.update({str(task["id"]): source["from_attempt"] for task in recovered
                          if isinstance(source := task.get("_working_recovery"), dict)
@@ -479,7 +479,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
         wait_allowed = False
         if task.get("_owner_wait_resume"):
             try:
-                wait_allowed = restore_owner_wait_allowed(_queue().DRIVE_ROOT, task)
+                wait_allowed = not panicked and restore_owner_wait_allowed(_queue().DRIVE_ROOT, task)
             except (OSError, ValueError, TypeError, RuntimeError) as exc:
                 retained.append(hold_restored_budget_pause(task, _queue().DRIVE_ROOT,
                     reason=HOLD_RESTORE_REFUSED_PREFIX + "owner_wait_source_unavailable", detail=str(exc)))
@@ -532,7 +532,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
                 handoff.pop("_owner_wait_resume", None)
                 recovered_wait = recover_saved_running(
                     [{"task": handoff, "attempt": int(task.get("_attempt") or 1)}], _queue().DRIVE_ROOT,
-                    transaction={}, cause=stop_cause)
+                    transaction={}, cause=stop_door)
                 if recovered_wait:
                     retained.extend(recovered_wait)
                 else:
@@ -563,7 +563,12 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
                 project_hold = {"reason": "project_routing_fence_lookup_failed", "detail": (
                     "The schedule receipt was busy at restore; recovery is checked automatically when it is readable.")}
             saved_or_accepted = never_started(task) or isinstance(task.get("_working_recovery"), dict)
-            if retained_pending(task, sleep_hold_reason=sleep_hold_reason):
+            kept = retained_pending(task, sleep_hold_reason=sleep_hold_reason)
+            if panicked and not current_stop(task):
+                # This also covers a planned delegate return under Project custody:
+                # its current stop must survive consumption of the installation input.
+                row = hold_stopped_queue(dict(task), _queue().DRIVE_ROOT, stop_door)
+            elif kept:
                 row = task
             elif str(task.get("id") or "") in returning_queue and (saved_or_accepted and schedule_replay or recheck):
                 row = task  # the fresh Restart returns it: ordinary admission, at any age
@@ -581,7 +586,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
                 # Quit/crash retain ALL accepted work for explicit Resume (#1563).
                 # Project verification is independent: healing it cannot release
                 # the owner's application-stop hold, even for a fresh snapshot.
-                row = hold_stopped_queue(dict(task), _queue().DRIVE_ROOT, stop_cause)
+                row = hold_stopped_queue(dict(task), _queue().DRIVE_ROOT, stop_door)
             elif not project_hold and stale:
                 continue  # no provable never-started fact: the old snapshot-age rule still decides
             else:
@@ -598,7 +603,7 @@ def _retain_snapshot_pending(snapshot_pending: list, running_rows: list, *, stal
     kept_ids = {str(task.get("id") or "") for task in retained}
     _record_refused_returns(_queue().DRIVE_ROOT, {
         str(task["id"]): "planned_handoff_not_retained" for task in snapshot_pending
-        if task.get("id") in set(transaction.get("task_ids") or []) and task["id"] not in kept_ids}, stop_cause)
+        if task.get("id") in set(transaction.get("task_ids") or []) and task["id"] not in kept_ids}, stop_door)
     return retained, unseen, consumed, prior_roots
 
 

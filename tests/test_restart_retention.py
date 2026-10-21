@@ -14,6 +14,8 @@ import json
 import time
 from types import SimpleNamespace
 
+import pytest
+
 from tests._budget_pause_exact_helpers import _install_queue, _parked, _pause
 
 RESTART_REASON = "Owner restart stopped this task before process restart."
@@ -39,7 +41,8 @@ def _queued(task_id, **extra):
     return {"admitted_dispatch": "possible" if extra.get("_attempt", 1) > 1 else "none", "id": task_id, "type": "task", "chat_id": 0, "_attempt": 1, "text": task_id, **extra}
 
 
-def test_a_checkpoint_before_park_survives_every_door_as_the_same_paused_task(tmp_path, monkeypatch):
+@pytest.mark.parametrize("door", ["panic", "owner_restart"])
+def test_a_checkpoint_before_park_survives_every_door_as_the_same_paused_task(tmp_path, monkeypatch, door):
     """The worker stored the continuation and wrote ``pausing`` + source, then the
     stop came before the supervisor handled the park event: the row is still
     RUNNING. Panic's kill (no new prerequisite: the workers are already dead
@@ -58,8 +61,10 @@ def test_a_checkpoint_before_park_survives_every_door_as_the_same_paused_task(tm
     workers.RUNNING["plain-run"] = {"task": {"id": "plain-run", "type": "task", "chat_id": 0,
                                              "root_task_id": "plain-run"}, "worker_id": 1, "attempt": 1}
 
-    # The exact Panic call (server_control): no hold_never_started, no reconcile.
-    assert workers.kill_workers(force=True, archive_service_logs=False, reconcile_delegate_custody=False)
+    from tests._work_stop_helpers import live_panic, live_restart
+    (live_panic if door == "panic" else live_restart)(tmp_path, monkeypatch)
+    assert workers.kill_workers(force=True, archive_service_logs=False, reconcile_delegate_custody=False,
+                                stop_source=door, retain_saved_work=door == "owner_restart")
 
     assert workers.RUNNING == {}
     assert [row["id"] for row in workers.PENDING] == ["saved-run"]
@@ -258,7 +263,9 @@ def test_owner_restart_passes_the_hold_only_through_its_own_kill(tmp_path, monke
     from ouroboros import delegate_custody as custody
     from supervisor.events_budget import HOLD_OWNER_RESTART
 
-    monkeypatch.setattr(server_restart, "DATA_DIR", tmp_path)
+    from tests._work_stop_helpers import live_restart
+    transaction = live_restart(tmp_path, monkeypatch)
+    monkeypatch.setattr(server_restart, "_LAST_RETURN_TX", {"id": transaction["transaction_id"]})
     monkeypatch.setattr(cancel_intents, "request_cancel", lambda *a, **k: {})
     monkeypatch.setattr(custody, "reconcile_orphaned_runs", lambda *a, **k: [])
     monkeypatch.setattr(server_restart, "_stop_owned_daemon", lambda label: None)
@@ -301,7 +308,8 @@ def test_boot_holds_the_restored_queue_before_the_restart_marker_is_consumed(tmp
     monkeypatch.setattr(worker_chat_lane, "_pool", lambda: workers)
     monkeypatch.setattr(queue, "persist_queue_snapshot", lambda reason="": False)
     worker_chat_lane.auto_resume_after_restart()
-    assert flag.exists(), "a marker consumed before its holds are durable could auto-wake the queue"
+    from ouroboros.delegate_recovery import pending_owner_restart
+    assert pending_owner_restart(tmp_path), "the translated door stays until its holds are durable"
 
     persisted: list = []
     monkeypatch.setattr(queue, "persist_queue_snapshot", lambda reason="": persisted.append(reason) or True)
@@ -334,7 +342,8 @@ def test_panic_adds_no_prerequisite_before_the_kill(tmp_path, monkeypatch):
     assert order[0] == "kill" and order.index("kill") < order.index("park")
 
 
-def test_only_the_planned_restart_record_triggers_the_boot_auto_resume(tmp_path, monkeypatch):
+@pytest.mark.parametrize("scratchpad", [None, "# Scratchpad\n- (empty)\n", "# Scratchpad\n- finish the report\n"])
+def test_only_the_planned_restart_record_triggers_the_boot_auto_resume(tmp_path, monkeypatch, scratchpad):
     """A ``launcher_start`` line in the log tail is not evidence of unfinished
     work; ``pending_restart_verify.json`` stays the one real trigger."""
     import threading
@@ -344,7 +353,8 @@ def test_only_the_planned_restart_record_triggers_the_boot_auto_resume(tmp_path,
     (tmp_path / "logs").mkdir()
     (tmp_path / "state").mkdir()
     (tmp_path / "memory").mkdir()
-    (tmp_path / "memory" / "scratchpad.md").write_text("# Scratchpad\n- finish the report\n", encoding="utf-8")
+    if scratchpad is not None:
+        (tmp_path / "memory" / "scratchpad.md").write_text(scratchpad, encoding="utf-8")
     (tmp_path / "logs" / "supervisor.jsonl").write_text(json.dumps({"type": "launcher_start"}) + "\n",
                                                         encoding="utf-8")
     pool = SimpleNamespace(DRIVE_ROOT=tmp_path, load_state=lambda: {"owner_chat_id": 7},
@@ -359,7 +369,7 @@ def test_only_the_planned_restart_record_triggers_the_boot_auto_resume(tmp_path,
 
     (tmp_path / "state" / "pending_restart_verify.json").write_text("{}", encoding="utf-8")
     worker_chat_lane.auto_resume_after_restart()
-    assert woke.wait(5), "the planned restart's verify record still resumes the scratchpad work"
+    assert woke.wait(5), "the planned restart's verify record works independently of scratchpad content"
 
 
 # --- Batch4 F1: the stop door's typed cause reaches the owner's Continue ---
@@ -383,7 +393,9 @@ def _restart_door(tmp_path, monkeypatch, workers):
     from ouroboros import server_restart
     from ouroboros import delegate_custody as custody
 
-    monkeypatch.setattr(server_restart, "DATA_DIR", tmp_path)
+    from tests._work_stop_helpers import live_restart
+    transaction = live_restart(tmp_path, monkeypatch)
+    monkeypatch.setattr(server_restart, "_LAST_RETURN_TX", {"id": transaction["transaction_id"]})
     monkeypatch.setattr(custody, "reconcile_orphaned_runs", lambda *a, **k: [])
     monkeypatch.setattr(server_restart, "_stop_owned_daemon", lambda label: None)
     monkeypatch.setattr(server_restart, "_managed_update_pending_kwargs", lambda: {})
@@ -456,7 +468,8 @@ def test_a_graceful_shutdown_records_its_cause_and_panic_records_none(tmp_path, 
     assert continuation_eligibility(panicked, "panic-root")["refusal"] == "interruption_cause_unrecorded"
 
     # Every graceful kill door of the composition root passes the typed cause.
-    for door in (server.lifespan, server._emergency_process_cleanup, server._perform_supervisor_restart):
+    from ouroboros import server_restart
+    for door in (server.lifespan, server._emergency_process_cleanup, server_restart._perform_supervisor_restart):
         source = inspect.getsource(door)
         kills = source.count("terminal_status=cleanup_status")
         assert kills and source.count('stop_source="server_shutdown"') == kills, door.__name__

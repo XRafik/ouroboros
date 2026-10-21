@@ -386,11 +386,8 @@ def test_owner_restart_copy_is_explicit_about_stopped_task(tmp_path, monkeypatch
 
     source = _read("ouroboros/server_restart.py")
     assert "Stopping active task. New settings apply to the next message." in source
-    assert "owner_restart_no_resume.flag" in source
-    assert "owner_restart_no_resume" in source
-    assert "panic_stop.flag" in source
-    assert "owner_restart_flag.unlink(missing_ok=True)" in source
-    assert "stable_skip_flag.unlink(missing_ok=True)" in source
+    assert "prepare_owner_restart" in source
+    assert "owner_restart_no_resume" not in source
     # Checkout gate first (a refusal leaves the server intact), then the durable
     # no-resume intent, then the owned-work stop, then the owner's stop notice.
     owner_restart = _read("server.py").split('lowered.startswith("/restart"):', 1)[1].split(
@@ -409,8 +406,9 @@ def test_owner_restart_copy_is_explicit_about_stopped_task(tmp_path, monkeypatch
 
     def stopped(actual):
         assert actual is ctx
-        assert (flags / "owner_restart_no_resume.flag").read_text(encoding="utf-8") == "owner_restart"
-        assert (flags / "panic_stop.flag").read_text(encoding="utf-8") == "owner_restart_no_resume"
+        from ouroboros.delegate_recovery import active_restart_transaction
+        assert active_restart_transaction(tmp_path)["door"] == "owner_restart"
+        assert not (flags / "panic_stop.flag").exists()
         calls.append("stopped")
         return ["active-task"]
 
@@ -546,8 +544,9 @@ def test_owner_restart_proceeds_when_worker_shutdown_fails(tmp_path, monkeypatch
 
     server._process_bridge_updates(Bridge(), 0, Ctx())
 
-    assert (tmp_path / "state" / "owner_restart_no_resume.flag").exists()
-    assert (tmp_path / "state" / "panic_stop.flag").exists()
+    from ouroboros.delegate_recovery import active_restart_transaction
+    assert active_restart_transaction(tmp_path)["door"] == "owner_restart"
+    assert not (tmp_path / "state" / "panic_stop.flag").exists()
     assert "New settings apply to the next message." in messages
     assert not any("Stopping active task" in text for text in messages)
     assert not any("cancelled" in text or "deferred" in text for text in messages)
@@ -689,7 +688,7 @@ def _owner_restart_world(tmp_path, monkeypatch, stop):
     run = lambda: server_restart._perform_owner_restart(SimpleNamespace(safe_restart=None),
                                                         lambda text, _suffix: notices.append(text))
     return SimpleNamespace(run=run, exits=exits, notices=notices, queue=queue,
-                           flag=tmp_path / "state" / "owner_restart_no_resume.flag")
+                           flag=tmp_path / "state" / "delegate_recovery_transactions" / "active.json")
 
 
 def test_a_raised_owner_stop_still_restarts_so_its_durable_flags_stay_true(tmp_path, monkeypatch):
@@ -706,7 +705,8 @@ def test_a_raised_owner_stop_still_restarts_so_its_durable_flags_stay_true(tmp_p
     world = _owner_restart_world(tmp_path, monkeypatch, broken)
     assert world.run() == (True, "")
     assert world.exits == [True], "the owner's restart follows"
-    assert world.flag.read_text(encoding="utf-8") == "owner_restart", "the flag describes the restart that happens"
+    from ouroboros.delegate_recovery import active_restart_transaction
+    assert active_restart_transaction(world.flag.parents[2])["door"] == "owner_restart"
     assert world.notices == ["New settings apply to the next message."], "no stopped task is claimed"
 
 

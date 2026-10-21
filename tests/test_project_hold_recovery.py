@@ -340,9 +340,11 @@ def test_room_rebind_and_back_cannot_redirect_original_preparation(host, tmp_pat
                                       "unreadable_receipt", "started", "owner_pause", "panic"])
 @pytest.mark.parametrize("readable", [False, True])
 def test_held_deadline_keeps_custody_without_replay(host, tmp_path, monkeypatch, expiry, dispatch, readable):  # noqa: F811
-    from supervisor.events_budget import HOLD_SAVED_WORK, budget_hold_fact
+    from supervisor.events_budget import HOLD_PANIC, HOLD_SAVED_WORK, budget_hold_fact, hold_budget_row
 
-    accepted(host, tmp_path)
+    task = accepted(host, tmp_path)
+    if dispatch == "panic":
+        hold_budget_row(task, reason=HOLD_PANIC, result_root=host.root)
     path, original = restore_unreadable(host)
     if readable:
         path.write_bytes(original)
@@ -364,8 +366,6 @@ def test_held_deadline_keeps_custody_without_replay(host, tmp_path, monkeypatch,
         from supervisor.owner_pause_control import request_owner_pause
 
         assert request_owner_pause("held", request_id="held-pause")["ok"]
-    elif dispatch == "panic":
-        (host.root / "state" / "panic_stop.flag").write_text("panic")
     sent = worker(host, monkeypatch)
     # Retention grants no execution; a positive never-started receipt still expires.
     if dispatch == "owner_pause":
@@ -373,7 +373,7 @@ def test_held_deadline_keeps_custody_without_replay(host, tmp_path, monkeypatch,
         assert not budget_hold_fact(held)
         assert current_stop(held, {"budget": queue.BUDGET_ROOT_FENCES})["cause"] == "pause"
     else:
-        assert budget_hold_fact(held)["reason"] == HOLD_SAVED_WORK
+        assert budget_hold_fact(held)["reason"] == (HOLD_PANIC if dispatch == "panic" else HOLD_SAVED_WORK)
     for _ in range(2):
         queue.enforce_task_timeouts()
         workers.assign_tasks()

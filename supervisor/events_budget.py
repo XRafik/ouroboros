@@ -21,6 +21,7 @@ from ouroboros.event_usage import event_token_counts
 # The hold carrier and the row's selection against a latch live with the pause owner,
 # so reservation reads the very predicate assignment does; re-exported here.
 from ouroboros.budget_pause import BUDGET_HOLD_KEY, budget_fence_selected, budget_hold_fact  # noqa: F401
+from ouroboros.delegate_recovery import owner_restart_in_progress
 from ouroboros.utils import append_jsonl, utc_now_iso
 from ouroboros.task_results import STATUS_SCHEDULED, write_task_result
 from ouroboros.work_stop import (
@@ -957,8 +958,7 @@ def hold_root_resume_descendants(q: Any, root_id: str, fence: dict, grant: dict,
                 and str(hold.get("root_grant_id") or "") != grant["grant_id"]):
             rebound[member_id] = dict(hold)
             member[BUDGET_HOLD_KEY] = {**hold, "root_grant_id": grant["grant_id"],
-                                       "root_resume_generation": int(grant["generation"]),
-                                       "rebound_at": utc_now_iso()}
+                                       "root_resume_generation": int(grant["generation"])}
             # The latch was lifted; carrying its old id would make the newly
             # selected child fail the dispatch fence comparison. Rollback above
             # retains the original hold, including that id.
@@ -974,7 +974,7 @@ def hold_root_resume_descendants(q: Any, root_id: str, fence: dict, grant: dict,
             detail="root resumed; this zero-dispatch sibling awaits explicit selection",
             extra={"root_task_id": root_id, "root_grant_id": grant["grant_id"],
                    "root_resume_generation": grant["generation"],
-                   **({"replaced_fence_marker": True, "replaced_fence_pause": markers[member_id]}
+                   **({"replaced_fence_pause": markers[member_id]}
                       if fence_derived else {})},
             result_root=pathlib.Path(member.get("budget_drive_root") or q.DRIVE_ROOT))
         held.append(member_id)
@@ -1008,8 +1008,7 @@ def _held_selection_authority(q: Any, task: Dict[str, Any]) -> Dict[str, Any]:
         "consumed_resume": consumed_member_resume(result_root, root_id, task_id, attempt=int(
             task["_working_recovery"].get("from_attempt") or 0)) if task.get("_working_recovery") else {},
         "cancel_pending": any(cancel_pending(result_root, tid, strict=True) for tid in {task_id, root_id}),
-        "stop_flags": [name for name in ("owner_restart_no_resume.flag", "panic_stop.flag")
-                       if (pathlib.Path(q.DRIVE_ROOT) / "state" / name).exists()],
+        "owner_restart": owner_restart_in_progress(q.DRIVE_ROOT),
     })
 
 
@@ -1078,7 +1077,7 @@ def select_held_budget_row(q: Any, task: Dict[str, Any], hold: Dict[str, Any],
     native_read_gap = native_continuation_repair(task)
     # This native repair cannot complete a shadow working carrier's root Resume.
     completing = {} if selected_by or native_read_gap else current["consumed_resume"]
-    if current["cancel_pending"] or current["owner_fence"] and not completing or current["stop_flags"]:
+    if current["cancel_pending"] or current["owner_fence"] and not completing or current["owner_restart"]:
         return {"ok": False, "error": "selection_owner_held"}
     continuation = ((task.get("metadata") or {}).get("continuation") or {}) if isinstance(
         task.get("metadata"), dict) else {}

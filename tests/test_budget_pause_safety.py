@@ -310,7 +310,8 @@ def test_hold_reads_controls_from_canonical_budget_root(tmp_path, monkeypatch, c
     monkeypatch.setattr(model_wait, "current_model_wait", lambda: None)
     assert budget_pause._hold_control_reason(ctx) == ""
     if control == "panic":
-        (tmp_path / "state" / "panic_stop.flag").write_text("stop")
+        monkeypatch.setattr(model_wait, "current_model_wait",
+                            lambda: SimpleNamespace(control_reason=lambda: "panic"))
     else:
         request_cancel(tmp_path, "split", reason="owner_stopped", source="test")
     assert budget_pause._hold_control_reason(ctx) == ("panic" if control == "panic" else "cancelled")

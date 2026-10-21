@@ -69,30 +69,23 @@ def conserve_unreadable_pending(task: dict) -> bool:
 
 
 def saved_sleep_hold_reason(result_root: Any, *, owner_restart: bool = False) -> str:
-    """Read the existing stop carriers; an ordinary recovery asserts no owner action.
-
-    Kill callers read this only after signalling workers. The explicit Restart
-    door also supplies its known intent, independent of a flag read.
-    """
+    """Live stop intent; boot passes its translated door explicitly."""
+    from ouroboros.delegate_recovery import owner_restart_in_progress
     from supervisor.events_budget import HOLD_OWNER_RESTART, HOLD_PANIC
 
-    state = pathlib.Path(result_root) / "state"
-    if owner_restart or (state / "owner_restart_no_resume.flag").exists():
+    if panic_recorded(result_root):
+        return HOLD_PANIC
+    if owner_restart or owner_restart_in_progress(result_root):
         return HOLD_OWNER_RESTART
-    try:
-        if (state / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic":
-            return HOLD_PANIC
-    except OSError:
-        pass
     return HOLD_SAVED_SLEEP_RECOVERY
 
 
 def panic_recorded(result_root: Any) -> bool:
-    """The owner's Panic stop flag (``server_control.execute_panic_stop``): nothing returns by itself."""
-    try:
-        return (pathlib.Path(result_root) / "state" / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic"
-    except OSError:
-        return False
+    """Live emergency termination latch, not a historical installation input."""
+    from ouroboros import server_control
+    from ouroboros.config import DATA_DIR
+
+    return pathlib.Path(result_root) == pathlib.Path(DATA_DIR) and server_control._restart_stop_requested
 
 
 def pause_retention(result_root: Any, task_id: str, attempt: Optional[int] = None) -> str:
@@ -896,7 +889,7 @@ def recover_saved_running(rows: Iterable[Dict[str, Any]], drive_root: Any, *,
         if not auto:
             hold_budget_row(task, reason=HOLD_SAVED_WORK, result_root=root,
                         detail=f"work saved before the application stopped ({cause}); continues after an explicit Resume",
-                        extra={"root_task_id": str(task.get("root_task_id") or task_id), "stop_cause": cause})
+                        extra={"root_task_id": str(task.get("root_task_id") or task_id), "door": cause})
         recovered.append(task)
     return recovered
 
@@ -908,5 +901,5 @@ def hold_stopped_queue(task: Dict[str, Any], drive_root: Any, cause: str) -> Dic
     hold_budget_row(task, reason=HOLD_SAVED_WORK, result_root=pathlib.Path(task.get("budget_drive_root") or drive_root),
                     existing_result_only=True,
                     detail=f"accepted before the application stopped ({cause}); starts after an explicit Resume",
-                    extra={"root_task_id": str(task.get("root_task_id") or task.get("id") or ""), "stop_cause": cause})
+                    extra={"root_task_id": str(task.get("root_task_id") or task.get("id") or ""), "door": cause})
     return task

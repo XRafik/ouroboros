@@ -17,8 +17,8 @@ def test_release_consumers_do_not_branch_on_hold_names():
     symbols = {key for key, value in vars(eb).items() if key.startswith("HOLD_") and value in names}
     symbols.add("HOLD_SAVED_SLEEP_RECOVERY")
     # Transport/source mechanisms (sleep, exact owner custody) are not release
-    # names. UI labels are converted in stage 3; boot-door choice is stage 2B.
-    deferred = {"_retain_snapshot_pending", "_activity_pause_cause", "_budget_pause_reason",
+    # names. UI labels are converted in stage 3.
+    deferred = {"_activity_pause_cause", "_budget_pause_reason",
                 "_queue_hold_facts", "classify_member"}
     offenders = []
     for directory in ("supervisor", "ouroboros"):
