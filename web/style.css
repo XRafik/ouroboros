@@ -9615,6 +9615,118 @@ body.keyboard-open .project-panel {
     text-overflow: clip;
 }
 
+/* Notes between works (chat_relay_deck.js; DESIGN "Replies"): a run of notes is one deck of note cards in the work
+   card's material, the latest in front and the edges of up to two cards behind it, one card a step narrower and
+   deeper than the one before; `Show N notes` fans the deck out in place. A card is a list row: a 36 px tile that says
+   who wrote (Main's glyph, or the Projects glyph in Project ink), the name over `to this work · time`, one capsule;
+   then the teller's line for the owner, and the note as written in a tray on request. */
+.chat-relay-deck {
+    --deck-step: 8px;
+    --deck-peek: 0px;
+    position: relative;
+    flex: none;
+    align-self: flex-start;
+    width: min(100%, 760px);
+    max-width: max(80%, min(100%, 620px));
+}
+.chat-relay-deck[data-n="2"] { --deck-peek: var(--deck-step); }
+.chat-relay-deck[data-n="3"] { --deck-peek: calc(var(--deck-step) * 2); }
+.chat-relay-deck-top { display: none; align-items: center; gap: var(--space-3); min-height: 36px; padding: 0 2px var(--space-2) 4px; }
+.chat-relay-deck[data-open="1"] .chat-relay-deck-top { display: flex; }
+.chat-relay-deck-caption { flex: 1 1 auto; min-width: 0; color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); }
+.chat-relay-deck-caption b { color: var(--text-primary); font-weight: 600; }
+.chat-relay-deck-note { display: block; }
+.chat-relay-deck-stack { position: relative; display: flex; flex-direction: column; gap: var(--space-2); }
+.chat-relay-deck[data-open="0"] .chat-relay-deck-stack { display: block; padding-top: var(--deck-peek); }
+.chat-relay-card {
+    position: relative;
+    z-index: 4;
+    border-radius: var(--radius-object);
+    background: var(--voice-ouroboros-card);
+    /* A hair of the room above the front card cuts a card behind it off cleanly instead of melting into it. */
+    box-shadow: 0 -1.5px 0 var(--bg-primary), var(--elev-rest);
+    transform-origin: 50% 0;
+}
+.chat-relay-card-body { padding: 12px 16px 14px; }
+/* Closed, a card behind the front one is only its top edge, a step deeper (the voice's tint; in dark its capsule step). */
+.chat-relay-deck[data-open="0"] .chat-relay-card:not(:last-child) {
+    position: absolute;
+    left: calc(var(--depth, 1) * var(--deck-step));
+    right: calc(var(--depth, 1) * var(--deck-step));
+    top: calc(var(--deck-peek) - var(--depth, 1) * var(--deck-step));
+    height: 56px;
+    z-index: calc(4 - var(--depth, 1));
+    pointer-events: none;
+    box-shadow: inset 0 0 0 100vmax var(--accent-08), 0 -1.5px 0 var(--bg-primary), var(--elev-rest);
+}
+.chat-relay-deck[data-open="0"] .chat-relay-card:not(:last-child) .chat-relay-card-body { visibility: hidden; }
+.chat-relay-deck[data-open="0"] .chat-relay-card[data-deep="1"] { visibility: hidden; opacity: 0; }
+.chat-relay-card-head { display: flex; align-items: center; gap: var(--space-3); min-height: 36px; }
+.chat-relay-tile {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: var(--surface-capsule);
+    box-shadow: var(--elev-rest);
+    color: var(--text-secondary);
+}
+.chat-relay-tile svg { display: block; width: 18px; height: 18px; }
+.chat-relay-card[data-kind="project"] .chat-relay-tile { color: var(--project); }
+.chat-relay-who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.chat-relay-from, .chat-relay-sub { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-relay-from { color: var(--text-primary); font-size: var(--type-body); font-weight: 600; line-height: var(--line-title); }
+.chat-relay-sub { color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); }
+.chat-relay-time { font-variant-numeric: tabular-nums; }
+.chat-relay-act { flex: none; }
+.chat-relay-act-label { display: inline-flex; align-items: baseline; }
+.chat-relay-count {
+    display: inline-grid;
+    overflow: hidden;
+    min-width: 0.6em;
+    margin-inline: 0.3em;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+.chat-relay-count > .chat-relay-count-value { grid-area: 1 / 1; }
+.chat-relay-gist {
+    margin: var(--space-2) 0 0;
+    color: var(--assistant-text);
+    font-size: var(--type-body);
+    line-height: var(--line-body);
+    overflow-wrap: anywhere;
+}
+/* Without the teller's line the note's own first words stand in, in the meta ink: they were written for the work. */
+.chat-relay-gist[data-raw="1"] { color: var(--text-meta); }
+.chat-relay-card > .chat-relay-card-body > :is(.chat-quote, .chat-relay-quotes) { margin: var(--space-3) 0 0; }
+.chat-relay-raw {
+    margin-top: var(--space-3);
+    padding: 10px 12px 6px;
+    overflow: hidden;
+    border-radius: var(--radius-inner);
+    background: var(--surface-tray);
+}
+:root[data-theme="light"] .chat-relay-raw { background: rgba(var(--shell-rgb), 0.72); }
+.chat-relay-raw-label { color: var(--text-meta); font-size: var(--type-meta); font-weight: 600; line-height: var(--line-meta); }
+.chat-relay-raw-text {
+    margin-top: 2px;
+    color: var(--text-secondary);
+    font-size: var(--type-body);
+    line-height: var(--line-body);
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+.chat-relay-raw-foot { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: 2px; }
+/* The closed deck can be pressed anywhere on its front card. */
+@media (hover: hover) {
+    .chat-relay-deck[data-open="0"]:not([data-n="1"]) .chat-relay-card:last-child { cursor: pointer; }
+}
+.chat-relay-deck[data-open="0"]:not([data-n="1"]) .chat-relay-card:last-child:active { filter: var(--press); }
+/* The picture of the card that sank into the deck while a new note came in. */
+.chat-relay-card.chat-relay-ghost { position: absolute; left: 0; right: 0; z-index: 3; overflow: hidden; pointer-events: none; }
+
 /* The clamp of a long quotation (a relay panel's text); its toggle lives in the panel's head, a row that already
    exists, so no control floats on a row of its own. */
 .chat-clamp {

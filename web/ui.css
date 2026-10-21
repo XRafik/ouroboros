@@ -449,7 +449,7 @@
    property resolves where it is declared, so the aliases :root computed (the legacy muted ink, the card bodies, the
    crimson word, the failure word) are restated here. Inside the owner's voice its links, focus and quiet words take
    the owner's readable blue. A light document keeps every inherited value. */
-:root:not([data-theme="light"]) :is(.chat-bubble.assistant, .chat-live-card) {
+:root:not([data-theme="light"]) :is(.chat-bubble.assistant, .chat-live-card, .chat-relay-card) {
     --text-primary: #fcf9f9;
     --assistant-text: var(--text-primary);
     --text-secondary: #ebd9da;
