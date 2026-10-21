@@ -4,7 +4,7 @@ One table (``state/scheduled_tasks.json``), reached only through
 ``supervisor/queue_schedules.py``, which owns its locking, lifecycle and audit:
 ``schedule_followup`` WRITES a future row, and ``manage_schedules`` sees and
 governs the rows that are already there — listing is a read any task may do,
-while changing one (including restoring a disabled/suppressed row) stays with
+while changing one (including restoring a disabled or withdrawn row) stays with
 the owner/root turn and is audited with a reason.  Observe visibility does not
 change that original schedule authority.
 
@@ -55,6 +55,8 @@ _MAX_CONTEXT_CHARS = 8_000
 def _manage_schedules(
     ctx: ToolContext, action: str = "list", schedule_id: str = "", reason: str = "",
     offset: int = 0, limit: int = 20, expected_hold_id: str = "", relation: str = "",
+    name: str = "", objective: str = "", context: str = "", run_at: str = "",
+    cron: str = "", timezone: str = "", reasoning_effort: str = "",
 ) -> str:
     """See, or apply one narrow audited change to, the rows already in the table.
 
@@ -74,12 +76,12 @@ def _manage_schedules(
             status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED",
             text="⚠️ RESOURCE_CONSTRAINT_BLOCKED: a Presence conversation cannot read or change owner schedules.",
         ))
-    if operation != "list" and not _root_schedule_mutation_authorized(ctx):
+    if operation not in {"list", "get"} and not _root_schedule_mutation_authorized(ctx):
         return publish_no_effect(ctx, ToolResult(
             status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED",
             text=(
                 "⚠️ RESOURCE_CONSTRAINT_BLOCKED: a delegated task may only read schedules "
-                "(action='list'); changing one is the root turn's authority. Report the "
+                "(action='list' or 'get'); changing one is the root turn's authority. Report the "
                 f"schedule you would change instead of {operation!r}."
             ),
         ))
@@ -94,9 +96,23 @@ def _manage_schedules(
                                                        result_limit=result_limit),
                               ensure_ascii=False, sort_keys=True,
                               separators=(",", ":"))
+        if operation == "get":
+            from supervisor.followup_policy import observed_store
+
+            row = next((row for row in load_schedule_store(root)["tasks"]
+                        if str(row.get("id") or "") == str(schedule_id or "").strip()), None)
+            if row is None:
+                return publish_no_effect(ctx, json.dumps({"ok": False, "status": "not_found",
+                                         "schedule_id": schedule_id}), tool_name="manage_schedules")
+            row = observed_store(root, {"tasks": [row]})["tasks"][0]
+            return _schedule_definition_reply(row, ok=True)
+        if operation == "update":
+            return _update_schedule(ctx, root, schedule_id, reason, {
+                "name": name, "objective": objective, "context": context, "run_at": run_at,
+                "cron": cron, "timezone": timezone, "reasoning_effort": reasoning_effort})
         if operation not in SCHEDULE_ACTIONS:
             return publish_no_effect(ctx, json.dumps({"ok": False, "status": "invalid_action",
-                               "allowed": ["list", *sorted(SCHEDULE_ACTIONS)]}, sort_keys=True), tool_name="manage_schedules")
+                               "allowed": ["list", "get", "update", *sorted(SCHEDULE_ACTIONS)]}, sort_keys=True), tool_name="manage_schedules")
         # Preserve selectors verbatim. Refuse an identity that cannot fit in a
         # truthful receipt before changing anything, rather than cutting it.
         if len(json.dumps(str(schedule_id or ""), ensure_ascii=False)) > result_limit - 2_000:
@@ -157,6 +173,68 @@ def _manage_schedules(
         "detail", "schedule action completed; full row omitted to fit the tool result limit")
     compact["schedule_omitted"] = True
     return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _schedule_definition_reply(row: dict, **facts) -> str:
+    """Keep the full definition; tool-result delivery retains a source before any cut."""
+    from supervisor.queue import schedule_activity_projection
+
+    return json.dumps({**facts, "schedule": schedule_activity_projection({"tasks": [row]})["tasks"][0]},
+                      ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _update_schedule(ctx: ToolContext, root: Any, schedule_id: str, reason: str, fields: dict) -> str:
+    from supervisor.queue import patch_scheduled_task
+
+    patch = {key: str(value).strip() for key, value in fields.items() if value is not None and str(value).strip()}
+    if patch.get("run_at") and patch.get("cron"):
+        return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
+            "ERROR: FOLLOWUP_TRIGGER_REQUIRED: supply run_at or cron, not both. Nothing changed.")))
+    for key in ("objective", "context"):
+        if error := _text_size_error(key, patch.get(key, "")):
+            return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=error))
+    notes = ""
+    if "reasoning_effort" in patch:
+        try:
+            effort, notes = _starting_effort(patch.pop("reasoning_effort"))
+        except ValueError as exc:
+            return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
+                f"ERROR: FOLLOWUP_EFFORT_INVALID: {exc}. Nothing changed.")))
+        if effort:
+            patch["reasoning_effort"] = effort
+    if "run_at" in patch:
+        patch["trigger"] = {"type": "once", "run_at": patch.pop("run_at")}
+    elif "cron" in patch:
+        patch["trigger"] = {"type": "cron", "expr": patch.pop("cron")}
+    outcome = patch_scheduled_task(schedule_id, patch, reason=reason, actor="agent",
+                                   task_id=str(getattr(ctx, "task_id", "") or ""), drive_root=root)
+    if outcome.get("ok") is False:
+        return publish_no_effect(ctx, json.dumps(outcome, ensure_ascii=False), tool_name="manage_schedules")
+    facts = {key: outcome[key] for key in ("status", "changed_fields", "audit", "reconsidered_claim")}
+    row = {key: value for key, value in outcome.items() if key not in facts}
+    if notes:
+        facts["argument_note"] = notes.strip()
+    return _schedule_definition_reply(row, ok=outcome["audit"] == "recorded",
+                                      changed=outcome["status"] == "updated", **facts)
+
+
+def _text_size_error(field: str, text: str) -> str:
+    limit = _MAX_OBJECTIVE_CHARS if field == "objective" else _MAX_CONTEXT_CHARS
+    return (f"ERROR: FOLLOWUP_TEXT_TOO_LONG: {field} is {len(text)} chars; the limit is {limit}. "
+            "Shorten it — nothing was truncated and nothing changed.") if len(text) > limit else ""
+
+
+def _starting_effort(value: Any) -> tuple[str, str]:
+    from ouroboros.runtime_mode_policy import effort_range_binds
+    from ouroboros.settings_scales import effort_range
+
+    effort = requested_effort(value)
+    if effort_range_binds():
+        return "", " " + ignored_argument_note(
+            "reasoning_effort", effort,
+            "outside Cyber Pro a future task I schedule starts at my human's recommended level "
+            f"({effort_range()['recommended']})") + "."
+    return effort, ""
 
 
 def get_tools() -> List[ToolEntry]:
@@ -250,9 +328,16 @@ def get_tools() -> List[ToolEntry]:
                 "each row contains only a bounded objective preview, never full context."
             ),
             "parameters": {"type": "object", "properties": {
-                "action": {"type": "string", "enum": ["list", "disable", "delete", "restore"]},
-                "schedule_id": {"type": "string", "description": "Schedule id for a change."},
+                "action": {"type": "string", "enum": ["list", "get", "update", "disable", "delete", "restore"]},
+                "schedule_id": {"type": "string", "description": "Schedule id for get or a change."},
                 "reason": {"type": "string", "description": "Why this change is needed."},
+                "name": {"type": "string", "description": "Update: your label for the schedule. Blank means unchanged."},
+                "objective": {"type": "string", "description": f"Update: task objective or exact note text (max {_MAX_OBJECTIVE_CHARS} chars). Blank means unchanged."},
+                "context": {"type": "string", "description": f"Update: task context (max {_MAX_CONTEXT_CHARS} chars). Blank means unchanged; clearing context is not offered."},
+                "run_at": {"type": "string", "description": "Update: replace the trigger with a one-shot ISO 8601 instant (naive = UTC). Mutually exclusive with cron; blank means unchanged."},
+                "cron": {"type": "string", "description": "Update: replace the trigger with a recurring 5-field cron expression. Mutually exclusive with run_at; blank means unchanged."},
+                "timezone": {"type": "string", "description": "Update: IANA timezone. Blank means unchanged."},
+                "reasoning_effort": {"type": "string", "enum": ["", *EFFORT_SCALE], "description": "Update: starting effort for future tasks, applied in Cyber Pro only. Otherwise ignored with a disclosure. Blank means unchanged."},
                 "expected_hold_id": {"type": "string", "description": "Exact hold_id from list, required to restore a held row. A stale identity refuses."},
                 "relation": {"type": "string", "enum": ["related", "independent"], "description": "Resolve a legacy unknown relationship on restore. Related must bind the existing origin; no fresh budget is inferred."},
                 "offset": {"type": "integer", "minimum": 0, "description": "Zero-based list offset."},
@@ -384,40 +469,26 @@ def _handle_schedule_followup(ctx: ToolContext, **params) -> str:
         return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=("ERROR: FOLLOWUP_OBJECTIVE_REQUIRED: write the future task's objective in plain language.")))
     # Typed refusal, never a silent cut: the text rides VERBATIM into the future
     # task, so truncating it here would silently change what that task is.
-    if len(objective) > _MAX_OBJECTIVE_CHARS:
-        return (
-            publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(f"ERROR: FOLLOWUP_TEXT_TOO_LONG: objective is {len(objective)} chars; the limit is "
-            f"{_MAX_OBJECTIVE_CHARS}. Shorten it — nothing was truncated and nothing was scheduled.")))
-        )
+    if error := _text_size_error("objective", objective):
+        return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=error))
     context = str(params.get("context") or "").strip()
     if notify and context:
         return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
             "ERROR: FOLLOWUP_NOTIFY_CONTEXT: a note is shown exactly as its objective; put what the owner "
             "should read there and omit context. Nothing was scheduled.")))
-    if len(context) > _MAX_CONTEXT_CHARS:
-        return (
-            publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(f"ERROR: FOLLOWUP_TEXT_TOO_LONG: context is {len(context)} chars; the limit is "
-            f"{_MAX_CONTEXT_CHARS}. Shorten it — nothing was truncated and nothing was scheduled.")))
-        )
+    if error := _text_size_error("context", context):
+        return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=error))
     effort = ""
     if params.get("reasoning_effort") is not None and notify:
         timezone_note += " " + ignored_argument_note(
             "reasoning_effort", params["reasoning_effort"], "a note wakes no model") + "."
     elif params.get("reasoning_effort") is not None:
         try:
-            effort = requested_effort(params["reasoning_effort"])
+            effort, effort_note = _starting_effort(params["reasoning_effort"])
+            timezone_note += effort_note
         except ValueError as exc:
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
                 f"ERROR: FOLLOWUP_EFFORT_INVALID: {exc}. Nothing was scheduled.")))
-        from ouroboros.runtime_mode_policy import effort_range_binds
-        from ouroboros.settings_scales import effort_range
-
-        if effort_range_binds():  # a root Ouroboros creates itself starts at the recommended level
-            timezone_note += " " + ignored_argument_note(
-                "reasoning_effort", effort,
-                "outside Cyber Pro a future task I schedule starts at my human's recommended level "
-                f"({effort_range()['recommended']})") + "."
-            effort = ""
     from ouroboros.tool_access import canonical_data_root
     from supervisor.queue import schedule_transaction
 
