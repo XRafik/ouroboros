@@ -179,8 +179,9 @@ def test_schedule_mutation_fails_closed_when_profile_resolution_is_unavailable(t
     assert "RESOURCE_CONSTRAINT_BLOCKED" in blocked
 
 
-def test_presence_gets_no_schedule_authority_at_all(tmp_path):
+def test_presence_gets_no_schedule_authority_at_all(tmp_path, monkeypatch):
     """No Presence expansion: an admitted guest room neither reads nor writes it."""
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")  # the tool's own boundary, not Safety
     guest = _registry(tmp_path, {"presence": {"event": {"source_event_id": "presence-1"}}})
     for args in ({"action": "list"}, {"action": "get", "schedule_id": "s1"},
                  {"action": "update", "schedule_id": "s1", "reason": "x", "objective": "Changed"},

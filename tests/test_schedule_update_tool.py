@@ -9,7 +9,10 @@ from tests.test_consciousness_authority import _registry, _wake_task
 
 
 @pytest.fixture
-def registry(tmp_path):
+def registry(tmp_path, monkeypatch):
+    # update is Safety-checked at the calling work's level; these tests pin the tool's own authority.
+    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     registry = _registry(tmp_path)
     queue.upsert_scheduled_task({
         "id": "s1", "name": "Morning review", "enabled": False, "timezone": "UTC",

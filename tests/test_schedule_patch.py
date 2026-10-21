@@ -26,7 +26,9 @@ def test_patch_changes_only_supplied_fields_and_audits_names(root):
     before = _rows(root)[0]
     reply = patch(root, {"name": "New label"})
     row = _rows(root)[0]
-    assert row == {**before, "name": "New label", "updated_at": row["updated_at"]}
+    # The host stamps who wrote the change; an unattributed caller is not the owner.
+    assert row == {**before, "name": "New label", "updated_at": row["updated_at"],
+                   "writer_kind": "consciousness", "writer_origin": row["writer_origin"]}
     assert reply["status"] == "updated" and reply["changed_fields"] == ["name"]
     assert not reply["reconsidered_claim"] and reply["audit"] == "recorded"
     events = _events(root)
