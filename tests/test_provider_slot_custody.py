@@ -61,3 +61,30 @@ def test_capacity_timeout_records_no_dispatch_then_a_free_slot_sends(tmp_path, m
         assert ua.execute_physical_attempt(_request(), wrapped, extractor=_extract) == {"answer": "ok"}
     assert sends == [True]
     assert [row["state"] for row in attempt_rows_in_start_order(tmp_path)] == ["released", "settled"]
+
+
+def test_owner_pause_cancels_a_queued_sender_before_physical_dispatch(tmp_path, monkeypatch, scope):
+    monkeypatch.setenv("OUROBOROS_MODEL_MAX_CONCURRENCY", "1")
+    monkeypatch.setenv("OUROBOROS_MODEL_SLOT_MAX_WAIT_SEC", "10")
+    sends, outcome = [], {}
+    wrapped = mc.limit_physical_send(ROUTE, lambda: sends.append(True) or {"answer": "ok"})
+    with mc.model_call_slot("holder", route=ROUTE):
+        thread, _owner = _call(tmp_path, scope, wrapped, outcome, abandonable=False)
+        try:
+            _until(lambda: bool(_records(tmp_path, "ticket")))
+            owner_pause.install_fence(tmp_path, "root", request_id="queued-pause")
+            _until(lambda: "returned_at" in outcome)
+            assert getattr(outcome["error"], "control_reason", "") == "owner_pause"
+            assert not sends and not _records(tmp_path, "ticket")
+            assert len(_records(tmp_path, "slot")) == 1
+            assert attempt_rows_in_start_order(tmp_path)[0]["state"] == "released"
+        finally:
+            thread.join(30)
+            assert not thread.is_alive()
+    owner_pause.release_fence(tmp_path, "root", reason="test_resume")
+    resumed = {}
+    thread, _owner = _call(tmp_path, scope, wrapped, resumed, abandonable=False)
+    thread.join(30)
+    assert not thread.is_alive()
+    assert resumed.get("result") == {"answer": "ok"} and sends == [True]
+    assert [row["state"] for row in attempt_rows_in_start_order(tmp_path)] == ["released", "settled"]

@@ -157,6 +157,13 @@ class _Waiter:
             raise ModelSlotCancelled("Provider capacity wait cancelled before dispatch")
         if self.check is not None:
             self.check()
+            from ouroboros.owner_pause import RAIL_OWNER_PAUSE, scope_fence
+            from ouroboros.llm_attempt import _PhysicalSendNotStarted
+
+            # Accounting's executor handoff precedes this queue. A queued waiter
+            # has not started provider work, so Pause still cancels admission.
+            if self.path is not None and scope_fence():
+                raise _PhysicalSendNotStarted(RAIL_OWNER_PAUSE)
         remaining = self.until - time.monotonic()
         if remaining <= 0:
             raise ModelSlotTimeout("Provider capacity wait expired before dispatch")
