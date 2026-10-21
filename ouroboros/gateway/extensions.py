@@ -992,14 +992,6 @@ async def api_skill_reconcile(request: Request) -> JSONResponse:
     _broadcast_extension_lifecycle(
         request, skill_name, state.get("action"), state.get("reason"),
     )
-    # Reconcile can flip grants/load state: refresh schedule readiness off the
-    # event loop because the schedule resync waits for a lock.
-    try:
-        from supervisor.queue import resync_skill_schedules
-
-        await asyncio.to_thread(resync_skill_schedules, drive_root)
-    except Exception:
-        log.debug("api_skill_reconcile schedule sync failed", exc_info=True)
     return JSONResponse(extension_reconcile_receipt(skill_name, state))
 
 
