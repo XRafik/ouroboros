@@ -107,8 +107,13 @@ def remember_failed_profile(target: dict, parameters: dict, error: Any) -> None:
 def same_route_refusal(accumulated_usage: dict) -> bool:
     """Did this round already get a refusal that a repeat of it cannot cure?"""
     return (str(accumulated_usage.get("_last_llm_error_kind") or "") == "model_substituted"
-            or str(accumulated_usage.get("_last_llm_provider_code") or "") in {
-                "invalid_continuation", "model_capability_refused"})
+            or str(accumulated_usage.get("_last_llm_provider_code") or "") == "invalid_continuation"
+            or capability_refused(accumulated_usage))
+
+
+def capability_refused(accumulated_usage: dict) -> bool:
+    """The round's LAST failure itself, not an earlier sticky code, is an engine capability refusal."""
+    return str((accumulated_usage.get("_last_llm_failure") or {}).get("provider_code") or "") == "model_capability_refused"
 
 
 def stamp_substitutions(accumulated_usage: dict, error: Any) -> None:
@@ -456,10 +461,11 @@ class CapabilityRetry:
 
     def unsent(self, failure: Any) -> None:
         """A correlated send the round's bound check refused (an exact admitted candidate
-        is not this request) ends as the original refusal, like an invalid correlation."""
+        is not this request) ends as the original refusal, like an invalid correlation.
+        Only that exact class: Stop, Pause and deadline subclasses stay their own control."""
         from ouroboros.usage_accounting import PhysicalAttemptPreconditionFailed
 
-        if self.original is not None and isinstance(failure, PhysicalAttemptPreconditionFailed):
+        if self.original is not None and type(failure) is PhysicalAttemptPreconditionFailed:
             self.original.ledger_attempt_ids = list(dict.fromkeys(
                 [*self.attempts, *([failure.attempt_id] if failure.attempt_id else [])]))
             raise self.original from None

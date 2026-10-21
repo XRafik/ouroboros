@@ -197,6 +197,21 @@ class TestOwnerDelivery:
         assert (event["chat_id"], event["task_id"]) == (1, "")
         assert event["text"].endswith("\nFirst seen in Launch Plan › Draft the outline.")
 
+    def test_a_label_that_cannot_be_read_does_not_drop_the_notice(self, tmp_path, monkeypatch):
+        from ouroboros import projects_registry
+        from supervisor import schedule_notes
+
+        def unreadable(*_args, **_kwargs):
+            raise OSError("registry unreadable")
+
+        monkeypatch.setattr(schedule_notes, "owner_chat_id", lambda root: 1)
+        monkeypatch.setattr(projects_registry, "task_presentation_snapshot", unreadable)
+        events, scope = self.scope(tmp_path)
+        with scope:
+            model_wait.announce_capability_refusal(error(refusal()), drive_root=tmp_path)
+        event = events.get_nowait()
+        assert event["delivery_id"] == capability_notice(refusal())[0] and "First seen" not in event["text"]
+
     def test_a_bare_library_caller_has_no_chat_side_effect(self, tmp_path):
         from supervisor.terminal_delivery import pending_deliveries
 

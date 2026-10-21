@@ -1157,10 +1157,13 @@ def provider_recovery_hint(accumulated_usage: Dict[str, Any]) -> str:
             "rather than the request itself. Dropping it and sending the same "
             "conversation again is the repair, and this round already spent it."
         )
-    if kind == "bad_request" and str(accumulated_usage.get("_last_llm_provider_code") or "") == "model_capability_refused":
+    from ouroboros.llm_substitution import capability_refused
+
+    if kind == "bad_request" and capability_refused(accumulated_usage):
         return (
-            " The account cannot serve this model, and no allowed account took the request. "
-            "Accounts shows the temporary marks; choose another model or an account whose plan serves it."
+            " The accounts tried cannot serve this model, and this round asks no other account. "
+            "A later request may reach another one; when none can, the owner chat names them "
+            "and Accounts shows any temporary marks."
         )
     if kind in {"quota_exhausted", "auth_error", "request_too_large", "bad_request", "context_overflow"}:
         guidance = {

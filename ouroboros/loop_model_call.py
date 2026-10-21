@@ -396,6 +396,8 @@ def _run_cross_model_fallback_chain(
         _cooled(fallback_model, fallback_use_local, fallback_role)
         previous_model, previous_tag = fallback_model, ftag
     fenced = msg is None and _walk_fenced(tools._ctx, accumulated_usage)
+    if msg is None and tried and not fenced and str(accumulated_usage.get("_last_llm_error_kind") or "") != "llm_output_exhausted":
+        accumulated_usage["_last_llm_failure"] = entry_failure  # the acting route's own failure decides its salvage
     if deferred is None:
         deferred = getattr(tools._ctx, "_deferred_resource_refusal", None)
     owner_question = (task_type != "presence" and deferred is not None and not own_wait

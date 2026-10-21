@@ -180,6 +180,83 @@ def test_an_ordinary_round_send_keeps_the_grant(replay, fits):
     assert len(judged) == 2
 
 
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("reject_on", [1, 2], ids=["first_send", "correlated_send"])
+def test_a_bound_check_refusal_is_the_original_refusal_only_after_a_grant(replay, asynchronous, reject_on):
+    from ouroboros.usage_accounting import PhysicalAttemptPreconditionFailed, bind_physical_attempt_context
+
+    f = replay("serve")
+    judged = []
+
+    def bound(request):
+        judged.append(request)
+        return len(judged) != reject_on
+
+    expected = PhysicalAttemptPreconditionFailed if reject_on == 1 else transport.ClaudexorModelError
+    with bind_physical_attempt_context(None, candidate_predicate=bound):
+        with pytest.raises(expected) as raised:
+            call(f, asynchronous)
+    assert len(f.uploads) == reject_on - 1 and len(judged) == reject_on
+    if reject_on == 2:
+        assert raised.value.code == "model_capability_refused" and len(raised.value.ledger_attempt_ids) == 2
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+@pytest.mark.parametrize("control", ["deadline", "cancelled", "owner_pause"])
+def test_a_control_before_the_correlated_send_stays_that_control(replay, monkeypatch, asynchronous, control):
+    """Stop, Pause or a spent deadline between the grant and the correlated send is the task's
+    own control, never the original refusal."""
+    from ouroboros.usage_accounting import bind_physical_attempt_context
+
+    f = replay("serve")
+    owner = model_wait.current_model_wait()
+    original = transport._accounted_request
+
+    def prepare(invocation):
+        request = original(invocation)
+        if invocation.payload.get("retryOfOperationId"):
+            if control == "deadline":
+                monkeypatch.setitem(owner.task, "deadline_at", "2000-01-01T00:00:00+00:00")
+            elif control == "cancelled":
+                (f.root / "state" / "cancel_intents.json").write_text(json.dumps({"schema_version": 1, "intents": {
+                    TASK["id"]: {"task_id": TASK["id"], "request_id": "stop-before-retry", "state": "requested"}}}),
+                    encoding="utf-8")
+            else:
+                from ouroboros.owner_pause import install_fence
+                install_fence(f.root, TASK["id"], request_id="pause-before-retry")
+            assert (owner.pre_dispatch_pause() if control == "owner_pause"
+                    else owner.control_reason(strict_current=True)) == control
+        return request
+
+    monkeypatch.setattr(transport, "_accounted_request", prepare)
+    with bind_physical_attempt_context(None, candidate_predicate=lambda request: None):
+        with pytest.raises(model_wait.ModelWaitInterrupted) as raised:
+            call(f, asynchronous)
+    assert raised.value.control_reason == control and len(f.uploads) == 1
+
+
+@pytest.mark.parametrize("asynchronous", [False, True], ids=["sync", "async"])
+def test_a_failed_preparation_of_the_correlated_send_stays_that_failure(replay, monkeypatch, asynchronous):
+    from ouroboros import observability
+    from ouroboros.usage_accounting import (
+        PhysicalAttemptPreconditionFailed, PhysicalAttemptPreparationFailed, bind_physical_attempt_context)
+
+    f = replay("serve")
+    original = observability.persist_physical_candidate
+
+    def persist(*args, **kwargs):
+        if kwargs["candidate"].get("retryOfOperationId"):
+            raise OSError("disk full")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(observability, "persist_physical_candidate", persist)
+    with bind_physical_attempt_context(None, candidate_predicate=lambda request: None):
+        with pytest.raises(PhysicalAttemptPreparationFailed) as raised:
+            call(f, asynchronous)
+    assert not isinstance(raised.value, PhysicalAttemptPreconditionFailed)
+    assert isinstance(raised.value.__cause__, OSError) and len(f.uploads) == 1
+
+
 @pytest.mark.parametrize("scenario", ["continuation", "preferred", "third", "returns"])
 def test_real_wire_engine_stories(replay, monkeypatch, scenario):
     from tests import test_claudexor_capability_engine as engine
