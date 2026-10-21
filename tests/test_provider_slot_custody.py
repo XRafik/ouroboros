@@ -5,7 +5,6 @@ import pytest
 
 from ouroboros import model_concurrency as mc, owner_pause
 from tests.test_model_concurrency import ROUTE, _records, _until
-
 from tests.test_pause_model_receiver import _call, scope as scope
 from tests._usage_store_testing import attempt_rows_in_start_order
 
