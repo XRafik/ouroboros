@@ -13,6 +13,9 @@ import {
     PLACE_STATES, SILENT_CARD, authorWord, capitalized, listWords, placeScopeText, placeStateOf, wakeFactWord,
 } from './consciousness_words.js';
 
+/** The one «Connect a place» control (Dashboard and Settings draw this, never their own); a press opens the flow. */
+export const connectPlaceButtonHtml = () => '<button type="button" class="btn btn-default btn-sm" data-place-connect>Connect a place</button>';
+
 /** Ask the Skills page for one installed skill's card, or Browse filtered to connectors. */
 export function openSkillsFor(detail) {
     globalThis.window?.dispatchEvent?.(new CustomEvent('ouro:open-skills', { detail }));

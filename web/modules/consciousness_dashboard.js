@@ -11,7 +11,7 @@ import { chipHtml, skillIconHtml } from './skill_presentation.js';
 import { allowanceLabel } from './utils.js';
 import { PLACES_CHANGED_EVENT, readConsciousness, readConsciousnessFromState, readPlaces } from './consciousness_api.js';
 import { CHECK_CHIPS, clockText, durationText, placeStatusText, usdText } from './consciousness_words.js';
-import { openConnectPlace, openPlaceSheet } from './place_sheet.js';
+import { connectPlaceButtonHtml, openConnectPlace, openPlaceSheet } from './place_sheet.js';
 
 const SEP = ' · ';
 const REFRESH_MS = 20000;
@@ -110,7 +110,7 @@ export function placesCardHtml(places, { error = '', awakeIn = '' } = {}) {
                 <h4 class="storage-card-title">Places</h4>
                 <p class="consciousness-copy">Each connector you install adds its place here; open a place for everything about it.</p>
             </div>
-            <button type="button" class="btn btn-default btn-sm" data-cx-act="connect">Connect a place</button>
+            ${connectPlaceButtonHtml()}
         </div>
         ${body}
         <p class="consciousness-foot">Allowance, own tasks and concurrent conversations: <button type="button" class="consciousness-inline-link ui-hit-area" data-cx-act="settings">Settings ›</button></p>`;
@@ -232,10 +232,11 @@ export function initConsciousnessDashboard({ mount, ws, state, openSettingsTab, 
             if (place) openPlaceSheet(place, { returnFocus: row });
             return;
         }
+        const connect = event.target.closest('[data-place-connect]');
+        if (connect) { openConnectPlace({ returnFocus: connect }); return; }
         const button = event.target.closest('[data-cx-act]');
         if (!button || button.disabled) return;
         const act = button.dataset.cxAct;
-        if (act === 'connect') { openConnectPlace({ returnFocus: button }); return; }
         if (act === 'settings') {
             await openSettingsTab?.('behavior');
             document.getElementById('settings-consciousness')?.scrollIntoView({ block: 'start' });

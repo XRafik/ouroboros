@@ -63,7 +63,7 @@ test('a place row: icon, label, state and wakes in words, the day\'s spend; unkn
     assert.match(slack, /aria-label="Open Slack · Acme, awake here now: /);
     assert.match(dashboardPlaceRowHtml(places[1]), /class="consciousness-spend is-none">—</);
     assert.match(dashboardPlaceRowHtml(places[2]), />\$0\.00</);
-    assert.match(placesCardHtml(places), /data-cx-act="connect">Connect a place</);
+    assert.match(placesCardHtml(places), /data-place-connect>Connect a place</, "the one Connect control");
     assert.match(placesCardHtml([]), /No place yet/);
     assert.match(placesCardHtml(null, { error: 'Places could not be read: HTTP 404' }), /data-tone="warn"/);
 });

@@ -53,6 +53,9 @@ export function safetySectionHtml() {
         <div id="s-safety-skip-counter" class="settings-inline-note"></div>`;
 }
 
+/** The one in-page link to another Settings tab («Change in Models»); the section's binder opens the tab. */
+export const settingsLinkHtml = (tab, label) => `<button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="${escapeHtml(tab)}">${escapeHtml(label)}</button>`;
+
 const levelLabel = (value) => safetyLevelOf(value)?.label || String(value || 'Unknown');
 const modelName = (value) => parseModelSource(value).model || String(value || '');
 
@@ -88,9 +91,9 @@ function paintLines(root, settings) {
     const meta = settings?._meta || {};
     const recheck = normalizeRecheck(meta.policy_state?.safety_recheck);
     const set = (selector, html) => { const node = root.querySelector(selector); if (node) node.innerHTML = html; };
-    set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="models">Change in Models</button>`);
+    set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · ${settingsLinkHtml('models', 'Change in Models')}`);
     set('[data-safety-second-check]', `${escapeHtml(secondCheckText(recheck, settings))}${recheck.known
-        ? ' · <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="agents">Change in Agents</button>' : ''}`);
+        ? ` · ${settingsLinkHtml('agents', 'Change in Agents')}` : ''}`);
     const unmeasured = root.querySelector('[data-safety-unmeasured]');
     if (unmeasured) unmeasured.hidden = !(recheck.rowId && !recheck.measured);
     syncRecheckState(recheck, root);

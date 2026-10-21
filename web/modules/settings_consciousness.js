@@ -10,7 +10,8 @@ import { parseModelSource } from './route_editor_primitives.js';
 import { PLACES_CHANGED_EVENT, readPlaces } from './consciousness_api.js';
 import { AUTONOMY_LEVELS, placeStateWord } from './consciousness_words.js';
 import { skillIconHtml } from './skill_presentation.js';
-import { openConnectPlace, openPlaceSheet } from './place_sheet.js';
+import { connectPlaceButtonHtml, openConnectPlace, openPlaceSheet } from './place_sheet.js';
+import { settingsLinkHtml } from './settings_safety.js';
 
 /** The section body under its title (settings_ui.js keeps the `<h3>`). */
 export function consciousnessSectionHtml() {
@@ -37,7 +38,7 @@ export function consciousnessSectionHtml() {
         <div class="consciousness-places" data-consciousness-places>
             <div class="consciousness-places-head">
                 <h4 class="consciousness-subhead">Places</h4>
-                <button type="button" class="btn btn-default btn-sm" data-place-connect>Connect a place</button>
+                ${connectPlaceButtonHtml()}
             </div>
             <div class="consciousness-place-list" data-place-list><p class="settings-inline-note">Reading places…</p></div>
         </div>
@@ -64,7 +65,7 @@ export function consciousnessSectionHtml() {
                     <div class="form-field ui-field">
                         <label id="s-consciousness-model-label">Model</label>
                         <div class="consciousness-model-value" aria-labelledby="s-consciousness-model-label"><span data-consciousness-model>Uses Main</span>
-                            <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="models">Change in Models</button></div>
+                            ${settingsLinkHtml('models', 'Change in Models')}</div>
                     </div>
                 </div>
             </div>
