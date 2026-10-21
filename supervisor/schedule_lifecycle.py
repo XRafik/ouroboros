@@ -325,54 +325,34 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
                         "schedule_id": wanted, "audit": "not_written",
                         "detail": "the schedule audit log could not be written; nothing was changed"}
             running = _store._schedule_running_or_queued(wanted, root)
-            detail, removed = "", False
+            detail = ""
             if operation == "disable":
                 current["enabled"] = False
                 status = "updated"
             elif operation == "delete":
-                from supervisor.followup_policy import relation_kind
-                from supervisor.schedule_occurrence import deletion_settled, owed
-
-                status, owes = "deleted", owed(current, drive_root=root)
-                continuation = relation_kind(current) != "independent"
-                if owes is not False or not deletion_settled(current, drive_root=root):
-                    # An accepted run waits to be re-queued: removal is deferred until it
-                    # starts, because deleting a row never takes back an admission (#1315).
-                    # A continuation's row also carries its task's Stop/Restart release
-                    # and start binding, so it stays until that task settles.
-                    current["enabled"], current["delete_requested_at"] = False, utc_now_iso()
-                    status = "delete_deferred"
-                    if owes is None:
-                        detail = ("the occurrence receipt is missing, unreadable or conflicting; the disabled "
-                                  "row is retained until its execution history can be established")
-                    elif owes:
-                        detail = ("an accepted run is still owed; the row will be removed once that run starts"
-                                  + (" and its task settles" if continuation else ""))
-                    else:
-                        detail = ("no new run starts; this row continues a task that has not settled "
-                                  "and is removed once it settles")
-                else:
-                    tasks = [item for item in tasks if str(item.get("id") or "") != wanted]
-                    removed = True
-            elif _is_consumed_once(current):
+                current.update(enabled=False, delete_requested_at=utc_now_iso(),
+                               delete_requested_by=str(actor), delete_reason=str(reason)[:500])
+                status = "withdrawn"
+                detail = "removed after the retention window once its work has settled"
+            elif _is_consumed_once(current) and not current.get("delete_requested_at"):
                 status = "consumed_not_rearmed"
                 detail = "a one-shot that already fired is history; schedule a new run_at instead"
             else:
                 # A new explicit Restore may cancel a still-pending deletion;
                 # exact hold releases return above and never change this intent.
-                current["enabled"] = True
-                current.pop("delete_requested_at", None)
+                current["enabled"] = not _is_consumed_once(current)
+                for key in ("delete_requested_at", "delete_requested_by", "delete_reason"):
+                    current.pop(key, None)
                 status = "updated"
             changed = status not in UNCHANGED_STATUSES
             if changed:
-                if not removed:
-                    current["updated_at"] = utc_now_iso()
+                current["updated_at"] = utc_now_iso()
                 data["tasks"] = tasks
                 _write_scheduled_tasks(data, root)
             recorded = _audit_schedule_mutation(
                 phase="outcome", result=status, before=before,
-                after=(None if removed else current), **audit)
-            achieved = status in {"updated", "deleted", "delete_deferred"}
+                after=current, **audit)
+            achieved = status in {"updated", "withdrawn"}
             if changed and not recorded:
                 # Keep the lifecycle blocker beside the audit disclosure: a lost
                 # outcome record must not erase WHY the row is still not ready.
@@ -385,7 +365,7 @@ def mutate_scheduled_task(action: str, schedule_id: str, *, reason: str,
                 "running_or_queued": running,
                 "audit": "recorded" if recorded else ("incomplete" if changed else "not_written"),
                 **({"detail": detail} if detail else {}),
-                "schedule": None if removed else _audit_row(current),
+                "schedule": _audit_row(current),
             }
     except ScheduleLockTimeout as exc:
         return {"ok": False, "changed": False, "status": "lock_timeout",

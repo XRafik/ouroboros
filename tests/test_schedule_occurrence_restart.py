@@ -285,12 +285,11 @@ def test_worker_delete_reads_receipt_from_its_canonical_table_root(q, tmp_path, 
     outcome = json.loads(_manage_schedules(ctx, action="delete", schedule_id="s1", reason="owner"))
     assert outcome["ok"] and outcome["running_or_queued"] is None  # no snapshot required for custody
     rows = queue_schedules.load_schedule_store(canonical)["tasks"]
-    if state_kind == "missing":
-        assert outcome["status"] == "deleted" and outcome["schedule"] is None and not rows
-    else:
-        assert outcome["status"] == "delete_deferred" and outcome["schedule"] is not None
-        assert len(rows) == 1 and rows[0]["delete_requested_at"] and not rows[0]["enabled"]
-        assert ("accepted run" in outcome["detail"]) is (state_kind == "accepted")
+    assert outcome["status"] == "withdrawn" and outcome["schedule"] is not None
+    assert len(rows) == 1 and rows[0]["delete_requested_at"] and not rows[0]["enabled"]
+    assert rows[0]["occurrence"] == row["occurrence"] or rows[0]["occurrence"] == {
+        "fingerprint": occurrence.fingerprint(row), **row["occurrence"]}
+
 
 
 @pytest.mark.parametrize("clocks", ["both", "receipt_only", "row_only", "unknown"])

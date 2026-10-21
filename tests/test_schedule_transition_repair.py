@@ -273,7 +273,8 @@ def test_legacy_unstarted_claim_obeys_current_controls(q, monkeypatch, control, 
     if control in {"disabled", "deleted", "future"}:
         assert not q.pending and not load_task_result(q.root, claimed["task_id"])
         if control == "deleted":
-            assert "s1" not in _rows(q)
+            assert _rows(q)["s1"]["delete_requested_at"]
+            assert "occurrence" not in _rows(q)["s1"]
         else:
             assert "occurrence" not in _rows(q)["s1"]
     else:
@@ -286,7 +287,7 @@ def test_legacy_unstarted_claim_obeys_current_controls(q, monkeypatch, control, 
             assert task["id"] != claimed["task_id"] and "current authored text" in task["text"]
 
 
-def test_deferred_unstarted_delete_is_finished_during_admission_recheck(q, monkeypatch):  # noqa: F811
+def test_deferred_unstarted_delete_keeps_withdrawal_during_admission_recheck(q, monkeypatch):  # noqa: F811
     _clock(monkeypatch)
     row = _refused(q, monkeypatch)
     prepared = occurrence.prepare(occurrence.view(row))
@@ -295,4 +296,5 @@ def test_deferred_unstarted_delete_is_finished_during_admission_recheck(q, monke
         data["tasks"][0].update(enabled=False, delete_requested_at="2026-09-27T12:00:00+00:00")
         queue_schedules._write_scheduled_tasks(data)
     occurrence.admit([prepared])
-    assert not q.pending and "s1" not in _rows(q)
+    assert not q.pending and _rows(q)["s1"]["delete_requested_at"]
+    assert "occurrence" not in _rows(q)["s1"]

@@ -337,14 +337,10 @@ def repair_followup_binding(record: Dict[str, Any]) -> bool:
         return False
 
 
-def discard_claim(record: Dict[str, Any], data: Dict[str, Any]) -> bool:
-    """Drop unaccepted work and finish any earlier deferred delete atomically."""
+def discard_claim(record: Dict[str, Any]) -> None:
+    """Drop only unaccepted work; the audited retention pass owns row removal."""
     record.pop("occurrence", None)
     record.pop("hold", None)
-    if record.get("delete_requested_at") and deletion_settled(record):
-        data["tasks"] = [row for row in data.get("tasks") or [] if row is not record]
-        return True
-    return False
 
 
 def settle(record: Dict[str, Any]) -> None:
@@ -661,7 +657,7 @@ def admit(prepared: List[Dict[str, Any]], *, stop: Optional[Callable[[], bool]] 
                 continue
             changed = True
             if verdict == "reconsider":
-                discard_claim(record, data)
+                discard_claim(record)
                 continue
             if verdict not in {"prepare", "republish"}:
                 continue
@@ -669,7 +665,7 @@ def admit(prepared: List[Dict[str, Any]], *, stop: Optional[Callable[[], bool]] 
                 continue  # accepted/held facts changed: prepare their frozen task on the next pass
             fresh_claim = verdict == "prepare"
             if fresh_claim and (not record.get("enabled", True) or fingerprint(record) != item["fingerprint"]):
-                discard_claim(record, data)  # disabled/edited during prepare: future only
+                discard_claim(record)  # disabled/edited during prepare: future only
                 continue
             if item.get("hold"):
                 set_hold(record, *item["hold"])
@@ -739,8 +735,7 @@ def _refused(record: Dict[str, Any], block: str, outcome: Dict[str, Any], data: 
     trigger = record.get("trigger") if isinstance(record.get("trigger"), dict) else {}
     if block == "project_routing_fence" and outcome.get("_project_lifecycle") == "tombstoned":
         message = f"Scheduled task was not queued: the project {outcome.get('_project_id') or ''} was deleted."
-        if discard_claim(record, data):
-            return
+        discard_claim(record)
         record["last_error"] = message
         if str(trigger.get("type") or "cron") == "once":
             record.update(enabled=False, completed_at=utc_now_iso(), next_run_at="")

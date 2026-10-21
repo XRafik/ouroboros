@@ -650,6 +650,31 @@ def _task_from_schedule(record: Dict[str, Any], *, task_id: str = "") -> Dict[st
     return task
 
 
+def _remove_withdrawn(data, root, cutoff_epoch):
+    """Stage audited removals only after retention and settled work permit them.
+
+    The caller records outcomes after its durable table write. Age is checked
+    first: recent withdrawals never pay a receipt or settlement read for GC.
+    """
+    from supervisor.schedule_occurrence import owed, deletion_settled
+
+    removals = []
+    for record in list(data.get("tasks") or []):
+        at = _parse_schedule_time(record.get("delete_requested_at"), datetime.timezone.utc)
+        if at is None or at.timestamp() >= cutoff_epoch:
+            continue
+        if (isinstance(record.get("occurrence"), dict) or owed(record, drive_root=root) is not False
+                or not deletion_settled(record, drive_root=root)):
+            continue
+        audit = dict(drive_root=root, operation_id=uuid.uuid4().hex[:12], actor="host", task_id="",
+                     action="remove", schedule_id=str(record.get("id") or ""), reason="withdrawal_retention_elapsed")
+        if not _audit_schedule_mutation(phase="intent", result="intended", before=record, **audit):
+            continue
+        data["tasks"].remove(record)
+        removals.append((record, audit))
+    return removals
+
+
 def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
     """Admit due cron/once schedules through the occurrence protocol.
 
@@ -731,23 +756,15 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
                 changed = changed or verdict != "live"
                 if verdict == "reconsider":
                     # Unstarted work follows the current authored timing/control.
-                    if occurrences.discard_claim(record, data):
-                        continue
+                    occurrences.discard_claim(record)
                 elif verdict == "settled":
                     occurrences.settle(record)
-                    if record.get("delete_requested_at") and occurrences.deletion_settled(record):
-                        data["tasks"] = [row for row in data.get("tasks") or [] if row is not record]
-                        continue
                 elif verdict in {"prepare", "republish"}:
                     claims.append(occurrences.view(record, stored))
                     continue
                 else:
                     continue
-            if record.get("delete_requested_at") and occurrences.deletion_settled(record):
-                data["tasks"] = [row for row in data.get("tasks") or [] if row is not record]
-                changed = True
-                continue
-            if not record.get("enabled", True) or occurrences.holding(record, now_utc):
+            if record.get("delete_requested_at") or not record.get("enabled", True) or occurrences.holding(record, now_utc):
                 continue
             schedule_id = str(record.get("id") or "").strip()
             if not schedule_id:
@@ -814,6 +831,8 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
         # Runtime Cleanup SSOT; enabled records are never pruned — see the helper).
         from ouroboros.retention import age_cutoff, get_gc_retention_days
 
+        removals = _remove_withdrawn(data, root, age_cutoff(get_gc_retention_days()))
+        changed = bool(removals) or changed
         kept, pruned = _prune_consumed_once(list(data.get("tasks") or []),
                                             age_cutoff(get_gc_retention_days()), work_settled=occurrences.deletion_settled)
         if pruned:
@@ -821,6 +840,9 @@ def check_scheduled_tasks(*, stop: Callable[[], bool] | None = None) -> None:
         if changed:
             if _write_scheduled_tasks(data) is False:
                 return
+            for before, audit in removals:
+                if not _audit_schedule_mutation(phase="outcome", result="removed", before=before, **audit):
+                    log.error("schedule %s removed but its audit outcome is incomplete", before.get("id"))
             _queue().persist_queue_snapshot(reason="scheduled_tasks")
     notes.deliver(due_notes, root)
     occurrences.retain_deferred(data.get("tasks") or [])

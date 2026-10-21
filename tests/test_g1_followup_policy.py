@@ -542,24 +542,15 @@ def test_exact_restore_replay_cannot_lift_separate_suppression(world, suppressio
         if not later:
             first = action(suppression)
             assert first['changed']
-            if suppression == 'delete':
-                # Never fired: Delete really removes it; nothing restorable remains.
-                assert first['status'] == 'deleted' and first['schedule'] is None
-                assert action('restore', expected_hold_id=held)['status'] == 'not_found'
-                return
         assert action('restore', expected_hold_id=held)['status'] == 'hold_released'
         if later:
             outcome = action(suppression)
             assert outcome['changed']
-            if suppression == 'delete':
-                assert outcome['status'] == 'deleted'
-                replay = action('restore', expected_hold_id=held)
-                assert replay['status'] == 'not_found' and not replay['changed']
-                return
         before = row(root, sid)
         replay = action('restore', expected_hold_id=held)
         assert not replay['changed'], replay
         assert row(root, sid) == before and not before['enabled']
+        assert bool(before.get('delete_requested_at')) is (suppression == 'delete')
         # The separate, explicitly generic Restore remains available.
         assert action('restore')['ok']
         assert row(root, sid)['enabled']
