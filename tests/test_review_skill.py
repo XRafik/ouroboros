@@ -116,6 +116,28 @@ def test_an_advisory_item_and_an_unknown_item_warn_and_never_block(harness, answ
     assert _state(harness).gate_for(outcome.content_hash, enforcement="advisory")["executable_review"] is True
 
 
+def test_an_unreadable_findings_array_is_no_answer_and_a_readable_entry_beside_junk_still_counts(harness):
+    """A seat whose array carries no readable entry (no ``item``, no PASS/FAIL ``verdict``) has not answered:
+    the one Advisory reviewer's wave stays pending and non-executable, never clean (grok 1 / astra 4); a
+    seat with one readable FAIL beside junk counts for what it said."""
+    harness.answers["t1"] = json.dumps([{"item": "host_token_handling", "severity": "critical", "reason": "prints the token"}])
+    outcome = _review(harness, reviewers=["t1"], reason="small payload")
+    assert (outcome.status, outcome.pending, outcome.paid) == ("pending", False, True), outcome.error
+    assert "QUORUM_FAILED" in outcome.error or "quorum" in outcome.error.lower(), outcome.error
+    record = review_ledger.load_record(harness.drive, outcome.record_id)
+    assert record["verdict"]["aggregate"] == "QUORUM_FAILED" and record["rows"][0]["answers"]["skill"]["status"] == "unanswered"
+    assert "none of the 1 entries has an item and a PASS/FAIL verdict" in record["rows"][0]["answers"]["skill"]["error"]
+    assert _state(harness).gate_for(outcome.content_hash, enforcement="advisory")["executable_review"] is False
+
+    (harness.skill_dir / "SKILL.md").write_text("# weather\n\nRevised.\n", encoding="utf-8")
+    harness.answers["t1"] = json.dumps([{"unexpected": "not a finding"},
+                                        {"item": "no_repo_mutation", "verdict": "FAIL", "severity": "advisory", "reason": "commits"}])
+    outcome = _review(harness, reviewers=["t1"], reason="small payload")
+    assert outcome.status == "blockers" and len(harness.sends) == 2, outcome.error
+    [finding] = [f for f in outcome.findings if not f.get("additional")]
+    assert (finding["item"], finding["severity"]) == ("no_repo_mutation", "critical")
+
+
 # --- the brief: change-focused re-review (3A), the packet's size, the governance owed -------------------------
 
 

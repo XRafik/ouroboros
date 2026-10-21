@@ -19,7 +19,6 @@ from ouroboros.skill_review_status import (
     HARD_CRITICAL_ITEMS,
     SEVERITY_DRIVEN_ITEMS,
     STATUS_PENDING,
-    normalize_finding_severity,
     skill_severity_policy,
     status_from_findings,
 )
@@ -54,7 +53,11 @@ def test_status_clean_when_all_critical_pass():
 @pytest.mark.parametrize("severity", ["critical", "advisory"])
 def test_status_blockers_on_a_hard_item_whatever_the_seat_said(severity):
     assert status_from_findings([_fail("no_repo_mutation", severity)], "script") == "blockers"
-    assert normalize_finding_severity(_fail("no_repo_mutation", severity), skill_severity_policy("script"))["severity"] == "critical"
+    from ouroboros.review_ledger import apply_severity_policy
+
+    judged = apply_severity_policy({"status": "responded", "findings": [_fail("no_repo_mutation", severity)]},
+                                   skill_severity_policy("script"))
+    assert judged["findings"][0]["severity"] == "critical" and judged["verdict"] == "FAIL", "the ledger's one rule"
 
 
 def test_status_warnings_on_an_advisory_only_item():

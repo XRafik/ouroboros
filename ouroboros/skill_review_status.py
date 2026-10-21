@@ -80,30 +80,22 @@ def skill_severity_policy(skill_type: str, *, is_module_widget: bool = False, re
     return policy
 
 
-def normalize_finding_severity(finding: Dict[str, Any], policy: Dict[str, str]) -> Dict[str, Any]:
-    """One finding's severity under the policy (the same rule ``review_ledger.apply_severity_policy`` applies
-    while a wave's answers are parsed): a rewritten copy, never the caller's row."""
-    rule = str(policy.get(str(finding.get("item") or ""), policy.get("*", SEVERITY_SEAT)) or SEVERITY_SEAT)
-    given = str(finding.get("severity") or "").strip().lower()
-    if rule in (SEVERITY_CRITICAL, SEVERITY_ADVISORY):
-        severity = rule
-    else:  # the seat's word; a missing or unknown severity stays conservative (legacy persisted findings)
-        severity = SEVERITY_ADVISORY if given in {"advisory", "warning", "warn"} else SEVERITY_CRITICAL
-    return {**finding, "severity": severity}
-
-
 def status_from_findings(findings: List[Dict[str, Any]], skill_type: str, *, is_module_widget: bool = False,
                          review_profile: str = "") -> str:
     """The enforcement-independent verdict of persisted or collected findings: ``pending`` on a deterministic
     preflight (or PluginAPI admission) failure, ``blockers`` when any counted FAIL is critical under the policy,
     ``warnings`` when only advisory FAILs remain, else ``clean``. An adviser's finding (``additional``) is heard,
-    never counted."""
+    never counted. The policy is applied by the ledger's one rule (``review_ledger.apply_severity_policy``,
+    the same that decides a wave's seat verdicts; a missing or unknown severity under ``seat`` reads critical)."""
+    from ouroboros.review_ledger import apply_severity_policy  # lazy: no import-time edge into the review stack
+
     counted = [f for f in findings if isinstance(f, dict) and not f.get("additional")]
     if preflight_failed(counted):
         return STATUS_PENDING
     policy = skill_severity_policy(skill_type, is_module_widget=is_module_widget, review_profile=review_profile)
-    failed = [normalize_finding_severity(f, policy) for f in counted if str(f.get("verdict") or "").upper() == "FAIL"]
-    if any(f["severity"] == SEVERITY_CRITICAL for f in failed):
+    failed = [f for f in counted if str(f.get("verdict") or "").upper() == "FAIL"]
+    judged = apply_severity_policy({"status": "", "findings": failed}, policy)["findings"]
+    if any(f.get("severity") == SEVERITY_CRITICAL for f in judged):
         return STATUS_BLOCKERS
     return STATUS_WARNINGS if failed else STATUS_CLEAN
 

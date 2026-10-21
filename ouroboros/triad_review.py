@@ -409,7 +409,7 @@ def _change_answer(items: List[Dict[str, Any]], severity_policy: Any = None) -> 
 
 def _unanswered(part: str, error: str = "") -> Dict[str, Any]:
     answer = {"status": "unanswered", "verdict": "", "findings": [], "critical": 0,
-              "coverage": "n/a" if part == "change" else "missing"}
+              "coverage": "missing" if part == "coupling" else "n/a"}
     if error:
         answer["error"] = error
     return answer
@@ -517,9 +517,16 @@ def parse_seat_answers(result_json: Dict[str, Any], row_parts: Dict[str, Sequenc
                 if parsed is None or (not parsed and not empty_array_is_verified_clean(raw_text)):
                     answers = None
                 else:
-                    answers = {parts[0]: _change_answer(_change_items(
-                        [e for e in parsed if isinstance(e, dict)], model_label=model_label, slot_id=slot_id),
-                        severity_policy)}
+                    items = _change_items([e for e in parsed if isinstance(e, dict)], model_label=model_label,
+                                          slot_id=slot_id)
+                    if parsed and not items:
+                        # The seat wrote entries the gate cannot read (no ``item``, a verdict outside
+                        # PASS/FAIL): no answer, not a clean one — the rule contract B applies to its
+                        # change block, for every contract-A part alike.
+                        answers = {parts[0]: _unanswered(parts[0], (
+                            f"none of the {len(parsed)} entries has an item and a PASS/FAIL verdict"))}
+                    else:
+                        answers = {parts[0]: _change_answer(items, severity_policy)}
             else:
                 answers = parse_two_part_answer(raw_text, parts, model_label=model_label, slot_id=slot_id)
             if answers is None:

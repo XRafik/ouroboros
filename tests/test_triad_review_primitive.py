@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from ouroboros.triad_review import (
     emit_review_model_error_events,
     extract_json_array,
@@ -57,6 +59,30 @@ def test_a_single_question_seat_answers_the_findings_array_and_may_omit_items():
     assert parsed.actor_records[1].answers["skill"] == {"status": "responded", "verdict": "PASS", "findings": [],
                                                        "critical": 0, "coverage": "n/a"}
     assert [f["item"] for f in parsed.findings] == ["a"]
+
+
+@pytest.mark.parametrize("part", ["skill", "result", "change"])
+def test_a_non_empty_array_with_no_readable_entry_is_no_answer_not_a_clean_one(part):
+    """Contract A, every single-question part alike (the rule contract B already applies to its change block):
+    an array whose entries carry no ``item`` or no PASS/FAIL ``verdict`` is a parse failure, never a PASS; a
+    seat with at least one readable entry keeps it (its junk siblings dropped); ``[]`` + NO_FINDINGS stays clean."""
+    unreadable = json.dumps([{"item": "host_token_handling", "severity": "critical", "reason": "prints the token"},
+                             {"note": "looks fine"}])
+    mixed = json.dumps([{"unexpected": "not a finding"},
+                        {"item": "bug_hunting", "verdict": "FAIL", "severity": "critical", "reason": "raises"}])
+    parsed = parse_seat_answers({"results": [
+        {"model": "m1", "slot_id": "s1", "text": unreadable},
+        {"model": "m2", "slot_id": "s2", "text": mixed},
+        {"model": "m3", "slot_id": "s3", "text": "[]\nNO_FINDINGS"},
+    ]}, {"s1": (part,), "s2": (part,), "s3": (part,)}, severity_policy={"host_token_handling": "critical"})
+    assert [r.status for r in parsed.actor_records] == ["parse_failure", "responded", "responded"]
+    assert parsed.responsive_models == ["m2 [s2]", "m3 [s3]"]
+    refused = parsed.actor_records[0].answers[part]
+    assert refused["status"] == "unanswered" and refused["verdict"] == "" and refused["findings"] == []
+    assert refused["error"] == "none of the 2 entries has an item and a PASS/FAIL verdict"
+    assert parsed.actor_records[1].answers[part]["verdict"] == "FAIL"
+    assert [f["item"] for f in parsed.findings] == ["bug_hunting"]
+    assert parsed.actor_records[2].answers[part]["verdict"] == "PASS"
 
 
 def test_a_declared_severity_policy_decides_the_seats_verdict_before_it_is_read():
