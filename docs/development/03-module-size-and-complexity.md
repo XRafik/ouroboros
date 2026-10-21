@@ -233,7 +233,7 @@ host-controlled below a finite ceiling. Below that ceiling, updates preserve the
 child's inline-size basis; the host controls vertical scrollbar mode while preserving
 horizontal overflow. Feedback-sensitive verification is event-driven on the relevant engine and proves
 convergence to a quiet fixed point with a real consumer or production-derived fixture
-that crosses the known wrapping threshold, not two snapshots. A module widget's faults
+that crosses the known wrapping threshold, not two snapshots. A module widget's own faults
 use `ouro-widget-error`; the builtin page sends bounded, best-effort reports to the
 existing event log (ARCHITECTURE §3 "Skills and Widgets"). These page-reported diagnostics
 are not task-execution evidence. Module source loading and declarative requests have a
