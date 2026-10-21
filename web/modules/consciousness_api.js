@@ -87,6 +87,10 @@ export function normalizePlacesResponse(raw) {
     return {
         places: list(data.places).map(normalizePlace).filter((place) => place.id),
         connectors: list(data.connectors).map(normalizeConnector).filter((connector) => connector.connector),
+        // Old connections the places migration could not move (absent on a server without the migration).
+        migrationProblems: list(data.migration_problems).map((problem) => ({
+            bindingId: text(problem?.binding_id), code: text(problem?.code), detail: text(problem?.detail),
+        })).filter((problem) => problem.bindingId || problem.code || problem.detail),
     };
 }
 

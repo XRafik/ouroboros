@@ -17,7 +17,9 @@ import {
     saveSafetyChecker, saveSafetyOwnerChanges, secondCheckText, takeCheckerChanges,
 } from '../modules/settings_safety.js';
 import { chooseRecheckRow, recheckDraft, recheckMarkHtml, syncRecheckState } from '../modules/safety_recheck.js';
-import { consciousnessModelText, consciousnessSectionHtml, settingsPlacesHtml } from '../modules/settings_consciousness.js';
+import {
+    consciousnessModelText, consciousnessSectionHtml, migrationProblemLines, settingsPlacesHtml,
+} from '../modules/settings_consciousness.js';
 import { parseAvailableSubagentsSetting, buildAvailableSubagentsSetting } from '../modules/subagents_settings.js';
 import { apiClient } from '../modules/api_client.js';
 
@@ -418,4 +420,22 @@ test('the Settings places list: icon, label, state word, unanswered count; each 
     assert.match(html, /aria-label="Open Mail · inbox: paused"/);
     assert.match(settingsPlacesHtml({ places: [] }), /No place yet\. Connect one from an installed connector\./);
     assert.match(settingsPlacesHtml({ error: 'Places could not be read: HTTP 404' }), /data-tone="warn"/);
+});
+
+test('an old connection the places migration could not move is said once, in Settings › Consciousness › Places', () => {
+    assert.deepEqual(normalizePlacesResponse(FIXTURE.places).migrationProblems, [], 'a server without the migration says nothing');
+    const { places, migrationProblems } = normalizePlacesResponse({ ...FIXTURE.places, migration_problems: [
+        { binding_id: 'b-1', code: 'connector_missing', detail: 'the connector telegram-bot is not installed.' },
+        { binding_id: 'b-2', code: 'connector_missing', detail: 'the connector telegram-bot is not installed' },
+        { binding_id: 'b-3', code: 'binding_unreadable', detail: '' },
+        { binding_id: '', code: '', detail: '' },
+    ] });
+    assert.deepEqual(migrationProblemLines(migrationProblems), [
+        'Could not move an old connection: the connector telegram-bot is not installed. Connect it again.',
+        'Could not move an old connection: binding unreadable. Connect it again.',
+    ]);
+    const html = settingsPlacesHtml({ places, problems: migrationProblems });
+    assert.equal((html.match(/Could not move an old connection/g) || []).length, 2);
+    assert.match(html, /<p class="settings-inline-note" data-tone="warn">Could not move/);
+    assert.match(settingsPlacesHtml({ places: [], problems: migrationProblems }), /Connect it again\.<\/p><p class="settings-inline-note">No place yet/);
 });
