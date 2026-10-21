@@ -91,6 +91,28 @@ def test_durable_handoff_waits_for_pool_terminal_even_before_queue_restore(clock
     assert clock.clock.next_wake_at == T0 + 5000 + DEFAULT * 2
 
 
+def test_matching_id_with_a_foreign_cause_cannot_finish_the_clock(clock, monkeypatch):
+    _launched(clock)
+    deadline = clock.clock.next_wake_at
+    monkeypatch.setattr(clock_module.time, "time", lambda: T0 + 5000)
+    clock.clock._wake_finished("wake0001", False, metadata=FOCUS, pooled=True)
+    assert clock.clock.next_wake_at == deadline and LAST_WAKE_STATE_KEY not in clock.store
+    clock.clock._wake_finished("wake0001", False, metadata=OWN, pooled=True)
+    assert clock.clock.next_wake_at == T0 + 5000 + DEFAULT * 2
+
+
+def test_pool_callback_filters_cause_before_calling_the_clock():
+    calls = []
+    ctx = SimpleNamespace(consciousness=SimpleNamespace(_wake_finished=lambda *args, **kwargs: calls.append((args, kwargs))))
+    pooled = {"execution_owner": {"kind": "pooled"}, "status": "completed"}
+    for metadata in (FOCUS, STARTED, OWNER):
+        finish_pooled_wake(ctx, "other", {**pooled, "metadata": metadata})
+    finish_pooled_wake(ctx, "own", {**pooled, "metadata": OWN, "execution_owner": {"kind": "direct"}})
+    assert calls == []
+    finish_pooled_wake(ctx, "own", {**pooled, "metadata": OWN})
+    assert calls == [(("own", True), {"metadata": OWN, "pooled": True})]
+
+
 def test_focus_and_descendants_do_not_delay_an_overdue_clock_but_owner_does(clock, monkeypatch):
     from supervisor import queue
     monkeypatch.setattr(queue, "PENDING", [_task("focus-pooled", FOCUS), _task("kid", STARTED)])
@@ -113,6 +135,7 @@ def test_counted_roots_are_exactly_autonomous_independent_roots(tmp_path, monkey
     q.PENDING.extend([_task("own", OWN), _task("focus", FOCUS), _task("started", STARTED),
                       _task("owner-commission", {**STARTED, "work_kind": "owner"}),
                       _task("kid", STARTED, parent_task_id="started", delegation_role="subagent"),
+                      _task("kid-role-missing", STARTED, parent_task_id="started"),
                       _task("continuation", STARTED, _consciousness_continuation=True)])
     q.RUNNING.update(started={"task": _task("started", STARTED)}, other={"task": _task("other", STARTED)})
     assert q.live_consciousness_root_count() == 2

@@ -188,6 +188,9 @@ def test_cause_rows_and_descendant_receipts_reduce_to_the_one_allowance(data_roo
             _settle(data_root, cost=cost, cost_final=True, task_id=task_id, root_task_id=task_id, category=category)
     # No bound scope after restart: the existing root's row supplies late receipts' cause.
     usage_store.forget(data_root)
+    # The root's cause wins even when a descendant carries the generic started stamp.
+    with ua.usage_scope(ua.UsageScope(drive_root=data_root, root_task_id="mail", consciousness_cause="started")):
+        _settle(data_root, cost=0.25, cost_final=True, task_id="mail-child", root_task_id="mail", category="subagent")
     ua.record_subscription_session("late-child", drive_root=data_root, route="fake:subscription", model="fake",
                                    task_id="child", root_task_id="started", spend_usd=0.5, category="subagent")
     ua.record_unmetered_external_dispatch("unknown-child", drive_root=data_root, model="fake",
@@ -196,13 +199,14 @@ def test_cause_rows_and_descendant_receipts_reduce_to_the_one_allowance(data_roo
     rows = list(_ledger_rows(data_root))
     child_rows = [row for row in rows if row.get("task_id") == "child"]
     assert len(child_rows) == 2 and {row["consciousness_cause"] for row in child_rows} == {"started"}
+    assert {row["consciousness_cause"] for row in rows if row.get("task_id") == "mail-child"} == {"place:mail"}
     assert all("consciousness_cause" not in row for row in rows if row.get("task_id") == "owner")
     window = allowance.allowance_window(data_root, now=T0)
     parts = {part["cause"]: part for part in window["spend_by_cause"]}
-    assert {cause: part["usd"] for cause, part in parts.items()} == {"own": 1.0, "place:mail": 2.0, "started": 3.5}
+    assert {cause: part["usd"] for cause, part in parts.items()} == {"own": 1.0, "place:mail": 2.25, "started": 3.5}
     assert parts["started"]["unmetered_calls"] == 1 and parts["own"]["unmetered_calls"] == 0
-    assert sum(part["usd"] for part in parts.values()) == window["settled_usd"] == 6.5
-    assert window["remaining_usd"] == 13.5
+    assert sum(part["usd"] for part in parts.values()) == window["settled_usd"] == 6.75
+    assert window["remaining_usd"] == 13.25
     # Export/re-import rebuilds attribution from the very same stamped money rows.
     usage_store.export_journal(data_root)
     usage_store.migrate_from_journal(data_root)
