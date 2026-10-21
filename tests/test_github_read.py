@@ -296,13 +296,25 @@ def test_list_pr_since_stops_at_the_first_older_row(gh):
     assert [i["number"] for i in payload["items"]] == [3] and payload["complete"] is True and payload["next_cursor"] == ""
 
 
-def test_merged_label_and_author_pr_filters_go_through_search(gh):
-    gh.answer = lambda p, argv, kw: json.dumps({"nameWithOwner": "owner/selected"}) if p.route == "repo view" \
-        else _rest({"total_count": 1, "incomplete_results": False, "items": [_issue(4, pull_request={"url": "x"})]})
-    line, payload = _payload(gh.read(method="list", kind="pr", state="merged", labels="bug", author="dev"))
-    assert line.startswith("github_read search pr in owner/selected: 1 item(s) of 1 for 'is:pr is:merged label:\"bug\" author:dev repo:owner/selected is:pr'")
-    assert gh.calls[0][0] == ["gh", "repo", "view", "--json", "nameWithOwner"] and "advanced_search=true" in gh.routes()[0]
-    assert any("answered by search" in note for note in payload["omitted"])
+@pytest.mark.parametrize("filters", [{"state": "merged"}, {"labels": "bug"}, {"author": "dev"}])
+@pytest.mark.parametrize("detail", ["concise", "full"])
+def test_search_backed_pr_lists_keep_facts_and_withhold_unreadable_counts(gh, filters, detail):
+    def answer(p, argv, kw):
+        if p.route == "graphql":
+            return json.dumps({"data": {"nodes": [{"id": "PR_node4", "commits": {"totalCount": 101},
+                "reviewDecision": "APPROVED", "headRefName": "feat", "headRefOid": SHA,
+                "headRepositoryOwner": {"login": "dev"}, "baseRefName": "main", "isDraft": True, "mergedAt": "t"}]}})
+        return _rest({"total_count": 1, "items": [_issue(4, node_id="PR_node4", html_url=f"{BASE}/pull/4", pull_request={})]})
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="list", kind="pr", detail=detail, **filters))
+    item = payload["items"][0]
+    assert item["commits"] == 101 and item["review_decision"] == "APPROVED" and item["draft"] is True
+    assert (item["head"]["ref"], item["base"]["ref"]) == ("feat", "main") if detail == "full" else (item["head"], item["base"]) == ("dev:feat", "main")
+    assert gh.calls[0][0] == ["gh", "repo", "view", "--json", "nameWithOwner"]
+    assert "advanced_search=true" in gh.routes()[0] and len(gh.routes()) == 2
+    gh.answer = lambda p, argv, kw: '{"data":{"nodes":[]}}' if p.route == "graphql" else answer(p, argv, kw)
+    text = gh.read(method="list", kind="pr", **filters)
+    assert "commit counts" in text and '"items"' not in text
 
 
 @pytest.mark.parametrize("kind,target,route,label", [

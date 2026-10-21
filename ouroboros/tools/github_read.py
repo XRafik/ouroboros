@@ -27,7 +27,8 @@ _LINK_NEXT_RE = re.compile(r'<([^>]*)>;\s*rel="next"')
 _PAGE_RE = re.compile(r"[?&]page=(\d+)")
 _URL_REPO_RE = re.compile(r"^https://([^/]+)/([^/]+)/([^/]+)/")
 # Exact commit counts and the review decision of listed PRs by node id: one fixed read, no commit objects.
-_PR_COMMIT_COUNTS_QUERY = "query($ids:[ID!]!){nodes(ids:$ids){...on PullRequest{id commits{totalCount} reviewDecision}}}"
+_PR_COMMIT_COUNTS_QUERY = ("query($ids:[ID!]!){nodes(ids:$ids){...on PullRequest{id commits{totalCount} reviewDecision "
+                           "headRefName headRefOid headRepositoryOwner{login} baseRefName isDraft mergedAt}}}")
 _PAGE_INFO = "pageInfo{hasNextPage endCursor}"
 _DISCUSSION_FIELDS = "id number title url createdAt updatedAt author{login} category{name} isAnswered comments{totalCount}"
 _GQL = {
@@ -548,12 +549,36 @@ def _pr_facts(read: _Read, rows: list) -> Tuple[Optional[dict], str]:
         return None, res.text
     try:
         nodes = json.loads(res.text)["data"]["nodes"]
-        facts = {node["id"]: (node["commits"]["totalCount"], node.get("reviewDecision")) for node in nodes}
+        facts = {node["id"]: node for node in nodes}
+        counts = [node["commits"]["totalCount"] for node in nodes]
     except (ValueError, TypeError, KeyError):
         return unavailable("the count response is malformed")
-    if len(facts) != len(nodes) or set(facts) != set(ids) or any(type(c) is not int or c < 0 for c, _d in facts.values()):
+    if len(facts) != len(nodes) or set(facts) != set(ids) or any(type(c) is not int or c < 0 for c in counts):
         return unavailable("the count response does not hold one count for every listed PR")
     return facts, ""
+
+
+def _pr_items(read: _Read, rows: list) -> Tuple[Optional[list], str]:
+    """The same exact PR facts for REST and search-backed list pages."""
+    if not rows:
+        return [], ""
+    facts, error = _pr_facts(read, rows)
+    if error:
+        return None, error
+    items = []
+    for row in rows:
+        node = facts[row["node_id"]]
+        enriched = {**row, "commits": node["commits"]["totalCount"]}
+        if "headRefName" in node:
+            owner = (node.get("headRepositoryOwner") or {}).get("login")
+            enriched["head"] = {"ref": node["headRefName"], "sha": node.get("headRefOid"),
+                                "label": f"{owner}:{node['headRefName']}" if owner else node["headRefName"]}
+            enriched["base"] = {"ref": node.get("baseRefName")}
+            enriched.update(draft=node.get("isDraft"), merged_at=node.get("mergedAt"))
+        item = enriched if read.detail == "full" else _pr_shape(read, enriched, full_body=False)
+        item["review_decision"] = node.get("reviewDecision")
+        items.append(read.project(item))
+    return items, ""
 
 
 def _list(read: _Read) -> str:
@@ -567,7 +592,6 @@ def _list(read: _Read) -> str:
         if read.args.get("author"):
             parts.append(f"author:{read.args['author']}")
         read.args["query"] = " ".join(parts)
-        read.omitted.append("merged state, labels and author filters on pull requests are answered by search; this is search(kind='pr')")
         return _search(read)
     params: Dict[str, Any] = {}
     label, shape, key = kind, None, "updated_at"
@@ -621,16 +645,9 @@ def _list(read: _Read) -> str:
         rows = read.since_filter(rows, key, facts, newest_first=kind == "pr")
     payload: Dict[str, Any] = {"target": number} if number else {}
     if kind == "pr" and rows:
-        pr_facts, error = _pr_facts(read, rows)
+        payload["items"], error = _pr_items(read, rows)
         if error:
             return error
-        items = []
-        for row in rows:
-            item = dict(row) if read.detail == "full" else _pr_shape(read, row, full_body=False)
-            count, decision = pr_facts[row["node_id"]]
-            item.update(commits=count, review_decision=decision)
-            items.append(read.project(item))
-        payload["items"] = items
     else:
         payload["items"] = read.rows(rows, shape)
     payload.update(facts)
@@ -696,14 +713,20 @@ def _search(read: _Read) -> str:
             return error
         if not isinstance(rows, dict) or not isinstance(rows.get("items"), list):
             return read.refuse(f"⚠️ TOOL_ERROR: GitHub's search answer holds no items: {str(rows)[:300]}", "TOOL_ERROR")
-        payload = {"query": q, "items": read.rows(rows["items"], lambda r: _issue_shape(read, r, full_body=False)), **facts}
+        if read.method == "list" and kind == "pr":
+            items, error = _pr_items(read, rows["items"])
+            if error:
+                return error
+        else:
+            items = read.rows(rows["items"], lambda r: _issue_shape(read, r, full_body=False))
+        payload = {"query": q, "items": items, **facts}
         if isinstance(rows.get("total_count"), int):
             payload["total_count"] = rows["total_count"]
         if rows.get("incomplete_results"):
             read.omitted.append("GitHub reports incomplete_results: the search timed out before covering everything; narrow the query")
     total = f" of {payload['total_count']}" if "total_count" in payload else ""
     more = f", more: cursor={facts['next_cursor']!r}" if not facts["complete"] else ""
-    return read.deliver(f"github_read search {kind} in {slug}: {len(payload['items'])} item(s){total} for {q!r}{more}", payload)
+    return read.deliver(f"github_read {read.method} {kind} in {slug}: {len(payload['items'])} item(s){total} for {q!r}{more}", payload)
 
 
 def _checks(read: _Read) -> str:

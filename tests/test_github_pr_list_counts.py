@@ -41,7 +41,7 @@ def gh(monkeypatch):
     def run(argv, **kwargs):
         world.calls.append((argv, kwargs))
         if argv[2] == "--include":
-            return SimpleNamespace(returncode=0, stdout=json.dumps(world.rows), stderr="")
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"total_count": len(world.rows), "items": world.rows} if "search/issues?" in argv[3] else world.rows), stderr="")
         assert argv == COUNT_ARGV, argv
         answer = world.count_answer
         if isinstance(answer, tuple):
@@ -64,7 +64,7 @@ def _items(text):
     return json.loads(text.partition("\n")[2])["items"]
 
 
-@pytest.mark.parametrize("state", ["open", "closed", "all"])
+@pytest.mark.parametrize("state", ["open", "closed", "merged", "all"])
 def test_fifty_prs_keep_metadata_order_and_exact_counts_in_two_reads(tmp_path, gh, monkeypatch, state):
     monkeypatch.setattr(github_read, "tool_result_limit", lambda name: 10 ** 6)  # fifty rows in one answer, no artifact
     ctx, _cwd = _context(tmp_path, "queued")
@@ -72,14 +72,18 @@ def test_fifty_prs_keep_metadata_order_and_exact_counts_in_two_reads(tmp_path, g
     gh.rows = _rows(*counts)
     gh.count_answer = _answer(list(reversed(_nodes(gh.rows, counts, ["APPROVED", None]))))  # association by id, not order
 
-    text = _list(ctx, state=state, limit=50)
+    text = _list(ctx, state=state, limit=50, **({"repo": "owner/selected"} if state == "merged" else {}))
 
     (list_argv, _), (count_argv, count_kw) = gh.calls
-    assert list_argv == ["gh", "api", "--include", PAGE.replace("per_page=30", "per_page=50") % state]
+    if state == "merged":
+        assert list_argv[:3] == ["gh", "api", "--include"] and "search/issues?" in list_argv[3]
+        assert "is%3Amerged" in list_argv[3] and "per_page=50" in list_argv[3]
+    else:
+        assert list_argv == ["gh", "api", "--include", PAGE.replace("per_page=30", "per_page=50") % state]
     request = json.loads(count_kw["input"])
     assert request == {"query": github_read._PR_COMMIT_COUNTS_QUERY, "variables": {"ids": [r["node_id"] for r in gh.rows]}}
     assert "commits{totalCount}" in request["query"] and "nodes(ids:$ids)" in request["query"] and "reviewDecision" in request["query"]
-    assert text.startswith(f"github_read list pr ({state}) in owner/selected: 50 item(s), complete")
+    assert "50 item(s)" in text and text.startswith("github_read list pr")
     items = _items(text)
     assert [(i["number"], i["commits"]) for i in items[:5]] == [(100, 0), (101, 1), (102, 100), (103, 101), (104, 250)]
     assert items[0]["draft"] is True and items[0]["review_decision"] == "APPROVED" and items[1]["review_decision"] is None
