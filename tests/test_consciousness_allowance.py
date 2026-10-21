@@ -172,6 +172,65 @@ def test_the_root_horizon_is_twice_the_window():
     assert allowance.ROOT_HORIZON_SEC == 2 * allowance.WINDOW_SEC == 48 * 3600
 
 
+def test_cause_rows_and_descendant_receipts_reduce_to_the_one_allowance(data_root, monkeypatch):
+    from ouroboros.task_results import write_task_result
+    from ouroboros.usage_origin import task_usage_scope
+
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_DAILY_USD", "20")
+    _at(monkeypatch, T0 - HOUR)
+    for task_id, cause, category, cost in [("own", "own", "consciousness", 1.0),
+                                          ("mail", "place:mail", "consciousness", 2.0),
+                                          ("started", "started", "consciousness_task", 3.0)]:
+        scope = task_usage_scope({"id": task_id, "metadata": {"consciousness_cause": cause, "usage_category": category}},
+                                 drive_root=data_root, root_task_id=task_id, parent_task_id="", billing={})
+        write_task_result(data_root, task_id, "running", root_task_id=task_id)
+        with ua.usage_scope(scope):
+            _settle(data_root, cost=cost, cost_final=True, task_id=task_id, root_task_id=task_id, category=category)
+    # No bound scope after restart: the existing root's row supplies late receipts' cause.
+    usage_store.forget(data_root)
+    ua.record_subscription_session("late-child", drive_root=data_root, route="fake:subscription", model="fake",
+                                   task_id="child", root_task_id="started", spend_usd=0.5, category="subagent")
+    ua.record_unmetered_external_dispatch("unknown-child", drive_root=data_root, model="fake",
+                                          task_id="child", root_task_id="started")
+    _settle(data_root, cost=9.0, cost_final=True, task_id="owner", root_task_id="owner", category="task")
+    rows = list(_ledger_rows(data_root))
+    child_rows = [row for row in rows if row.get("task_id") == "child"]
+    assert len(child_rows) == 2 and {row["consciousness_cause"] for row in child_rows} == {"started"}
+    assert all("consciousness_cause" not in row for row in rows if row.get("task_id") == "owner")
+    window = allowance.allowance_window(data_root, now=T0)
+    parts = {part["cause"]: part for part in window["spend_by_cause"]}
+    assert {cause: part["usd"] for cause, part in parts.items()} == {"own": 1.0, "place:mail": 2.0, "started": 3.5}
+    assert parts["started"]["unmetered_calls"] == 1 and parts["own"]["unmetered_calls"] == 0
+    assert sum(part["usd"] for part in parts.values()) == window["settled_usd"] == 6.5
+    assert window["remaining_usd"] == 13.5
+    # Export/re-import rebuilds attribution from the very same stamped money rows.
+    usage_store.export_journal(data_root)
+    usage_store.migrate_from_journal(data_root)
+    with usage_store.read(data_root) as txn:
+        assert txn.binding("consciousness", "started") == {"cause": "started"}
+    assert allowance.allowance_window(data_root, now=T0)["spend_by_cause"] == window["spend_by_cause"]
+
+
+def test_unrelated_request_never_inherits_bound_cause(data_root, monkeypatch):
+    _at(monkeypatch, T0)
+    with ua.usage_scope(ua.UsageScope(drive_root=data_root, root_task_id="own", consciousness_cause="own")):
+        _settle(data_root, cost=1.0, cost_final=True, task_id="other", root_task_id="other", category="task")
+    assert all("consciousness_cause" not in row for row in _ledger_rows(data_root))
+
+
+def test_owner_commissioned_scope_does_not_charge_consciousness():
+    from ouroboros.usage_origin import task_usage_scope
+    metadata = {"work_kind": "owner", "initiator": "consciousness", "usage_category": "consciousness_task",
+                "consciousness_cause": "started"}
+    scope = task_usage_scope({"id": "commission", "metadata": metadata}, drive_root=None,
+                             root_task_id="commission", parent_task_id="", billing={})
+    assert scope.category == "task" and scope.consciousness_cause == ""
+    metadata["work_kind"] = "consciousness"
+    autonomous = task_usage_scope({"id": "commission", "metadata": metadata}, drive_root=None,
+                                  root_task_id="commission", parent_task_id="", billing={})
+    assert autonomous.category == "consciousness_task" and autonomous.consciousness_cause == "started"
+
+
 # --- what a route's price actually costs the allowance ----------------------------
 #
 # The wake prompt asks this mind to tell incremental CASH from subscription quota

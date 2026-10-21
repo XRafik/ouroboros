@@ -528,6 +528,8 @@ class Txn:
         revision = int(previous["revision"]) + 1 if previous else 1
         materialized = durable_literals({**{key: value for key, value in row.items() if key != "revision"},
                                          "seq": seq, "ts": str(row.get("ts") or utc_now_iso())})
+        from ouroboros.usage_origin import stamp_root_cause
+        stamp_root_cause(self, materialized)
         validate_row_fields(materialized, seq)
         validate_transition(materialized, None if previous is None else str(previous.get("state") or ""),
                             late_receipt_eligible(previous), seq, previous_row=previous)
@@ -589,6 +591,9 @@ class Txn:
     def _bind(self, row: Dict[str, Any]) -> None:
         """The earliest ORIGINAL row carrying a cap binds its root and group
         (``BindingIndex.fold`` for an original row)."""
+        if row.get("root_task_id") and row.get("consciousness_cause"):
+            self.conn.execute("INSERT OR IGNORE INTO bindings (scope, key, binding) VALUES ('consciousness', ?, ?)",
+                              (str(row["root_task_id"]), _json({"cause": row["consciousness_cause"]})))
         if not any(cap in row for cap in _BINDING_CAPS):
             return
         binding = _json(durable_literals({key: row[key] for key in BINDING_KEYS if key in row}))
@@ -899,9 +904,12 @@ def _build(tmp: pathlib.Path, tier: str, records: Sequence[Dict[str, Any]], prov
     stamps: Dict[str, Dict[str, str]] = {}
     revisions: Dict[str, int] = {}
     bindings = BindingIndex()
+    causes = {}
     header = None
     for row in records:
         bindings.fold(row)
+        if row.get("root_task_id") and row.get("consciousness_cause"):
+            causes.setdefault(str(row["root_task_id"]), {"cause": row["consciousness_cause"]})
         attempt_id, state = str(row["attempt_id"]), str(row.get("state") or "")
         if str(row.get("kind") or "") == "usage_baseline":
             header = row
@@ -938,7 +946,8 @@ def _build(tmp: pathlib.Path, tier: str, records: Sequence[Dict[str, Any]], prov
                          f"VALUES ({','.join('?' * len(_SUMMARY_COLUMNS))})",
                          [_bucket_record(scope, key, bucket) for (scope, key), bucket in buckets.items() if bucket.rows])
         bound = [(scope, key, _json(durable_literals(binding))) for scope, index in (
-            ("root", bindings.roots), ("group", bindings.groups)) for key, binding in index.items()]
+            ("root", bindings.roots), ("group", bindings.groups), ("consciousness", causes))
+                 for key, binding in index.items()]
         conn.executemany("INSERT INTO bindings (scope, key, binding) VALUES (?, ?, ?)", bound)
         # The visible one-time import also seeds stale completed projections.
         from ouroboros.terminal_cost_reconciliation import imported_projection_debt
