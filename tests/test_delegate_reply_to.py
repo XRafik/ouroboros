@@ -154,6 +154,45 @@ def test_multi_question_address_allows_an_explicit_partial_answer(setup):
     assert len(stub.answers) == 1
 
 
+@pytest.mark.parametrize("read_seconds", [99, 101])
+def test_address_validation_preserves_the_answer_deadline(setup, monkeypatch, read_seconds):
+    from ouroboros import delegate_interactions as interactions
+
+    ctx, stub, address = setup
+    clock = [0.0]
+    monkeypatch.setattr(interactions, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    get_run = stub.get_run
+
+    def read(*args, **kwargs):
+        clock[0] += read_seconds
+        return get_run(*args, **kwargs)
+
+    monkeypatch.setattr(stub, "get_run", read)
+    result = json.loads(_delegate_answer(ctx, "run-1", "int-current",
+        [{"question_id": "q-port", "free_text": "9090"}], reply_to=address).text)
+    if read_seconds > interactions._ANSWER_DEADLINE_SEC:
+        assert result["reason"] == "reply_to_unresolved" and not stub.answers
+    else:
+        assert result["status"] == "delivered"
+        assert stub.answers[0][1]["timeout_sec"] == interactions._ANSWER_DEADLINE_SEC - read_seconds
+
+
+def test_answer_transport_passes_only_an_explicit_remaining_timeout():
+    import httpx
+    from ouroboros.gateways.claudexor import ClaudexorGateway, DaemonEndpoint
+
+    calls = []
+    gateway = ClaudexorGateway(DaemonEndpoint("127.0.0.1", 1, "test"))
+    gateway.close()
+    gateway._client = SimpleNamespace(request=lambda *a, **kw: calls.append(kw) or
+                                      httpx.Response(200, json={"status": "delivered"}))
+    gateway.answer_interaction("run", "question", [])
+    gateway.answer_interaction("run", "question", [], timeout_sec=12)
+    assert "timeout" not in calls[0]
+    assert calls[1]["timeout"].read == 12
+    assert calls[0]["json"] == calls[1]["json"] == {"answers": []}
+
+
 def test_schema_is_unconditional_and_plan_extension_refuses(setup, tmp_path):
     from ouroboros.tools.core import get_tools
     from ouroboros.tools.delegate import get_tools as delegated_tools

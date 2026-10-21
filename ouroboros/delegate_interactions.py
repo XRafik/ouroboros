@@ -548,7 +548,12 @@ def _delegate_answer(
                     require_pending_address(address, pending_interactions(detail, strict=True))
                 except (ValueError, ClaudexorUnavailable) as exc:
                     return _fail("delegate_answer", "reply_to_unresolved", str(exc), run_id=rid)
-            body = gateway.answer_interaction(rid, iid, wire)
+                if _left() <= 0:
+                    return _fail("delegate_answer", "reply_to_unresolved",
+                                 "Question validation exhausted the deadline; no answer was sent.", run_id=rid)
+                body = gateway.answer_interaction(rid, iid, wire, timeout_sec=poll_bound(_left(), strict=True))
+            else:
+                body = gateway.answer_interaction(rid, iid, wire)
         except ClaudexorUnavailable as exc:
             status_code = int(getattr(exc, "status_code", 0) or 0)
             if isinstance(exc, ClaudexorSubscriptionWindowExhausted):

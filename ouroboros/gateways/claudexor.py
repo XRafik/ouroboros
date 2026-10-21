@@ -1078,7 +1078,8 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
         return body
 
     def answer_interaction(self, run_id: str, interaction_id: str,
-                           answers: List[Dict[str, Any]]) -> Dict[str, Any]:
+                           answers: List[Dict[str, Any]], *,
+                           timeout_sec: Optional[float] = None) -> Dict[str, Any]:
         """POST /v2/runs/:id/interactions/:iid/answer — deliver one answer set.
 
         Transport, not translation: ``answers`` rows are already the strict
@@ -1095,7 +1096,7 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
                 f"/interactions/{quote(str(interaction_id), safe='')}/answer")
         try:
             response = self._client.request("POST", path,
-                                            json={"answers": list(answers or [])})
+                                            json={"answers": list(answers or [])}, **_request_timeout(timeout_sec))
         except httpx.HTTPError as exc:
             raise ClaudexorUnavailable(
                 "daemon_unreachable",
