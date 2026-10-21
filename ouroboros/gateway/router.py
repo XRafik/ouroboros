@@ -164,12 +164,12 @@ def collect_routes(
     from ouroboros.gateway import desktop_autostart as desktop_host
     from ouroboros.gateway.onboarding_host import api_onboarding_bootstrap, onboarding_page
     from ouroboros.gateway.owner_effort import api_owner_effort_range
+    from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model, api_owner_safety_mode
     from ouroboros.gateway.settings import (
         api_acknowledge_capability,
         api_onboarding,
         api_owner_auto_grant,
         api_owner_context_mode,
-        api_owner_safety_mode,
         api_owner_runtime_mode,
         api_settings_get,
         api_settings_post,
@@ -247,6 +247,8 @@ def collect_routes(
         Route("/api/owner/context-mode", endpoint=api_owner_context_mode, methods=["POST"]),
         Route("/api/owner/effort-range", endpoint=api_owner_effort_range, methods=["POST"]),
         Route("/api/owner/safety-mode", endpoint=api_owner_safety_mode, methods=["POST"]),
+        Route("/api/owner/safety-rules", endpoint=api_owner_safety_rules, methods=["POST"]),
+        Route("/api/owner/safety-model", endpoint=api_owner_safety_model, methods=["POST"]),
         Route("/api/owner/capability-ack", endpoint=api_acknowledge_capability, methods=["POST"]),
         Route("/api/model-catalog", endpoint=api_model_catalog),
         Route("/api/projects", endpoint=api_projects_list, methods=["GET"]),

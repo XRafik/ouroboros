@@ -281,7 +281,8 @@ def test_registry_filters_schema_dispatch_and_resolved_targets(tmp_path):
     ).endswith("\tok")
 
 
-def test_presence_argument_bindings_override_model_supplied_values(tmp_path):
+def test_presence_argument_bindings_override_model_supplied_values(tmp_path, monkeypatch):
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     selection = PresenceSelection(
         "1" * 64,
         PresenceToolTarget("builtin", "bound_tool"),

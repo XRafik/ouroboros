@@ -253,7 +253,7 @@ def _is_safety_mode_owner_post(request: Any) -> bool:
     except Exception:
         return False
     path = urllib.parse.unquote(urllib.parse.unquote(parsed.path)).rstrip("/")
-    return method == "POST" and path == "/api/owner/safety-mode"
+    return method == "POST" and path in {"/api/owner/safety-mode", "/api/owner/safety-model", "/api/owner/safety-rules"}
 
 
 def _is_review_enforcement_post(request: Any) -> bool:
@@ -294,6 +294,19 @@ def _is_owner_settings_self_elevation_post(request: Any) -> bool:
         body = str(request.post_data or "").lower()
     except Exception:
         return False
+    from ouroboros import config
+    from ouroboros.server_runtime import repropose_unedited_slots
+    import json
+    try:
+        proposed = json.loads(request.post_data or "{}")
+        current = config.load_settings()
+        candidate = {**current, **proposed}
+        document = config._settings_integrity.read_settings_json_verified(config.SETTINGS_PATH) or {}
+        repropose_unedited_slots(candidate, document, proposed, current)
+        if config.safety_configuration(current) != config.safety_configuration(candidate):
+            return True
+    except (TypeError, ValueError):
+        return True
     return (
         "ouroboros_post_task_evolution" in body
         or "ouroboros_allow_mutative_subagents" in body

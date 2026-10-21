@@ -25,6 +25,7 @@ PROCESSING_PREFERENCES = ("standard", "fast", "economy")
 MODEL_ROLE_SETTINGS = {
     "main": "OUROBOROS_MODEL",
     "light": "OUROBOROS_MODEL_LIGHT",
+    "safety": "OUROBOROS_MODEL_SAFETY",
     "vision": "OUROBOROS_MODEL_VISION",
     "consciousness": "OUROBOROS_MODEL_CONSCIOUSNESS",
     "deep_review": "OUROBOROS_MODEL_DEEP_SELF_REVIEW",
@@ -313,6 +314,12 @@ def _main_model() -> str:
 def get_light_model() -> str:
     """Light slot; empty falls back to Main (heavy/consciousness stay empty->main)."""
     return str(runtime_setting("OUROBOROS_MODEL_LIGHT", "") or "").strip() or _main_model()
+
+
+def get_safety_model() -> str:
+    """Safety Supervisor inherits Light, including its local route, then Main."""
+    return (str(runtime_setting("OUROBOROS_MODEL_SAFETY", "") or "").strip()
+            or slot_lane_label("light", get_light_model()))
 
 
 def get_heavy_model() -> str:

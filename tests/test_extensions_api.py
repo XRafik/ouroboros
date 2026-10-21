@@ -2038,6 +2038,8 @@ def test_tool_registry_execute_dispatches_ext_tool(tmp_path, monkeypatch):
         save_review_state,
     )
 
+    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     skills_root = tmp_path / "skills"
     drive_root = tmp_path / "drive"
     drive_root.mkdir()
@@ -2068,12 +2070,7 @@ def test_tool_registry_execute_dispatches_ext_tool(tmp_path, monkeypatch):
         assert schema is not None
         assert schema["function"]["name"] == tool_name
         result = tmp_reg.execute(tool_name, {"who": "phase5"})
-        # v5.1.2 iter-2: extension dispatch now goes through
-        # ``ouroboros.safety.check_safety``. In test envs without a
-        # safety backend, the supervisor returns a visible
-        # ``SAFETY_WARNING`` prefix while still letting the call run
-        # (fail-open). Assert the handler ran and produced its output;
-        # the warning prefix is acceptable.
+        # Safety is disabled above so this regression exercises extension dispatch.
         assert "hello phase5" in result, result
         # get_timeout honours the extension's declared timeout plus the v5.7.0
         # cleanup buffer used by async handlers (so the outer tool executor

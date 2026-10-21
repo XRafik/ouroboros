@@ -355,7 +355,7 @@ def _start_task(
     # stripping, the wake chooses project/workspace like any Main turn (В9').
     from ouroboros.consciousness_authority import consciousness_origin_metadata
 
-    evt.update(consciousness_origin_metadata(metadata))
+    evt.update(consciousness_origin_metadata({**metadata, "task_id": str(getattr(ctx, "task_id", "") or "")}, started_root=True))
     _attach_origin_from_metadata(ctx, evt)
     _attach_drafted_objective(ctx, evt)
     _attach_client_surface(ctx, evt)
