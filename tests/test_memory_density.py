@@ -3,6 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
+from tests._memory_presence_seams import wake_cause_seam as wake_cause_seam
 
 from ouroboros import capability_evidence as ce
 from ouroboros.context_fit import measure_main_fit, _physical_context_for_fit

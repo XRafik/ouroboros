@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
 from threading import Barrier
+from tests._memory_presence_seams import wake_cause_seam as wake_cause_seam
 
 from ouroboros.memory import Memory
 from ouroboros.tools.control_runtime import _update_identity, _update_scratchpad

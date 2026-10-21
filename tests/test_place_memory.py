@@ -6,6 +6,7 @@ import pytest
 from ouroboros import chat_chain, memory_inventory as mi, memory_view as mv
 from ouroboros.dialogue_provenance import row_provenance
 from tests import _memory_inventory_shared as shared
+from tests._memory_presence_seams import wake_cause_seam as wake_cause_seam
 
 
 def _focus(room=444):
