@@ -15,7 +15,9 @@ function fixture({ actions = undefined } = {}) {
     const feed = el('div', { className: 'chat-messages' });
     const input = el('textarea', { attrs: { id: 'chat-input' } });
     const textRow = el('div', { className: 'chat-text-row' }, input);
-    const wrap = el('div', { className: 'chat-input-wrap' }, textRow);
+    // The composer's markup: the field holds the text row, and a staged strip becomes its first line.
+    const field = el('div', { className: 'chat-field' }, textRow);
+    const wrap = el('div', { className: 'chat-input-wrap' }, field);
     doc.body.append(feed, wrap);
     const positions = [];
     const replies = createChatReplies({ chatId: 1, feed, input, key: 'ouro_chat_reply', actions,
@@ -30,10 +32,10 @@ function fixture({ actions = undefined } = {}) {
     };
     const quote = (node) => node.children.find((child) => child.classList.contains('chat-quote')) || null;
     // The strip the owner sees; one that is closing (shut) has already left and goes once its motion has run.
-    const strips = () => wrap.children.filter((child) => child.classList.contains('chat-quote--composer'));
+    const strips = () => field.children.filter((child) => child.classList.contains('chat-quote--composer'));
     const strip = () => strips().find((child) => child.dataset.motion !== 'shut') || null;
     const leaving = () => strips().filter((child) => child.dataset.motion === 'shut');
-    return { ...env, feed, input, textRow, wrap, replies, bubble, quote, strip, leaving, positions,
+    return { ...env, feed, input, textRow, field, wrap, replies, bubble, quote, strip, leaving, positions,
         close() { replies.destroy(); env.restore(); } };
 }
 
@@ -199,8 +201,9 @@ test('Reply stages the strip and the next frame carries only the address; Esc or
         f.replies.decorate(saved, { row_address: 'row:1@b#2', role: 'assistant' });
         saved.querySelector('.chat-message-reply').click();
         const strip = f.strip();
-        assert.ok(strip, 'the strip stands above the field');
-        assert.equal(f.wrap.children.indexOf(strip) < f.wrap.children.indexOf(f.textRow), true);
+        assert.ok(strip, 'the strip is staged');
+        assert.equal(f.field.children.indexOf(strip), 0, 'the field\'s first line, inside the field');
+        assert.equal(f.field.children.indexOf(f.textRow), 1, 'right before its text row');
         assert.equal(f.doc.activeElement, f.input, 'the field takes focus');
         assert.match(f.input.getAttribute('aria-describedby'), /reply$/);
         assert.deepEqual(f.replies.frameField(), { reply_to: 'row:1@b#2' }, 'the host makes the snippet');

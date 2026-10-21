@@ -21,7 +21,8 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | GET | `/api/extensions/{skill}/manifest` | |
 | GET | `/api/extensions/{skill}/module/{entry:path}` | reviewed `.js`/`.mjs` from captured texts; `Access-Control-Allow-Origin: *` |
 | GET | `/api/extensions/{skill}/ui/{revision}/{path:path}` | captured page-module files of the live revision |
-| GET | `/api/widgets` | passive projection of live UI tabs and pinned cards; `Cache-Control: no-store` |
+| GET | `/api/widgets` | live UI tabs and pinned cards, passive; `Cache-Control: no-store` |
+| POST | `/api/widgets/fault` | a shown fault as one task-less `widget_fault` event, bounded |
 | GET | `/api/extensions/{skill}/settings_section` | |
 | ANY | `/api/extensions/{skill}/{rest:path}` | extension dispatch (§13) |
 | GET | `/api/skills/daemons` | |
@@ -210,7 +211,7 @@ Frames sent while disconnected wait in a bounded process-local queue (oldest dro
 
 Off-loop acceptance confines attachment specs to upload-root basenames bound to measured `size`/`sha256`, so bytes swapped under the path afterwards are rejected rather than staged; model pixels come only from staged files. The web owner identity is fixed: `chat_id` selects a thread and cannot mint an external owner identity.
 
-A built-in `command` frame carries a slash command into the same bridge with rebroadcast disabled; command routing, owner authorization, queue authority and typed outcomes stay outside the socket module, so the Main header controls reuse the ordinary command contract for Restart, Panic, review, evolution and background consciousness. The socket does not infer intent from command-looking prose (BIBLE P5).
+A `command` frame routes through the bridge without rebroadcast; authorization, queue authority and outcomes remain outside the socket module. Panic bypasses the queue; `panic_accepted` acknowledges its latch, never exit. The browser uses its existing connection without replay (§9); other header controls retain ordinary command routing. Prose never implies a command (BIBLE P5).
 
 #### Frame addressing
 

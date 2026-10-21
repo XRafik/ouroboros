@@ -72,7 +72,7 @@ from ouroboros.gateway.contracts import (
 )
 from ouroboros.gateway.contracts import ClaudexorPassiveReadError, ClaudexorQuotaResponse
 from ouroboros.gateway.router import collect_routes
-from ouroboros.gateway.widgets import WidgetTab, WidgetsResponse
+from ouroboros.gateway.widgets import WidgetFaultRequest, WidgetFaultResponse, WidgetTab, WidgetsResponse
 
 
 def _js_typedef_fields(text: str, name: str) -> set[str]:
@@ -228,6 +228,9 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
     for name in ("DecisionRequest", "DecisionResponse"):
         assert f"import('./decision_types.js').{name}" in text
     text += "\n" + (modules / "decision_types.js").read_text(encoding="utf-8")
+    for name in ("CommandInbound", "PanicAcceptedOutbound"):
+        assert f"import('./client_contract_types.js').{name}" in text
+    text += "\n" + (modules / "client_contract_types.js").read_text(encoding="utf-8")
     version = (pathlib.Path(__file__).resolve().parent.parent / "VERSION").read_text(encoding="utf-8").strip()
     assert f"GATEWAY_CONTRACT_VERSION = '{version}'" in text
     settings_meta_fields = {
@@ -297,6 +300,8 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
         "ClaudexorVendorCredentialDisposition",
         "WidgetTab",
         "WidgetsResponse",
+        "WidgetFaultRequest",
+        "WidgetFaultResponse",
     ):
         assert re.search(rf"@typedef \{{Object\}} {name}\b", text), f"api_types.js missing {name}"
     api_client = (pathlib.Path(__file__).resolve().parent.parent / "web" / "modules" / "api_client.js").read_text(
@@ -336,7 +341,7 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
                 ClaudexorVendorCredentialDisposition,
                 ClaudexorStatusReads, ClaudexorStatusResponse,
                 ClaudexorPassiveReadError, ClaudexorQuotaResponse,
-                WidgetTab, WidgetsResponse):
+                WidgetTab, WidgetsResponse, WidgetFaultRequest, WidgetFaultResponse):
         expected = set(get_type_hints(cls, include_extras=True))
         actual = _js_typedef_fields(text, cls.__name__)
         # ABI 7.0 (ABI-3): the alias JSDoc lines were cleaned up in the F3.3

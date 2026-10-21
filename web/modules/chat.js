@@ -114,7 +114,7 @@ import {
     chatMediaMessageKey,
     chatThreadAccepts,
     clearStickyCardState,
-    confirmAndSendPanic,
+    sendPanic,
     confirmAndSendRestart,
     computeHydratedDirectActivities,
     documentMessageKey,
@@ -144,7 +144,6 @@ import {
     reconcileHydratedDirectActivities,
     reconnectBannerText,
     senderLabel,
-    shouldFirePanic,
     taskCostMeta,
     taskCostProjection,
     unconfirmedForegroundCardIds,
@@ -166,7 +165,7 @@ export {
     chatMediaMessageKey,
     clearStickyCardState,
     clearTransientRoutingAnnotations,
-    confirmAndSendPanic,
+    sendPanic,
     computeHydratedDirectActivities,
     headerBudgetPresentation,
     insertTimelineNode,
@@ -181,7 +180,6 @@ export {
     reconcileHydratedDirectActivities,
     taskCostMeta,
     taskCostProjection,
-    shouldFirePanic,
 };
 
 // Host placement: custody warns; settled reviews show results.
@@ -453,6 +451,46 @@ export function createChatInstance({
             }).catch(() => {}).finally(() => managedTaskDetailReads.delete(childId));
         }
     }
+    // Root census rows omit children; complete work membership can admit their own
+    // result read before the root ends. Unknown/nonterminal replies retry on the
+    // existing refresh; a confirmed 404 waits for new card evidence or reconnect.
+    function settleAbsentChildren(snapshotRequestedAt) {
+        for (const [childId, record] of liveCardRecords) {
+            if (!record.isSubagent || record.finished || !record.root?.isConnected) continue;
+            if (workState.members.has(childId)) {
+                record.childDetailRead = undefined;
+                if (record.historicalUnavailable) withStableViewport(() => {
+                    setHistoricalUnavailable(record, false);
+                    renderLiveCardMeta(record);
+                    return true;
+                });
+                continue;
+            }
+            const observedAt = record.lastLiveObservedAt || 0;
+            const updates = record.updates;
+            if (!workState.complete || observedAt >= snapshotRequestedAt
+                    || (record.childDetailRead?.missing && record.childDetailRead.updates === updates)
+                    || managedTaskDetailReads.has(childId)
+                    || !subagentChildParents.has(childId)) continue;
+            // Queue departure and membership share this read; keep the visible hold
+            // until actual recovery or terminal evidence, not just absence.
+            record.projectHoldQueued = false;
+            const observation = record.childDetailRead = { updates };
+            managedTaskDetailReads.add(childId);
+            fetchTaskDetailStrict(childId).then((detail) => {
+                if (destroyed || ws.isConnected?.() === false || !workState.complete
+                        || liveCardRecords.get(childId) !== record || record.finished
+                        || workState.members.has(childId) || record.updates !== updates
+                        || record.childDetailRead !== observation) return;
+                if (detail === null) {
+                    observation.missing = true;
+                    withStableViewport(() => settleMissingTaskRecord(record));
+                } else if (isTerminalTaskDetail(detail)) {
+                    withStableViewport(() => routeSubagentTerminalToCard(childId, { ...detail, task_id: childId }));
+                }
+            }).catch(() => {}).finally(() => managedTaskDetailReads.delete(childId));
+        }
+    }
     let activeLiveGroupId = '';
     let pendingReconnectSync = false;  // Set when a fromReconnect sync arrives while one is already in-flight.
     let pendingReconnectBannerText = '';
@@ -569,6 +607,7 @@ export function createChatInstance({
         if (data) void refreshChildProjectHolds();
         const before = workState;
         workState = reconcileWorkState(workState, data, chatId, ws.isConnected?.() !== false);
+        if (Array.isArray(data?.works)) settleAbsentChildren(snapshotRequestedAt);
         applyCardWorkViews(liveCardRecords, workState);
         changedOffers(liveCardRecords, before, workState).forEach(syncCancelRunButton);
         syncHeaderControlState(data ?? { accounting: { available: false } });
@@ -978,6 +1017,18 @@ export function createChatInstance({
         if (!setHistoricalUnavailable(record, false, held)) return;
         renderLiveCardMeta(record);
         syncCancelRunButton(record);
+    }
+
+    function settleMissingTaskRecord(record) {
+        const historical = record.historicalTerminal;
+        if (historical) {
+            const changed = applyHistoricalModelExecution(record, historical) && renderLiveCardMeta(record);
+            return finishLiveCard(record.groupId, historical.phase) || changed;
+        }
+        const changed = setHistoricalUnavailable(record, true);
+        renderLiveCardMeta(record);
+        syncChatStatus();
+        return changed;
     }
 
     function markTaskCancelable(taskId = '') {
@@ -2673,7 +2724,7 @@ export function createChatInstance({
     function showSent({ text, frame, result, views }) {
         const sentTs = new Date().toISOString();
         reading.cancel(); // an accepted Send supersedes any saved place
-        addMessage(text, 'user', false, sentTs, false, {
+        const row = addMessage(text, 'user', false, sentTs, false, {
             pending: result?.status === 'queued',
             source: 'web',
             senderSessionId: chatSessionId,
@@ -2698,6 +2749,7 @@ export function createChatInstance({
         syncChatStatus();
         composer.resize();
         reading.followAfterLayout();
+        return row;  // the sent draft rises into it (send_flight.js)
     }
     // Dynamic CSS reserve keeps the absolute composer from covering messages.
 
@@ -2739,6 +2791,7 @@ export function createChatInstance({
         }
         if (destroyed || !current()) return;
         reading.stick = true;
+        for (const record of liveCardRecords.values()) record.childDetailRead = undefined;
         reading.followAfterLayout();
         updateScrollButton();
     }
@@ -2754,9 +2807,10 @@ export function createChatInstance({
         // Mid-motion heights are fractional: whole pixels would differ by one from frame to frame and write again.
         let height = inputArea.getBoundingClientRect().height;
         for (const strip of strips) {
-            const gap = parseFloat(getComputedStyle(strip.parentElement).rowGap) || 0;
-            const now = strip.getBoundingClientRect().height + (parseFloat(getComputedStyle(strip).marginBottom) || 0) + gap;
-            const end = strip.dataset.motion === 'open' ? (parseFloat(strip.style.getPropertyValue('--reply-h')) || 0) + gap : 0;
+            // The room a strip takes is its box and its margins (style.css): opening it ends at --reply-room, shut at none.
+            const { marginTop, marginBottom } = getComputedStyle(strip);
+            const now = strip.getBoundingClientRect().height + (parseFloat(marginTop) || 0) + (parseFloat(marginBottom) || 0);
+            const end = strip.dataset.motion === 'open' ? (parseFloat(strip.style.getPropertyValue('--reply-room')) || 0) : 0;
             height += end - now;
         }
         return height;
@@ -2846,15 +2900,7 @@ export function createChatInstance({
             await confirmAndSendRestart({ openConfirmDialog, ws });
             return;
         }
-        if (command === 'panic') {
-            // CRITICAL CONTROL: the whole confirm-and-send flow lives in the
-            // node-tested confirmAndSendPanic (dialog options + strict
-            // shouldFirePanic gate + the exact /panic command); this handler
-            // only injects the real deps. Manual check on release: click
-            // Panic → dialog → "Kill all workers" sends /panic;
-            // Cancel/Escape/backdrop send nothing.
-            await confirmAndSendPanic({ openConfirmDialog, ws });
-        }
+        if (command === 'panic') sendPanic({ ws });
     });
 
     // Native <details> needs outside-click/Escape dismissal; destroy removes
@@ -3163,17 +3209,7 @@ export function createChatInstance({
                 const vouched = !missingManagedTaskIds.has(taskId) || activeDirectActivities.has(taskId);
                 if (!vouched && detail === null) {
                     revokeManagedTaskCancelAuthority(taskId);
-                    const historical = currentRecord.historicalTerminal;
-                    if (historical) {
-                        if (applyHistoricalModelExecution(currentRecord, historical)) {
-                            changed = renderLiveCardMeta(currentRecord) || changed;
-                        }
-                        return finishLiveCard(taskId, historical.phase) || changed;
-                    }
-                    changed = setHistoricalUnavailable(currentRecord, true) || changed;
-                    renderLiveCardMeta(currentRecord);
-                    syncChatStatus();
-                    return changed;
+                    return settleMissingTaskRecord(currentRecord) || changed;
                 }
                 if (cancelPending || (!vouched && !isTerminalTaskDetail(detail))) {
                     if (currentRecord.isSubagent && detail?.status) missingManagedTaskIds.delete(taskId);
@@ -3492,6 +3528,7 @@ export function createChatInstance({
             }
             let changed = false;
             for (const [id, record] of liveCardRecords) {
+                record.childDetailRead = undefined;
                 changed = syncParkedPhase(record, 'unknown', activeDirectActivities.get(id)) || changed;
             }
             return changed;
