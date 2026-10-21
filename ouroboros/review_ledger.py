@@ -323,19 +323,47 @@ def load_record(drive_root: Any, record_id: str) -> Optional[Dict[str, Any]]:
 
 
 def note_author_decision(drive_root: Any, record_id: str, decision: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Attach the author's informed decision to the record it continued from."""
+    """Attach the author's informed decision to the record it continued from.
+
+    Host facts on that decision are kept. Landing is not: a failed Git command
+    has not landed, so only ``note_commit_landing`` writes it, after success.
+    """
     def _mutate(payload: Dict[str, Any]) -> Dict[str, Any]:
+        from ouroboros.review_doctrine import decision_for_ledger
         from ouroboros.review_history import retain_author_decision
 
-        payload["author_decision"] = retain_author_decision(drive_root, payload, {"disposition": str(decision.get("disposition") or ""),
-                                      "rationale": str(decision.get("rationale") or ""),
-                                      "reused_record_id": str(decision.get("reused_record_id") or record_id)})
+        payload["author_decision"] = retain_author_decision(
+            drive_root, payload, decision_for_ledger(decision, record_id))
         return payload
 
     try:
         return revise_record(drive_root, record_id, _mutate)
     except (OSError, ValueError):
         log.warning("review ledger author decision not recorded on %s", record_id, exc_info=True)
+        return None
+
+
+def note_commit_landing(drive_root: Any, record_id: str, landing: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Record that this candidate's Git command succeeded. Same landing twice is a no-op."""
+    from ouroboros.review_doctrine import validate_landing, with_landing
+
+    try:
+        checked = validate_landing(landing)
+        current = load_record(drive_root, record_id) if checked is not None else None
+        author = current.get("author_decision") if isinstance(current, dict) else None
+        if checked is None or not isinstance(author, dict) or author.get("landing") == checked:
+            return current
+
+        def _mutate(payload: Dict[str, Any]) -> Dict[str, Any]:
+            from ouroboros.review_history import retain_author_decision
+
+            payload["author_decision"] = retain_author_decision(
+                drive_root, payload, with_landing(payload.get("author_decision") or {}, checked))
+            return payload
+
+        return revise_record(drive_root, record_id, _mutate)
+    except (OSError, ValueError):
+        log.warning("review ledger commit landing not recorded on %s", record_id, exc_info=True)
         return None
 
 
@@ -1434,7 +1462,8 @@ __all__ = [
     "newest_rotation_ts", "index_stamp", "surface_records",
     "build_rows", "build_wave_record",
     "distinct_model_facts", "find_reusable", "index_path", "index_row", "ledger_dir", "ledger_root", "load_record",
-    "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision", "panel_facts", "read_source",
+    "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision",
+    "note_commit_landing", "panel_facts", "read_source",
     "recent_records", "record_path", "record_sources_resolvable", "reduce_verdict", "retain_text_source", "reuse_key_digest",
     "revise_record", "row_verdict", "rows_from_plan", "seat_findings", "seat_open", "settle_from_collected",
     "settle_pending_payload", "single_question_part",

@@ -1426,6 +1426,8 @@ def _run_git_network_cmd(cmd: List[str], cwd: pathlib.Path) -> str:
 
 
 def get_tools() -> List[ToolEntry]:
+    from ouroboros.review_doctrine import AUTHOR_DISPOSITION_SCHEMA
+
     reviewed_commit_description = (
         "Commit already-changed files through the unified reviewed commit workflow: free deterministic checks, "
         "the tests preflight, then the review panel (both questions). Blocking gates on its verdict; under Advisory or "
@@ -1453,9 +1455,7 @@ def get_tools() -> List[ToolEntry]:
         "skip_advisory_review": {"type": "boolean", "default": False, "description": skip_advisory_description},
         "goal": {"type": "string", "default": "", "description": "High-level goal of this change. Used by the panel's coupling questions to judge completeness."}, "scope": {"type": "string", "default": "", "description": "Declared scope boundary. Without a goal it is the intended transformation the panel's coupling questions judge the change against (completeness, forgotten adjacent surfaces)."},
         "review_reference": {"type": "object", "description": "Exact reference a prior commit call of this task returned, for the free explicit Advisory or Cyber Pro continuation."},
-        "author_disposition": {"type": "object", "additionalProperties": False,
-            "properties": {"disposition": {"type": "string", "enum": ["accepted", "rejected", "partial", "deferred"]}, "rationale": {"type": "string"}},
-            "required": ["disposition", "rationale"], "description": "Explicitly accept the current attributed candidate after reading the referenced outcome. Never overrides Blocking."},
+        "author_disposition": AUTHOR_DISPOSITION_SCHEMA,
     }
     return [
         ToolEntry("commit_reviewed", {"name": "commit_reviewed", "description": reviewed_commit_description,
