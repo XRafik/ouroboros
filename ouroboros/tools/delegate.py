@@ -130,7 +130,7 @@ from ouroboros.delegate_shared import (  # noqa: F401
 # (same objects) because sibling code and the tests address it on THIS surface.
 # `_fail` is NOT re-imported from it — the one shared refusal author is
 # `delegate_shared._fail`, which delegate_integration itself imports.
-from ouroboros.delegate_continuation import NO_CONTINUATION, replayed_custody, start_binding
+from ouroboros.delegate_continuation import NO_CONTINUATION, start_binding
 from ouroboros.tools.delegate_integration import (  # noqa: F401
     _CAPTURE_DELEGATED_SNAPSHOT,
     _capture_block,
@@ -143,6 +143,7 @@ from ouroboros.tools.delegate_integration import (  # noqa: F401
     _resolve_retry_invocation,
     _resolved,
     _retry_binding_refusal,
+    _snapshot_facts,
     _validated_invocation,
     claimed_start_request,
     payload_host_instructions,
@@ -172,8 +173,8 @@ _CLAUDEXOR_MAX_SECONDS = 604_800
 # The process-local memo of the durable custody rows (the authority lives in the module
 # above); re-bound here because sibling code and tests name it on this surface.
 _CUSTODY = custody._CUSTODY
-_RETRY_HINT = ("to retry THIS start call use delegate_start(prompt=..., "
-               "retry_of=pending_invocation_id); a plain call starts a NEW run")
+_RETRY_HINT = ("to retry THIS start call use delegate_start(retry_of=pending_invocation_id, prompt=''), "
+               "which replays its recorded request; a plain call starts a NEW run")
 
 
 def _host_instructions(authority: "DelegatedRunShape", assignment: str = "",
@@ -403,8 +404,9 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
     if argument_refusal:
         # This argument boundary precedes daemon access, provisioning and any start.
         return _replace_tool_result(argument_refusal, meta_updates={"operation_outcome": "completed_no_effect"})
-    seconds_basis = ""
-    if not str(retry_of or "").strip():
+    retry_token = str(retry_of or "").strip()
+    recovering, seconds_basis = bool(retry_token), ""
+    if not recovering:
         # Decided BEFORE the daemon is touched: a spent lifetime or a sub-second
         # deadline is a definite no-run, and the basis rides both custody rows.
         bound = bounded_max_seconds(ctx, max_seconds)
@@ -418,14 +420,18 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
     binding_fingerprint = ""
     processing_info: Dict[str, Any] = {}
     resource_ref, directory_options, continuation = {}, {}, NO_CONTINUATION
-    retry_token = str(retry_of or "").strip()
+    if recovering:  # the owned recorded request is validated before any fingerprint (#1614)
+        binding, refusal = _resolve_retry_invocation(
+            ctx, drive, retry_token, text, max_seconds=max_seconds, geometry=(directory_strategy, scope_paths))
+        if refusal:
+            return refusal
+        text = text or binding.request_body["prompt"]  # omitted or '' replays the recorded prompt
     source_binding = prepare_work_order_start_binding(
         ctx, drive, retry_token, _canonical_work_order_fingerprint, text,
         _work_order_source_request,
     )
     work_order_source_request = source_binding["request"]
     work_order_fingerprint = source_binding["fingerprint"]
-    recovering = source_binding["recovering"]
     actor, actor_refusal = prepare_delegate_start_actor(
         ctx, drive, recovering=recovering, invocation_id=retry_token, continuing=continuation_token,
         work_order_fingerprint=work_order_fingerprint, authority_fingerprint=source_binding["authority_fingerprint"],
@@ -436,20 +442,11 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
         "selected_subagent_id", "config_fingerprint", "work_order_fingerprint", "authority_fingerprint")}
     actor_facts.update(work_order_coverage=source_binding["coverage"], work_order_source_request=work_order_source_request)
     if recovering:
-        binding, refusal = _resolve_retry_invocation(ctx, drive, retry_token, text)
-        if refusal:
-            return refusal
         (request_body, route, authority, root, key, project_id, owned_project_id,
          project_persistent, seconds, snapshot_id, target_root, baseline_sha,
-         authority_source, resource_ref, processing_info, binding_fingerprint) = binding
+         authority_source, resource_ref, processing_info, binding_fingerprint,
+         seconds_basis, continuation) = binding
         invocation_id = retry_token
-        # A replay presents the recorded body byte-identically, so its cap
-        # basis is the recorded one too — never re-derived from today's clocks.
-        recorded = custody.invocation_record(drive, retry_token) or {}
-        seconds_basis, continuation = str(recorded.get("max_seconds_basis") or ""), replayed_custody(recorded)
-        if directory_strategy is not None or scope_paths is not None:
-            return _fail("delegate_start", "retry_selector_conflict",
-                         "A retry replays its recorded directory strategy and scope; omit new geometry arguments.")
     else:
         route = actor["route"]
         if selector_root:
@@ -794,20 +791,6 @@ def _settle_refused_provision(ctx: ToolContext, gateway: Any, refusal: ToolResul
         reason=str(payload.get("reason") or "execution_snapshot_failed"),
         history_facts={**(history_facts or {}), **refusal_facts(payload),
                        "detail": str(payload.get("detail") or "")})
-
-
-def _snapshot_facts(handle: Any) -> Dict[str, Any]:
-    """Disclosure on the start receipt: how big the private snapshot is and how long
-    it took to provision (#1241). Facts only — nothing refuses or truncates on them."""
-    if handle is None:
-        return {}
-    if getattr(handle, "adopted_from", ""):
-        return {"reused_from_run": handle.adopted_from}  # a continuation's predecessor snapshot
-    file_baseline = getattr(handle, "file_baseline", {}) or {}
-    return {"entries": int(getattr(handle, "entry_count", 0) or 0),
-            "untracked_files": len(getattr(handle, "untracked_baseline", {}) or {}) + len(file_baseline),
-            "file_input_bytes": sum(int(item.get("size", 0) or 0) for item in file_baseline.values()),
-            "provisioning_sec": float(getattr(handle, "provisioning_sec", 0.0) or 0.0)}
 
 
 def _retire_orphaned_registration(ctx: ToolContext, gateway: Any, project_id: str, *,
@@ -1342,8 +1325,8 @@ def get_tools() -> List[ToolEntry]:
                 "Returns run_id for delegate_wait/delegate_cancel. Output is a claim to verify; host "
                 "verification receipts remain yours. Missing/unavailable routes refuse typed: explicitly "
                 "select a configured alternative, wait, narrow or report blocked. Direct starts require "
-                "subagent_id. A configured session's exact leaf is already started before your first round: "
-                "supervise the startup receipt's run, never duplicate it. Replacement with prompt='' requires "
+                "subagent_id. Fresh configured work starts its leaf before the first round; restored work follows "
+                "its continuation receipt. Never duplicate a run. Replacement with prompt='' requires "
                 "verified cancellation/terminal settlement or a typed refusal proving no run exists. "
                 "Recover an unknown start with retry_of, without a new selector; continue finished work "
                 "with continue_from (see arguments). This call requests no extra Claudexor review panel; "
@@ -1353,19 +1336,23 @@ def get_tools() -> List[ToolEntry]:
             ),
             "parameters": {
                 "type": "object",
-                "required": ["prompt"],
+                "required": [],
                 "properties": {
                 "prompt": {"type": "string", "description":
                     "Direct start: a complete standalone task (why the work exists, decisions, material paths); "
                     "the session has none of my memory. The host appends my human's originating words verbatim. "
-                    "Configured-session retry/replacement: optional advisory coordination only; "
-                    "the host supplies the canonical work order."},
+                    "The run starts in my write root; a path named here does not move it: for another "
+                    "repository, schedule a child whose workspace is that repository. "
+                    "Direct retry_of: omit or pass '' to replay the recorded request; other text must equal "
+                    "the original call's. Configured-session retry/replacement: optional advisory coordination "
+                    "only, never sent with retry_of; the host supplies the canonical work order."},
                 "subagent_id": {"type": "string", "description":
                     "Exact agent_session id from Available subagents, required for direct starts including continue_from. "
                     "Omit for the configured snapshot and retry_of. Schedule API actors as recursive children instead."},
                 "access": {"type": "string", "enum": list(SESSION_ACCESS_LOWERING), "description":
-                    "Lower native access to readonly or workspace_write; omit to inherit the captured profile "
-                    "(new mutating sessions default full). Explicit readonly authority wins. Omit on retry_of."},
+                    "Lower native access to readonly or workspace_write; omit to inherit the captured profile (new mutating "
+                    "sessions default full; continue_from keeps the continued run's when narrower). Explicit readonly "
+                    "authority wins. Omit on retry_of."},
                 "effort": {"type": "string", "enum": ["auto", *EFFORT_SCALE], "default": "auto", "description":
                     "The run's reasoning effort: auto/omitted = this room's primary clamped into its helper "
                     "bounds; outside those bounds it runs at the nearest bound. A row my human pinned or a level in "
@@ -1408,9 +1395,11 @@ def get_tools() -> List[ToolEntry]:
                     "session with retained evidence when the old session has gone astray."},
                 "retry_of": {"type": "string", "description":
                     "pending_invocation_id from an unknown start outcome (transport failure/lost response). "
-                    "Replays that invocation byte-identically under its original key to retrieve an accepted run "
-                    "without duplicating it. Omit subagent_id or receive a typed conflict. Never use for intended "
-                    "new work: a plain call creates a new invocation even with identical prompt."},
+                    "Replays that invocation's recorded request byte-identically under its original key to retrieve "
+                    "an accepted run without duplicating it; prompt may be omitted. Omit subagent_id or receive a "
+                    "typed conflict; omit the other arguments too: the recorded ones replay, and a new value is a "
+                    "typed conflict. Never use for intended new work: a plain call creates a new invocation even "
+                    "with identical prompt."},
                 },
             },
         }, _published_entry(_delegate_start_entry),
