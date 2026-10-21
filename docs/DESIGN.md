@@ -1569,7 +1569,8 @@ the Widgets page the kept card says `kept from the chat` and its menu carries `R
 app, which only puts a request into the draft. Until the body arrives, and whenever it cannot be read, the card shows
 its plain words (the text Telegram gets) with one status line — `Loading the card…`, the failure with Retry, `This
 card is no longer available.`, `This skill is off.` — never an empty box. A press on a card's control is the owner's:
-it says `Sending…`, then `Sent ✓` or the honest failure, and a control meant once locks after it counted. An app's
+it says `Sending…`, then `Sent ✓` (`Saved · the task reads it when it continues` until a paused task reads it) or
+the honest failure, and a control meant once locks after it counted. An app's
 frame reads the theme roles of the material it lies on (inside the dark Ouroboros voice, that voice's inks and
 surfaces), at mount and at every theme change. A frame in
 a message (an app, a skill's widget) is at least 120 px and at most 70 % of the window, with `Expand` / `Collapse`
