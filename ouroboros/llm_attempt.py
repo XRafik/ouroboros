@@ -14,6 +14,8 @@ candidate-attached facts rather than provider prose.
 from __future__ import annotations
 
 import copy
+import contextlib
+import contextvars
 import hashlib
 import inspect
 import json
@@ -55,6 +57,23 @@ _CACHE_TTL_SECONDS = {"5m": 300, "1h": 3600}
 
 
 PROVIDER_POLICY_REFUSAL = "provider_policy_refusal"
+
+# The caller owns the allowance; this scope carries its write-ahead claim to
+# every physical lane, without another counter or any accounting authority.
+_SINGLE_SEND = contextvars.ContextVar("single_physical_send", default=None)
+
+
+@contextlib.contextmanager
+def single_physical_send(claim):
+    token = _SINGLE_SEND.set(claim)
+    try:
+        yield
+    finally:
+        _SINGLE_SEND.reset(token)
+
+
+def single_physical_send_active() -> bool:
+    return _SINGLE_SEND.get() is not None
 
 
 class PhysicalDispatchInterrupted(PhysicalAttemptPreconditionFailed):
@@ -771,6 +790,9 @@ def _deadline_checked_send(send: Any, before_dispatch: Any):
         except PhysicalDispatchInterrupted as exc:
             exc.candidate_manifest_ref = manifest
             raise
+        claim = _SINGLE_SEND.get()
+        if claim is not None:
+            claim(reservation)  # after admission; durable before mark_dispatched/send
         return manifest
 
     def dispatch():

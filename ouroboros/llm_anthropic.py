@@ -25,6 +25,7 @@ from ouroboros.llm_attempt import (
     _VALID_CACHE_TTLS,
     _attempt_request,
     _candidate_before_dispatch,
+    single_physical_send_active,
     _execute_candidate,
     _finalized_physical_candidate,
     preserve_prior_dispatch,
@@ -586,6 +587,9 @@ class _AnthropicLaneMixin:
         except UsageAccountingError:
             raise
         except Exception as exc:
+            if single_physical_send_active():
+                self._pop_effort_clamp_disclosure()
+                raise
             retry_payload = plan_next_wire_retry(payload, error=exc, target=target)
             if (retry_payload is None and reasoning_strip_retry_allowed(exc)
                     and any(block.get("type") in {"thinking", "redacted_thinking"}
