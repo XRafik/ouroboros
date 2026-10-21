@@ -199,7 +199,11 @@ _REVIEW_SURFACES = {
                      "cyber_pro": "panel, self-check or no review; the skill may run"},
     "plan_review": "opening is optional; first own-code ask: Blocking adds missing ticked reviewers, Advisory requires a ticked reviewer and a reason when narrowed, Cyber Pro is free; later asks name rows; only a counted participant's objection holds, only under Blocking",
     "advisers": "enabled unticked rows may be named in every mode: heard, not counted, never holding",
-    "result": "review_change(subject=result): named ticked rows in every mode, a narrowed panel records a missing reason; omitted means the whole pool",
+    "result": ("review_change(subject=result): on a Required root, Blocking widens a named subset to every ticked "
+               "reviewer and records it; Advisory names ticked reviewers and requires a reason when narrowed, and if "
+               "nobody reviewed before delivery the host seats the whole pool (chosen by the host); Auto composes "
+               "freely; Cyber Pro composes freely and never holds; Off is refused; a child's own result review "
+               "composes freely; advisers are heard, not counted; omitted reviewers mean the whole pool"),
     "preflight": "one enabled catalog row you name: commit_reviewed(preflight_reviewer=…); none → recorded as not performed",
     "system_review": "/review: one enabled catalog row, default Main",
 }

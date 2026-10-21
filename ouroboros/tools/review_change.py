@@ -304,19 +304,29 @@ def _verify_revisions(root: pathlib.Path, request: ReviewChangeRequest) -> None:
 
 # --- Panel ------------------------------------------------------------------------
 
-def compose_panel(request: ReviewChangeRequest, *, body: bool = False, strictness: Optional[str] = None) -> ComposedPanel:
-    """The shared strictness policy, applied to this change's own-body fact; a result wave composes freely
-    (named rows in every mode, a narrowed panel records a missing reason) and every seat answers its one
-    result question; a skill wave composes as the skill surface (Blocking widens to every ticked reviewer,
-    Advisory narrows with a reason, Cyber Pro composes freely) and every seat answers the one skill question."""
+def compose_panel(request: ReviewChangeRequest, *, body: bool = False, strictness: Optional[str] = None,
+                  required_root: bool = False, chosen_by: str = "ouroboros") -> ComposedPanel:
+    """The shared strictness policy, applied to this change's own-body fact.
+
+    ``required_root`` is the host fact that this result wave is a Required root
+    (``review_result.required_root_wave``): the surface becomes ``result_required``
+    (Blocking widens, Advisory refuses an unexplained narrowing). Auto, a child and
+    Cyber Pro leave it ``result`` and compose the named rows. It is never a model
+    argument. ``chosen_by`` is the caller's record of who seated the panel (the host
+    floor passes ``host``). A skill wave composes as the skill surface. Every seat of
+    a result or skill wave answers its one question.
+    """
     from ouroboros.reviewer_slot_config import compose_review_panel, review_strictness
 
-    surface = ("preflight" if request.surface == "preflight" else request.surface if request.surface in SINGLE_QUESTION
+    surface = ("preflight" if request.surface == "preflight"
+               else "result_required" if request.surface == RESULT and required_root
+               else request.surface if request.surface in SINGLE_QUESTION
                else "own_body" if body else "change")
     try:
         panel = compose_review_panel(request.reviewers, request.reason, surface=surface,
             strictness=strictness or review_strictness(get_review_enforcement(), get_runtime_mode()),
-            reviewer_effort=request.reviewer_effort, coupling_only=request.coupling_only)
+            reviewer_effort=request.reviewer_effort, coupling_only=request.coupling_only,
+            chosen_by=chosen_by or "ouroboros")
     except ReviewChangeArgumentError:
         raise
     except ValueError as exc:
@@ -956,6 +966,9 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
     # its own source (the Skills page composes as the owner, the tool as the mind).
     frozen_skill = args.pop("_frozen_skill", None)
     supplied_panel = args.pop("_panel", None)
+    # Who seated this panel. The tool schema has no such argument; the host floor
+    # passes ``host`` and every model call keeps the default.
+    chosen_by = str(args.pop("_chosen_by", "") or "ouroboros")
     request = parse_request(args)
     if request.subject == SKILL and frozen_skill is None:
         raise ReviewChangeArgumentError("subject=skill is skill_review's own: call skill_review for a skill payload")
@@ -966,10 +979,14 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
                                  effort=request.reviewer_effort, goal=request.goal,
                                  author_questions=request.author_questions, reason=request.reason)
     governance = _governance_repo(ctx)
+    required_root = False
     if request.subject == RESULT:
-        from ouroboros.tools.review_result import RESULT_LAYER, refuse_when_off, result_subject, running_earlier_request
+        from ouroboros.tools.review_result import (
+            RESULT_LAYER, refuse_when_off, required_root_wave, result_subject, running_earlier_request,
+        )
 
         refuse_when_off()  # before any subject is built or any seat is paid
+        required_root = required_root_wave(ctx)
         result = frozen_result if frozen_result is not None else result_subject(ctx, request, governance_root=governance)
         if frozen_result is None:
             earlier = running_earlier_request(ctx, result)
@@ -1025,7 +1042,7 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
         elif supplied_panel is not None:
             panel = single_question_panel(supplied_panel, request.surface)
         else:
-            panel = compose_panel(request, body=layer == "body")
+            panel = compose_panel(request, body=layer == "body", required_root=required_root, chosen_by=chosen_by)
         if public_execution and (supplied_execution or {}).get("tested", {}) != {}:
             tested = supplied_execution["tested"]
             if (tested.get("head"), tested.get("tree")) != (frozen.parent_sha, frozen.tree_sha):
@@ -1184,9 +1201,13 @@ _DESCRIPTION = (
     "(default: the Main model) reads the whole system against BIBLE.md and returns a report. subject=result "
     "(surface=result) reviews THIS task's result instead of a change: the reply (answer, default your latest reply), "
     "the files and effects the task produced, and what was asked; every seat answers one question, whether the "
-    "result does what was asked, judged on the result, never the method. Nobody asks for it in Auto: ask when "
-    "another mind's check could change what you deliver, or when your human asks for a careful check. It is "
-    "unavailable when task review is Off, and it has its own paid-cycle count. The same subject, "
+    "result does what was asked, judged on the result, never the method. On a Required root, Blocking widens a "
+    "named subset to every ticked reviewer; Advisory names ticked reviewers and needs a reason when narrowed "
+    "(missing reason is a typed $0 refusal); if you did not review before delivery the host seats the whole pool. "
+    "Auto composes the rows you name in every strictness. Cyber Pro composes freely and never holds. A child's "
+    "own result review composes freely. Omitted reviewers mean the whole pool. Under Auto ask when another mind's "
+    "check could change what you deliver, or when your human asks for a careful check. It is unavailable when "
+    "task review is Off, and it has its own paid-cycle count. The same subject, "
     "surface, rules and panel return the settled record free (reused=true); enforcement is recorded and on another "
     "root never locks anything. Returns JSON {record_id, aggregate, per_question, panel, rows, subject, checklist, "
     "tests, cost, reused, findings} (+ report for subject=system)."
