@@ -103,19 +103,31 @@ def _api_owner_safety_model_sync(request: Request, body: Any) -> JSONResponse:
                 return unsaved_error(pool_error, 400, code="empty_review_pool")
             settings["OUROBOROS_SUBAGENTS"] = canonical
         safety_configuration(settings)
+        _persist(request, settings, "safety_model", {"changed_settings": sorted(settings)})
     except (TypeError, ValueError) as exc:
         return unsaved_error(str(exc), 400)
-    _persist(request, settings, "safety_model", {"changed_settings": sorted(settings)})
     return JSONResponse({"ok": True})
 
 
 def _persist(request: Request, changes: dict, action: str, audit: dict) -> dict:
     from ouroboros.config import apply_settings_to_env
 
+    def merge(current):
+        proposed = {**current, **changes}
+        if action == "safety_model":
+            from ouroboros.gateway.settings import REVIEW_LANES_KEY
+            from ouroboros.server_runtime import has_startup_ready_provider
+
+            if str(proposed.get("LOCAL_MODEL_SOURCE", "") or "").strip() and not has_startup_ready_provider(proposed):
+                raise ValueError("Local-only setups must route at least one model to the local runtime.")
+            if changes.get("OUROBOROS_SUBAGENTS") not in (None, ""):
+                proposed.pop(REVIEW_LANES_KEY, None)
+        return proposed
+
     with settings_document_mutation():
         digest = settings_document_digest()
         previous = _owner_read_settings_raw()
-        _owner_update_settings(lambda current: {**current, **changes}, digest,
+        _owner_update_settings(merge, digest,
                                authored_keys=tuple(changes), allow_safety_lowering=True)
         # Projection only; the owner writer has already released its file lock.
         from ouroboros.config import load_settings
