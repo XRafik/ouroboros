@@ -731,6 +731,9 @@ def test_a_left_wave_that_settles_after_its_author_ended_stays_in_its_room_once(
     assert sorted(a.reviewer.rounds) == ["m1", "m2"] and _commit_count(a) == 1 and not a.pushes
     record = _left_record(a, wait)
     assert review_pause.ended_left_review(record) == "unchanged"
+    enriched = {**record, "selection": {"tasks": ["child"]}, "seen_helpers": ["task:child"],
+                "seen_outcomes": ["same-wave:operation:outcome"], "review_reference": {"record_id": wait["record_id"]}}
+    assert review_pause.ended_left_review(enriched) == "unchanged"
     assert _release(a.data, mark["id"], direct=True)["ok"]
     assert review_pause.ended_left_review(record) == "unchanged" and _late_marks(a.data) == []
     assert sorted(a.reviewer.rounds) == ["m1", "m2"], "composition collects at $0 only"

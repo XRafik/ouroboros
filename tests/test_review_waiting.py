@@ -86,6 +86,20 @@ def test_unreadable_record_cannot_acknowledge_delivery(tmp_path):
     assert not getattr(ctx, "_review_wait_selection", None)
 
 
+@pytest.mark.parametrize("author", ["task-1", "foreign-author"])
+def test_delivery_cursor_accepts_only_its_author(tmp_path, author):
+    from ouroboros.working_checkpoint import flush_content_acks
+
+    record = _record(tmp_path)
+    ctx = SimpleNamespace(task_id=author, drive_root=tmp_path, budget_drive_root=None)
+    waiting.acknowledge_delivery(ctx, {"record_id": record["record_id"], "outcomes": ["wave:operation:outcome"]})
+    assert bool(getattr(ctx, "_review_wait_selection", None)) is (author == "task-1")
+    assert bool(getattr(ctx, "_pending_content_acks", None)) is (author == "task-1")
+    flush_content_acks(ctx)
+    saved = ledger.load_record(tmp_path, record["record_id"])
+    assert bool(saved.get("waiting")) is (author == "task-1")
+
+
 @pytest.mark.parametrize("paused", [False, True])
 def test_pause_precedes_a_ready_helper(tmp_path, monkeypatch, paused):
     import contextlib

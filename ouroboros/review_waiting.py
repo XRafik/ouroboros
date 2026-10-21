@@ -79,7 +79,7 @@ def outcome_ids(record):
     for row in record.get("rows") or ():
         if seat_open(row):
             continue
-        outcome = row.get("outcome_id") or hashlib.sha256(json.dumps(
+        outcome = (row.get("outcome") or {}).get("outcome_id") or row.get("outcome_id") or hashlib.sha256(json.dumps(
             {key: row.get(key) for key in ("status", "answers", "source_refs")}, sort_keys=True).encode()).hexdigest()
         outcomes.append(f"{record['record_id']}:{row.get('operation_id') or row['seat_id']}:{outcome}")
     return outcomes

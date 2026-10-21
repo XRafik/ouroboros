@@ -399,7 +399,6 @@ def cognitive_route_billing_basis(
     """Return ``(route_label, billing_basis)`` with ``billing_basis`` in
     ``subscription | measured | unknown`` (``reviewer_slot_config.review_cost_facts`` style,
     never a price table)."""
-    from ouroboros.pricing import estimate_cost_optional
     from ouroboros.reviewer_slot_config import review_cost_facts
 
     raw = str(route_model or "").strip()
@@ -407,8 +406,6 @@ def cognitive_route_billing_basis(
     base = raw[: -len(" (local)")].strip() if raw.endswith(" (local)") else raw
     route_label = (f"{base} (local)" if local and base else base) or "unknown"
     observed = cost
-    if observed is None and local:
-        observed = 0.0
     if observed is None and ctx is not None:
         usage = getattr(ctx, "_accumulated_usage", None)
         if isinstance(usage, Mapping):
@@ -417,11 +414,6 @@ def cognitive_route_billing_basis(
             raw_cost = usage.get("cost")
             if (not last_model or last_model in {raw, base, route_label}) and isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
                 observed = raw_cost
-    if observed is None and route_label != "unknown":
-        try:
-            observed = estimate_cost_optional(route_label, 1, 1, allow_live_fetch=False)
-        except Exception:
-            observed = None
     return route_label, str(review_cost_facts(observed, model=route_label)["cost_kind"])
 
 

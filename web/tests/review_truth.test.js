@@ -275,6 +275,7 @@ test('the chip is layered truth: decision before evidence, receipt only from evi
     const dispatchedSub = executorChip({
         executor_route: 'claude',
         model: 'claudexor::claude=sonnet-4-6',
+        coordinator_billing: 'subscription',
         parent_cognitive_route: { model: 'claudexor::claude=sonnet-4-6', chosen_by: 'inherited' },
     });
     assert.match(
@@ -287,6 +288,7 @@ test('the chip is layered truth: decision before evidence, receipt only from evi
         executor_route: 'codex',
         model: 'openai/gpt-5.6-sol',
         cost_usd: 0.02,
+        coordinator_billing: 'measured',
     });
     assert.match(
         dispatchedMeasured.title,

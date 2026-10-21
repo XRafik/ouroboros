@@ -552,7 +552,8 @@ _LEFT_TOOLS = {"commit": "commit_reviewed", "change": "review_change", "result":
 # the mark's writer surface (late_review_marks)
 _LEFT_SURFACES = {"commit": "commit_gate", "change": "change", "result": "result", "skill": "skill"}
 _SEAT_FACTS = ("model", "status", "operation_id", "operation_state", "late_result_pending", "raw_text", "error",
-               "failure_code", "response_ref", "usage", "cost_usd", "outcome_id", "usage_ref")
+               "failure_code", "reported_cause", "transport_status", "prompt_ref", "response_ref", "usage",
+               "cost_usd", "cost_estimate", "cost_kind", "tokens_in", "tokens_out", "outcome", "outcome_id", "usage_ref")
 
 
 def _left_mark_id(record: Dict[str, Any]) -> str:
@@ -704,7 +705,7 @@ def _left_seats(record: Dict[str, Any]) -> Tuple[Any, List[Dict[str, Any]], str]
                 drive, task_id=task_id, surface=kind, row=row, retry_key=retry_key,
                 root_task_id=str(attempt.root_task_id or ""),
                 review_contract=str(attempt.review_contract_fingerprint or "")) if _row_is_pending(row) else row)
-            parts = row.get("parts") or (row.get("review_plan") or {}).get("parts") or ()
+            parts = (actor.get("outcome") or {}).get("parts") or row.get("parts") or (row.get("review_plan") or {}).get("parts") or ()
             seats.append({"surface": kind, "slot_id": slot_id, "parts": list(parts),
                           **{key: actor.get(key) for key in _SEAT_FACTS},
                           "model": actor.get("model") or actor.get("model_id"),
@@ -751,10 +752,12 @@ def _settle_left_record(record: Dict[str, Any], seats: List[Dict[str, Any]], *, 
         if unknown and str(seat.get("operation_state") or "") != "custody_lost":
             continue  # its answer may still arrive: the record stays pending
         row_parts[slot] = tuple(seat.get("parts") or ("change",))
-        result = {"model": str(seat.get("model") or ""), "slot_id": slot,
-                  "operation_id": str(seat.get("operation_id") or ""),
-                  **{key: seat[key] for key in ("failure_code", "usage", "cost_usd", "response_ref",
-                                               "outcome_id", "usage_ref") if seat.get(key) is not None}}
+        result = {key: seat[key] for key in _SEAT_FACTS if seat.get(key) is not None}
+        usage = seat.get("usage") or {}
+        cost = next((v for v in (seat.get("cost_usd"), seat.get("cost_estimate"), usage.get("cost")) if v is not None), None)
+        result.update(slot_id=slot, cost_estimate=cost,
+                      tokens_in=seat.get("tokens_in") or usage.get("prompt_tokens", 0),
+                      tokens_out=seat.get("tokens_out") or usage.get("completion_tokens", 0))
         raw = str(seat.get("raw_text") or "")
         if unknown:
             result.update(verdict="ERROR", text="", operation_state="custody_lost",
@@ -799,7 +802,7 @@ def _left_review_mark(record: Dict[str, Any], attempt: Any, seats: List[Dict[str
     drive, attempt_no = pathlib.Path(record["drive_root"]), int(record.get("attempt") or 0)
     source = {"kind": "left_review_settlement", "gap": gap, "seats": seats,
               **{key: record.get(key) for key in ("surface", "task_id", "attempt", "record_id", "retry_key",
-                                                  "unknown_seats", "msg_id", "left", "selection", "seen_helpers", "seen_outcomes", "review_reference")},
+                                                  "unknown_seats", "msg_id", "left")},
               "attempt_row": {key: getattr(attempt, key, None) for key in (
                   "repo_key", "tool_name", "attempt", "review_record_id", "pre_review_fingerprint", "phase",
                   "status", "block_reason")} if attempt is not None else None}
@@ -843,7 +846,9 @@ def _seat_words(seat: Dict[str, Any]) -> str:
     if not raw.strip():
         return "failed: " + (" ".join(str(seat.get("error") or "").split()) or "no answer")
     parts = tuple(seat.get("parts") or ())
-    if parts == ("result",):  # a result seat answers the findings array (contract A), not the two-part object
+    if seat.get("outcome"):
+        answers = seat["outcome"].get("answers")
+    elif parts == ("result",):  # a result seat answers the findings array (contract A), not the two-part object
         from ouroboros.triad_review import parse_seat_answers
 
         answers = (parse_seat_answers({"results": [{**seat, "text": raw}]}, {str(seat.get("slot_id") or ""): parts})
