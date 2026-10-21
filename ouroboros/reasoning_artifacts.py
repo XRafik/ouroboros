@@ -186,3 +186,48 @@ def pop_replay_omission() -> bool:
     omitted = bool(_REPLAY_OMITTED_CVAR.get())
     _REPLAY_OMITTED_CVAR.set(False)
     return omitted
+
+
+def _prefix_bound_detail(entry: Any) -> bool:
+    return isinstance(entry, dict) and str(entry.get("format") or "").startswith("anthropic-")
+
+
+def _prefix_bound_block(block: Any) -> bool:
+    return isinstance(block, dict) and block.get("type") in {"thinking", "redacted_thinking"}
+
+
+def prefix_bound_reasoning(message: Any) -> int:
+    """Count conversation-bound blocks by shape, never by the selected model.
+
+    Native custody and the neutral details are projections of the same blocks,
+    counted once. Gemini, OpenAI, DeepSeek and nativeContinuation stay untouched.
+    """
+    from ouroboros.anthropic_native_custody import native_reasoning_blocks
+
+    if not isinstance(message, dict) or message.get("role") != "assistant":
+        return 0
+    details, content = message.get("reasoning_details"), message.get("content")
+    return max(native_reasoning_blocks(message),
+               sum(_prefix_bound_detail(entry) for entry in details) if isinstance(details, list) else 0,
+               sum(_prefix_bound_block(block) for block in content) if isinstance(content, list) else 0)
+
+
+def retire_prefix_bound_reasoning(message: Dict[str, Any]) -> int:
+    """Retire only bound reasoning in place; return the number of removed blocks."""
+    from ouroboros.anthropic_native_custody import native_reasoning_blocks
+
+    count = prefix_bound_reasoning(message)
+    if not count:
+        return 0
+    native_reasoning_blocks(message, retire=True)
+    details = message.get("reasoning_details")
+    if isinstance(details, list) and any(_prefix_bound_detail(entry) for entry in details):
+        kept = [entry for entry in details if not _prefix_bound_detail(entry)]
+        if kept:
+            message["reasoning_details"] = kept
+        else:
+            message.pop("reasoning_details", None)
+            message.pop("reasoning", None)  # the flat projection of those details
+    if isinstance(message.get("content"), list):
+        message["content"] = [block for block in message["content"] if not _prefix_bound_block(block)]
+    return count
