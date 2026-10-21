@@ -11,6 +11,14 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolated_window_store(tmp_path, monkeypatch):
+    from ouroboros import capability_evidence
+    monkeypatch.setattr(capability_evidence, "canonical_evidence_root", lambda: tmp_path)
+
 from ouroboros.context_anchor import (
     ACCEPTED_INPUTS_KEY, INPUT_ANCHOR_KEY, InputAnchor, main_input_anchor, record_input_anchor,
 )
@@ -49,11 +57,11 @@ def test_an_accepted_request_becomes_the_anchor_and_raises_the_floor():
     assert anchor.input_tokens == 600_000 and floor == 874_829
 
 
-def test_an_account_rotation_keeps_the_anchor_and_another_model_has_none():
+def test_an_account_rotation_and_another_model_have_no_anchor():
     plan, usage = _plan(), {}
     record_input_anchor(_settled(usage, prompt=500_000, estimate=480_000), plan, round_idx=3)
     rotated = SimpleNamespace(model=plan.model, provider=plan.provider)  # a new route fingerprint, same model
-    assert main_input_anchor(usage, rotated, rewrite_epoch=0)[0] is not None
+    assert main_input_anchor(usage, rotated, rewrite_epoch=0) == (None, None)
     other = SimpleNamespace(model="anthropic/claude-opus-5.5", provider="openrouter")
     assert main_input_anchor(usage, other, rewrite_epoch=0) == (None, None)
 
@@ -134,14 +142,14 @@ def test_measurement_uses_this_conversations_anchor_before_other_witnesses(monke
     assert (measured.measurement.anchor_input_tokens, measured.measurement.anchor_round) == (874_829, 1481)
 
 
-def test_a_stated_window_below_an_accepted_input_is_no_window():
+def test_an_accepted_input_raises_a_known_planning_window():
     from ouroboros.context_fit import measure_main_fit
 
     plan = _plan(window=872_000)
     messages = plan.messages_for("max")
     above = measure_main_fit(plan, messages, [], profile="owner_max", rendered_mode="max", round_id="r",
                              accepted_input_tokens=903_762)
-    assert above.measurement.capacity_total_tokens is None and above.measurement.window_reading_tokens == 872_000
+    assert above.measurement.capacity_total_tokens == 903_762 and above.measurement.window_reading_tokens == 872_000
     below = measure_main_fit(plan, messages, [], profile="owner_max", rendered_mode="max", round_id="r",
                              accepted_input_tokens=640_000)
     assert below.measurement.capacity_total_tokens == 872_000  # a floor under the window cancels nothing

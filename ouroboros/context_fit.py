@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
+from ouroboros.context_window import WindowRecord, resolve_window
 # Tool-result delivery (the whole-batch projection under the measured frame)
 # lives in ``tool_result_delivery``; the consolidator imports its contract here.
 from ouroboros.tool_result_delivery import project_tool_result_batch  # noqa: F401
@@ -110,6 +111,7 @@ class MainFitMeasurement:
     accepted_input_tokens: Optional[int] = None
     window_reading_tokens: Optional[int] = None
     view_kind: str = ""
+    window_witness_bound: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,12 +124,7 @@ class MainFitDisposition:
 
 @dataclass(frozen=True)
 class ContextFitPlan:
-    """Task-local context fit decision for the ordinary Main agent path.
-
-    The two projections are rendered from the same captured core.  The plan is
-    deliberately data-only: it neither owns provider routing nor changes the
-    owner-selected global context mode.  P3 review calls do not use this path.
-    """
+    """Task-local Main fit from one immutable capture; no global mode or review authority."""
 
     core_sha256: str
     preferred_mode: str
@@ -152,6 +149,9 @@ class ContextFitPlan:
     nano_projection: Optional[ContextFitProjection] = None
     core: Optional["ContextCore"] = None  # the capture a new route re-renders the memory view from
     view_kind: str = ""
+    window_record: Optional[WindowRecord] = None
+    window_witness_bound: bool = True
+    route_base_url: str = ""
 
     def reproject_for_route(self, *, window_tokens: int, known_window: bool, ratio: float, output_reserve: int,
                             tool_schemas: Optional[List[Dict[str, Any]]], start_mode: Optional[str] = None,
@@ -609,7 +609,10 @@ def measure_main_fit(
     from ouroboros.context_anchor import floored_window
 
     reading = int(plan.window_tokens or 0) if is_known(plan, require_fresh=True) else None
-    floored, known = floored_window(reading, reading is not None, accepted_input_tokens)
+    current = resolve_window(plan, reserve, bound=plan.window_witness_bound)
+    reading = current.total_equivalent if current.usable is not None else reading
+    accepted_floor = None if current.source.startswith("refusal") else accepted_input_tokens
+    floored, known = floored_window(reading, reading is not None, accepted_floor)
     capacity = floored if known else None
     target_deficit = max(0, total - target) if target is not None else None
     capacity_deficit = max(0, total - capacity) if capacity is not None else None
@@ -644,6 +647,7 @@ def measure_main_fit(
         anchor_rewritten=bool(anchor is not None and anchor.rewritten),
         accepted_input_tokens=accepted_input_tokens,
         window_reading_tokens=reading,
+        window_witness_bound=plan.window_witness_bound,
     )
     action: Literal["send", "send_target_miss"] = (
         "send_target_miss" if target_deficit and target_deficit > 0 else "send")
@@ -834,9 +838,11 @@ def build_context_fit_plan(
     from ouroboros.tool_policy import select_tool_schemas
 
     output_reserve = main_output_reserve_tokens(use_local=bool(route.get("use_local")), evidence=evidence)
-    known_window = is_known(evidence, require_fresh=True)
+    bound = route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint"))
+    window_record = resolve_window(evidence, output_reserve, bound=bound)
+    known_window = window_record.usable is not None
     view_args = dict(
-        preferred=preferred, tool_schemas=tool_schemas, window_tokens=int(evidence.window_tokens or 0),
+        preferred=preferred, tool_schemas=tool_schemas, window_tokens=window_record.total_equivalent,
         known_window=known_window, output_reserve=output_reserve)
     governance = {form: _governance_blocks(env, core, mode=form) for form in ("max", "low")}
     from ouroboros.memory_view import view_role
@@ -865,7 +871,7 @@ def build_context_fit_plan(
     # The task-input pointer is decided on the calibrated Nano request: the schemas it sends and its reply floor.
     nano_sent_tokens = tool_schema_tokens(list(select_tool_schemas(tool_schemas or [], context_mode="nano").schemas))
     nano_reserve = context_mode_limits("nano", preferred, output_reserve)[1]
-    window = int(evidence.window_tokens or 0) if known_window else 0
+    window = window_record.total_equivalent if known_window else 0
 
     def nano_total(tokens: int) -> int:
         return math.ceil((tokens + nano_sent_tokens) * ratio) + nano_reserve
@@ -918,9 +924,6 @@ def build_context_fit_plan(
     max_projection = _projection("max")
     low_projection = _projection("low")
     nano_projection = _projection("nano")
-    # Prediction fits memory granularity but never removes current Max books, even when
-    # the shortest estimated view misses the window. Pre-send or provider size recovery selects Low;
-    # owner Low/Nano and already-lowered starts retain their existing sizing behavior.
 
     core_payload = json.dumps(
         {
@@ -952,9 +955,9 @@ def build_context_fit_plan(
         model=str(route["model"] or ""),
         provider=str(route["provider"] or ""),
         route_fp=str(evidence.route_fp or ""),
-        status=str(evidence.status or ""),
-        stale=bool(evidence.stale),
-        window_tokens=int(evidence.window_tokens or 0),
+        status="confirmed" if known_window else str(evidence.status or ""),
+        stale=False if known_window else bool(evidence.stale),
+        window_tokens=window_record.total_equivalent,
         output_reserve_tokens=output_reserve,
         user_content_json=core.user_content_json,
         max_projection=max_projection,
@@ -967,7 +970,8 @@ def build_context_fit_plan(
             "credentialProfileId": str(getattr(evidence, "credential_profile_id", "") or ""),
             "accountFingerprint": str(getattr(evidence, "account_fingerprint", "") or ""),
         } if route["provider"] == "claudexor" else {},
-        evidence_source=str(getattr(evidence, "source", "") or ""),
+        evidence_source=window_record.source, window_record=window_record, window_witness_bound=bound,
+        route_base_url=str(route.get("base_url") or ""),
         core=core,
     )
 
@@ -988,4 +992,6 @@ def _physical_context_for_fit(disposition: Any) -> PhysicalAttemptContext:
         context_target_miss=disposition.action == "send_target_miss",
         automatic_pass_used=disposition.automatic_pass_used,
         measurement_density=measurement.measurement_density,
+        response_reserve_tokens=measurement.response_reserve_tokens,
+        window_witness_bound=getattr(measurement, "window_witness_bound", False),
     )
