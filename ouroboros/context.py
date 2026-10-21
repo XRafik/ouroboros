@@ -42,9 +42,6 @@ from ouroboros.context_input_selection import (
     _validate_declared_input_task,
 )
 from ouroboros.context_health import (
-    _compute_cache_hit_rate as _compute_cache_hit_rate,
-)
-from ouroboros.context_health import (
     _iter_recent_jsonl as _iter_recent_jsonl,
 )
 from ouroboros.context_health import (
