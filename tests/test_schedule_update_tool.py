@@ -239,3 +239,20 @@ def test_a_naive_run_at_beside_a_timezone_is_refused_as_on_creation(registry):
     accepted = _call(registry, "update", reason="Move it", run_at="2099-01-01T12:00:00+03:00", timezone="Europe/Moscow")
     assert accepted.status == "ok", accepted.text
     assert _stored(registry)["trigger"] == {"type": "once", "run_at": "2099-01-01T09:00:00+00:00"}
+
+
+def test_lifecycle_receipts_describe_the_row_as_stored(registry):
+    from supervisor import queue_schedules as store
+
+    root = registry._ctx.drive_root
+    data = queue.load_schedule_store(root)
+    data["tasks"][0].update(last_task_id="t1", last_outcome={
+        "task_id": "t1", "state": "completed", "quiet": False, "notice": False, "ended_at": None, "line": "Sent"})
+    store._write_scheduled_tasks(data, root)
+    result = _call(registry, "delete", reason="No longer needed")
+    assert result.status == "ok", result.text
+    row = json.loads(result.text)["schedule"]
+    # The audit row lacks these facts; the receipt reads the row as stored after the change.
+    assert row["outcome"]["state"] == "completed" and row["kind"] == "task"
+    assert row["destination"] == {"chat_id": 42, "project_id": "reports"}
+    assert row["withdrawal"]["work_in_flight"] is False and row["status"] == "delete_pending"

@@ -228,7 +228,7 @@ def _patched_definition(current, patch):
             incoming.pop("completed_at", None)
             incoming["enabled"] = True
         if kind == "once":
-            incoming["next_run_at"] = "" if incoming.get("completed_at") else instant.isoformat()
+            incoming["next_run_at"] = ""  # a one-shot is due at its run_at, as on creation
         else:
             incoming["next_run_at"] = _schedule_next_run(incoming)
     return incoming, changed

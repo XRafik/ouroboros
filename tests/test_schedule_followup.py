@@ -226,7 +226,7 @@ def test_schedule_followup_registers_a_one_shot_entry(tmp_path):
     assert record["task"]["context"] == "plan review for root-1 was quorum-unreachable"
     assert record["name"] == "Review window"
     assert "description" not in record and "description" not in record["task"]
-    assert f"Next due: {record['next_run_at']}" in out
+    assert "Next due: 2030-01-01T00:00:00+00:00." in out  # a one-shot names its own instant
 
 
 @pytest.mark.parametrize("recurring", [False, True])
@@ -244,7 +244,8 @@ def test_schedule_followup_notify_leaves_a_note_in_the_one_table(tmp_path, recur
     assert record["kind"] == "notify" and record["source"] == "task_followup"
     assert record["notification"]["text"] == "Call mother" and record["notification"]["set_at"]
     assert record["name"] == "Family call" and "description" not in record
-    assert f"Next due: {record['next_run_at']}" in out
+    assert f"Next due: {record['next_run_at'] or record['trigger']['run_at']}." in out
+    assert "not determined" not in out
     assert record["followup_relation"]["kind"] == "independent"
     assert record["followup_origin"]["task_id"] == "root-1"
     assert "text" not in record["task"], "a note has no future task objective"

@@ -94,7 +94,7 @@ def test_consumed_rearm_requires_a_new_trigger(root, fields, rearmed):
     assert ("completed_at" not in reply) is rearmed
     if rearmed:
         once = fields["trigger"]["type"] == "once"
-        assert reply["next_run_at"] == "2099-01-01T00:00:00+00:00" if once else reply["next_run_at"]
+        assert reply["next_run_at"] == "" if once else reply["next_run_at"]  # a one-shot is due at run_at
 
 
 def test_paused_unconsumed_row_stays_paused_and_context_can_be_cleared(root):

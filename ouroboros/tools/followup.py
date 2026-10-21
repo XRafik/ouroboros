@@ -143,7 +143,7 @@ def _manage_schedules(
         schedule = outcome.get("schedule")
         if isinstance(schedule, dict):
             outcome["schedule"] = schedule_tool_projection(
-                {"tasks": [schedule]}, limit=1, result_limit=result_limit)["tasks"][0]
+                {"tasks": [_stored_row(root, schedule)]}, limit=1, result_limit=result_limit)["tasks"][0]
     except ScheduleRefused as exc:
         # The mutation is ALREADY durable and audited by the time the row is
         # rendered. A row this process cannot fit is a missing receipt detail,
@@ -175,6 +175,19 @@ def _manage_schedules(
         "detail", "schedule action completed; full row omitted to fit the tool result limit")
     compact["schedule_omitted"] = True
     return json.dumps(compact, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _stored_row(root: Any, audit_row: dict) -> dict:
+    """The changed row as stored now: the audit row lacks the facts the view derives."""
+    from supervisor.followup_policy import observed_store
+    from supervisor.queue import ScheduleStoreUnreadable, load_schedule_store
+
+    try:
+        row = next((row for row in load_schedule_store(root)["tasks"]
+                    if str(row.get("id") or "") == str(audit_row.get("id") or "")), None)
+    except ScheduleStoreUnreadable:
+        return audit_row
+    return observed_store(root, {"tasks": [row]})["tasks"][0] if row else audit_row
 
 
 def _schedule_definition_reply(row: dict, **facts) -> str:
@@ -226,6 +239,12 @@ def _update_schedule(ctx: ToolContext, root: Any, schedule_id: str, reason: str,
         facts["argument_note"] = notes.strip()
     return _schedule_definition_reply(row, ok=outcome["audit"] == "recorded",
                                       changed=outcome["status"] == "updated", **facts)
+
+
+def _next_due(stored: dict, trigger: dict) -> str:
+    """A one-shot is due at its own instant; a cron at its computed next run."""
+    once = trigger.get("run_at") if trigger.get("type") == "once" else ""
+    return str(stored.get("next_run_at") or once or "not determined")
 
 
 def _text_size_error(field: str, text: str) -> str:
@@ -601,7 +620,7 @@ def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: s
         f" AUDIT_INCOMPLETE: the row is durable, but its audit outcome fact could not be written (audit={audit or 'unknown'}).")
     return (
         f"FOLLOWUP_SCHEDULED: note {stored.get('id')} registered {timing}. "
-        f"Next due: {stored.get('next_run_at') or 'not determined'}. Nothing wakes then: the host shows "
+        f"Next due: {_next_due(stored, trigger)}. Nothing wakes then: the host shows "
         "your objective verbatim in the owner's chat as a System row signed with when you wrote it and when "
         "it was due (after downtime, at the next start with both times). Pending follow-ups for this task: "
         f"{len(pending) + 1}; the owner can disable or delete it from the Schedules "
@@ -714,7 +733,7 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
         "accounted for in logs/events.jsonl.")
     return (
         f"FOLLOWUP_SCHEDULED: follow-up {stored.get('id')} registered as {timing}. "
-        f"Next due: {stored.get('next_run_at') or 'not determined'}. Future enqueue "
+        f"Next due: {_next_due(stored, trigger)}. Future enqueue "
         "requires eligible relationship/controls and ordinary supervisor admission; "
         f"pending follow-ups for this task: {len(pending) + 1}. The "
         f"record is durable in state/scheduled_tasks.json and {lifecycle}; the owner can "
