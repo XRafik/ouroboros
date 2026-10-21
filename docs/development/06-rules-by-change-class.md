@@ -75,7 +75,7 @@ Enforcement: `tests/test_presence_admission.py` (parsing, admission, schema and 
 
 ### Live E2E stand (`devtools/e2e_live/`)
 
-`python -m devtools.e2e_live.run_live_lanes` exercises owner-shaped work (the SM1, SW1 and SK1 scenarios) on isolated real servers; `stub_lane.py` reuses `tests/system_e2e/harness.py`'s loopback model and review answers for the `--stub` rehearsal. The rule binding runtime changes: keep this opt-in stand outside runtime imports and default local evolution. Its operator manual is `devtools/e2e_live/README.md`, in these sections:
+`python -m devtools.e2e_live.run_live_lanes` runs owner-shaped SM1/SW1/SK1 on isolated real servers; `stub_lane.py` uses `tests/system_e2e/harness.py`'s loopback model/review answers for `--stub`. The rule binding runtime changes: keep this opt-in stand outside runtime imports and default local evolution. Operator manual: `devtools/e2e_live/README.md`.
 
 #### Scenario acceptance
 
@@ -120,7 +120,7 @@ Mechanism: ARCHITECTURE §6 "Own-body candidates" and §2. Rules a change keeps:
 - The old generation never writes the serving tree for an adoption: arm only from the existing stop owners' outcomes (PID census, `stop_owned_work`'s ownership set, reaped children); add no wait, drain or PID probe, nothing on the Panic path. Boot settles `adopted` only for a process that attested the switched tree before its imports (`sys._ouroboros_body_generation`).
 - The hook in `ouroboros/__init__.py` and `body_switch.py` stay stdlib-only and compatible with the helper an older body captured; a body without the hook receives it via an ordinary release, never by adoption.
 - No generic adoption reset (`holds_checkout` covers landed, returned and open transitions); returning files never claims restored dependencies. Preserve the loaded-generation handoff contract in ARCHITECTURE §2.
-- A candidate commit is never auto-pushed; the serving push sends only reachable annotated tags (`--follow-tags`). The release gate names the form from the diff, `numbered` or `neutral` (`neutral_allowed` for the prepared index lane and a bound candidate); a partial carrier move is a finding in either form. Crash recovery grants no new adoption authority.
+- Candidates are not auto-pushed; serving/adoption sends only the operation-created tag, never backfills. Without creation evidence it sends only the branch. The gate reads `numbered`/`neutral` from the diff (`neutral_allowed` for prepared index and bound candidates); partial carrier moves are findings. Recovery grants no adoption authority.
 
 Enforcement: `tests/test_body_adoption.py` with `tests/test_body_candidate.py`. Not exercised there: Windows handover, the packaged launcher's frozen code, a native Android host, an end-to-end `commit_reviewed` with live reviewers on a candidate.
 
@@ -193,7 +193,7 @@ Enforcement: `tests/test_transport_b_stream_deadlines.py` (deadlines and streams
 
 ### LLM call rules
 
-Call-site rules and enforcement; mechanisms in ARCHITECTURE: subscription transport (§6 "Caller-owned subscription model calls"), accounting (§6 "Budget tracking", "Usage ledger substrate vs. accounting policy"), route contracts (§6 "Context fitting, retry, and compaction"; DEVELOPMENT §2 "Provider Independence").
+ARCHITECTURE: subscription transport (§6 "Caller-owned subscription model calls"), accounting (§6 "Budget tracking", "Usage ledger substrate vs. accounting policy"), route contracts (§6 "Context fitting, retry, and compaction"; DEVELOPMENT §2 "Provider Independence").
 
 #### Subscription transport
 
@@ -206,7 +206,7 @@ Call-site rules and enforcement; mechanisms in ARCHITECTURE: subscription transp
 
 #### Call sites and accounting
 
-- Stamp every new physical Main candidate before measurement, pricing and sealing; same-invocation bytes and consumed history (clock line, a recovery send's omitted reasoning) stay fixed (`tests/test_send_clock.py`).
+- Stamp every new physical Main candidate before measurement, pricing and sealing; same-invocation bytes and consumed history (clock line, a recovery send's omitted reasoning) stay fixed (`tests/test_send_clock.py`). Direct Anthropic shares OpenRouter's one-shot reasoning-strip retry; only a successful retry records the omission.
 - New LLM calls go through the shared `LLMClient`/`llm.py` layer — no ad-hoc HTTP clients or provider SDKs outside it (review gate: CHECKLISTS item 11(e)). Exception: skill/extension `plugin.py` modules may call providers directly.
 - Canonical messages and tools stay provider-neutral and function-shaped. A dialect is an outbound projection plus inbound normalization, never a mutation of stored history or a second compaction/replay contract; one request-wire driver; custom-origin receipts stay private and catalog-bound (`request_wire_custom_validation.py`). Enforced by `tests/test_request_wire_contract.py`, `tests/test_openai_chat_custom_contract.py` and `tests/test_anthropic_native_custody.py`; the dialect ladder and `usage.request_wire`: ARCHITECTURE §6 "Context fitting, retry, and compaction".
 - Every core-mediated physical provider send goes through `usage_accounting.execute_physical_attempt[_async]` (`tests/test_usage_accounting.py`). Custody classifiers read the explicit `__cause__` chain, never `__context__`, because implicit chaining would turn a timeout into proven non-dispatch; an ambiguous timeout stays unresolved (`tests/test_transport_custody.py`).
