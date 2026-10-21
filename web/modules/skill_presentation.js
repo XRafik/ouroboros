@@ -284,15 +284,21 @@ export function skillIconHtml(icon, size = 18) {
     return pageIcons.controlIcon(icon?.name || '', size);
 }
 
-/** «Connects Slack» for a connector (the host's `connects` fact, derived from its place declaration), else ''. */
+/** The services a connector connects: the host's `connects` fact, a list of names derived from its place declaration. */
+export function connectsServices(item) {
+    const value = item?.connects;
+    return Array.isArray(value) ? value.map((name) => String(name || '').trim()).filter(Boolean) : [];
+}
+
+/** «Connects Slack» for a connector, else ''. */
 export function connectsText(item) {
-    const label = String(item?.connects?.label || '').trim();
-    return label ? `Connects ${label}` : '';
+    const services = connectsServices(item);
+    return services.length ? `Connects ${services.join(', ')}` : '';
 }
 
 /** A skill that writes into the owner's chat without a place of its own: what arrives from it is the owner's. */
 export function countsAsYoursText(item) {
     const permissions = Array.isArray(item?.permissions) ? item.permissions : [];
     const injects = permissions.some((permission) => String(permission || '').split(':')[0] === 'inject_chat');
-    return injects && !item?.connects ? 'Messages from here count as yours' : '';
+    return injects && !connectsServices(item).length ? 'Messages from here count as yours' : '';
 }

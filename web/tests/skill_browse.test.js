@@ -188,7 +188,7 @@ test('a card: name opens the sheet, Official only on endorsed entries, unknown p
 });
 
 test('a connector is known by its place declaration, never a typed tag: icon, «Connects …», the Connectors filter', () => {
-    const slack = { ...item('ouroboros/duckduckgo'), connects: { label: 'Slack', destination: 'vendor:Slack' }, icon: { name: 'chat' } };
+    const slack = { ...item('ouroboros/duckduckgo'), connects: ['Slack'], icon: { name: 'chat' } };
     assert.equal(isConnector(slack), true);
     assert.equal(isConnector(item('ouroboros/duckduckgo')), false);
     assert.equal(isConnector({ category: [CONNECTORS] }), true, 'a catalog category of the same id joins it');
@@ -202,6 +202,6 @@ test('a connector is known by its place declaration, never a typed tag: icon, «
 test('a skill that writes into your chat without a place says its messages count as yours', () => {
     const bridge = { ...item('ouroboros/duckduckgo'), permissions: ['net', 'inject_chat'] };
     assert.match(renderBrowseCard(bridge, { state: browseCardState(bridge) }), /<div class="skills-card-facts">Messages from here count as yours<\/div>/);
-    const place = { ...bridge, connects: { label: 'A2A' } };
+    const place = { ...bridge, connects: ['A2A'] };
     assert.doesNotMatch(renderBrowseCard(place, { state: browseCardState(place) }), /count as yours/);
 });

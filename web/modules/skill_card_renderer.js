@@ -18,7 +18,7 @@ import {
 import { installedTime } from './ui_helpers.js';
 import { hasSemanticVerdict, lifecycleMeta } from './review_presentation.js';
 import {
-    buttonHtml, canUpdateWithoutReview, chipHtml, connectsText, countsAsYoursText, grantPhrases, officialMarkHtml, permissionWords,
+    buttonHtml, canUpdateWithoutReview, chipHtml, connectsServices, connectsText, countsAsYoursText, grantPhrases, officialMarkHtml, permissionWords,
     plural, relativeAge, shortDate, skillIconHtml, skipReviewButtonHtml, trayHtml, updateRejectionSentence, versionText,
 } from './skill_presentation.js';
 
@@ -662,7 +662,7 @@ export function renderInstalledSkillCard(skill, reviewingSkills = new Set(), rep
     return `<article class="skills-card skills-installed-card" data-skill="${safeName}"${skill.lifecycle_virtual ? ' data-lifecycle-virtual' : ''}${model.needs ? ' data-needs-you' : ''}${reviewing ? ' data-reviewing="1"' : ''}${repairing ? ' data-repairing="1"' : ''}>
         <header class="skills-card-head">
             <div class="skills-card-title">
-                <div class="skills-head-title">${skill.connects ? `<span class="skills-card-icon" aria-hidden="true">${skillIconHtml(skill.icon, 18)}</span>` : ''}<button type="button" class="skills-card-name" ${actionAttrs(skill.name, 'open_detail')}>${safeName}<span class="skills-card-name-more" aria-hidden="true">›</span></button><span class="skills-card-marks">${marks}</span></div>
+                <div class="skills-head-title">${connectsServices(skill).length ? `<span class="skills-card-icon" aria-hidden="true">${skillIconHtml(skill.icon, 18)}</span>` : ''}<button type="button" class="skills-card-name" ${actionAttrs(skill.name, 'open_detail')}>${safeName}<span class="skills-card-name-more" aria-hidden="true">›</span></button><span class="skills-card-marks">${marks}</span></div>
                 ${description ? `<p class="skills-card-purpose">${escapeHtml(description)}</p>` : ''}
                 <div class="skills-card-who">${installedWhoHtml(skill, model)}</div>
                 ${countsAsYoursText(skill) ? `<p class="skills-card-facts">${escapeHtml(countsAsYoursText(skill))}</p>` : ''}

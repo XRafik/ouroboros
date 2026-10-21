@@ -43,28 +43,30 @@ def test_installed_connector_derived_without_hub_and_catalog_tolerates_optional_
     skill, staged = staged_icon(tmp_path)
     monkeypatch.setattr("ouroboros.skill_install_record.read_install_record", lambda *a: None)
     listing = catalog.install_listing(tmp_path, skill, {})
-    assert listing["connects"] is True
-    assert catalog._manifest_facts(replace(skill.manifest, contributes=[]))["connects"] is False
+    assert listing["connects"] == ["Service"]
+    assert catalog._manifest_facts(replace(skill.manifest, contributes=[]))["connects"] == []
     snapshot = catalog.parse_plain_tree(skill.skill_dir)
     row = {"id": "local", "kind": "local", "name": "Local", "trust": "review"}
     assert catalog.items_for(row, snapshot)[0]["icon"]["kind"] == "svg"
-    assert catalog.items_for(row, snapshot)[0]["connects"] is True
+    assert catalog.items_for(row, snapshot)[0]["connects"] == ["Service"]
     snapshot["entries"][0].pop("connects")
     snapshot["entries"][0].pop("icon")
     legacy = catalog.items_for(row, snapshot)[0]
-    assert legacy["connects"] is False and legacy["icon"] == {}
+    assert legacy["connects"] == [] and legacy["icon"] == {}
     catalog._join_installed([legacy], {skill.name: {"skill_dir": str(skill.skill_dir), "locations": ["user_repo"]}},
                             {row["id"]: row})
-    assert legacy["connects"] is True and legacy["installed"]["state"] == "installed"
-    snapshot["entries"][0].update(connects=True, icon={"kind": "svg", "svg": "<svg><script/></svg>"})
+    assert legacy["connects"] == ["Service"] and legacy["installed"]["state"] == "installed"
+    snapshot["entries"][0].update(connects=["Service"], icon={"kind": "svg", "svg": "<svg><script/></svg>"})
     assert catalog.items_for(row, snapshot)[0]["icon"] == {}
 
 
 def test_hub_pointer_optional_fields_do_not_change_schema(tmp_path):
     entry = {"schema_version": 2, "name": "connector", "digest": "a" * 64,
              "source": {"kind": "git", "repo": "https://github.com/example/connector", "commit": "b" * 40}}
-    assert catalog._hub_entry(entry, "connector", tmp_path)["connects"] is False
-    marked = catalog._hub_entry({**entry, "connects": True, "icon": "mail"}, "connector", tmp_path)
-    assert marked["connects"] is True and marked["icon"] == {"kind": "host", "name": "mail"}
+    assert catalog._hub_entry(entry, "connector", tmp_path)["connects"] == []
+    marked = catalog._hub_entry({**entry, "connects": ["Mail"], "icon": "mail"}, "connector", tmp_path)
+    assert marked["connects"] == ["Mail"] and marked["icon"] == {"kind": "host", "name": "mail"}
+    # A bare boolean names no service: the Hub index writes the list of services.
+    assert catalog._hub_entry({**entry, "connects": True}, "connector", tmp_path)["connects"] == []
     assert catalog._hub_entry({**entry, "connects": "true", "icon": "https://example.test/icon.svg"},
                               "connector", tmp_path)["icon"] == {}

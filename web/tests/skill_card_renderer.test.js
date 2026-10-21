@@ -290,13 +290,13 @@ test('a place is the owner\'s choice on its sheet: no Presence runtime form on t
 });
 
 test('a connector card wears its icon and «Connects …»; a chat writer without a place says whose its messages are', () => {
-    const connector = renderInstalledSkillCard(skill({ connects: { label: 'Slack', destination: 'vendor:Slack' }, icon: { name: 'chat' } }));
+    const connector = renderInstalledSkillCard(skill({ connects: ['Slack'], icon: { name: 'chat' } }));
     assert.match(connector, /<span class="skills-card-icon" aria-hidden="true"><svg/);
     assert.match(connector, /data-tone="neutral">Connects Slack</);
     assert.doesNotMatch(renderInstalledSkillCard(skill()), /skills-card-icon|Connects /);
     const bridge = renderInstalledSkillCard(skill({ permissions: ['net', 'inject_chat'] }));
     assert.match(bridge, /<p class="skills-card-facts">Messages from here count as yours<\/p>/);
-    const place = renderInstalledSkillCard(skill({ permissions: ['inject_chat', 'presence'], connects: { label: 'A2A' } }));
+    const place = renderInstalledSkillCard(skill({ permissions: ['inject_chat', 'presence'], connects: ['A2A'] }));
     assert.doesNotMatch(place, /count as yours/, 'a place declaration speaks for its messages instead');
 });
 

@@ -99,7 +99,21 @@ def _connector_facts(manifest: Any, *, icon_source: bytes | None = None) -> Dict
     icon = getattr(manifest, "raw_extra", {}).get("icon", "")
     if not icon and places:
         icon = places[0].get("icon", "")
-    return {"connects": bool(places), "icon": icon_spec(icon, icon_source)}
+    services = [str(row.get("destination") or "")[len("vendor:"):].strip() for row in places
+                if str(row.get("destination") or "").startswith("vendor:")]
+    return {"connects": connect_services(services), "icon": icon_spec(icon, icon_source)}
+
+
+def connect_services(*values: Any) -> List[str]:
+    """The services a connector connects (``Slack``), from manifests or Hub rows; [] for none.
+
+    The Hub index writes a list of service names; anything else names no service.
+    """
+    names: set[str] = set()
+    for value in values:
+        if isinstance(value, (list, tuple)):
+            names.update(str(item).strip() for item in value if isinstance(item, str) and item.strip())
+    return sorted(names)
 
 
 def _catalog_icon(raw: Any, folder: pathlib.Path | None = None) -> Dict[str, str]:
@@ -122,7 +136,7 @@ def _catalog_icon(raw: Any, folder: pathlib.Path | None = None) -> Dict[str, str
 
 def _manifest_facts(manifest: Any, folder: pathlib.Path | None = None) -> Dict[str, Any]:
     if manifest is None:
-        return {"type": "", "needs_keys": [], "permissions": [], "connects": False, "icon": {}}
+        return {"type": "", "needs_keys": [], "permissions": [], "connects": [], "icon": {}}
     keys: List[str] = []
     for raw in manifest.env_from_settings or []:
         key = str(raw or "").strip().upper()
@@ -196,7 +210,7 @@ def _hub_entry(raw: Any, stem: str, clone: pathlib.Path) -> Dict[str, Any]:
                            "path": str(source.get("path") or "").strip("/"), "commit": commit}
         entry.update(_manifest_facts(None))
     if "connects" in raw:
-        entry["connects"] = entry["connects"] or raw["connects"] is True
+        entry["connects"] = connect_services(entry["connects"], raw["connects"])
     if not entry["icon"] and "icon" in raw:
         entry["icon"] = _catalog_icon(raw["icon"])
     return entry
@@ -438,7 +452,7 @@ def items_for(row: Dict[str, Any], snapshot: Optional[Dict[str, Any]]) -> List[D
             "withdrawn": entry.get("withdrawn"), "type": entry.get("type", ""),
             "needs_keys": list(entry.get("needs_keys") or []), "permissions": list(entry.get("permissions") or []),
             "installed": None,
-            "connects": entry.get("connects") is True, "icon": _catalog_icon(entry.get("icon", "")),
+            "connects": connect_services(entry.get("connects")), "icon": _catalog_icon(entry.get("icon", "")),
         }
         if row.get("url"):
             item["repo_url"] = row["url"]
@@ -638,7 +652,7 @@ def _join_installed(items: List[Dict[str, Any]], index: Dict[str, Dict[str, Any]
         if item["installed"]["state"] == "installed" and current.get("skill_dir"):
             # Older Hub snapshots need no schema refresh to identify an installed connector.
             manifest = read_manifest(pathlib.Path(current["skill_dir"]))
-            item["connects"] = bool(item.get("connects") or _connector_facts(manifest)["connects"])
+            item["connects"] = connect_services(item.get("connects"), _connector_facts(manifest)["connects"])
 
 
 def catalog_view(drive_root: pathlib.Path, *, rows: Optional[List[Dict[str, Any]]] = None, refresh: bool = False,

@@ -11,7 +11,7 @@ import { skillSourcesApi } from './api_client.js';
 import { installedSkillModel } from './skill_card_renderer.js';
 import { openSkillDetailSheet } from './skill_detail_sheet.js';
 import {
-    buttonHtml, catalogWhoHtml, chipHtml, connectsText, countsAsYoursText, factsText, officialMarkHtml, plural, relativeAge,
+    buttonHtml, catalogWhoHtml, chipHtml, connectsServices, connectsText, countsAsYoursText, factsText, officialMarkHtml, plural, relativeAge,
     skillIconHtml, skipReviewButtonHtml, statusHtml, trustSentence, versionText,
 } from './skill_presentation.js';
 
@@ -19,7 +19,7 @@ const HIDDEN_KEY = 'ouroboros.skills.recommendedHidden';
 // The Connectors chip is derived from each entry's `connects` fact (an installed skill's place declaration, or
 // the Hub entry's), never a typed tag; a catalog category of the same id joins it.
 export const CONNECTORS = 'connectors';
-export const isConnector = (item) => Boolean(item?.connects) || (item?.category || []).includes(CONNECTORS);
+export const isConnector = (item) => connectsServices(item).length > 0 || (item?.category || []).includes(CONNECTORS);
 const CLAMP_CHARS = 600;
 
 function readHiddenShelf() {
