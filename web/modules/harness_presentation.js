@@ -101,6 +101,75 @@ export function joinMetaParts(parts) {
     return parts.filter(Boolean).join(META_PART_SEPARATOR);
 }
 
+/** Normalize coordinator route provenance from a recorded snapshot or frame. */
+export function formatCoordinatorProvenance(source) {
+    if (!source) return '';
+    if (typeof source === 'string') {
+        const trimmed = source.trim();
+        if (!trimmed) return '';
+        const lower = trimmed.toLowerCase();
+        if (lower === 'inherited' || lower === 'parent') return 'inherited';
+        if (lower === 'fallback' || lower === 'parent_fallback' || lower === "parent's fallback") {
+            return "parent's fallback";
+        }
+        if (lower.startsWith('chosen by the delegator')) return trimmed;
+        if (lower.startsWith('delegator:')) {
+            const row = trimmed.slice('delegator:'.length).trim();
+            return row ? `chosen by the delegator (${row})` : 'chosen by the delegator';
+        }
+        return trimmed;
+    }
+    if (typeof source !== 'object') return '';
+    const snap = source.parent_cognitive_route && typeof source.parent_cognitive_route === 'object'
+        ? source.parent_cognitive_route
+        : null;
+    const chosenRow = String(
+        snap?.supervisor_row || snap?.supervisor_subagent_id
+        || snap?.selected_supervisor_snapshot?.handle || snap?.selected_supervisor_snapshot?.selected_subagent_id
+        || snap?.row || source.supervisor_row || source.supervisor_subagent_id
+        || source.selected_supervisor_snapshot?.handle || source.selected_supervisor_snapshot?.selected_subagent_id
+        || '',
+    ).trim();
+    const explicit = String(
+        source.coordinatorProvenance || source.coordinator_provenance
+        || snap?.chosen_by || snap?.provenance || source.chosen_by || '',
+    ).trim();
+    const lower = explicit.toLowerCase();
+    const role = String(snap?.source_role || source.source_role || source.effective_model_lane || '').trim().toLowerCase();
+    if (chosenRow || lower === 'delegator') {
+        return chosenRow ? `chosen by the delegator (${chosenRow})` : 'chosen by the delegator';
+    }
+    if (lower === 'fallback' || lower === 'parent_fallback' || lower === "parent's fallback" || role === 'fallback') {
+        return "parent's fallback";
+    }
+    if (lower === 'inherited' || lower === 'parent' || Boolean(snap?.model)) {
+        return 'inherited';
+    }
+    return explicit ? formatCoordinatorProvenance(explicit) : '';
+}
+
+/** Describe the supervising child's own cognitive route and billing basis for the pre-evidence chip. */
+export function coordinatorRouteClause(evt) {
+    const snap = evt?.parent_cognitive_route && typeof evt.parent_cognitive_route === 'object'
+        ? evt.parent_cognitive_route
+        : null;
+    const rawModel = String(evt?.coordinator_route || evt?.model || snap?.model || '').trim();
+    const local = Boolean(evt?.use_local_model || snap?.use_local_model) || rawModel.endsWith(' (local)');
+    const route = local && rawModel && !rawModel.endsWith(' (local)') ? `${rawModel} (local)` : rawModel;
+    const explicitBilling = String(
+        evt?.coordinator_billing || evt?.nanny_billing || evt?.cost_kind || snap?.billing || snap?.cost_kind || '',
+    ).trim();
+    const hasNumericCost = (typeof evt?.cost_usd === 'number' && Number.isFinite(evt.cost_usd))
+        || (typeof evt?.cost === 'number' && Number.isFinite(evt.cost));
+    const billing = explicitBilling
+        || (route.startsWith('claudexor::') ? 'subscription'
+            : local || hasNumericCost ? 'measured'
+            : 'unknown');
+    return route
+        ? `this subagent itself runs on ${route} (bills as ${billing})`
+        : `this subagent runs on its coordinator route (bills as ${billing})`;
+}
+
 /** Card identity consumes projected facts; it does not infer execution from marks.
  *  The chip's detail sentence is also text on the line, shown only while the card
  *  is expanded through its own summary control (pointer, keyboard or touch), never
@@ -108,7 +177,9 @@ export function joinMetaParts(parts) {
  *  collapsed line keeps no dangling ` · `, and a copy of the open line keeps it.
  *  Text-mode escaping keeps the markup equal to its serialization, which the meta
  *  line's no-op check compares, so a quote never forces a rebuild. */
-export function executorIdentityMarkup(chip, { agentModel = '' } = {}) {
+export function executorIdentityMarkup(chip, {
+    agentModel = '', coordinatorProvenance = '', snapshot = null,
+} = {}) {
     const detail = chip?.title
         ? `<span class="chat-live-executor-detail">${META_PART_SEPARATOR}<span class="chat-live-meta-text">${escapeHtmlText(chip.title)}</span></span>`
         : '';
@@ -116,8 +187,11 @@ export function executorIdentityMarkup(chip, { agentModel = '' } = {}) {
         ? `<span class="harness-chip chat-live-executor-chip" title="${escapeHtml(chip.title || '')}">`
             + harnessIdentityMarkup(chip.harness, { label: chip.label || '', className: 'chat-live-executor-identity' }) + '</span>' + detail
         : '';
+    const provenance = formatCoordinatorProvenance(
+        coordinatorProvenance || snapshot || chip?.coordinatorProvenance || chip?.snapshot,
+    );
     const facts = [
-        agentModel ? `${chip ? 'Coordinator' : 'Agent model'}: ${agentModel}` : '',
+        agentModel ? `${chip ? 'Coordinator' : 'Agent model'}: ${agentModel}${chip && provenance ? ` (${provenance})` : ''}` : '',
         chip?.observedModels?.length ? `Observed: ${chip.observedModels.join(', ')}` : '',
     ];
     return joinMetaParts([

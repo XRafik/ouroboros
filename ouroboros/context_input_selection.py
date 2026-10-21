@@ -290,7 +290,9 @@ def _capture_declared_context_core(
     retries and fitting operate on the resulting immutable ContextCore.
     """
     from ouroboros.subagent_work_order import input_source_selection_receipt
-    from ouroboros.subagent_runtime import current_model_visible_subagent_catalog, review_facts_block, review_records_block
+    from ouroboros.subagent_runtime import (
+        current_model_visible_subagent_catalog, review_facts_block, review_records_block, subagent_supervision_fact_line,
+    )
 
     canonical_root = pathlib.Path(task.get("budget_drive_root") or getattr(env, "budget_drive_root", None) or memory.drive_root)
     same_drive = canonical_root.resolve(strict=False) == memory.drive_root.resolve(strict=False)
@@ -303,7 +305,7 @@ def _capture_declared_context_core(
     ]
     parts.extend(snapshot_labelled(section, sources["captured_at"]) for section in
                  process_memory.recent_activity_sections(str(task["id"]), own_drive=None if same_drive else memory))
-    catalog_text = ""
+    catalog_text, catalog = "", None
     try:
         catalog = current_model_visible_subagent_catalog()
         if catalog:
@@ -313,7 +315,10 @@ def _capture_declared_context_core(
     review_text = ""
     try:
         review_text = review_facts_block()
-        parts.append(review_records_block(drive_root=canonical_root, task_id=str(task["id"])))
+        parts.extend(filter(None, (
+            review_records_block(drive_root=canonical_root, task_id=str(task["id"])),
+            subagent_supervision_fact_line(task, ctx=ctx, catalog=catalog),
+        )))
     except Exception:
         log.warning("Failed to build the Review block", exc_info=True)
     return _ContextCore(

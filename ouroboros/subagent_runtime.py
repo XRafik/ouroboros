@@ -393,6 +393,90 @@ def review_records_block(*, drive_root: Any, task_id: str) -> str:
     }, ensure_ascii=False, separators=(",", ":"))
 
 
+def cognitive_route_billing_basis(
+    route_model: str, *, use_local: bool = False, ctx: Any = None, cost: Any = None,
+) -> tuple[str, str]:
+    """Return ``(route_label, billing_basis)`` with ``billing_basis`` in
+    ``subscription | measured | unknown`` (``reviewer_slot_config.review_cost_facts`` style,
+    never a price table)."""
+    from ouroboros.pricing import estimate_cost_optional
+    from ouroboros.reviewer_slot_config import review_cost_facts
+
+    raw = str(route_model or "").strip()
+    local = bool(use_local or raw.endswith(" (local)"))
+    base = raw[: -len(" (local)")].strip() if raw.endswith(" (local)") else raw
+    route_label = (f"{base} (local)" if local and base else base) or "unknown"
+    observed = cost
+    if observed is None and local:
+        observed = 0.0
+    if observed is None and ctx is not None:
+        usage = getattr(ctx, "_accumulated_usage", None)
+        if isinstance(usage, Mapping):
+            last_meta = usage.get("_last_llm_call_meta")
+            last_model = str(last_meta.get("model") or "").strip() if isinstance(last_meta, Mapping) else ""
+            raw_cost = usage.get("cost")
+            if (not last_model or last_model in {raw, base, route_label}) and isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
+                observed = raw_cost
+    if observed is None and route_label != "unknown":
+        try:
+            observed = estimate_cost_optional(route_label, 1, 1, allow_live_fetch=False)
+        except Exception:
+            observed = None
+    return route_label, str(review_cost_facts(observed, model=route_label)["cost_kind"])
+
+
+def current_cognitive_route_and_billing(
+    task: Optional[Mapping[str, Any]] = None, *, ctx: Any = None,
+) -> tuple[str, str]:
+    """Resolve the caller's current cognitive route and billing basis for nanny supervision."""
+    task_map = task if isinstance(task, Mapping) else {}
+    meta = task_map.get("task_metadata") if isinstance(task_map.get("task_metadata"), Mapping) else (
+        getattr(ctx, "task_metadata", None) if isinstance(getattr(ctx, "task_metadata", None), Mapping) else {}
+    )
+    model = str(
+        getattr(ctx, "active_model_override", "")
+        or getattr(ctx, "active_model", "")
+        or getattr(ctx, "task_model_override", "")
+        or task_map.get("model")
+        or meta.get("model")
+        or runtime_setting("OUROBOROS_MODEL", "")
+        or ""
+    ).strip()
+    for candidate in (
+        getattr(ctx, "active_use_local_override", None),
+        getattr(ctx, "active_use_local", None),
+        getattr(ctx, "task_use_local_override", None),
+        task_map.get("use_local_model") if "use_local_model" in task_map else None,
+        meta.get("use_local_model") if "use_local_model" in meta else None,
+    ):
+        if candidate is not None:
+            use_local = bool(candidate)
+            break
+    else:
+        use_local = str(runtime_setting("USE_LOCAL_MAIN", "") or "").strip().lower() in ("true", "1")
+    return cognitive_route_billing_basis(model, use_local=use_local, ctx=ctx)
+
+
+def subagent_supervision_fact_line(
+    task: Optional[Mapping[str, Any]] = None, *, ctx: Any = None, catalog: Optional[Mapping[str, Any]] = None,
+) -> str:
+    """Dynamic-tier fact for nanny supervision when the visible catalog has an Agent-session row."""
+    try:
+        visible = current_model_visible_subagent_catalog() if catalog is None else catalog
+        rows = visible.get("rows") if isinstance(visible, Mapping) else None
+        if not isinstance(rows, list) or not any(
+            isinstance(row, Mapping) and row.get("route_class") == "Agent session" for row in rows
+        ):
+            return ""
+        route_label, billing = current_cognitive_route_and_billing(task, ctx=ctx)
+        return (
+            f"An Agent-session row also creates a supervising child on {route_label}; "
+            f"its calls bill as {billing}; the row named as supervisor (D5) replaces that route."
+        )
+    except Exception:
+        return ""
+
+
 def _recent_review_records(drive_root: Any, task_id: str) -> tuple[list[dict[str, Any]], Any]:
     """This task's five newest review-ledger records from the bounded hot index, in the reader's
     newest-first order, and whether more exist: ``0`` when the hot index holds nothing else and no

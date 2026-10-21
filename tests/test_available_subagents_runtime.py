@@ -1482,3 +1482,19 @@ def test_an_owner_disabled_local_api_row_no_longer_asks_for_a_local_runtime():
     # An enabled sibling still needs it.
     assert needs_local_model_autostart(_settings(off, _api_row(
         "local-builder", model="other-model (local)")))
+
+
+def test_scheduling_receipt_names_nanny_route_and_billing_for_session_rows_only():
+    from ouroboros.tools.control_scheduling import _finalize_schedule_emission
+    ctx = SimpleNamespace(active_model="claudexor::claude=sonnet-4-6", active_use_local=False, task_metadata={})
+    route = {"model": "claudexor::claude=sonnet-4-6", "use_local_model": False}
+    session_receipt = _finalize_schedule_emission(ctx, {
+        "task_ids": ["11223344"], "objective": "Build feature", "parent_cognitive_route": route,
+        "configured_subagent": _snapshot(_settings(_session_row()), "session-builder"),
+    })
+    assert "route=agent_session, recursive nanny on claudexor::claude=sonnet-4-6 (bills as subscription); exact route/work-order authority is frozen before its first model call" in session_receipt
+    api_receipt = _finalize_schedule_emission(ctx, {
+        "task_ids": ["55667788"], "objective": "Build API feature", "parent_cognitive_route": route,
+        "configured_subagent": _snapshot(_settings(_api_row()), "api-builder"),
+    })
+    assert "route=api_model, ordinary recursive API actor)" in api_receipt and "recursive nanny" not in api_receipt
