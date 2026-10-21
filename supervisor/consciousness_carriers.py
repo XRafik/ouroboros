@@ -35,10 +35,10 @@ def autonomous_tasks() -> list[str]:
 def autonomous_work_enabled(task: dict, drive_root) -> bool:
     """Recheck Off/Panic at selection and launch, including restored autonomous work."""
     metadata = task.get("metadata") or {}
-    # Already-admitted historical work without any origin is not reclassified on restore.
-    if not (metadata.get("work_kind") or is_consciousness_origin(metadata)):
-        return True
-    if work_kind(metadata) != WORK_KIND_CONSCIOUSNESS:
+    # Only work consciousness itself started obeys its switch. Unmarked work is
+    # checked at the consciousness Safety level, but it is not autonomous: an Off
+    # switch must never stop system, owner or historical work from dispatching.
+    if not is_consciousness_origin(metadata) or work_kind(metadata) != WORK_KIND_CONSCIOUSNESS:
         return True
     from ouroboros.consciousness import panic_blocks_wake
     from supervisor.state import control_is, load_state

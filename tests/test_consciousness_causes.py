@@ -184,3 +184,20 @@ def test_recovered_autonomous_work_rechecks_off_and_panic_at_assignment(tmp_path
     assert choose() == (None, False)
     workers.PENDING[0]["metadata"] = OWNER
     assert choose() == (0, False)
+
+
+def test_off_switch_stops_only_work_consciousness_started(tmp_path, monkeypatch):
+    """Unmarked work is checked at the consciousness level, yet Off never stops it from dispatching."""
+    from supervisor import consciousness_carriers as carriers
+    from supervisor import state
+
+    monkeypatch.setattr(state, "load_state", lambda: {"bg_consciousness_enabled": False})
+    monkeypatch.setattr("ouroboros.consciousness.panic_blocks_wake", lambda root: False)
+    unmarked = {"id": "system", "metadata": {"work_kind": "consciousness"}}
+    started = {"id": "started", "metadata": {"initiator": "consciousness", "work_kind": "consciousness"}}
+    commissioned = {"id": "owner", "metadata": {"initiator": "consciousness", "work_kind": "owner"}}
+    assert carriers.autonomous_work_enabled(unmarked, tmp_path) is True
+    assert carriers.autonomous_work_enabled(commissioned, tmp_path) is True
+    assert carriers.autonomous_work_enabled(started, tmp_path) is False
+    monkeypatch.setattr(state, "load_state", lambda: {"bg_consciousness_enabled": True})
+    assert carriers.autonomous_work_enabled(started, tmp_path) is True
