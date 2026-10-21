@@ -27,7 +27,7 @@ PRESENCE = {"presence": {"binding_id": "b1", "event": {"provider": "telegram", "
 def test_role_defaults_are_the_table_of_the_spec():
     table = {  # story, room_page, room_lanes, origin_words, live_rooms, marks, knowledge, owner_words
         "integrator": (True, True, True, True, "lines", "all", True, False),
-        "consciousness": (True, True, True, True, "lines_with_words", "all", True, False),  # Main's view + people's words
+        "consciousness": (True, True, True, True, "directory", "all", True, False),
         "presence": (True, True, True, False, "none", "room_and_global", True, False),
         "child": (True, True, False, True, "none", "room_and_global", False, True),
         "nanny": (False, True, False, True, "none", "room_and_global", False, True),
@@ -430,9 +430,9 @@ def test_a_rooms_standing_facts_are_the_inventorys_in_its_header_its_live_line_a
     quiet = [room for room in snapshot.live_rooms if not room["notes"] and not room["words"]]
     assert [room["room_id"] for room in quiet] == [str(rooms["alpha"]), beta, "777"]
     assert mv._rooms_line(quiet) == (
-        "3 more open rooms without notes; open 2026-09-05 10:13 → 2026-09-05 10:20; people 3, mine 2, task facts 1, "
+        "3 open rooms; open 2026-09-05 10:13 → 2026-09-05 10:20; people 3, mine 2, task facts 1, "
         f"~{sum(room['facts']['chars'] for room in quiet)} chars; no page of these rooms yet; "
-        f"memory_read(room_id=<id>, rows=true) reads each: {rooms['alpha']}, {beta}, 777")
+        "memory_read(room_id='*', start=0)")
     # A page over rows 10:05-10:10 of Main; a note in Main; the transport's one spoken row sealed.
     covers = page_covers(tmp_path, "1", from_addr=_addr(rows[3]), to_addr=_addr(rows[8]))["covers"]
     assert store.publish_page(room_id="1", text="The middle of the morning.", covers=covers, author=shared.MIND).ok
@@ -451,7 +451,7 @@ def test_a_rooms_standing_facts_are_the_inventorys_in_its_header_its_live_line_a
     assert "sealed up to" not in text and "sealed through" not in text and "frontier" not in text
     quiet = [room for room in snapshot.live_rooms if not room["notes"] and not room["words"]]
     assert mv._rooms_line(quiet).startswith(
-        "3 more open rooms without notes; open 2026-09-05 10:13 → 2026-09-05 10:17; people 2, mine 2, task facts 1, ")
+        "3 open rooms; open 2026-09-05 10:13 → 2026-09-05 10:17; people 2, mine 2, task facts 1, ")
     assert "; pages of these rooms: 1, last covered row 2026-09-05 10:20; memory_read(" in mv._rooms_line(quiet)
     # A child of a Main task counts the same room the same way, whatever its view prints of the rows.
     child, _text = _view(tmp_path, {"id": "kid", "chat_id": 1, "delegation_role": "subagent", "parent_task_id": "root2",
@@ -549,7 +549,7 @@ def test_each_role_sees_its_parts_of_the_live_view(tmp_path):
     assert "please look at X" in _section(wake_text, "### Open conversation since")
     assert "### Main — " not in wake_text  # Main is this room, not a live-room line
     live = _section(wake_text, "## Live rooms")
-    assert "alpha words" in live and "beta words" in live
+    assert "alpha words" not in live and "beta words" not in live
     assert "transport words" not in live and wake_text.count("transport words") == 1
     assert "alpha reply" not in wake_text and "beta reply" not in wake_text  # my replies there: one read by address
     assert f"memory_read(room_id='{rooms['alpha']}', rows=true)" in live

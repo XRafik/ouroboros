@@ -7,7 +7,7 @@ Which parts a role sees is one ``ViewSpec``: ``ROLE_DEFAULTS`` by role (Main, a 
 integrator; consciousness; Presence; a delegated child; a nanny), or an explicit spec a
 task carries under ``memory_view``. The current room is the task's own room
 (``dialogue_evidence.own_room_chat``); outside a Project and Main it is Main (a wake's too:
-it reads Main as the Main turn does, plus people's words in the other live rooms), except a
+it reads Main as the Main turn does, plus a directory of other live rooms), except a
 Presence turn, which sees its own conversation.
 
 ``capture_memory_view`` reads the facts once per request into a ``MemoryViewSnapshot``
@@ -57,7 +57,7 @@ log = logging.getLogger(__name__)
 
 MAIN_ROOM = str(WEB_UI_CHAT_ID)
 ROLES = ("integrator", "consciousness", "presence", "child", "nanny")
-LIVE_ROOMS = ("none", "lines", "lines_with_words")
+LIVE_ROOMS = ("none", "lines", "lines_with_words", "directory")
 MARKS = ("all", "room_and_global", "none")
 LEGACY_FILE = "memory/dialogue_blocks.json"
 # A task's typed host facts its lane-2 line names by type and address, never by text or JSON:
@@ -127,7 +127,7 @@ class ViewSpec:
     room_page: bool = True  # the room's retold records not yet folded, pages under my parts, my open notes
     room_lanes: bool = True  # the open conversation (lane 1) and one line per task (lane 2)
     origin_words: bool = True  # the owner's words that started a Project, when its rows are not open
-    live_rooms: str = "lines"  # none | lines | lines_with_words
+    live_rooms: str = "lines"  # none | lines | lines_with_words | directory
     marks: str = "all"  # all | room_and_global | none
     knowledge: bool = True  # overview, knowledge index, patterns, project journal (rendered by the context)
     work_room_levels: int = 1
@@ -136,8 +136,8 @@ class ViewSpec:
 
 ROLE_DEFAULTS: Mapping[str, ViewSpec] = MappingProxyType({
     "integrator": ViewSpec("integrator"),
-    # A wake sees Main, distinct words from other ordinary rooms, and place pointers.
-    "consciousness": ViewSpec("consciousness", live_rooms="lines_with_words"),
+    # A wake sees ordinary Main and one directory line per other room.
+    "consciousness": ViewSpec("consciousness", live_rooms="directory"),
     "presence": ViewSpec("presence", origin_words=False, live_rooms="none", marks="room_and_global"),
     "child": ViewSpec("child", room_lanes=False, live_rooms="none", marks="room_and_global", knowledge=False,
                       owner_words=True),
@@ -580,6 +580,7 @@ def _notes_by_room(store: ChronicleStore) -> Dict[str, List[Dict[str, Any]]]:
     for room in rooms:
         sealed = store.sealed_row_refs(room)
         kept = [{"id": record["id"], "date": _minute(record.get("ts")).split(" ")[0],
+                 "task_id": str(record.get("author", {}).get("task_id") or ""),
                  "role": str(_mapping(_mapping(record.get("author")).get("focus")).get("role") or "mind"),
                  "origin": dict(_mapping(_mapping(record.get("author")).get("focus"))),
                  "text": str(record.get("current_text") or "")}
@@ -649,6 +650,35 @@ def _capture_room(store: ChronicleStore, root: pathlib.Path, spec: ViewSpec, lab
     return facts
 
 
+def _room_focus(root, by_room, notes):
+    """Latest authored focus per room, including its bound tasks whose rows are already sealed."""
+    from ouroboros.focus import compact_focus
+    from ouroboros.task_store import display_documents
+
+    ids = {room: {str(row.get("task_id") or "") for _a, row, _p in entries}
+           for room, entries in by_room.items()}
+    for room, entries in notes.items():
+        ids.setdefault(room, set()).update(note.get("task_id", "") for note in entries)
+    for task_id, room in memory_inventory.membership_facts(root).bindings.items():
+        if str(room) in ids:
+            ids[str(room)].add(task_id)
+    documents = display_documents(root, set().union(*ids.values()) if ids else ())
+    focus = {task_id: compact_focus(json.loads(text).get("focus")) for task_id, text in documents.items()}
+    dated = {}
+    for task_id, line in focus.items():
+        try:
+            dated[task_id] = datetime.datetime.fromisoformat(line["authored_at"]).timestamp()
+        except (TypeError, ValueError, OverflowError):
+            continue
+    latest = {}
+    for room, tasks in ids.items():
+        candidates = [focus[t] for t in tasks if t in dated and focus[t].get("author_task_id") == t]
+        if candidates:
+            line = max(candidates, key=lambda item: (dated[item["author_task_id"]], item["author_task_id"]))
+            latest[room] = f"{line['text']} (task {line['author_task_id']}, {_minute(line['authored_at'])})"
+    return latest
+
+
 def _live_rooms(store: ChronicleStore, root: pathlib.Path, spec: ViewSpec, label: Callable[..., str],
                 by_room: Mapping[str, List[Entry]], notes: Mapping[str, List[Dict[str, Any]]],
                 lineage: Mapping[str, Any]) -> List[Dict[str, Any]]:
@@ -656,6 +686,7 @@ def _live_rooms(store: ChronicleStore, root: pathlib.Path, spec: ViewSpec, label
     from ouroboros.dialogue_provenance import row_provenance
 
     rooms = []
+    focus = _room_focus(root, by_room, notes) if spec.live_rooms == "directory" else {}
     shown = {entry[0]["row_sha256"] for entry in by_room.get(spec.room_id, [])} if spec.room_lanes else set()
     for room in sorted((set(by_room) | set(notes)) - {spec.room_id}):
         entries = by_room.get(room, [])
@@ -682,7 +713,7 @@ def _live_rooms(store: ChronicleStore, root: pathlib.Path, spec: ViewSpec, label
                                   "conversation_key": origin.get("conversation_key", ""),
                                   "answered_events": 0, "last_address": "no open rows"}
         rooms.append({"room_id": room, "label": label(room, sample), "key": entries[-1][2] if entries else -1,
-                      "facts": facts,
+                      "facts": facts, "directory": spec.live_rooms == "directory", "focus": focus.get(room, ""),
                       "notes": list(notes.get(room, ())), "words": words})
     return sorted(rooms, key=lambda item: (item["key"], item["room_id"]))
 
@@ -921,8 +952,8 @@ def _directory_room(room: Mapping[str, Any]) -> str:
     focus = str(room.get("focus") or "")
     place = room["facts"].get("place") or {}
     extra = (f"; place {place.get('place_id', '?')}; last row {place.get('last_address', '?')}" if place else "")
-    return (f"- {room['label']}; {_facts_text(room['facts'])}; last activity {_minute(room['facts'].get('latest'))}"
-            f"{'; focus: ' + focus if focus else ''}{extra}; memory_read(room_id='{room['room_id']}', rows=true)")
+    return " ".join((f"- {room['label']}; {_facts_text(room['facts'])}; last activity {_minute(room['facts'].get('latest'))}"
+            f"{'; authored focus: ' + focus if focus else ''}{extra}; memory_read(room_id='{room['room_id']}', rows=true)").split())
 
 
 def _range_room(room: Mapping[str, Any]) -> str:
@@ -1111,13 +1142,13 @@ def render_room(snapshot: MemoryViewSnapshot, level: FloorLevel = FULL_VIEW, *, 
         parts.append(_late_reviews_text(late, snapshot.spec.role))
     if len(late) < len(snapshot.marks):
         parts.append(_marks_text([mark for mark in snapshot.marks if not mark.get("late_review")]))
+    if snapshot.spec.role == "consciousness":
+        parts.append(f"## Memory drafts\n\nDrafts awaiting a decision: {len(snapshot.candidates)}; memory_read(room_id='candidates'). "
+                     "Candidates do not act until adopted by a chronicle_write decision.")
     if snapshot.live_rooms:
         parts.append(_live_text(snapshot.live_rooms, gone))
     if room:
         parts.append(_room_text(room, gone))
-    if snapshot.spec.role == "consciousness":
-        parts.append(f"Drafts awaiting a decision: {len(snapshot.candidates)}; memory_read(room_id='candidates'). "
-                     "Candidates do not act until adopted by a chronicle_write decision.")
     parts.append(floor_note)
     return "\n\n".join(part for part in parts if part)
 
