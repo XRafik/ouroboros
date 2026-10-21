@@ -179,9 +179,18 @@ def test_bounded_history_projection_discloses_both_omission_limits(tmp_path):
         "kind": "review_ledger_index", "path": "state/review_ledger/index.jsonl", "reader": "read_file",
     }
 
-    # An archived segment beside the hot index: older records live where the bounded read never looks.
+    # An archived segment beside the hot index: older records live where the bounded read never looks — a cut
+    # for a task whose start is unknown or precedes the hot index's oldest row (opus R1-8, subagent 2); a task
+    # that started at or after that row has every row of its own in the hot index, and says so.
     (review_ledger.ledger_dir(drive_root) / "index.20260101T000000.jsonl").write_text("", encoding="utf-8")
     history = _skill_names_from_review_history(drive_root, "root-1")
     assert history["names"] == ["visible"] and history["coverage"]["truncated"] is True
     assert history["coverage"]["complete"] is False and history["coverage"]["gap_reasons"] == ["tail_bytes_truncated"]
+    before = _skill_names_from_review_history(drive_root, "root-1", task_started_at="2000-01-01T00:00:00+00:00")
+    assert before["coverage"]["truncated"] is True and before["coverage"]["complete"] is False
+    oldest = review_ledger.hot_index_oldest_ts(drive_root)
+    assert oldest
+    since = _skill_names_from_review_history(drive_root, "root-1", task_started_at=oldest)
+    assert since["names"] == ["visible"] and since["coverage"]["truncated"] is False
+    assert since["coverage"]["complete"] is True and since["coverage"]["gap_reasons"] == []
 

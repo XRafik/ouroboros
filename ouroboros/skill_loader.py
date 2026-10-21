@@ -589,7 +589,8 @@ def _read_review_record(
         if not (pathlib.Path(skill_dir) / ".ouroboroshub.json").is_file():
             review_profile = ""
     # A native_seed verdict holds only while .seed-origin is present (the marker is hash-exempt, so it is checked
-    # explicitly; an unverifiable provenance — no skill_dir — fails safe the same way: CHECKLISTS §Skills).
+    # explicitly): removing the marker reclassifies the skill as user-managed (CHECKLISTS §Skills) and the
+    # launcher-trust verdict must not survive into that life; an unverifiable provenance (no skill_dir) fails safe.
     if review_profile == "native_seed":
         if skill_dir is None or not (pathlib.Path(skill_dir) / ".seed-origin").is_file():
             return SkillReviewState()

@@ -171,6 +171,7 @@ def _skill_names_from_review_history(
     gaps: set[str] = set()
     names: List[str] = []
     rows: List[Dict[str, Any]] = []
+    cutoff = str(task_started_at or "").replace("Z", "+00:00")
     if root_task_id:
         try:
             rows = ledger.recent_records(drive_root, root_task_id, limit=_ROOT_TASK_PROJECTION_MAX_RECORDS,
@@ -178,8 +179,12 @@ def _skill_names_from_review_history(
         except OSError:
             gaps.add("projection_unreadable")
         if ledger.archived_segments_exist(drive_root):
-            gaps.add("tail_bytes_truncated")  # older records live in archived segments the hot read never opens
-    cutoff = str(task_started_at or "").replace("Z", "+00:00")
+            # Older records live in archived segments the hot read never opens: a cut only when this task
+            # could have rows there — the hot index's oldest row is newer than the task's start, or no start
+            # is known; a task that started before the oldest hot row has every row in the hot index.
+            oldest = ledger.hot_index_oldest_ts(drive_root).replace("Z", "+00:00")
+            if not cutoff or not oldest or oldest > cutoff:
+                gaps.add("tail_bytes_truncated")
     for row in rows:
         row_ts = str(row.get("ts") or "").replace("Z", "+00:00")
         if cutoff and row_ts and row_ts < cutoff:

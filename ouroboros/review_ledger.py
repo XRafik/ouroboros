@@ -434,15 +434,31 @@ def archived_segments_exist(drive_root: Any) -> bool:
     return bool(_index_segments(drive_root))
 
 
-def recent_records(drive_root: Any, task_id: str = "", limit: int = 20, *, hot_only: bool = False,
-                   surface: str = "") -> List[Dict[str, Any]]:
-    """Newest-first index rows (junction for context assembly): the hot index, then
-    archived segments newest-first, one row per record at its highest revision.
-    ``task_id`` matches the record's task OR root task; empty matches all; ``surface``
-    keeps one surface's records. ``hot_only`` reads the bounded hot index alone
-    (``INDEX_MAX_BYTES``) and never opens an archived segment: the read a per-task
-    context capture can afford."""
-    wanted = max(1, int(limit))
+def index_stamp(drive_root: Any) -> tuple:
+    """The identity of the index's current bytes: ``(name, mtime_ns, size)`` of the hot index and of every
+    archived segment (a directory listing and stats, no row read); a written row or a rotation changes it,
+    so a reader may memoize one parse of the index under it."""
+    stamps = []
+    for path in [index_path(drive_root), *_index_segments(drive_root)]:
+        try:
+            stat = path.stat()
+            stamps.append((path.name, stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            stamps.append((path.name, 0, 0))
+    return tuple(stamps)
+
+
+def hot_index_oldest_ts(drive_root: Any) -> str:
+    """The ``ts`` of the oldest row the hot index holds ("" when it is empty or unreadable): how far back a
+    bounded hot read reaches, so a reader can say whether an archived segment could hold rows it wanted."""
+    for row in iter_jsonl_objects(index_path(drive_root)):
+        if isinstance(row, dict) and row.get("ts"):
+            return str(row["ts"])
+    return ""
+
+
+def _index_rows(drive_root: Any, *, task_id: str = "", surface: str = "", limit: Optional[int] = None,
+                hot_only: bool = False) -> List[Dict[str, Any]]:
     seen: Dict[str, int] = {}
     out: List[Dict[str, Any]] = []
     paths = [index_path(drive_root)] + ([] if hot_only else [*reversed(_index_segments(drive_root))])
@@ -458,9 +474,28 @@ def recent_records(drive_root: Any, task_id: str = "", limit: int = 20, *, hot_o
             out.append(row)
         elif int(row.get("revision") or 0) > int(out[prior].get("revision") or 0):
             out[prior] = row  # a revision row appended out of order still wins by number
-        if len(out) >= wanted:
+        if limit is not None and len(out) >= limit:
             break
-    return out[:wanted]
+    return out
+
+
+def recent_records(drive_root: Any, task_id: str = "", limit: int = 20, *, hot_only: bool = False,
+                   surface: str = "") -> List[Dict[str, Any]]:
+    """Newest-first index rows (junction for context assembly): the hot index, then
+    archived segments newest-first, one row per record at its highest revision.
+    ``task_id`` matches the record's task OR root task; empty matches all; ``surface``
+    keeps one surface's records. ``hot_only`` reads the bounded hot index alone
+    (``INDEX_MAX_BYTES``) and never opens an archived segment: the read a per-task
+    context capture can afford."""
+    wanted = max(1, int(limit))
+    return _index_rows(drive_root, task_id=task_id, surface=surface, limit=wanted, hot_only=hot_only)[:wanted]
+
+
+def surface_records(drive_root: Any, surface: str) -> List[Dict[str, Any]]:
+    """Every index row of one surface, newest first, one per record at its highest revision: the whole index
+    (hot and archived) in ONE read. A reader that answers many lookups memoizes the result under
+    ``index_stamp`` instead of reading the index once per lookup."""
+    return _index_rows(drive_root, surface=str(surface or ""))
 
 
 def latest_preflight_record(drive_root: Any, *, repo_key: str = "") -> Optional[Dict[str, Any]]:
@@ -1359,6 +1394,7 @@ def coupling_outcome(verdict: dict, rows: list) -> CouplingOutcome:
 __all__ = [
     "ALL_PARTS", "PART_RESULT", "PART_SKILL", "REVIEW_LEDGER_SCHEMA_VERSION", "SINGLE_QUESTION_PARTS", "ReviewLedgerRecord",
     "answer_keys", "apply_severity_policy", "build_commit_gate_record",
+    "hot_index_oldest_ts", "index_stamp", "surface_records",
     "build_rows", "build_wave_record",
     "distinct_model_facts", "find_reusable", "index_path", "index_row", "ledger_dir", "ledger_root", "load_record",
     "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision", "panel_facts", "read_source",

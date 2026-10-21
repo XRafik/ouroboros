@@ -744,6 +744,98 @@ def test_a_left_wave_that_settles_without_a_verdict_admits_the_author_finish_onl
     assert state.gate_for(reference["content_hash"], enforcement="advisory")["blocking_reason"] == "author_accepted_advisory"
 
 
+# --- the ledger readers: this skill's rows, the earlier verdict, what the brief cuts ---------------------------
+
+
+def test_skill_record_rows_count_this_skills_rows_and_parse_the_index_once_per_stamp(harness):
+    """opus R1-3/4, grok 2, subagent 1: every per-skill lookup is served from ONE parse of the ledger index per
+    index stamp (N skills → one read; a written row → one more), and ``limit`` counts THIS skill's rows however
+    many other skills were reviewed since (never a window over every skill's traffic)."""
+    from ouroboros.tools import review_skill as subject
+
+    h = harness
+    outcome = _review(h, reviewers=["t1"], reason="small payload")
+    index = review_ledger.index_path(h.drive)
+
+    def other(n, record_id):
+        return json.dumps({"record_id": record_id, "surface": "skill", "state": "settled", "revision": 0,
+                           "ts": f"2026-10-21T13:{n % 60:02d}:00+00:00", "subject": {"skill": f"other-{n}"},
+                           "verdict": {"aggregate": "PASS"}}) + "\n"
+
+    with index.open("a", encoding="utf-8") as handle:
+        handle.writelines(other(n, f"r{n:04d}") for n in range(60))
+    parses = []
+    real = review_ledger.surface_records
+    h.monkeypatch.setattr(review_ledger, "surface_records", lambda drive, surface: parses.append(surface) or real(drive, surface))
+    subject._SKILL_ROWS_MEMO.clear()
+    assert [row["record_id"] for row in subject.skill_record_rows(h.drive, "weather", limit=1)] == [outcome.record_id]
+    for n in range(60):
+        assert [row["record_id"] for row in subject.skill_record_rows(h.drive, f"other-{n}", limit=5)] == [f"r{n:04d}"]
+    assert subject.skill_record_rows(h.drive, "nobody") == []
+    assert parses == ["skill"], "one index parse serves every skill's lookup"
+    with index.open("a", encoding="utf-8") as handle:  # a written row: a new stamp, one more parse
+        handle.write(other(0, "r9999"))
+    assert [row["record_id"] for row in subject.skill_record_rows(h.drive, "other-0", limit=5)] == ["r9999", "r0000"]
+    assert parses == ["skill", "skill"]
+
+
+def test_the_earlier_verdict_is_the_record_review_json_names_and_no_index_is_claimed_missing_while_it_exists(harness):
+    """subagent 1, grok 2, opus 4: the earlier verdict is first the record the projection names (exact, one
+    read), so 3A holds however many other skills were reviewed since; "kept no file index" is said only of a
+    verdict that has none (a legacy review.json)."""
+    from ouroboros.skill_loader import compute_content_hash, find_skill, save_review_state
+    from ouroboros.tools import review_skill as subject
+
+    h = harness
+    first = _review(h, reviewers=["t1"], reason="small payload")
+    h.monkeypatch.setattr(subject, "settled_skill_records", lambda *a, **k: [])  # as if every window lost the row
+    skill = find_skill(h.drive, "weather", repo_path="")
+    earlier = subject.earlier_verdict(h.drive, skill)
+    assert earlier["record_id"] == first.record_id and set(earlier["files"]) == {"SKILL.md", "scripts/hello.py"}
+    (h.skill_dir / "SKILL.md").write_text("# weather\n\nRevised.\n", encoding="utf-8")
+    skill = find_skill(h.drive, "weather", repo_path="")
+    current = subject.skill_subject(h.ctx, skill, compute_content_hash(skill.skill_dir, manifest_entry=skill.manifest.entry,
+                                                                        manifest_scripts=skill.manifest.scripts),
+                                    drive_root=h.drive, governance_root=h.system)
+    change = subject.change_since(h.drive, skill, current)
+    assert change["modified"] == ["SKILL.md"] and change["index_missing"] == "" and change["record_id"] == first.record_id
+    state = _state(h)
+    state.record_id = ""  # a verdict of an earlier version: review.json without a record
+    save_review_state(h.drive, "weather", state)
+    legacy = subject.change_since(h.drive, find_skill(h.drive, "weather", repo_path=""), current)
+    assert legacy["files"] is None and "kept no file index" in legacy["index_missing"] and legacy["record_id"] == ""
+
+
+def test_the_change_section_names_what_it_cut_and_where_the_whole_is():
+    """astra R1-6: the brief's earlier findings keep a bound, and every cut is named (N more findings not shown;
+    reason truncated) with the record that keeps the whole; nothing is said when nothing was cut."""
+    from ouroboros.tools.review_skill import MAX_PREVIOUS_FINDINGS, MAX_PREVIOUS_REASON_CHARS, _change_section
+
+    findings = [{"item": "bug_hunting", "severity": "advisory", "reason": f"finding {n}", "model": "m"}
+                for n in range(MAX_PREVIOUS_FINDINGS + 2)]
+    findings[0]["reason"] = "x" * (MAX_PREVIOUS_REASON_CHARS + 100)
+    change = {"hash": "a" * 64, "verdict": "warnings", "same_bytes": True, "added": [], "modified": [], "removed": [],
+              "diffs": {}, "diff_unavailable": "", "index_missing": "", "record_id": "rec-123", "findings": findings}
+    text = _change_section(change)
+    assert "(100 more chars; reason truncated)" in text and "- … 2 more findings not shown" in text
+    assert "(Cut for size: the full findings are on review record rec-123.)" in text
+    assert text.count("- [ADVISORY] bug_hunting (m): ") == MAX_PREVIOUS_FINDINGS
+    legacy = _change_section({**change, "record_id": ""})
+    assert "the full findings are on the skill's review.json of that verdict" in legacy
+    whole = _change_section({**change, "findings": findings[1:3]})
+    assert "Cut for size" not in whole and "not shown" not in whole and "truncated" not in whole
+
+
+def test_a_left_skill_wave_that_settles_after_its_task_is_marked_as_a_late_skill_review():
+    """subagent 3: the late mark names the surface it was written for."""
+    from ouroboros.late_review_marks import SURFACE_NAMES, _text
+
+    assert SURFACE_NAMES["skill"] == "skill review"
+    text = _text({"surface": "skill", "task_id": "task-skill", "settled_at": "2026-10-21T12:00:00+00:00",
+                  "subject": {"skill": "weather"}, "lines": ["- t1: PASS"]})
+    assert text.startswith("Late skill review of task task-skill, settled 2026-10-21T12:00:00+00:00.")
+
+
 # --- the receptive author, publication, and the silo between skill and repo review -------------------------
 
 
