@@ -177,6 +177,7 @@ def test_testclient_lifespan_reload_all_uses_app_state_drive_root(tmp_path, monk
         monkeypatch,
         srv,
         {"OUROBOROS_SKILLS_REPO_PATH": str(repo_root), "OUROBOROS_RUNTIME_MODE": "advanced"},
+        request,
     )
     monkeypatch.setattr("ouroboros.config.get_skills_repo_path", lambda: str(repo_root))
     calls: list[tuple[pathlib.Path, str | None]] = []
