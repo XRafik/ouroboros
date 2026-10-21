@@ -166,6 +166,28 @@ def pop_reasoning_pin_note() -> Optional[Dict[str, Any]]:
     return pending if isinstance(pending, dict) else None
 
 
+# Omission slot: the recovery ladder (``llm_fallback``) got its answer from a send
+# that no longer carried the transcript's replayed reasoning; the conversation owner
+# (``send_clock.main_send_scope``) adopts the omission, so the next request extends
+# what the model read: a provider may bind a thinking block to the prefix it was
+# produced on and refuse every later request that restores the omitted blocks.
+_REPLAY_OMITTED_CVAR: contextvars.ContextVar = contextvars.ContextVar(
+    "ouroboros_reasoning_replay_omitted", default=False,
+)
+
+
+def note_replay_omission(omitted: bool) -> None:
+    """Record whether the send whose generated answer came back dropped the replayed reasoning."""
+    _REPLAY_OMITTED_CVAR.set(bool(omitted))
+
+
+def pop_replay_omission() -> bool:
+    """Take and clear this call's omission fact."""
+    omitted = bool(_REPLAY_OMITTED_CVAR.get())
+    _REPLAY_OMITTED_CVAR.set(False)
+    return omitted
+
+
 def _prefix_bound_detail(entry: Any) -> bool:
     return isinstance(entry, dict) and str(entry.get("format") or "").startswith("anthropic-")
 
