@@ -90,6 +90,19 @@ def test_clawhub_adaptation_keeps_the_declaration(tmp_path, declared):
     rendered = (tmp_path / "SKILL.md").read_text(encoding="utf-8")
     assert ("always_in_context: true" in rendered) is declared
     assert parse_skill_manifest_text(rendered).always_in_context is declared
+    assert not any("always_in_context is dropped" in warning for warning in result.warnings)
+
+
+def test_clawhub_adaptation_names_a_dropped_declaration_when_the_package_becomes_a_script(tmp_path):
+    from ouroboros.marketplace.adapter import adapt_openclaw_skill
+
+    (tmp_path / "SKILL.md").write_text(_manifest(), encoding="utf-8")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "run.py").write_text("print('fixture')\n", encoding="utf-8")
+    result = adapt_openclaw_skill(tmp_path, slug="guide")
+    assert result.ok, result.blockers
+    assert result.manifest.type == "script" and result.manifest.always_in_context is False
+    assert any("always_in_context is dropped" in warning for warning in result.warnings)
 
 
 # --- selection and rendering ----------------------------------------------

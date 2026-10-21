@@ -509,8 +509,12 @@ def adapt_openclaw_skill(
     if isinstance(source_model_experience, dict) and source_model_experience:
         translated_front["model_experience"] = source_model_experience
     # So does an instruction source's always-in-context declaration (same fail-closed re-parse).
-    if skill_type == "instruction" and original_front.get("always_in_context") is True:
-        translated_front["always_in_context"] = True
+    if original_front.get("always_in_context") is True:
+        if skill_type == "instruction":
+            translated_front["always_in_context"] = True
+        else:
+            warnings.append("always_in_context is dropped: the package adapts as a script skill, and only "
+                            "instruction skills place their body in every context.")
 
     rendered_body = _append_manual_install_guidance(body, manual_install_specs)
     rendered_skill_md = _render_skill_md(translated_front, rendered_body)
