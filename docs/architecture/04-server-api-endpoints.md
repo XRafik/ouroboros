@@ -16,6 +16,7 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | GET | `/api/health` | 200 during boot too; the `boot` document: §2 Boot order |
 | GET | `/api/contract` | |
 | GET | `/api/state` | |
+| GET | `/api/consciousness` | the consciousness panel: status, spend by cause, places and recent wakes (read-only) |
 | GET | `/api/extensions` | installed-skill projection; never fetches |
 | POST | `/api/skills/{skill}/publish-preflight` | |
 | GET | `/api/extensions/{skill}/manifest` | |
@@ -96,6 +97,8 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | POST | `/api/owner/context-mode` | |
 | POST | `/api/owner/effort-range` | |
 | POST | `/api/owner/safety-mode` | |
+| POST | `/api/owner/safety-model` | |
+| POST | `/api/owner/safety-rules` | |
 | GET | `/api/places` | place records and installed connector declarations |
 | POST | `/api/places` | connect a place |
 | POST | `/api/places/{place_id}` | atomic owner-authored choices |

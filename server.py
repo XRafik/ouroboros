@@ -1583,6 +1583,8 @@ app.app.state.supervisor_ready_event = _supervisor_ready  # type: ignore[attr-de
 app.app.state.supervisor_init_done_event = _supervisor_init_done  # type: ignore[attr-defined]
 app.app.state.get_supervisor_error = lambda: _supervisor_error  # type: ignore[attr-defined]
 app.app.state.describe_bg_consciousness_state = _describe_bg_consciousness_state  # type: ignore[attr-defined]
+app.app.state.describe_consciousness = lambda: (  # type: ignore[attr-defined]
+    _consciousness.details_snapshot() if _consciousness else {"status": "stopped", "places": [], "recent_wakes": []})
 app.app.state.startup_owner_command = _startup_owner_command
 app.app.state.request_restart = _request_restart_exit  # type: ignore[attr-defined]
 app.app.state.runtime_branch_defaults = _runtime_branch_defaults  # type: ignore[attr-defined]
