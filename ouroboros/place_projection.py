@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
-from ouroboros.places import PlaceError, connect_place, load_places, place_summary, note_identity
+from ouroboros.places import PlaceError, connect_place, load_places, place_summary, note_identity, migration_problems
 
 
 def place_declarations(root) -> list[dict]:
@@ -59,7 +59,7 @@ def places_view(root) -> dict:
     places = load_places(root)
     from ouroboros.presence_admission import focus_allowance
     allowance = focus_allowance(root)
-    return {"places": [place_view(root, p, declarations=declarations, allowance=allowance) for p in places],
+    return {"migration_problems": migration_problems(root), "places": [place_view(root, p, declarations=declarations, allowance=allowance) for p in places],
             "connectors": [{"connector": r["skill"], "connector_label": r.get("skill_label") or r["skill"],
                             "label": r["label"], "icon": r.get("icon") or {}, "destination": r["destination"],
                             "wakes": r.get("wakes") or [], "connected": any(p.connector == r["skill"] for p in places)}
@@ -67,20 +67,6 @@ def places_view(root) -> dict:
 
 
 def place_activity(root, place) -> dict:
-    """Read the indexed arrival family; task terminals carry answered/silent decisions."""
-    from ouroboros import dialogue_store
-    from ouroboros.task_results import load_task_result
-    result = {"unanswered": 0, "last_activity_at": ""}
-    if not dialogue_store.present(root):
-        return result
-    with dialogue_store.transaction(root, write=False) as conn:
-        rows = conn.execute("SELECT body FROM dialogue INDEXED BY dialogue_kind "
-                            "WHERE stream='chat' AND kind='place_arrival' "
-                            "AND json_extract(body, '$.place_id')=?", (place.place_id,)).fetchall()
-    for raw in rows:
-        row = dialogue_store.decode(raw[0])
-        result["last_activity_at"] = max(result["last_activity_at"], row.get("ts") or "")
-        terminal = load_task_result(root, row["task_id"], strict=True) or {}
-        if terminal.get("status") not in {"completed", "failed", "cancelled"}:
-            result["unanswered"] += 1
-    return result
+    """Indexed newest arrival and nonterminal focus count; no historical row walk."""
+    from ouroboros.place_arrivals import activity
+    return activity(root, place)

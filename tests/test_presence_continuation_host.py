@@ -91,6 +91,7 @@ def _seed_reviewing_behavior(data_dir: pathlib.Path) -> str:
 def host(harness, monkeypatch):
     monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
     monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("supervisor.consciousness_carriers.autonomous_work_enabled", lambda *_: True, raising=False)
     monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})
     h = harness
     monkeypatch.setenv("OUROBOROS_PRESENCE_MAX_ACTIVE", "1")

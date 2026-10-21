@@ -103,6 +103,7 @@ def install_bootstrap_harness(monkeypatch, data, *, repo=None, review_mode="requ
     observes the actual production constructor.
     """
     monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("supervisor.consciousness_carriers.autonomous_work_enabled", lambda *_: True, raising=False)
     monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {
         "status": "available", "remaining_usd": 10})
     monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))

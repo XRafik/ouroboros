@@ -229,14 +229,14 @@ async def _api_presence_turn(request: Request) -> JSONResponse:
             decision, allowance = await host._bounded_host_read(ctx, functools.partial(
                 decide_attention, ctx.data_dir, admission, event))
             if decision == "silent":
-                result = await host._bounded_host_read(ctx, functools.partial(settle_heard, ctx.data_dir, captured, event))
+                result = await host._bounded_host_read(ctx, functools.partial(settle_heard, ctx.data_dir, captured, event, allowance["reason"]))
             elif decision == "retry":
                 return _presence_error("Consciousness allowance is unavailable; retry this event.", 429,
                     "consciousness_allowance_exhausted", "retry", retry_after=allowance["retry_after"])
             else:
                 admission = replace(admission, allowance=allowance)
                 if await host._bounded_host_read(ctx, functools.partial(offer_to_author, ctx.data_dir, captured, event)):
-                    result = await host._bounded_host_read(ctx, functools.partial(settle_heard, ctx.data_dir, captured, event))
+                    result = await host._bounded_host_read(ctx, functools.partial(settle_heard, ctx.data_dir, captured, event, "current_author"))
         if result is None:
             if not ctx.rate_limiter.allow(f"{skill_name}:presence"):
                 return _presence_error("rate limit exceeded", 429, "presence_rate_limited", "retry")
@@ -311,12 +311,14 @@ async def _api_presence_work(request: Request) -> JSONResponse:
             from ouroboros.presence_observations import record_transport_queue
 
             payload = await request.json()
-            if not isinstance(payload, dict) or set(payload) != {"binding_id", "transport_queue"}:
-                raise ValueError("expected binding_id and transport_queue")
-            binding_id = str(payload["binding_id"] or "").strip()
+            if not isinstance(payload, dict) or set(payload) not in ({"transport_queue"}, {"binding_id", "transport_queue"}):
+                raise ValueError("expected transport_queue and optional binding_id")
+            binding_id = str(payload.get("binding_id") or "").strip()
             status, body = await host._bounded_host_read(ctx, functools.partial(_presence_work_view, ctx, skill_name, work_ref, binding_id))
             if status >= 400:
                 return JSONResponse(body, status_code=status)
+            # Ownership was checked against the authenticated connector, including
+            # old retained children. The writer binds the actual stored binding.
             body = await asyncio.to_thread(record_transport_queue, ctx.data_dir, work_ref, binding_id,
                                             payload["transport_queue"])
             return JSONResponse(body)
@@ -342,9 +344,8 @@ async def _api_presence_place(request: Request) -> JSONResponse:
     ctx = request.app.state.host_service_context
     try:
         skill, _token = await host._authenticated(ctx, request.headers.get("x-skill-token", ""), "presence")
-        from ouroboros.places import resolve_place
         place = await host._bounded_host_read(ctx, functools.partial(
-            resolve_place, ctx.data_dir, connector=skill,
+            _outbox_place, ctx.data_dir, connector=skill,
             provider=str(request.query_params.get("provider") or ""),
             account_id=str(request.query_params.get("account_id") or ""),
             conversation_id=str(request.query_params.get("conversation_id") or "")))
@@ -355,3 +356,16 @@ async def _api_presence_place(request: Request) -> JSONResponse:
         return _presence_error(str(exc), 403, "presence_auth_blocked", "blocked")
     except (ValueError, OSError) as exc:
         return _presence_error(str(exc), 503, "places_unavailable", "retry")
+
+
+def _outbox_place(drive_root, *, connector, provider, account_id, conversation_id):
+    from ouroboros.places import places_of_connector, resolve_place
+
+    if not conversation_id:
+        restricted = next((p for p in places_of_connector(drive_root, connector)
+                           if p.provider == provider and p.account_id in ("", "*", account_id)
+                           and p.state in {"silent", "paused"}), None)
+        if restricted is not None:
+            return restricted
+    return resolve_place(drive_root, connector=connector, provider=provider,
+                         account_id=account_id, conversation_id=conversation_id)

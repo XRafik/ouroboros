@@ -361,11 +361,11 @@ def test_owner_projection_tracks_heard_events_and_preserves_choices(focus, monke
     task = capture_presence_event(admission, event, drive_root=root)
     view = places_view(root)
     card, = view["places"]
-    assert card["unanswered"] == 1 and card["last_activity_at"]
+    assert card["unanswered"] is None and card["last_activity_at"]
     assert card["spent_24h_usd"] == 0.25 and card["icon"] == declaration["icon"]
     assert view["connectors"][0]["connected"]
     settle_heard(root, task, event)
-    assert places_view(root)["places"][0]["unanswered"] == 0
+    assert places_view(root)["places"][0]["unanswered"] is None  # hearing creates no task store
     connected = connect_declared_place(root, "bridge", account_id="new-account")
     assert connected.provider == "chat" and connected.wakes == (p.WakeItem("mention", "connector"),)
     saved = p.edit_place(root, connected.place_id, "add_note", author="owner", text="Owner choice")

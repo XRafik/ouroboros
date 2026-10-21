@@ -949,15 +949,19 @@ Use the connector's ordinary content-hash-bound skill token for:
   are distinct from absent facts. Bots require an explicit bot wake item.
 - `GET /presence/place?provider=&account_id=&conversation_id=`: returns
   `{place_id, label, state}` for the connector's outbox recheck. `/identity`
-  advertises `places_version: 1`.
+  advertises `places_version: 1`. An empty conversation id is an opaque queued mutation:
+  any Silent/Paused place for that connector, provider and matching/broad account restricts it.
 - `GET /presence/work/{work_ref}?binding_id=...`: reads correlated late work,
   including after a place is Paused or disconnected. The binding query is optional;
   the authenticated connector must still own the stored work.
-- `POST /presence/work/{continuation_ref}` with `binding_id` and `transport_queue`
+- `POST /presence/work/{continuation_ref}` accepts exactly `{transport_queue}` or
+  `{binding_id, transport_queue}`. It authenticates retained connector ownership and
   retains dated inbox observations without making them owner directives.
 
 The host captures an event once into its room before deciding whether to wake.
 Paused, consciousness Off/Panic, or no matching wake returns `silent` (heard).
+That final decision stays on the accepted room record: a retry stays silent after On,
+without creating a task document or retained context-source blob for the heard event.
 An exhausted or unknown allowance returns `consciousness_allowance_exhausted`,
 `disposition: retry` and `retry_after` seconds. Physical capacity keeps the existing
 `presence_capacity_full` retry response. A matching event focuses consciousness in
@@ -1055,7 +1059,7 @@ yield anchors the previous-turn pointer across repeated parks and final completi
 returning author cannot replace a newer turn's pointer. Unsubmitted transport facts remain unknown.
 
 Supply an initial inbox observation in `event.conversation.transport_queue`. To refresh it while
-an author waits, post `{binding_id, transport_queue}` to its continuation work URL; `GET` remains
+an author waits, post `{transport_queue}` (optionally with the old `binding_id`) to its continuation work URL; `GET` remains
 a read-only poll. The snapshot has `schema_version: 1`, `source`, timezone-qualified ISO
 `observed_at`, the exact derived `conversation_key`, `after_source_event_id` matching the turn's
 original source event, `complete: true`, `pending_count` equal to `len(events)`, and

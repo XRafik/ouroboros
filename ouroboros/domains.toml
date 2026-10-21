@@ -67,6 +67,7 @@ D20 = "Presence"
 [modules]
 "ouroboros/loop_completion_schema.py" = "D01"
 "ouroboros/place_reply.py" = "D20"
+"ouroboros/place_arrivals.py" = "D20"
 "ouroboros/place_intake.py" = "D20"
 "ouroboros/place_projection.py" = "D20"
 "ouroboros/gateway/places_api.py" = "D11"

@@ -726,6 +726,10 @@ def presence_turn_replay(drive_root: Path, task_id: str, conversation_key: str,
     whatever the author did since; its terminal is read from the continuation poll. When
     that author has settled since, its lost pointer is rebuilt before the envelope returns.
     """
+    from ouroboros.place_arrivals import heard_replay
+    heard = heard_replay(drive_root, task_id, identity, continuation_version)
+    if heard is not None:
+        return heard
     if continuation_version and identity:
         from ouroboros.presence_continuation import replay_envelope
 
@@ -800,7 +804,7 @@ def _log_dialogue(
            if task["metadata"]["presence"].get("place_id") else {}),
         **{key: task[key] for key in ("attachment_manifest", "attachment_manifest_ref") if key in task},
     }
-    if direction == "in":
+    if direction == "in" and not task["metadata"].get("focus"):
         # Retain the transport's exact contextual observations before publishing their address.
         # They remain dated context of this event, never additional incoming speech or work.
         source = {"recorded_at": row["ts"], "source_event_id": event.source_event_id,
@@ -977,9 +981,8 @@ def capture_presence_event(admission: PresenceAdmission, event: PresenceTurnEven
     """Retain source and attachments exactly once before every attention decision."""
     task_id = _task_id(admission, event)
     identity = presence_event_identity(admission.binding_id, event)
-    gate = _configured_gate(drive_root)
-    key, lock = gate._conversation("intake:" + event.conversation_key)
-    with lock, gate._file_lock(gate._conversation_file(key)):
+    from ouroboros.place_arrivals import intake_lock
+    with intake_lock(drive_root, event.conversation_key):
         rows = _live_task_rows(drive_root, task_id, event.conversation_key)
         prior = next((row for row in rows if row.get("direction") == "in"), None)
         if prior is not None and prior.get("presence_event_identity") != identity:
@@ -1097,7 +1100,7 @@ def run_presence_turn(
             from ouroboros.place_intake import decide_attention, settle_heard
             decision, allowance = decide_attention(Path(drive_root), admission, event)
             if decision == "silent":
-                return settle_heard(Path(drive_root), task, event)
+                return settle_heard(Path(drive_root), task, event, allowance["reason"])
             if decision == "retry":
                 error = PresenceTurnError("consciousness_allowance_exhausted", "allowance")
                 error.disposition, error.retry_after = "retry", allowance["retry_after"]
@@ -1128,16 +1131,23 @@ def run_presence_turn(
         from ouroboros.task_results import write_task_result
         from ouroboros.task_status import execution_owner_record
 
+        from ouroboros.place_arrivals import heard_replay, intake_lock, retain_focus_source
         try:
-            write_task_result(Path(drive_root), task_id, STATUS_RUNNING,
-                              execution_owner=execution_owner_record(drive_root, task, "presence"),
-                              create_only=True, strict_existing_dict=True,
-                              metadata=task["metadata"], chat_id=chat_id,
-                              _is_direct_chat=True, source=task["source"], result="Task is running.")
-            start = _stored_turn(Path(drive_root), task_id, identity)
-            if str(start.get("status") or "") != STATUS_RUNNING or (
-                    start.get("metadata") or {}).get("presence_event_identity") != identity:
-                raise ValueError("Presence start record was not bound to this event")
+            with intake_lock(drive_root, event.conversation_key):
+                heard = heard_replay(drive_root, task_id, identity, event.continuation_version)
+                if heard is not None:
+                    return heard
+                write_task_result(Path(drive_root), task_id, STATUS_RUNNING,
+                                  execution_owner=execution_owner_record(drive_root, task, "presence"),
+                                  create_only=True, strict_existing_dict=True,
+                                  metadata=task["metadata"], chat_id=chat_id,
+                                  _is_direct_chat=True, source=task["source"], result="Task is running.")
+                start = _stored_turn(Path(drive_root), task_id, identity)
+                if str(start.get("status") or "") != STATUS_RUNNING or (
+                        start.get("metadata") or {}).get("presence_event_identity") != identity:
+                    raise ValueError("Presence start record was not bound to this event")
+                if admission.place is not None:
+                    retain_focus_source(drive_root, _task_id(admission, event))
         except (OSError, ValueError, StoreError) as exc:
             raise PresenceTurnError("presence_start_unwritable", "source_event_id", turn_ref=task_id) from exc
         try:
