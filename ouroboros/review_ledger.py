@@ -884,6 +884,7 @@ def _apply_raw(seat: Dict[str, Any], raw: Dict[str, Any]) -> None:
             seat["answers"][part] = _legacy_change_answer(raw, answered, status)
         else:
             seat["answers"][part] = _blank_answer(part, status if not answered else ANSWER_UNANSWERED)
+    seat.update({key: raw[key] for key in ("operation_id", "outcome_id", "usage_ref") if raw.get(key)})
     seat.update(status=status,
                 parts_answered=[p for p in seat["parts"] if seat["answers"][p]["status"] == ANSWER_RESPONDED],
                 usd=raw.get("cost_usd"),  # reported money and operation completion are separate facts
@@ -1192,6 +1193,17 @@ PROVENANCE_FIELDS = ("task_id", "root_task_id", "review_wave_id", "surface", "su
 ROW_PROVENANCE_FIELDS = ("subagent_id", "parts", "additional", "requested", "brief_sha")
 
 
+def _merge_evidence(*groups: Iterable[Any]) -> list:
+    """Findings merge by their seat/question/item identity; diagnostics by exact value."""
+    merged = {}
+    for group in groups:
+        for value in group:
+            key = (tuple(str(value.get(name) or "") for name in ("seat_id", "part", "item", "obligation_id"))
+                   if isinstance(value, dict) and value.get("item") else json.dumps(value, sort_keys=True, default=str))
+            merged[key] = value
+    return list(merged.values())
+
+
 def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
     """The payload that settles a pending record: provenance is the dispatching
     attempt's (``prior`` — ``PROVENANCE_FIELDS`` and, per seat, ``ROW_PROVENANCE_FIELDS``
@@ -1200,21 +1212,41 @@ def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict
     status, cost, observed model and response refs, the verdict, the cost, the state —
     so a rules or brief update between dispatch and settle never rewrites what the
     seats actually read. ``revision``/``ts`` are ``revise_record``'s."""
-    settled = {**fresh, **{key: prior[key] for key in PROVENANCE_FIELDS if key in prior},
+    settled = {**prior, **fresh, **{key: prior[key] for key in PROVENANCE_FIELDS if key in prior},
                **({} if "preflight_execution" in prior else {"preflight_execution": {"status": "unobserved"}})}
-    before = {str(row.get("seat_id") or ""): row for row in prior.get("rows") or [] if isinstance(row, dict)}
+    before = {str(row.get("seat_id") or ""): row for row in prior.get("rows") or []}
+    incoming = {str(row.get("seat_id") or ""): row for row in fresh.get("rows") or []}
     rows = []
-    for row in fresh.get("rows") or []:
-        kept = before.get(str(row.get("seat_id") or ""))
-        if kept is None:
-            rows.append(row)
+    for key in dict.fromkeys([*before, *incoming]):
+        kept, row = before.get(key), incoming.get(key)
+        if kept is None or row is None:
+            rows.append(row if kept is None else kept)
             continue
-        prompt_refs = [ref for ref in kept.get("source_refs") or [] if str(ref.get("role") or "") != "response"]
-        response_refs = [ref for ref in row.get("source_refs") or [] if str(ref.get("role") or "") == "response"]
-        rows.append({**row, **{key: kept[key] for key in ROW_PROVENANCE_FIELDS if key in kept},
-                     "source_refs": prompt_refs + response_refs})
+        # A drain can return an old PENDING snapshot after another collector saved an answer.
+        # An operation identity is immutable; a different producer cannot replace this seat.
+        conflict = kept.get("operation_id") and row.get("operation_id") and kept["operation_id"] != row["operation_id"]
+        if conflict or (not seat_open(kept) and seat_open(row)):
+            rows.append(kept)
+            continue
+        refs = [ref for ref in kept.get("source_refs") or [] if str(ref.get("role") or "") != "response"]
+        refs += [ref for ref in row.get("source_refs") or [] if str(ref.get("role") or "") == "response"]
+        rows.append({**kept, **row, **{field: kept[field] for field in ROW_PROVENANCE_FIELDS if field in kept},
+                     "source_refs": refs})
     settled["rows"] = rows
-    settled["panel"] = {**settled.get("panel", {}), "not_reached": panel_not_reached(rows)}
+    still_open = any(seat_open(row) for row in rows)
+    counted = [row for row in rows if not row.get("additional")]
+    gate_reason = str((fresh.get("verdict") or {}).get("reason") or "")
+    verdict = reduce_verdict(counted, gate_blocked=gate_reason.startswith("gate_block"),
+                             gate_reason=gate_reason.removeprefix("gate_block:"), dispatch_refusal=settled.get("dispatch_refusal"),
+                             pending=any(seat_open(row) for row in counted))
+    verdict["per_row"].update({str(row.get("seat_id") or ""): row_verdict(row) for row in rows})
+    for name in (*HEAVY_VERDICT_FIELDS, "degraded_reasons"):
+        values = [*((prior.get("verdict") or {}).get(name) or []), *((fresh.get("verdict") or {}).get(name) or [])]
+        verdict[name] = _merge_evidence(values)
+    settled.update(verdict=verdict, state=STATE_PENDING if still_open else STATE_SETTLED,
+                   panel={**settled.get("panel", {}), "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)})
+    known = [float(row["usd"]) for row in rows if isinstance(row.get("usd"), (int, float))]
+    settled["cost"] = {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}
     return settled
 
 
@@ -1269,46 +1301,46 @@ def settle_from_collected(drive_root: Any, record_id: str, raws: Iterable[Dict[s
     if prior is None or prior.get("state") != STATE_PENDING:
         return prior
     by_slot = {str(raw.get("slot_id") or ""): raw for raw in raws if isinstance(raw, dict)}
-    task_id = str(prior.get("task_id") or "")
-    # The record's own severity policy (a skill wave's checklist rule) decides a late answer's
-    # critical findings exactly as it decided the dispatching attempt's.
-    policy = ((prior.get("brief") or {}).get("checklist") or {}).get("severity_policy")
-    rows, applied = [], []
-    for row in prior.get("rows") or []:
-        seat = json.loads(json.dumps(row, default=str))
-        raw = by_slot.get(str(seat.get("seat_id") or ""))
-        if raw is not None and seat_open(seat):
-            if isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
-                raw = {**raw, "answers": {part: apply_severity_policy(answer, policy)
-                                          for part, answer in raw["answers"].items()}}
-            _apply_raw(seat, raw)
-            applied.append(raw)
-            if seat.get("raw_text"):
-                seat.setdefault("source_refs", []).append(retain_text_source(
-                    drive_root, task_id, record_id=record_id, seat_id=str(seat["seat_id"]), role="response",
-                    part=",".join(seat.get("parts") or []), text=seat["raw_text"]))
-        seat.pop("raw_text", None)
-        rows.append(seat)
-    still_open = any(seat_open(seat) for seat in rows)
-    verdict = reduce_verdict([seat for seat in rows if not seat.get("additional")],
-                             dispatch_refusal=prior.get("dispatch_refusal"), pending=still_open)
-    verdict["per_row"].update({str(seat.get("seat_id") or ""): row_verdict(seat) for seat in rows if seat.get("additional")})
-    before = dict(prior.get("verdict") or {})
-    found = dict(zip(HEAVY_VERDICT_FIELDS, seat_findings(
-        applied, {str(seat.get("seat_id") or "") for seat in rows if seat.get("additional")})))
-    verdict.update({key: [*(before.get(key) or []), *found[key]] for key in HEAVY_VERDICT_FIELDS},
-                   degraded_reasons=list(before.get("degraded_reasons") or []))
-    known = [float(seat["usd"]) for seat in rows if isinstance(seat.get("usd"), (int, float))]
-    settled = {"rows": rows, "verdict": verdict, "state": STATE_PENDING if still_open else STATE_SETTLED,
-               "cost": {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}}
 
-    def _mutate(current: Dict[str, Any]) -> Dict[str, Any]:
-        # Another settlement (the author's own re-issue) may have landed meanwhile: it wins. A settled record
-        # can await nothing, so its lost seats join the seats never reached, with their cause.
-        if current.get("state") != STATE_PENDING:
-            return current
-        return {**current, **settled, "panel": {**dict(current.get("panel") or {}),
-                                                "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)}}
+    def _mutate(prior: Dict[str, Any]) -> Dict[str, Any]:
+        if prior.get("state") != STATE_PENDING:
+            return prior
+        task_id = str(prior.get("task_id") or "")
+        # The record's own severity policy (a skill wave's checklist rule) decides a late answer's
+        # critical findings exactly as it decided the dispatching attempt's.
+        policy = ((prior.get("brief") or {}).get("checklist") or {}).get("severity_policy")
+        rows, applied = [], []
+        for row in prior.get("rows") or []:
+            seat = json.loads(json.dumps(row, default=str))
+            raw = by_slot.get(str(seat.get("seat_id") or ""))
+            if (raw is not None and seat_open(seat) and (not seat.get("operation_id")
+                    or not raw.get("operation_id") or seat["operation_id"] == raw["operation_id"])):
+                if isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
+                    raw = {**raw, "answers": {part: apply_severity_policy(answer, policy)
+                                              for part, answer in raw["answers"].items()}}
+                _apply_raw(seat, raw)
+                applied.append(raw)
+                if seat.get("raw_text"):
+                    seat.setdefault("source_refs", []).append(retain_text_source(
+                        drive_root, task_id, record_id=record_id, seat_id=str(seat["seat_id"]), role="response",
+                        part=",".join(seat.get("parts") or []), text=seat["raw_text"]))
+            seat.pop("raw_text", None)
+            rows.append(seat)
+        still_open = any(seat_open(seat) for seat in rows)
+        verdict = reduce_verdict([seat for seat in rows if not seat.get("additional")],
+                                 dispatch_refusal=prior.get("dispatch_refusal"), pending=any(seat_open(seat) for seat in rows if not seat.get("additional")))
+        verdict["per_row"].update({str(seat.get("seat_id") or ""): row_verdict(seat) for seat in rows if seat.get("additional")})
+        before = dict(prior.get("verdict") or {})
+        found = dict(zip(HEAVY_VERDICT_FIELDS, seat_findings(
+            applied, {str(seat.get("seat_id") or "") for seat in rows if seat.get("additional")})))
+        verdict.update({key: _merge_evidence(before.get(key) or [], found[key]) for key in HEAVY_VERDICT_FIELDS},
+                       degraded_reasons=list(before.get("degraded_reasons") or []))
+        known = [float(seat["usd"]) for seat in rows if isinstance(seat.get("usd"), (int, float))]
+        settled = {"rows": rows, "verdict": verdict, "state": STATE_PENDING if still_open else STATE_SETTLED,
+                   "cost": {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}}
+
+        return {**prior, **settled, "panel": {**dict(prior.get("panel") or {}),
+                                            "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)}}
 
     return revise_record(drive_root, record_id, _mutate)
 
