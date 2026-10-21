@@ -19,6 +19,8 @@ Built-in tools are governed by their own policy tables and answer ``""``.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from copy import deepcopy
+import threading
 from typing import Any, Mapping
 
 EFFECT_READ = "read"
@@ -48,19 +50,94 @@ class ToolEffect:
 
 
 BUILTIN = ToolEffect(effect="", source="builtin")
+_MCP_ANNOTATIONS: dict[str, dict[str, dict[str, Any]]] = {}
+_MCP_LOCK = threading.Lock()
+
+
+def record_mcp_annotations(server_id: str, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Replace one server's discovery hints. They never grant read authority.
+
+    One small entry per discovered tool, replaced on rediscovery; process exit
+    removes the cache. Only the four protocol booleans are retained. Return
+    discovery rows without the hints so the existing transport shape stays put.
+    """
+    from ouroboros.mcp_client import make_tool_name
+
+    hints = {}
+    for tool in tools:
+        raw = tool.get("annotations")
+        if hasattr(raw, "model_dump"):
+            raw = raw.model_dump()
+        if isinstance(raw, Mapping):
+            hints[make_tool_name(server_id, tool.get("name", ""))] = {
+                key: raw[key] for key in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+                if type(raw.get(key)) is bool
+            }
+    with _MCP_LOCK:
+        _MCP_ANNOTATIONS[server_id] = hints
+    return [{key: value for key, value in tool.items() if key != "annotations"} for tool in tools]
+
+
+def connector_of(name: str, ext_tool: Any = None) -> str:
+    """The registry's canonical skill identity (encoded tokens are not names)."""
+    from ouroboros import extension_registry_state as registry
+
+    with registry._lock:
+        tool = ext_tool if isinstance(ext_tool, Mapping) else registry._tools.get(name)
+        return str((tool or {}).get("skill") or "")
+
+
+def _published_declaration(name: str, ext_tool: Any) -> dict[str, Any]:
+    from ouroboros import extension_registry_state as registry
+    from ouroboros.extension_surface_names import parse_extension_surface_name
+
+    parsed = parse_extension_surface_name(name)
+    if not parsed:
+        return {}
+    with registry._lock:
+        tool = ext_tool if isinstance(ext_tool, Mapping) else registry._tools.get(name)
+        if not tool:
+            return {}
+        bundle = registry._extensions.get(str(tool.get("skill") or ""))
+        if bundle is None:
+            return {}
+        generation = tool.get("extension_generation")
+        if generation and generation != bundle.generation_digest:
+            return {}  # Never pair an old handler with a new declaration.
+        manifest = getattr(bundle.loaded_skill, "manifest", None)
+        rows = getattr(manifest, "raw_extra", {}).get("tools", [])
+        if not isinstance(rows, list):
+            return {}
+        matches = [row for row in rows if isinstance(row, Mapping) and row.get("name") == parsed[1]]
+        return deepcopy(matches[0]) if len(matches) == 1 else {}
+
+
+def _argument_names(value: Any) -> tuple[str, ...]:
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, (list, tuple)) or any(not isinstance(v, str) or not v.strip() for v in values):
+        return ()
+    return tuple(dict.fromkeys(v.strip() for v in values))
 
 
 def effect_of(name: str, *, ext_tool: Any = None, is_mcp: bool = False, ctx: Any = None) -> ToolEffect:
-    """The effect fact of ``name`` for this dispatch.
+    """Resolve the published declaration; defaults never relax a call's policy."""
+    from ouroboros.extension_surface_names import parse_extension_surface_name
 
-    Seam stub: every extension and MCP tool is an undeclared write until the
-    declaration reader lands.
-    """
-    if is_mcp:
-        return ToolEffect(effect=EFFECT_WRITE, declared=False, source="mcp")
-    if ext_tool is not None:
-        return ToolEffect(effect=EFFECT_WRITE, declared=False, source="extension")
-    return BUILTIN
+    if is_mcp or name.startswith("mcp_"):
+        with _MCP_LOCK:
+            hints = next((dict(rows[name]) for rows in _MCP_ANNOTATIONS.values() if name in rows), {})
+        return ToolEffect(effect=EFFECT_WRITE, source="mcp", annotations=hints)
+    if ext_tool is None and not parse_extension_surface_name(name):
+        return BUILTIN
+    row = _published_declaration(name, ext_tool)
+    effect = row.get("effect")
+    declared = isinstance(effect, str) and effect in EFFECTS
+    return ToolEffect(
+        effect=effect if declared else EFFECT_WRITE, declared=declared, source="extension",
+        targets=_argument_names(row.get("target")),
+        conversation=row.get("conversation") if isinstance(row.get("conversation"), str) else "",
+        thread=row.get("thread") if isinstance(row.get("thread"), str) else "",
+    )
 
 
 def target_values(effect: ToolEffect, args: Mapping[str, Any]) -> dict[str, list[str]]:
@@ -72,7 +149,7 @@ def target_values(effect: ToolEffect, args: Mapping[str, Any]) -> dict[str, list
             continue
         raw = source.get(name)
         items = raw if isinstance(raw, (list, tuple)) else [raw]
-        texts = [str(item).strip() for item in items if isinstance(item, (str, int)) and str(item).strip()]
+        texts = [str(item).strip() for item in items if type(item) in (str, int) and str(item).strip()]
         if texts:
             values[name] = texts
     return values
