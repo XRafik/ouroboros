@@ -17,9 +17,14 @@ def legacy_places(root: Path) -> tuple[list[Place], list[dict]]:
         try:
             result.append(_legacy_place(root, binding))
         except (PlaceError, OSError, ValueError, TypeError, AttributeError) as exc:
+            code = getattr(exc, "code", "places_migration_source_invalid")
+            detail = {
+                "places_migration_source_missing": f"the behavior skill {binding.behavior_skill} is not installed",
+                "places_migration_source_invalid": "its presence profile could not be read",
+                "places_migration_instructions_missing": f"the behavior skill {binding.behavior_skill} has no instructions",
+            }.get(code, "the old connection could not be imported")
             problems.append({"binding_id": binding.binding_id,
-                             "code": getattr(exc, "code", "places_migration_source_invalid"),
-                             "detail": str(exc)})
+                             "code": code, "detail": detail})
     return result, problems
 
 

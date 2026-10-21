@@ -1101,7 +1101,8 @@ def run_presence_turn(
             from ouroboros.place_intake import decide_attention, settle_heard
             decision, allowance = decide_attention(Path(drive_root), admission, event)
             if decision == "silent":
-                return settle_heard(Path(drive_root), task, event, allowance["reason"])
+                return settle_heard(Path(drive_root), task, event, allowance["reason"],
+                                    captured_task_id=_task_id(admission, event))
             if decision == "retry":
                 error = PresenceTurnError("consciousness_allowance_exhausted", "allowance")
                 error.disposition, error.retry_after = "retry", allowance["retry_after"]

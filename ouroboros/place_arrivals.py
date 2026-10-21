@@ -68,18 +68,21 @@ def heard_replay(root, task_id, identity="", continuation_version=0):
                               continuation_version=continuation_version)
 
 
-def record_heard(root, task, event, reason):
+def record_heard(root, task, event, reason, *, captured_task_id=None):
     from ouroboros.presence_runner import _stored_turn, presence_result_from_stored
     from dataclasses import replace
     identity = task['metadata']['presence_event_identity']
+    arrival_id = captured_task_id or task['id']
     with intake_lock(root, event.conversation_key):
+        # A certified retry has a new physical id, but custody still belongs to
+        # that attempt while the immutable arrival keeps its original id.
         stored = _stored_turn(root, task['id'], identity)
         if stored:
             if stored.get('status') not in {'completed', 'failed'}:
                 return None  # admitted custody is never overwritten by an attention decision
             return replace(presence_result_from_stored(stored, task['id']), continuation_version=event.continuation_version)
         with dialogue_store.transaction(root, write=True) as conn:
-            row = _record(conn, task['id'])
+            row = _record(conn, arrival_id)
             if row is None or dialogue_store.decode(row['body']).get('presence_event_identity') != identity:
                 raise ValueError('Place attention requires its captured event')
             facts = json.loads(row['dispatch_input'] or '{}')
@@ -87,7 +90,7 @@ def record_heard(root, task, event, reason):
                              'delivery_reporting_version': event.delivery_reporting_version})
             conn.execute("UPDATE dialogue SET dispatch_input=? WHERE stream='chat' AND seq=?",
                          (json.dumps(facts), row['seq']))
-        return heard_replay(root, task['id'], identity, event.continuation_version)
+        return heard_replay(root, arrival_id, identity, event.continuation_version)
 
 
 def retain_focus_source(root, task_id):

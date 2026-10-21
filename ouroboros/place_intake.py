@@ -37,10 +37,10 @@ def decide_attention(root: Path, admission, event) -> tuple[str, dict]:
     return "focus", allowance
 
 
-def settle_heard(root: Path, task: dict, event, reason: str = "heard"):
+def settle_heard(root: Path, task: dict, event, reason: str = "heard", *, captured_task_id: str | None = None):
     """Finalize on the accepted room row; heard-only arrivals create no task document."""
     from ouroboros.place_arrivals import record_heard
-    return record_heard(root, task, event, reason)
+    return record_heard(root, task, event, reason, captured_task_id=captured_task_id)
 
 
 def offer_to_author(root, task: dict, event) -> bool:

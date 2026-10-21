@@ -49,23 +49,29 @@ def test_outbox_accepts_thread_and_omission_stays_room_lookup(tmp_path, monkeypa
 
 
 @pytest.mark.parametrize("legacy", [False, True])
-def test_promotion_preserves_requested_scope_unless_legacy_ceiling(focus, monkeypatch, legacy):
+@pytest.mark.parametrize("no_folder", [False, True])
+def test_promotion_preserves_requested_scope_unless_legacy_ceiling(focus, monkeypatch, legacy, no_folder):
     from ouroboros.tools import control_routing as routing
     from supervisor import worker_promotion, workers
     from ouroboros import workspace_admission as workspace
-    root, _, _, _ = focus
-    parent = task_for(focus)
-    parent["task_contract"]["workspace"] = {"root": str(root / "inherited")}
+    from ouroboros.contracts.task_contract import attach_task_contract
+    from ouroboros.presence_authority import presence_ceiling_payload
+    from tests.test_presence_runner import _admission
+    root, place, admission, event = focus
+    inherited = str(root / "inherited")
+    parent = task_for((root, place, replace(admission, workspace_root=inherited), event))
+    parent["task_contract"]["resource_policy"] = {"unrelated": "keep"}
     if legacy:
-        parent["task_contract"]["capability_ceiling"] = {}
+        parent["task_contract"]["capability_ceiling"] = presence_ceiling_payload(_admission().capability_ceiling)
     events = []
     monkeypatch.setattr(routing, "_promotion_pool_disabled_from_snapshot", lambda _: "")
     monkeypatch.setattr(routing, "_emit_and_wait_for_routing", lambda _ctx, evt: (
         events.append(evt) or "confirmed", {"status": "scheduled"}))
     ctx = SimpleNamespace(task_id=parent["id"], task_metadata=parent["metadata"], task_contract=parent["task_contract"],
                           current_chat_id=parent["chat_id"], drive_root=root)
-    requested = str(root / "requested")
+    requested = "" if no_folder else str(root / "requested")
     assert routing._start_task(ctx, "Build a report", title="Report", project_id="report-project", workspace_root=requested,
+                               workspace="none" if no_folder else "",
                                source="https://example.invalid/report.git").startswith("OK: task")
     evt = events[0]
     assert (evt["project_id"], evt["workspace_root"], evt["source"]) == (
@@ -83,7 +89,13 @@ def test_promotion_preserves_requested_scope_unless_legacy_ceiling(focus, monkey
     assert worker_promotion._admit_promoted_workspace(evt, None, task, pid=evt["project_id"], tid="promoted") is None
     assert calls[0]["explicit_workspace"] == (str(root / "inherited") if legacy else requested)
     assert calls[0]["project_id"] == ("" if legacy else "report-project")
-    assert task["workspace_root"] == calls[0]["explicit_workspace"]
+    assert task.get("workspace_root", "") == calls[0]["explicit_workspace"]
+    attach_task_contract(task)  # the final supervisor attachment must agree with admission
+    assert task["task_contract"]["workspace"] == {
+        "root": inherited if legacy else requested, "mode": "external" if legacy or requested else ""}
+    assert task["task_contract"]["resource_policy"] == {"unrelated": "keep"}
+    assert ("capability_ceiling" in task["task_contract"]) is legacy
+    assert parent["task_contract"]["workspace"]["root"] == inherited
     assert task["_presence_origin"] and task["metadata"]["presence"] == parent["metadata"]["presence"]
 
 
