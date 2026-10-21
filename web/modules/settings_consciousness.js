@@ -9,7 +9,8 @@ import { escapeHtmlAttr as escapeHtml } from './utils.js';
 import { parseModelSource } from './route_editor_primitives.js';
 import { PLACES_CHANGED_EVENT, readPlaces } from './consciousness_api.js';
 import { AUTONOMY_LEVELS, placeStateWord } from './consciousness_words.js';
-import { openConnectPlace, openPlaceSheet, placeIconHtml } from './place_sheet.js';
+import { skillIconHtml } from './skill_presentation.js';
+import { openConnectPlace, openPlaceSheet } from './place_sheet.js';
 
 /** The section body under its title (settings_ui.js keeps the `<h3>`). */
 export function consciousnessSectionHtml() {
@@ -75,7 +76,7 @@ export function settingsPlaceRowHtml(place) {
     const count = Number.isInteger(place.unanswered) && place.unanswered > 0 ? `${place.unanswered} unanswered` : '';
     return `<li><button type="button" class="consciousness-place-row" data-place-open="${escapeHtml(place.id)}"
             aria-label="${escapeHtml(`Open ${place.label}: ${[placeStateWord(place.state), count].filter(Boolean).join(', ')}`)}">
-        <span class="place-glyph" aria-hidden="true">${placeIconHtml(place.icon, 18)}</span>
+        <span class="place-glyph" aria-hidden="true">${skillIconHtml(place.icon, 18)}</span>
         <span class="consciousness-place-name">${escapeHtml(place.label)}</span>
         <span class="consciousness-place-facts">${escapeHtml([placeStateWord(place.state), count].filter(Boolean).join(' · '))}</span>
     </button></li>`;

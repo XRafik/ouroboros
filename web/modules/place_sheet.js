@@ -7,21 +7,11 @@
 import { bindDialogFocus } from './ui_interactions.js';
 import { escapeHtmlAttr as escapeHtml } from './ui_primitives.js';
 import { renderSegmentedField } from './page_header.js';
-import * as pageIcons from './page_icons.js';
-import { chipHtml } from './skill_presentation.js';
+import { chipHtml, skillIconHtml } from './skill_presentation.js';
 import { connectPlace, disconnectPlace, PLACES_CHANGED_EVENT, readPlaces, updatePlace } from './consciousness_api.js';
 import {
     PLACE_STATES, SILENT_CARD, authorWord, capitalized, listWords, placeScopeText, placeStateOf, wakeFactWord,
 } from './consciousness_words.js';
-
-/** A connector's icon in the house stroke style (Lane D's `renderSkillIcon`), else the house glyph for a skill. */
-export function placeIconHtml(icon, size = 18) {
-    const render = pageIcons.renderSkillIcon;
-    if (typeof render === 'function') {
-        try { return render(icon || {}, size); } catch { /* the house glyph below */ }
-    }
-    return pageIcons.controlIcon(icon?.name || '', size);
-}
 
 /** Ask the Skills page for one installed skill's card, or Browse filtered to connectors. */
 export function openSkillsFor(detail) {
@@ -241,7 +231,7 @@ export function openPlaceSheet(place, { returnFocus = document.activeElement, on
     disconnect = disconnectPlace } = {}) {
     let current = place;
     const ui = { drafts: {}, status: {}, busy: false, adding: false, confirmDisconnect: false, moreOpen: false };
-    const dialog = sheetShell(`<span class="place-glyph" aria-hidden="true">${placeIconHtml(place.icon, 22)}</span><span>${escapeHtml(place.label)}</span>`,
+    const dialog = sheetShell(`<span class="place-glyph" aria-hidden="true">${skillIconHtml(place.icon, 22)}</span><span>${escapeHtml(place.label)}</span>`,
         placeSheetMetaText(place));
     const sheet = showSheet(dialog, { returnFocus, onClose: () => { window.removeEventListener(PLACES_CHANGED_EVENT, onExternal); onClose?.(); } });
     const { body } = sheet;
@@ -364,7 +354,7 @@ export function connectListHtml({ connectors = null, error = '', status = {} } =
     return `<section class="place-sheet-section">
         <p class="place-sheet-note">Connecting a place lets it hear there and, while the place is Active, speak and act there. You choose its state after connecting.</p>
         <div class="place-accounts">${open.map((connector) => `<div class="harness-account-row place-connector-row">
-            <div class="harness-account-main"><span class="place-glyph" aria-hidden="true">${placeIconHtml(connector.icon, 18)}</span><strong>${escapeHtml(connector.label)}</strong></div>
+            <div class="harness-account-main"><span class="place-glyph" aria-hidden="true">${skillIconHtml(connector.icon, 18)}</span><strong>${escapeHtml(connector.label)}</strong></div>
             <div class="harness-account-meta">${escapeHtml([connector.destination.replace(/^vendor:/, 'Connects '),
                 connector.wakes.length ? `suggests waking for ${listWords(connector.wakes.map(wakeFactWord))}` : ''].filter(Boolean).join(' · '))}</div>
             <div class="harness-account-actions"><button type="button" class="btn btn-default btn-sm" data-connect-act="connect" data-connector="${escapeHtml(connector.connector)}">Connect</button></div>

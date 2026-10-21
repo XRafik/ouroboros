@@ -7,11 +7,11 @@
 import { escapeHtmlAttr as escapeHtml } from './ui_primitives.js';
 import { statusMarkHtml } from './status_mark.js';
 import { strokeIcon } from './page_icons.js';
-import { chipHtml } from './skill_presentation.js';
+import { chipHtml, skillIconHtml } from './skill_presentation.js';
 import { allowanceLabel } from './utils.js';
 import { PLACES_CHANGED_EVENT, readConsciousness, readConsciousnessFromState, readPlaces } from './consciousness_api.js';
 import { CHECK_CHIPS, clockText, durationText, placeStatusText, usdText } from './consciousness_words.js';
-import { openConnectPlace, openPlaceSheet, placeIconHtml } from './place_sheet.js';
+import { openConnectPlace, openPlaceSheet } from './place_sheet.js';
 
 const SEP = ' · ';
 const REFRESH_MS = 20000;
@@ -91,7 +91,7 @@ export function dashboardPlaceRowHtml(place, { awake = false } = {}) {
     const spend = usdText(place.spent24hUsd);
     return `<li><button type="button" class="consciousness-dash-place" data-place-open="${escapeHtml(place.id)}"
             aria-label="${escapeHtml(`Open ${place.label}${awake ? ', awake here now' : ''}: ${placeStatusText(place)}; ${spend === '—' ? 'nothing spent' : `${spend} spent`} in 24 hours`)}">
-        <span class="consciousness-dash-place-main"><span class="place-glyph" aria-hidden="true">${placeIconHtml(place.icon, 18)}</span><span class="consciousness-place-name">${escapeHtml(place.label)}</span>${awake ? dots() : ''}</span>
+        <span class="consciousness-dash-place-main"><span class="place-glyph" aria-hidden="true">${skillIconHtml(place.icon, 18)}</span><span class="consciousness-place-name">${escapeHtml(place.label)}</span>${awake ? dots() : ''}</span>
         <span class="consciousness-dash-place-meta">${escapeHtml(placeStatusText(place))}${place.status?.text ? `${SEP}${escapeHtml(place.status.text)}` : ''}</span>
         <span class="consciousness-spend${spend === '—' ? ' is-none' : ''}">${escapeHtml(spend)}</span>
     </button></li>`;
