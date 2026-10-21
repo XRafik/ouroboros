@@ -48,12 +48,12 @@ export function headlineView(snapshot) {
 
 const causeWord = (row) => (row.cause === 'own' ? 'own' : row.cause === 'started' ? 'started work' : row.label || row.cause.replace(/^place:/, ''));
 
-/** «on its own clock · 3 places · today: own $0.62 · Slack · Acme $0.88 · started work $0.48 · unmetered 3 calls». */
+/** «on its own clock · 3 places · own $0.62 · Slack · Acme $0.88 · started work $0.48 · unmetered 3 calls» (the rolling 24 hours). */
 export function factsLineParts(snapshot, placeCount = null) {
     const parts = [snapshot.enabled === false ? 'off' : snapshot.enabled === null ? '' : 'on its own clock'];
     if (Number.isInteger(placeCount)) parts.push(placeCount === 1 ? '1 place' : `${placeCount} places`);
     const spend = snapshot.spendByCause.filter((row) => row.usd !== null);
-    spend.forEach((row, index) => parts.push(`${index === 0 ? 'today: ' : ''}${escapeHtml(causeWord(row))} <span class="consciousness-num">${escapeHtml(usdText(row.usd))}</span>`));
+    spend.forEach((row) => parts.push(`${escapeHtml(causeWord(row))} <span class="consciousness-num">${escapeHtml(usdText(row.usd))}</span>`));
     const unmetered = snapshot.spendByCause.reduce((sum, row) => sum + row.unmeteredCalls, 0);
     if (unmetered > 0) parts.push(`unmetered ${unmetered} ${unmetered === 1 ? 'call' : 'calls'}`);
     return parts.filter(Boolean);
@@ -103,12 +103,12 @@ export function dashboardPlaceRowHtml(place, { awake = false } = {}) {
 export function placesCardHtml(places, { error = '', awakeIn = '' } = {}) {
     const body = error ? `<p class="ui-status" data-tone="warn">${escapeHtml(error)}</p>`
         : !places ? '<p class="storage-meta">Reading places…</p>'
-            : !places.length ? '<p class="consciousness-copy">No place yet. A connector skill connects one: Slack, Telegram, email and others.</p>'
+            : !places.length ? '<p class="consciousness-copy">No place yet. Connect one from an installed connector.</p>'
                 : `<ul class="consciousness-dash-places">${places.map((place) => dashboardPlaceRowHtml(place, { awake: place.id === awakeIn })).join('')}</ul>`;
     return `<div class="consciousness-card-head">
             <div class="consciousness-card-head-text">
                 <h4 class="storage-card-title">Places</h4>
-                <p class="consciousness-copy">Each connector you install adds its place here; open a place for everything about it.</p>
+                <p class="consciousness-copy">A connector you install can connect a place here: Connect a place.</p>
             </div>
             ${connectPlaceButtonHtml()}
         </div>

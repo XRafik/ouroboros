@@ -86,7 +86,7 @@ export function settingsPlaceRowHtml(place) {
 export function settingsPlacesHtml({ places = null, error = '' } = {}) {
     if (error) return `<p class="settings-inline-note" data-tone="warn">${escapeHtml(error)}</p>`;
     if (!places) return '<p class="settings-inline-note">Reading places…</p>';
-    if (!places.length) return '<p class="settings-inline-note">No place yet. Connect one to let it hear and act there.</p>';
+    if (!places.length) return '<p class="settings-inline-note">No place yet. Connect one from an installed connector.</p>';
     return `<ul class="consciousness-place-rows">${places.map(settingsPlaceRowHtml).join('')}</ul>`;
 }
 

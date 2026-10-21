@@ -50,7 +50,8 @@ test('the owner names stand with their notes; stored values never change', () =>
 test('a place row says its state, what wakes it and what waits; absent money is the dash', () => {
     const { places } = normalizePlacesResponse(FIXTURE.places);
     assert.equal(placeStatusText(places[0]), 'active · wakes for direct messages, mentions and replies · 2 unanswered');
-    assert.equal(placeStatusText(places[1]), 'silent', 'a Silent place is not woken by its list');
+    assert.equal(placeStatusText(places[1]), 'silent · wakes for mentions', 'a Silent place still wakes for its list');
+    assert.equal(placeStatusText(places[2]), 'paused', 'a Paused place says only its state');
     assert.equal(placeStatusText({ state: 'gone' }), 'state unknown');
     assert.equal(wakesForText([]), '');
     assert.equal(usdText(null), '—');
@@ -415,6 +416,6 @@ test('the Settings places list: icon, label, state word, unanswered count; each 
     assert.equal((html.match(/data-place-open=/g) || []).length, 3);
     assert.match(html, /<span class="consciousness-place-name">Slack · Acme<\/span>\s*<span class="consciousness-place-facts">active · 2 unanswered<\/span>/);
     assert.match(html, /aria-label="Open Mail · inbox: paused"/);
-    assert.match(settingsPlacesHtml({ places: [] }), /No place yet\. Connect one/);
+    assert.match(settingsPlacesHtml({ places: [] }), /No place yet\. Connect one from an installed connector\./);
     assert.match(settingsPlacesHtml({ error: 'Places could not be read: HTTP 404' }), /data-tone="warn"/);
 });

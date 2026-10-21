@@ -30,9 +30,9 @@ test('the headline says what it does now; work in a place outranks its own clock
     assert.equal(headlineView({ ...spent, allowanceResetsAt: '' }).text, 'Waiting for the allowance');
 });
 
-test('the facts line: on its own clock, its places, the day by cause, unmetered calls', () => {
+test('the facts line: on its own clock, its places, the rolling 24 hours by cause, unmetered calls', () => {
     const parts = factsLineParts(fromState(), 3).map(strip);
-    assert.deepEqual(parts, ['on its own clock', '3 places', 'today: own $0.62', 'Slack · Acme $0.88', 'started work $0.48', 'unmetered 3 calls']);
+    assert.deepEqual(parts, ['on its own clock', '3 places', 'own $0.62', 'Slack · Acme $0.88', 'started work $0.48', 'unmetered 3 calls']);
     assert.deepEqual(factsLineParts({ ...fromState(), enabled: false, spendByCause: [] }, 1).map(strip), ['off', '1 place']);
 });
 
@@ -62,9 +62,13 @@ test('a place row: icon, label, state and wakes in words, the day\'s spend; unkn
     assert.match(slack, /class="status-mark consciousness-mark"/);
     assert.match(slack, /aria-label="Open Slack · Acme, awake here now: /);
     assert.match(dashboardPlaceRowHtml(places[1]), /class="consciousness-spend is-none">—</);
+    assert.match(strip(dashboardPlaceRowHtml(places[1])), /^Telegram · Ouroboros community silent · wakes for mentions —$/, 'Silent still wakes for its list');
+    assert.match(strip(dashboardPlaceRowHtml(places[2])), /^Mail · inbox paused \$0\.00$/);
     assert.match(dashboardPlaceRowHtml(places[2]), />\$0\.00</);
     assert.match(placesCardHtml(places), /data-place-connect>Connect a place</, "the one Connect control");
-    assert.match(placesCardHtml([]), /No place yet/);
+    assert.match(placesCardHtml([]), /No place yet\. Connect one from an installed connector\./);
+    assert.match(placesCardHtml([]), /A connector you install can connect a place here: Connect a place\./);
+    assert.doesNotMatch(placesCardHtml(places), /Each connector you install adds/);
     assert.match(placesCardHtml(null, { error: 'Places could not be read: HTTP 404' }), /data-tone="warn"/);
 });
 
