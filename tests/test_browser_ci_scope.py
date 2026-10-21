@@ -62,11 +62,9 @@ def test_one_complete_browser_lane_serves_manual_runs_and_release_tags():
     ci, ci_triggers = _workflow("ci.yml")
     caller = ci["jobs"]["ui-smoke"]
     assert caller["uses"] == "./.github/workflows/ui-browser.yml"
-    assert "github.event_name == 'pull_request'" in caller["if"]
-    assert "github.event_name == 'workflow_dispatch'" in caller["if"]
-    assert "startsWith(github.ref, 'refs/tags/v')" in caller["if"]
-    # Dormant PR predicates do not admit PR events; only manual/tag triggers remain.
-    assert "push" not in caller["if"] and "schedule" not in caller["if"]
+    assert caller["if"] == "github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')"
+    # Only manual/tag triggers remain; the run's shard plan is published first.
+    assert caller["needs"] == "shard-plan"
     assert "schedule" not in ci_triggers  # owner, 2026-10-05: no nightly run nobody reads
 
     assert list(push_triggers) == ["workflow_dispatch"]
@@ -472,7 +470,12 @@ def test_real_shards_partition_the_lane_and_reconcile_against_the_unsharded_mani
     assert proven.returncode == 0, proven.stdout + proven.stderr
     assert "UI_BROWSER_RECONCILE complete" in proven.stdout and "GAP" not in summary
 
+    # A session killed before its export left the lane its journal recorded at collection: without a
+    # passing retry verdict (scripts/ci_retry.py) that is a red session, never a proof.
     (tmp_path / "shards" / "ui-shard-2" / "host" / "results.json").unlink()
+    killed, summary = _reconcile(tmp_path, manifest, tmp_path / "shards", 3)
+    assert killed.returncode == 1 and "GAP shard 2/3: its session ended before its final export" in killed.stdout
+    (tmp_path / "shards" / "ui-shard-2" / "host" / "events.jsonl").unlink()
     silent, summary = _reconcile(tmp_path, manifest, tmp_path / "shards", 3)
     assert silent.returncode == 1 and "shard 2/3: no proof" in silent.stdout
     for node in slices[1]:  # The nodes no shard proved are named, the proven ones are not.
