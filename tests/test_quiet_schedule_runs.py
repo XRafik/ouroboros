@@ -1,5 +1,7 @@
 """Quiet scheduled results stay internal through Project/Main completion delivery."""
 
+import json
+
 import pytest
 
 from ouroboros.projects_registry import bind_task_to_project, create_project
@@ -56,3 +58,35 @@ def test_project_completion_mirrors_only_published_results(tmp_path, scheduled_p
         assert stored["canonical_terminal_projection_ready"] is None
         assert settle_terminal_projection(tmp_path, task["id"], task=task, event_queue=bus) == SETTLEMENT_NONE
         assert len(chat_rows(tmp_path)) == len(rows) and bus.empty()
+
+
+@pytest.mark.parametrize("fault", [False, True], ids=["normal", "lifecycle-fault"])
+@pytest.mark.parametrize("silent,notice", [(True, ""), (False, ""), (True, "A tool failed.")],
+                         ids=["quiet", "ordinary", "quiet-with-notice"])
+def test_task_done_carries_canonical_quiet_facts(tmp_path, scheduled_project, monkeypatch, fault, silent, notice):
+    from ouroboros.headless import prepare_terminal_task_files
+    from supervisor import events
+    from tests.test_task_done_durable_vs_transport import _mk_ctx
+
+    task = scheduled_project
+    write_task_result(tmp_path, task["id"], "completed", **{k: v for k, v in task.items() if k != "id"},
+                      result="Internal check result.", terminal_origin="model_final", wake_silent=silent,
+                      terminal_host_notice=notice, outcome_axes={"execution": {"status": "ok"}})
+    assert not prepare_terminal_task_files(tmp_path, task)["error"]
+    sent, pushed = [], []
+    ctx = _mk_ctx(tmp_path, sent, pushed)
+    ctx.RUNNING[task["id"]] = {"task": task}
+    bus = ObservedEventQueue()
+    monkeypatch.setattr("supervisor.workers.get_event_q", lambda **_kw: bus)
+    events._handle_task_done({
+        "task_id": task["id"], "status": "running" if fault else "completed",
+        "chat_id": task["chat_id"], "_files_prepared_attempt": 1,
+        "wake_silent": not silent, "quiet_effective": not silent,
+    }, ctx)
+    done = next(row for row in pushed if row.get("type") == "task_done")
+    assert done["wake_silent"] is silent
+    assert done["quiet_effective"] is bool(silent and not notice)
+    records = [json.loads(line) for line in (tmp_path / "logs" / "events.jsonl").read_text().splitlines()]
+    recorded = next(row for row in records if row.get("type") == "task_done")
+    assert recorded["wake_silent"] is silent and recorded["quiet_effective"] == done["quiet_effective"]
+    assert task["id"] not in ctx.RUNNING
