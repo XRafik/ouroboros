@@ -123,3 +123,35 @@ def test_memory_author_keeps_originating_focus_room():
     assert author["focus"]["role"] == "presence"
     assert {k: author["focus"][k] for k in ("room_id", "place_id", "conversation_key")} == {
         "room_id": "444", "place_id": "garden", "conversation_key": "garden:talk"}
+
+
+def test_gateway_keeps_full_place_id_and_its_terminal_summary(tmp_path):
+    import asyncio
+    import json
+    from starlette.requests import Request
+    from ouroboros.gateway.history import make_chat_history_endpoint
+
+    shared.world(tmp_path)
+    room = (1 << 40) + 444
+    shared.append(tmp_path / "logs/chat.jsonl",
+                  shared.msg("2026-09-05", "PLACE_WORDS", chat_id=room,
+                             presence_provenance={"place_id": "garden"}),
+                  shared.msg("2026-09-05", "PLACE_SUMMARY", chat_id=room,
+                             presence_provenance={"place_id": "garden"},
+                             summary_kind="terminal_result_projection"),
+                  shared.msg("2026-09-05", "OTHER_PLACE", chat_id=room + 1,
+                             presence_provenance={"place_id": "elsewhere"}),
+                  shared.msg("2026-09-05", "OWNER_WORDS"))
+    endpoint = make_chat_history_endpoint(tmp_path)
+
+    def words(chat):
+        request = Request({"type": "http", "method": "GET", "path": "/api/chat/history",
+                           "query_string": f"chat_id={chat}".encode(), "headers": []})
+        response = asyncio.run(endpoint(request))
+        assert response.status_code == 200
+        return [row.get("text") for row in json.loads(response.body)["messages"]]
+
+    assert words(room) == ["PLACE_WORDS", "PLACE_SUMMARY"]
+    main = words(1)
+    assert "OWNER_WORDS" in main
+    assert not {"PLACE_WORDS", "PLACE_SUMMARY", "OTHER_PLACE"}.intersection(main)

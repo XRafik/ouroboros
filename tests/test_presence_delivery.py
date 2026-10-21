@@ -82,6 +82,10 @@ def test_http_records_exact_facts_with_nonterminal_history_type(tmp_path, state,
     export_for_older_body(tmp_path)  # Transition (unit H): history endpoint still owns the file reader.
     request = Request({"type": "http", "method": "GET", "path": "/api/chat/history", "query_string": b"", "headers": []})
     response = asyncio.run(make_chat_history_endpoint(tmp_path)(request))
+    assert not [item for item in json.loads(response.body)["messages"] if item.get("text") == payload["text"]]
+    request = Request({"type": "http", "method": "GET", "path": "/api/chat/history",
+                       "query_string": f"chat_id={row['chat_id']}".encode(), "headers": []})
+    response = asyncio.run(make_chat_history_endpoint(tmp_path)(request))
     projected = [item for item in json.loads(response.body)["messages"] if item.get("text") == payload["text"]]
     assert len(projected) == 1
     assert projected[0]["system_type"] == "presence_delivery"
