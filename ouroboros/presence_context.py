@@ -115,6 +115,7 @@ def _own_work_section(drive_root: Path, value: Mapping[str, Any], task_id: str) 
     binding = str(value.get("binding_id") or "").strip()
     if not binding:
         return ""
+    focused = isinstance(value.get("place"), Mapping)
     page = recent_tasks_page(Path(drive_root), limit=_OWN_WORK_PAGE, binding=binding,
                              exclude=str(task_id or ""), restricted=True)
     here = str((value.get("event") or {}).get("conversation_key") or "")
@@ -142,11 +143,20 @@ def _own_work_section(drive_root: Path, value: Mapping[str, Any], task_id: str) 
                      + "; this binding's work may be among them)")
     if page.get("error"):
         lines.append(f"(listing unavailable now: {page['error'].get('code')}; page again with recent_tasks)")
+    elif page.get("remaining") and focused:
+        lines.append(f"({page['remaining']} more started here; recent_tasks reads current work.)")
     elif page.get("remaining"):
         lines.append(f"({page['remaining']} more: recent_tasks(presence_scope=\"own_binding\", "
                      f"offset={page['offset'] + page['returned']}, snapshot=\"{page['snapshot']}\"))")
     if not lines:
         return ""
+    if focused:
+        return (
+            "## Work started from this place (host-authored facts)\n\n"
+            "Being listed says nothing about whether a result reached anyone. "
+            "Use get_task_result(task_id) to read a record, recent_tasks for current work, "
+            "and tell_task to give a live author new facts.\n\n" + "\n".join(lines)
+        )
     return (
         "## Work started from this binding (host-authored facts)\n\n"
         "Independent work this Presence binding started, from this or another of its conversations, "

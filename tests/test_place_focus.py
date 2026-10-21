@@ -371,3 +371,16 @@ def test_owner_projection_tracks_heard_events_and_preserves_choices(focus, monke
     saved = p.edit_place(root, connected.place_id, "add_note", author="owner", text="Owner choice")
     declaration["wakes"] = ["any_message"]
     assert connect_declared_place(root, "bridge", account_id="new-account") == saved
+
+
+def test_focus_work_facts_use_ordinary_readers(tmp_path, monkeypatch):
+    from ouroboros.presence_context import _own_work_section
+    monkeypatch.setattr("ouroboros.tools.recent_tasks.recent_tasks_page", lambda *_a, **_kw: {
+        "tasks": [{"task_id": "report", "status": "running", "description": "Prepare the report"}],
+        "remaining": 2, "offset": 0, "returned": 1, "snapshot": "snapshot"})
+    legacy = {"binding_id": "binding", "event": {"conversation_key": "room"}}
+    assert "presence_scope" in _own_work_section(tmp_path, legacy, "current")
+    text = _own_work_section(tmp_path, {**legacy, "place": {"place_id": "place"}}, "current")
+    assert "report [running]" in text and "get_task_result(task_id)" in text
+    assert "presence_scope" not in text and "presence_cancel_work" not in text
+    assert "not addressable" not in text
