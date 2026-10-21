@@ -1,0 +1,94 @@
+"""Own-work sealing, terminal links and the ON/OFF candidate boundary."""
+import json
+from types import SimpleNamespace
+
+import pytest
+from ouroboros import memory_view as mv, memory_fallback as mf, chat_chain
+from ouroboros.chronicle_store import ChronicleStore
+from ouroboros.memory_sealing import failed_work_units
+from ouroboros.task_results import write_task_result
+from ouroboros.tools.chronicle import _memory_read
+from tests.test_chronicle_tools import chat, ctx_for, ts, addr, sha, write
+from tests._memory_inventory_shared import MIND
+from tests.test_memory_fallback import _Light, _consciousness, light_route
+
+
+def _own_rows(root):
+    store = ChronicleStore(root)
+    store.ensure_activated()
+    rows = chat(root, [
+        {"chat_id": 1, "direction": "out", "ts": ts(1), "text": "OWN ONE", "task_id": "failed01"},
+        {"chat_id": 1, "direction": "out", "ts": ts(2), "text": "FOREIGN CHILD", "task_id": "child001", "parent_task_id": "failed01", "root_task_id": "failed01"},
+        {"chat_id": 1, "direction": "out", "ts": ts(3), "text": "OWN TWO", "task_id": "failed01"},
+        {"chat_id": 1, "direction": "out", "ts": ts(4), "text": "FOREIGN ROOT", "task_id": "foreign1"},
+    ])
+    write_task_result(root, "failed01", "failed", result="Failed after work")
+    return store, rows
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_candidate_is_nonacting_until_adopted_and_rebuild_preserves_decision(tmp_path, monkeypatch, accepted):
+    light_route(monkeypatch)
+    _consciousness(monkeypatch, True)
+    store, rows = _own_rows(tmp_path)
+    llm = _Light()
+    run = mf.run_fallback_draft(SimpleNamespace(), {"id": "next0001"}, llm, tmp_path / "logs", {})
+    assert run.outcome == "published", run
+    candidate = store.pending_candidates()[0]
+    assert candidate["metadata"]["candidate"] and candidate["status"] == "candidate"
+    assert candidate["covers"]["rows"] == [sha(rows[0]), sha(rows[2])]
+    assert "OWN ONE" in llm.prompts[0] and "OWN TWO" in llm.prompts[0]
+    assert "FOREIGN CHILD" not in llm.prompts[0] and "FOREIGN ROOT" not in llm.prompts[0]
+    assert not store.sealed_row_refs("1") and not store.pages_of_room("1")
+    assert not failed_work_units(tmp_path, store)  # the same pending rows are not paid for twice
+    task = {"id": "wake0001", "usage_category": "consciousness", "chat_id": 1}
+    snap = mv.capture_memory_view(tmp_path, task, mv.view_spec_for_task(task, tmp_path))
+    assert "Drafts awaiting a decision: 1" in mv.render_room(snap)
+    assert candidate["text"] not in mv.render_story(snap)
+    ctx = ctx_for(tmp_path)
+    assert candidate["id"] in _memory_read(ctx, room_id="candidates")
+    assert not store.publish_part(room_id="1", text="Cannot fold pending", member_ids=[candidate["id"]],
+                                  author=MIND, expected_sequence=store.room_head("1")).ok
+    result = write(ctx, kind="decision", target_id=candidate["id"], accepted=accepted, reason="Read the draft and its sources")
+    assert result["ok"], result
+    store.index_path.unlink()
+    assert not store.pending_candidates()
+    assert bool(store.sealed_row_refs("1")) is accepted
+    assert bool(store.pages_of_room("1")) is accepted
+    assert sha(rows[1]) not in store.sealed_row_refs("1")
+
+
+def test_candidate_adoption_checks_intervening_sealing_and_ordinary_drafts_still_act(tmp_path):
+    store, rows = _own_rows(tmp_path)
+    covers = {"rows": [sha(rows[0])], "stream_span": [0, 0]}
+    candidate = store.publish_page(room_id="1", text="Pending", covers=covers,
+        author={"kind": "helper", "route": "Light"}, metadata={"candidate": True}).record
+    acting = store.publish_page(room_id="1", text="Ordinary signed draft", covers=covers,
+        author={"kind": "helper", "route": "child"})
+    assert acting.ok and store.sealed_row_refs("1") == {sha(rows[0])}
+    assert store.decide(candidate["id"], True, MIND, "Adopt").reason == "already_sealed"
+    assert store.decide(acting.record["id"], False, MIND, "Withdraw").ok
+    assert store.decide(candidate["id"], True, MIND, "Now free").ok
+
+
+def test_end_page_links_only_own_later_terminal_rows_and_to_leaves_no_holes(tmp_path):
+    ctx, store = ctx_for(tmp_path, "writer01"), ChronicleStore(tmp_path)
+    store.ensure_activated()
+    rows = chat(tmp_path, [{"chat_id": 1, "direction": "out", "ts": ts(i), "text": f"work {i}",
+                           "task_id": "writer01"} for i in range(1, 5)])
+    first = write(ctx, kind="page", text="Middle rows", covers={"from": addr(rows[1]), "to": addr(rows[2])})
+    last = write(ctx, kind="page", text="I finished; I did not reread external sources.", covers={"to": addr(rows[-1])})
+    assert first["ok"] and last["ok"]
+    assert store.sealed_row_refs("1") == {sha(row) for row in rows}
+    page = store.get(last["node_id"])
+    before = set(page["covers"]["rows"])
+    terminal = chat(tmp_path, [
+        {"chat_id": 1, "direction": "out", "ts": ts(20), "text": "Final", "task_id": "writer01", "terminal_origin": "model_final"},
+        {"chat_id": 1, "direction": "system", "ts": ts(21), "text": "Done", "task_id": "writer01", "type": "task_summary", "status": "completed"},
+        {"chat_id": 1, "direction": "out", "ts": ts(22), "text": "Child final", "task_id": "child001", "root_task_id": "writer01", "terminal_origin": "model_final"},
+    ])
+    document = _memory_read(ctx, node_id=page["id"])
+    assert "Linked task final report of task writer01" in document and "Linked host summary of task writer01" in document
+    assert "child001" not in document and "not page coverage" in document
+    assert set(store.get(page["id"])["covers"]["rows"]) == before
+    assert not {sha(row) for row in terminal} & store.sealed_row_refs("1")

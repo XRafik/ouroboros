@@ -268,13 +268,14 @@ class MemoryViewSnapshot:
     legacy_blocks: Dict[str, Any] = dataclasses.field(default_factory=dict)  # the story status facts
     fallback_refusals: Tuple[Dict[str, Any], ...] = ()
     owner_words: str = ""  # the rendered block of the owner's words that caused a helper's work
+    candidates: Tuple[Dict[str, Any], ...] = ()
 
     @property
     def active(self) -> bool:
         return self.store_status.get("state") == "active"
 
 
-_TUPLES = ("story", "live_rooms", "marks", "fallback_refusals")
+_TUPLES = ("story", "live_rooms", "marks", "fallback_refusals", "candidates")
 
 
 def snapshot_json(snapshot: MemoryViewSnapshot) -> str:
@@ -366,6 +367,7 @@ def _story_pages(store: ChronicleStore, label: Callable[..., str],
                 {"kind": "correction" if record["kind"] == "correction" else "rejection", "id": record["id"],
                  "text": record.get("text"), "reason": record.get("reason")})
     rooms = sorted({str(record["room_id"]) for record in store.records(kinds=("page", "part"))})
+    terminal_cache = {}
     keyed = [((entry.pop("first"), entry["sequence"]), entry) for entry in account_entries(
         store, label, units, fixes, lambda period: _period(period.span, period.note()))]
     for room in rooms:
@@ -373,13 +375,15 @@ def _story_pages(store: ChronicleStore, label: Callable[..., str],
             if record["kind"] not in ("page", "part") or record.get("folded_into"):
                 continue
             period = memory_inventory.record_period(store, record, units)
+            from ouroboros.memory_sealing import terminal_links
             keyed.append(((period.first, record["sequence"]), {
                 "kind": record["kind"], "id": record["id"], "room_id": room,
                 "label": str(_mapping(record.get("metadata")).get("room_label") or label(room)),
                 "source_period": period.span, "period_basis": period.source,
                 "period": _period(period.span, period.note()), "text": str(record.get("current_text") or ""),
                 "status": str(record.get("status") or ""), "signer": draft_signer(record.get("author")),
-                "stamp": _stamp_summary(record.get("host_stamp")), "fixes": _fixes(store, record, fixes), "quotes": record.get("quotes") or []}))
+                "stamp": _stamp_summary(record.get("host_stamp")), "fixes": _fixes(store, record, fixes),
+                "terminal_links": terminal_links(store.data_root, record, terminal_cache), "quotes": record.get("quotes") or []}))
     told = told_map([entry for _key, entry in keyed if entry["kind"] == "account"])
     return [{**entry, "told_by": told[entry["id"]]} if entry["id"] in told else entry
             for _key, entry in sorted(keyed, key=lambda pair: pair[0])]
@@ -795,7 +799,9 @@ def capture_memory_view(drive_root: Any, task: Mapping[str, Any], spec: ViewSpec
     return MemoryViewSnapshot(spec=spec, store_status=status,
                               frontier={"status": frontier.get("status"), "pos": frontier.get("pos")},
                               story=tuple(story), room=room, live_rooms=tuple(live), marks=tuple(marks),
-                              legacy_blocks=story_status, fallback_refusals=tuple(refusals), owner_words=owner_words)
+                              legacy_blocks=story_status, fallback_refusals=tuple(refusals), owner_words=owner_words,
+                              candidates=tuple({"id": row["id"], "room_id": row["room_id"]} for row in store.pending_candidates())
+                              if spec.role == "consciousness" else ())
 
 
 # --- rendering ------------------------------------------------------------------------------------
@@ -858,6 +864,7 @@ def _page_lines(entry: Mapping[str, Any]) -> List[str]:
         lines.append(f"(drafted by a helper ({entry.get('signer') or 'Light'}), accepted by me)")
     if entry.get("stamp"):
         lines.append(f"({entry['stamp']})")
+    lines.extend(entry.get("terminal_links") or ())
     for fix in entry.get("fixes") or ():  # a record's own corrections stand inside its text (chronicle_store._interpret)
         verb = "correction by me of" if fix["kind"] == "correction" else "my rejection of the draft"
         lines.append(f"- {verb} {fix['target']}:\n{_indented(fix['text'])}")
@@ -1108,6 +1115,9 @@ def render_room(snapshot: MemoryViewSnapshot, level: FloorLevel = FULL_VIEW, *, 
         parts.append(_live_text(snapshot.live_rooms, gone))
     if room:
         parts.append(_room_text(room, gone))
+    if snapshot.spec.role == "consciousness":
+        parts.append(f"Drafts awaiting a decision: {len(snapshot.candidates)}; memory_read(room_id='candidates'). "
+                     "Candidates do not act until adopted by a chronicle_write decision.")
     parts.append(floor_note)
     return "\n\n".join(part for part in parts if part)
 

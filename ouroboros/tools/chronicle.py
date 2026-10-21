@@ -327,7 +327,8 @@ def _write_page(ctx: Any, root: Path, store: ChronicleStore, author: Dict[str, A
     stamp = host_stamp(root, covers["task_ids"], rows=rows)
     resolver = _quote_resolver(root, lineage, {address["row_sha256"]: pos for address, _r, pos in rows})
     result = store.publish_page(room_id=room, text=a["text"], covers=covers, author=author,
-                                quotes=a["quotes"] or (), host_stamp=stamp, metadata={"coverage_facts": facts},
+                                quotes=a["quotes"] or (), host_stamp=stamp, metadata={"coverage_facts": facts,
+                                "terminal_after_pos": max((pos for _a, _r, pos in chat_chain.iter_room_rows(root, room)), default=-1)},
                                 quote_resolver=resolver, expected_sequence=a["expected_sequence"])
     if not result.ok:
         return _published(ctx, result)
@@ -831,6 +832,10 @@ def _read_node(root: Path, node_id: str, start: int, limit: int, revision: str =
     if record is None:
         raise ValueError(f"memory node {node_id} not found")
     shown, document = _node_document(store, record, revision)
+    from ouroboros.memory_sealing import terminal_links
+    links = terminal_links(root, shown)
+    if links:
+        document += "\n\nHost-linked terminal facts (outside page coverage):\n" + "\n".join(links)
     header = _record_header(shown, _periods(store, root, [shown]).get(shown["id"]))
     at = f", revision={revision}" if revision else ""
     return _window(header, document, start, limit, lambda end: f"memory_read(node_id={node_id}{at}, start={end})")
@@ -879,6 +884,13 @@ def _memory_read(ctx: Any, node_id: str = "", room_id: Any = None, after_seq: in
         store = _activated(root)
         if str(room_id) == "*":
             text = _read_rooms(root, store, start, limit)
+        elif str(room_id) == "candidates":
+            candidates = store.pending_candidates()
+            body = "\n".join(f"- {r['id']}; room {r['room_id']}; signed by {draft_signer(r['author'])}; "
+                f"memory_read(node_id='{r['id']}'); chronicle_write(kind='decision', target_id='{r['id']}', accepted=true/false, reason='...')"
+                for r in candidates)
+            text = _window(f"Drafts awaiting a decision: {len(candidates)}", body, start, limit,
+                           lambda n: f"memory_read(room_id='candidates', start={n})")
         elif source_ref:
             text = _read_source(root, source_ref, start, limit)
         elif node_id:
