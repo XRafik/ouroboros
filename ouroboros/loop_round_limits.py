@@ -424,6 +424,8 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
             exposed_units=observed.get("exposed_units"),
         )
         receipt = asdict(result)
+        from ouroboros.context_source_view import retire_host_rows_after_fold
+        candidate = retire_host_rows_after_fold(candidate, receipt)
         if receipt["status"] == "no_op" and (proposal.get("review_transfers") or proposal.get("review_notes")):
             from ouroboros.review_history_view import retain_transfer_only_checkpoint
             try:

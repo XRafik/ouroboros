@@ -61,7 +61,7 @@ def project_helper_predecessor_authority(
         # host's terminal notice), its answer, its contract core, its accepted plan
         # core and record, and the owner's words.
         keep.update({"status", "execution_status", "reason_code", "terminal_origin", "terminal_host_notice",
-                     "outcome_axes", "result", "task_contract", "plan_review_state", "plan_record",
+                     "outcome_axes",
                      "origin_message_text", "origin_message_ref"})
     prior = envelope.get("omitted_fields")
     omitted = {}
@@ -114,7 +114,7 @@ def project_main_task_authority(task: Mapping[str, Any]) -> Dict[str, Any]:
     predecessor = task.get("predecessor_authority")
     contract = task.get("task_contract")
     if isinstance(predecessor, Mapping) and predecessor:
-        projection["predecessor_authority"] = copy.deepcopy(dict(predecessor))
+        projection["predecessor_authority"] = project_helper_predecessor_authority(predecessor)
     if isinstance(contract, Mapping):
         projected_contract = copy.deepcopy(dict(contract))
         nested = projected_contract.get("predecessor_authority")

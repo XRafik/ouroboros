@@ -58,6 +58,20 @@ def _obsolete_host_rows(messages: Sequence[Mapping[str, Any]]) -> set[int]:
     return obsolete | set(obsolete_review_index_positions(messages)) | obsolete_snapshot_positions(messages)
 
 
+
+def retire_host_rows_after_fold(messages: list, receipt: dict) -> list:
+    """Retire only superseded typed host rows inside an applied, checkpointed authored fold."""
+    if receipt.get("status") != "applied" or not receipt.get("selection_fingerprint") or not receipt.get("checkpoint_ref"):
+        return messages
+    obsolete = _obsolete_host_rows(messages)
+    if not obsolete:
+        return messages
+    receipt["retired_host_row_ids"] = [str(messages[i].get("msg_id") or
+        compaction._sha256(compaction._canonical_json(messages[i]))) for i in sorted(obsolete)]
+    receipt["retired_host_rows_source"] = receipt["checkpoint_ref"]
+    return [row for i, row in enumerate(messages) if i not in obsolete]
+
+
 def _exposed_units(messages: list, units: Sequence[_AtomicUnit], observation: Mapping[str, Any]) -> set[str]:
     """Match an observed original unit, never its current position or a reused call ID.
 
