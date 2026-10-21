@@ -348,12 +348,36 @@ def count_history_change(usage: dict, fact: Mapping[str, Any], *, drive_root: An
         _record_history_change(Path(drive_root), history_change_origin(fact), str(task_id or ""))
 
 
+def count_helper_send(slot: Any, messages: list, tools: Any, *, round_idx: int, usage: dict) -> None:
+    """A helper's accepted send counts a change of sent history as Main's observer does.
+
+    Its retirement before the send left the same identity on the slot, so a change it
+    already counted is not counted twice; a model without signed reasoning still counts."""
+    fact = observe_send(slot, messages, round_idx=round_idx, tools=tools)
+    if not fact:
+        return
+    from ouroboros.loop_messages import _emit_checkpoint_event
+
+    task_id = str(getattr(slot, "task_id", "") or "")
+    count_history_change(usage, fact, drive_root=history_drive_root(slot), task_id=task_id)
+    logs = getattr(slot, "drive_logs", None)
+    logs = logs() if callable(logs) else (Path(slot.drive_root) / "logs" if getattr(slot, "drive_root", None) else None)
+    _emit_checkpoint_event(getattr(slot, "event_queue", None), task_id, logs, fact)
+
+
 @functools.lru_cache(maxsize=1)
 def _running_code() -> str:
-    """The commit this process imported (an update restarts every process)."""
+    """The commit this process imported (an update restarts every process); a tree without
+    git names its VERSION, so two versions never share one record."""
     from ouroboros.utils import get_git_info
 
-    return get_git_info(Path(__file__).resolve().parents[1])[1] or "unknown"
+    root = Path(__file__).resolve().parents[1]
+    if sha := get_git_info(root)[1]:
+        return sha
+    try:
+        return "version " + (root / "VERSION").read_text(encoding="utf-8").strip()
+    except OSError:
+        return "unknown"
 
 
 def _record_history_change(drive_root: Path, origin: str, task_id: str) -> None:
@@ -390,7 +414,8 @@ def history_changes_line(drive_root: Any) -> str:
         tasks = len(row.get("tasks") or [])
         rows.append(f"{origin} {int(row.get('count') or 0)} in {tasks}{'+' if tasks >= _HISTORY_TASKS_KEPT else ''} "
                     f"task{'s' if tasks != 1 else ''}")
-    return (f"INFO: SENT HISTORY CHANGES under the running code ({str(record.get('code'))[:12]}, first at "
+    code = str(record.get("code"))
+    return (f"INFO: SENT HISTORY CHANGES under the running code ({code if ' ' in code else code[:12]}, first at "
             f"{str(record.get('first'))[:16]}) — {'; '.join(rows)}. Ordinary steps append; the round facts name "
             "each change beside the cache share it preceded.")
 

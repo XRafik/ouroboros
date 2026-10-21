@@ -85,6 +85,19 @@ class TestSentHistoryHealth:
         result = build_health_invariants(env)
         assert "compaction 1 in 1 task" in result and "superseded_skill_snapshot" not in result
 
+    def test_a_tree_without_git_names_its_version(self, tmp_path, monkeypatch):
+        from ouroboros import transcript_prefix, utils
+
+        monkeypatch.setattr(utils, "get_git_info", lambda _root: ("", ""))
+        transcript_prefix._running_code.cache_clear()
+        try:
+            env = self._make_env(tmp_path, [])
+            transcript_prefix.count_history_change(
+                {}, {"round": 1, "kind": "rewritten", "sanctioned_by": "compaction"}, drive_root=tmp_path, task_id="t1")
+            assert "under the running code (version " in build_health_invariants(env)
+        finally:
+            transcript_prefix._running_code.cache_clear()
+
     def test_the_task_list_is_capped_and_says_so(self, tmp_path):
         from ouroboros import transcript_prefix
 

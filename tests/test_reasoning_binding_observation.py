@@ -164,3 +164,25 @@ def test_cache_observer_sees_images_blocks_and_schemas_but_not_cache_markers(cha
     else:
         assert fact["index"] == (0 if change == "tools" else 1)
         assert fact["kind"] == ("tools_changed" if change == "tools" else "tail_replaced")
+
+
+@pytest.mark.parametrize("signed_reasoning", [True, False])
+def test_a_helper_send_counts_its_change_once_signed_or_not(tmp_path, signed_reasoning):
+    """Native review and consolidation count a change as Main does: retirement and the
+    send observer share one identity, and a model without signed reasoning still counts."""
+    messages = history()
+    if not signed_reasoning:
+        for message in messages:
+            message.pop("reasoning_details", None)
+    slot = answered(messages)
+    slot.task_id, slot.drive_root, usage = "helper-task", tmp_path, {}
+    transcript_prefix.sanction_rewrite(slot, "compaction")
+    messages[3]["content"] = "folded tool result"
+    transcript_prefix.prepare_reasoning_for_send(slot, messages, TOOLS, round_idx=2, usage=usage)
+    transcript_prefix.count_helper_send(slot, messages, TOOLS, round_idx=2, usage=usage)
+    assert usage["prompt_prefix_breaks"] == 1 and len(_events(tmp_path)) == 1
+    assert [(b["round"], b["index"], b["sanctioned_by"]) for b in usage["_recent_prefix_breaks"]] == [(2, 3, "compaction")]
+    record = json.loads(transcript_prefix.history_changes_path(tmp_path).read_text())
+    assert record["origins"]["compaction"]["count"] == 1
+    transcript_prefix.count_helper_send(slot, [*messages, {"role": "user", "content": "more"}], TOOLS, round_idx=3, usage=usage)
+    assert usage["prompt_prefix_breaks"] == 1  # an append is no change
