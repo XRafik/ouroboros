@@ -167,12 +167,12 @@ class _Read:
             return text
         return _save(self.ctx, line, payload, self.method, self.kind)
 
-    def since_filter(self, rows: list, key: str, facts: dict) -> list:
-        """Rows updated at or after ``since`` for endpoints without a ``since`` parameter (ordered newest first)."""
+    def since_filter(self, rows: list, key: str, facts: dict, *, newest_first: bool = False) -> list:
+        """Filter a page; only a source descending by this timestamp permits stopping the walk early."""
         if not self.since:
             return rows
         kept = [r for r in rows if isinstance(r, dict) and str(r.get(key) or "") >= self.since]
-        if len(kept) < len(rows):
+        if newest_first and any(isinstance(r, dict) and r.get(key) and str(r[key]) < self.since for r in rows):
             facts.update(complete=True, next_cursor="")
         return kept
 
@@ -618,7 +618,7 @@ def _list(read: _Read) -> str:
             read.omitted.append(f"{prs} pull request(s) on this page not shown; list(kind='pr') reads them")
         rows = [r for r in rows if "pull_request" not in r]
     if kind in ("pr", "review", "release") and read.since and key:
-        rows = read.since_filter(rows, key, facts)
+        rows = read.since_filter(rows, key, facts, newest_first=kind == "pr")
     payload: Dict[str, Any] = {"target": number} if number else {}
     if kind == "pr" and rows:
         pr_facts, error = _pr_facts(read, rows)
@@ -660,7 +660,7 @@ def _list_discussions(read: _Read, number: Optional[int]) -> str:
         if error:
             return error
         nodes, facts = read.connection((data.get("repository") or {}).get("discussions") or {})
-        nodes = read.since_filter(nodes, "updatedAt", facts)
+        nodes = read.since_filter(nodes, "updatedAt", facts, newest_first=True)
         payload = {"items": read.rows(nodes, lambda d: _discussion_shape(read, d)), **facts}
         label = "discussion"
     more = f", more: cursor={facts['next_cursor']!r}" if not facts["complete"] else ", complete"

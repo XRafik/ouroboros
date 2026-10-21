@@ -353,6 +353,38 @@ def test_list_discussions_and_their_comments_with_replies_are_graphql_pages(gh):
 
 
 # ---- search ------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("kind,key,old", [("review", "submitted_at", "2026-01-01"),
+                                        ("release", "published_at", "2026-01-01"), ("release", "published_at", None)])
+def test_since_preserves_unordered_rest_page_continuations(gh, kind, key, old):
+    gh.answer = lambda p, argv, kw: _rest([{"id": 1, key: old}], link_next=f"{API}/x?page=2")
+    _line, payload = _payload(gh.read(method="list", kind=kind, target=7, since="2026-10-01"))
+    assert payload["items"] == [] and (payload["complete"], payload["next_cursor"]) == (False, "2")
+
+
+@pytest.mark.parametrize("target,newest_first", [(7, False), (None, True)])
+def test_since_respects_discussion_connection_order(gh, target, newest_first):
+    def answer(p, argv, kw):
+        connection = {"totalCount": 2, "pageInfo": {"hasNextPage": True, "endCursor": "next"},
+                      "nodes": [{"id": "D_1", "updatedAt": "2026-01-01"}]}
+        node = {"discussion": {"comments": connection}} if target else {"discussions": connection}
+        assert ("orderBy:{field:UPDATED_AT,direction:DESC}" in p.graphql) is newest_first
+        return json.dumps({"data": {"repository": node}})
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="list", kind="discussion", target=target, since="2026-10-01"))
+    assert payload["items"] == []
+    assert (payload["complete"], payload["next_cursor"]) == ((True, "") if newest_first else (False, "next"))
+
+
+@pytest.mark.parametrize("kind", ["comment", "review_comment"])
+def test_since_on_ascending_comment_sweeps_keeps_the_server_cursor(gh, kind):
+    def answer(p, argv, kw):
+        assert "since=2026-10-01" in p.route and "sort=updated&direction=asc" in p.route
+        return _rest([_comment(1, updated_at="2026-10-02")], link_next=f"{API}/x?page=2")
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="list", kind=kind, since="2026-10-01"))
+    assert len(payload["items"]) == 1 and (payload["complete"], payload["next_cursor"]) == (False, "2")
+
+
 def test_search_scopes_to_the_repository_and_reports_total_count(gh):
     gh.answer = lambda p, argv, kw: _rest({"total_count": 120, "incomplete_results": True, "items": [_issue(5)]}, link_next=f"{API}/search/issues?page=2")
     line, payload = _payload(gh.read(method="search", kind="issue", query="is:open label:bug", repo="owner/selected", since="2026-10-01T00:00:00Z"))
