@@ -76,6 +76,7 @@ def test_foreground_nonzero_completion_is_not_unresolved_effect(tmp_path, monkey
     _running(tmp_path, workers)
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
     registry._ctx.task_id = registry._ctx.root_task_id = 'root'
+    registry._ctx.task_metadata = {'work_kind': 'owner'}  # an owner task's minted kind
     result = registry.execute_result('run_command', {'cmd': [sys.executable, '-c', 'raise SystemExit(3)']})
     assert result.code == 'SHELL_EXIT_ERROR', result
     assert result.meta['exit_code'] == 3
@@ -94,6 +95,7 @@ def test_pause_during_process_preparation_prevents_process_start(tmp_path, monke
     _running(tmp_path, workers)
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
     registry._ctx.task_id = registry._ctx.root_task_id = 'root'
+    registry._ctx.task_metadata = {'work_kind': 'owner'}  # an owner task's minted kind
     marker = tmp_path / 'effect'
     def preparation(*_a, **_k):
         install_fence(tmp_path, 'root', request_id='during-preparation')

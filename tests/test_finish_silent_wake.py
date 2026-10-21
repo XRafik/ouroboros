@@ -120,6 +120,9 @@ def _no_post_task_model(monkeypatch):
 @pytest.mark.parametrize("cause", ["own_clock", "focus"])
 def test_clean_silent_wake_publishes_nothing_and_keeps_its_record(wake, answer, cause):
     metadata = {**WAKE, "wake_cause": cause}
+    if cause == "focus":  # the host stamps a focus with its place and its event
+        metadata.update(focus={"place_id": "place-1", "conversation_key": "slack:c1"},
+                        presence={"event": {"conversation_key": "slack:c1"}})
     text, usage, trace, bus = wake.run([finish(answer, silent=True)], metadata=metadata)
     assert len(wake.calls) == 1 and usage.get("wake_silent") is True
     assert text == (answer or "")
