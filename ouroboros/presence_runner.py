@@ -1147,7 +1147,7 @@ def run_presence_turn(
                         start.get("metadata") or {}).get("presence_event_identity") != identity:
                     raise ValueError("Presence start record was not bound to this event")
                 if admission.place is not None:
-                    retain_focus_source(drive_root, task_id)
+                    retain_focus_source(drive_root, _task_id(admission, event))
         except (OSError, ValueError, StoreError) as exc:
             raise PresenceTurnError("presence_start_unwritable", "source_event_id", turn_ref=task_id) from exc
         try:
