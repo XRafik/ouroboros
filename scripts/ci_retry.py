@@ -42,6 +42,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -152,6 +153,10 @@ def _run(command: list[str]) -> int:
     """The command's exit status. It inherits the streams, the working directory and the
     environment, less the token that only the accepted-failure check reads."""
     env = {key: value for key, value in os.environ.items() if key not in ("GH_TOKEN", "GITHUB_TOKEN")}
+    # Resolve the program on PATH as the calling shell did. Windows' own lookup tries this
+    # process's directory first, and a venv's python.exe runs as the base interpreter there,
+    # so a bare `python` would start the hosted Python without the venv's packages.
+    command = [shutil.which(command[0]) or command[0], *command[1:]]
     sys.stdout.flush()
     process = subprocess.Popen(command, env=env)
     try:

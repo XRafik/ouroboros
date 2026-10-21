@@ -333,6 +333,25 @@ def test_the_wrapped_command_inherits_everything_but_the_api_token(ci_retry, mon
     assert "GH_TOKEN" not in seen and "GITHUB_TOKEN" not in seen
 
 
+def test_the_program_is_found_on_path_as_the_calling_shell_finds_it(ci_retry, monkeypatch):
+    """Windows' own lookup tries the interpreter's directory first, where a venv's python.exe runs
+    as the base interpreter, so a bare `python` started the hosted Python without the venv's pytest."""
+    started = []
+
+    class Process:
+        def __init__(self, command, env):
+            started.append(command)
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(ci_retry.subprocess, "Popen", Process)
+    monkeypatch.setattr(ci_retry.shutil, "which", {"python": "/venv/bin/python"}.get)
+    assert ci_retry._run(["python", "scripts/run_tests.py"]) == 0
+    assert ci_retry._run(["not-on-path", "scripts/run_tests.py"]) == 0
+    assert started == [["/venv/bin/python", "scripts/run_tests.py"], ["not-on-path", "scripts/run_tests.py"]]
+
+
 def test_without_any_evidence_the_command_status_stands(ci_retry, monkeypatch, tmp_path):
     code, verdict, _ = _wrapped(ci_retry, monkeypatch, tmp_path, _session({}, exit=3, export=False))
     assert code == 3 and verdict["verdict"] == "red" and verdict["rounds"] == [{"dir": ".", "exit": 3, "ran": 0}]
