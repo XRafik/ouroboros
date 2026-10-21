@@ -717,7 +717,7 @@ def test_per_test_timeout_kill_is_not_told_to_mark_the_test_serial():
     assert "PARALLEL_WORKER_CRASH" in result, "a killed worker is still a hard block"
     assert "300s per-test limit" in result
     assert "faster or split" in result
-    assert "Marking it @pytest.mark.serial does not help" in result, (
+    assert "Do NOT mark it @pytest.mark.serial" in result, (
         "the serial pass carries the same per-test timeout, so the wrong instruction only relocates the hang"
     )
     assert "Find the test that spawns a real process" not in result, (

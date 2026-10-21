@@ -344,9 +344,9 @@ def _default_run(tmp_path, *, lane="default_parallel", system="Windows"):
 
 
 def _verdict(directory, verdict="flaky", *, rounds=(".", "retry-1"), flaky=(), failed=(), accepted=(), not_run=(),
-             run_id=RUN, payload=None):
+             run_id=RUN, attempt="1", payload=None):
     return _write(Path(directory) / "verdict.json", payload if payload is not None else {
-        "format": 1, "pass": Path(directory).name, "github": {"sha": SHA, "run_id": run_id, "run_attempt": "1"},
+        "format": 1, "pass": Path(directory).name, "github": {"sha": SHA, "run_id": run_id, "run_attempt": attempt},
         "platform": "windows", "rounds": [{"dir": name, "exit": 0, "ran": 1} for name in rounds],
         "flaky": [{"nodeid": node, "first": {"phase": "call", "error_type": "AssertionError"}} for node in flaky],
         "failed": [{"nodeid": node, "attempts": [{"phase": "call", "error_type": "AssertionError"}] * 2}
@@ -542,6 +542,24 @@ def test_the_run_verdict_lists_every_test_completely_and_links_accepted_issues(t
         quiet = subprocess.run(CLI + ["run-verdict", *arguments], capture_output=True, text=True, timeout=30)
         assert quiet.returncode == 0, quiet.stdout + quiet.stderr
     assert "No retry verdict was found" in summary.read_text(encoding="utf-8")
+
+
+def test_a_pass_rerun_in_a_later_attempt_counts_only_there(tmp_path):
+    """A re-run of a red shard that comes back green must not leave its first attempt's failure
+    in the table the release reads; a pass that was not re-run keeps its own verdict."""
+    root, rerun, kept = tmp_path / "evidence", "tests/test_b.py::test_rerun", "tests/test_c.py::test_kept"
+    shard = "ci-evidence-full-test-ubuntu-latest-shard-{}-" + RUN + "-{}"
+    _verdict(root / shard.format(1, 1) / "parallel", "red", failed=[rerun])
+    _verdict(root / shard.format(1, 2) / "parallel", "green", rounds=(".",), attempt="2")
+    _verdict(root / shard.format(2, 1) / "parallel", "red", failed=[kept])
+    result = subprocess.run(CLI + ["run-verdict", "--evidence-root", str(root), "--summary", str(tmp_path / "s.md"),
+                                   "--out", str(tmp_path / "v.json")],
+                            capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    facts = _json(tmp_path / "v.json")
+    assert [row["nodeid"] for row in facts["failed"]] == [kept]
+    assert sorted(lane["label"] for lane in facts["lanes"]) == [
+        shard.format(1, 2) + "/parallel", shard.format(2, 1) + "/parallel"]
 
 
 def test_summary_and_annotations_follow_the_verdict_of_a_retried_pass(tmp_path):

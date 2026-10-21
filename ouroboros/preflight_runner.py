@@ -990,8 +990,8 @@ def _crash_remediation(output: str) -> str:
         return (
             "A test exceeded the 300s per-test limit and pytest-timeout stopped it "
             "(its thread method, used where SIGALRM does not exist, terminates the worker). "
-            "Make that test faster or split it. Marking it @pytest.mark.serial does not "
-            "help: the serial pass carries the same per-test timeout."
+            "Make that test faster or split it. Do NOT mark it @pytest.mark.serial: the "
+            "serial pass carries the same per-test timeout."
         )
     return (
         "A pytest-xdist worker DIED instead of reporting a failure. Find the test that "

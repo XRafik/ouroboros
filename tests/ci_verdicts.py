@@ -235,9 +235,11 @@ def run_verdicts(root: Path) -> list[tuple[str, dict | None]]:
     """(label, verdict or None when unreadable) of every pass beneath root, each pass once.
 
     The label is the pass directory's path below root. Two artifacts of one job can
-    carry the same pass; a byte-identical verdict is listed once.
+    carry the same pass; a byte-identical verdict is listed once. A pass re-run in a
+    later attempt of the run counts only in its highest attempt, as reconciliation
+    counts it: its artifact name differs only in `-<run_id>-<attempt>`.
     """
-    found, seen = [], set()
+    found, chosen, seen = [], {}, set()
     for directory, dirs, files in os.walk(root):
         dirs[:] = sorted(name for name in dirs if not ROUND_DIR.fullmatch(name))
         if "verdict.json" not in files:
@@ -249,10 +251,19 @@ def run_verdicts(root: Path) -> list[tuple[str, dict | None]]:
         except (OSError, ValueError):
             found.append((label, None))
             continue
-        if payload not in seen:
-            seen.add(payload)
-            found.append((label, verdict if verdict_shape(verdict) else None))
-    return found
+        if payload in seen:
+            continue
+        seen.add(payload)
+        if not verdict_shape(verdict):
+            found.append((label, None))
+            continue
+        run_id, attempt = (str(verdict["github"].get(name) or "") for name in ("run_id", "run_attempt"))
+        key, rank = label, 0
+        if run_id and attempt.isdecimal():
+            key, rank = label.replace(f"-{run_id}-{attempt}/", f"-{run_id}-*/", 1), int(attempt)
+        if key not in chosen or rank > chosen[key][0]:
+            chosen[key] = (rank, label, verdict)
+    return sorted(found + [(label, verdict) for _, label, verdict in chosen.values()], key=lambda item: item[0])
 
 
 SECTIONS = (

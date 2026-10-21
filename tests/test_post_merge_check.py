@@ -424,6 +424,18 @@ def test_an_open_issue_of_the_same_pull_request_is_extended_not_duplicated():
     assert "labels" not in [path for path, _ in github.posts]
 
 
+def test_a_red_that_stays_red_does_not_comment_on_its_pull_request_again():
+    culprit = "c" * 40
+    github = FakeGitHub(prs={culprit: [_pr(2067, culprit, login="author")]})
+    verdicts = [{"id": "tests/t.py::test_a", "verdict": "culprit", "culprit": culprit, "last_good": "b" * 40}]
+    first = _route(github, ["tests/t.py::test_a"], verdicts)
+    again = _route(github, ["tests/t.py::test_a"], verdicts)
+    assert first["comments"] == [2067] and first["created"] == [100]
+    assert again["comments"] == [] and again["created"] == again["updated"] == []
+    assert again["handed"] == [{"ids": ["tests/t.py::test_a"], "pr": 2067, "issue": 100}]
+    assert [number for number, _ in github.comments] == [2067]
+
+
 def test_issues_whose_tests_pass_at_the_head_are_closed_and_others_stay_open():
     github = FakeGitHub(label=True, issues=[
         _issue(5, {"kind": "culprit", "pr": 1, "culprit": "c" * 40, "ids": ["tests/t.py::test_fixed",

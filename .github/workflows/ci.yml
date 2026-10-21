@@ -2925,13 +2925,20 @@ jobs:
           done < "$RUNNER_TEMP/attestation-targets.tsv"
           echo "android_result=$ANDROID_RESULT" >> "$GITHUB_OUTPUT"
 
-      # The run's FLAKY and ACCEPTED tests, for the notes.
-      - name: Download the run's test verdict
+      # The run's FLAKY and ACCEPTED tests, for the notes. Every attempt that re-ran
+      # `test-verdict` uploaded its own table; the newest describes the lanes released.
+      - name: Download the run's test verdicts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: test-verdict-${{ github.run_id }}-*
-          path: release-verdict/
-          merge-multiple: true
+          path: release-verdict/attempts/
+      - name: Keep the newest attempt's verdict
+        shell: bash
+        run: |
+          set -euo pipefail
+          newest="$(for dir in release-verdict/attempts/test-verdict-*; do printf '%s\t%s\n' "${dir##*-}" "$dir"; done \
+                    | sort -n | tail -n 1 | cut -f2-)"
+          cp "$newest/test-verdict.json" release-verdict/test-verdict.json
 
       - name: Assemble release proof capsule and notes
         id: release_proof

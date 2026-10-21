@@ -139,3 +139,27 @@ def test_release_step_passes_actual_results_and_the_run_verdict(tmp_path, result
     workflow = json.loads(evidence.read_text(encoding="utf-8"))["workflow"]
     assert workflow["testVerdict"]["flaky"] == [{"nodeid": "tests/test_a.py::test_once"}]
     assert "`tests/test_a.py::test_once`" in (tmp_path / "release-notes.md").read_text(encoding="utf-8")
+
+
+def test_the_release_reads_the_newest_attempts_verdict(tmp_path):
+    """A re-run that turned a red lane green uploads a new table; the first attempt's red one stays
+    among the run's artifacts and must not be what the release reads."""
+    bash = shutil.which("bash")
+    if not bash:
+        pytest.skip("workflow shell execution requires bash")
+    jobs = yaml.safe_load((REPO / ".github/workflows/ci.yml").read_text(encoding="utf-8"))["jobs"]
+    step = next(step for step in jobs["release"]["steps"] if step.get("name") == "Keep the newest attempt's verdict")
+    for attempt, rows in (("2", {"failed": []}), ("10", {"failed": []}), ("1", {"failed": [{"nodeid": "t::red"}]})):
+        table = tmp_path / "release-verdict" / "attempts" / f"test-verdict-123-{attempt}" / "test-verdict.json"
+        table.parent.mkdir(parents=True)
+        table.write_text(json.dumps({**rows, "attempt": attempt}), encoding="utf-8")
+    done = subprocess.run([bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+                          cwd=tmp_path, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    assert json.loads((tmp_path / "release-verdict" / "test-verdict.json").read_text(encoding="utf-8"))[
+        "attempt"] == "10"
+    # Without any table the step fails rather than letting the release read nothing.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert subprocess.run([bash, "--noprofile", "--norc", "-e", "-o", "pipefail", "-c", step["run"]],
+                          cwd=empty, capture_output=True, text=True).returncode != 0

@@ -705,7 +705,9 @@ def route(github, *, classification: dict, attribution: dict, head: str, run_url
             block.update(culprit=key[1], last_good=key[2], pr=pr["number"] if pr else None)
         number = _upsert_issue(call, github, issues if known else None, block, pr, head, run_url, record)
         record["handed"].append({"ids": block["ids"], "pr": block.get("pr"), "issue": number})
-        if pr:
+        # The author hears when the tracking issue opens or gains tests, not on every run it stays
+        # red; without a tracking issue (the API failed) the hand-over still reaches the author.
+        if pr and (number is None or number in record["created"] + record["updated"]):
             login = (pr.get("user") or {}).get("login", "")
             text = ((f"@{login} " if login else "") + "the post-merge check found tests on `ouroboros` that fail "
                     "since this pull request was merged:\n\n" + "\n".join(f"- {_named(n)}" for n in block["ids"])

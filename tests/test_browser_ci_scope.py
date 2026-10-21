@@ -76,6 +76,23 @@ def test_one_complete_browser_lane_serves_manual_runs_and_release_tags():
     assert triggers["workflow_call"] is None
 
 
+def test_every_caller_grants_what_the_shared_lane_requests():
+    """A called workflow cannot raise its caller's token: the manual wrapper once granted only
+    `contents: read`, so its full lane could not read the run's shard plan."""
+    order = ["none", "read", "write"]
+    shared, _ = _workflow("ui-browser.yml")
+    requested = {}
+    for job in shared["jobs"].values():
+        for scope, level in (job.get("permissions") or {}).items():
+            requested[scope] = max(requested.get(scope, "none"), level, key=order.index)
+    assert requested.get("actions") == "read", requested  # the lane reads the run's shard plan
+    for name in ("ci.yml", "ui-browser-push.yml"):
+        granted = _workflow(name)[0]["jobs"]["ui-smoke"].get("permissions") or {}
+        short = {scope: level for scope, level in requested.items()
+                 if order.index(granted.get(scope, "none")) < order.index(level)}
+        assert short == {}, (name, granted)
+
+
 def test_requested_browser_runs_cannot_replace_each_other():
     """A later requested run must not cancel or replace an earlier qualification.
 
