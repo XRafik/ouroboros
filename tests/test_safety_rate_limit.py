@@ -1,5 +1,5 @@
 """Rate-limit lane of the safety supervisor (PR: stop reporting safety-model rate
-limits as SAFETY_VIOLATION) plus the bounded conversation-transcript budget.
+limits as SAFETY_VIOLATION) plus complete retained source evidence.
 
 Split from tests/test_safety_policy.py at its 1600-line module gate; shares that
 module's stub-client idiom (the tiny ``_patch_llm_client`` shim is repeated here
@@ -378,45 +378,15 @@ def test_non_rate_limit_exception_is_an_unavailable_hold(monkeypatch, tmp_path, 
     assert _read_events(ctx, "safety_check_rate_limited") == []
 
 
-def test_conversation_section_is_bounded_newest_first_with_counted_marker():
-    """The CONVERSATION section is bounded, keeps the NEWEST rounds, and discloses
-    the exact number it dropped. The tool-arguments section is untouched."""
-    import re
-
-    from ouroboros.safety import _SAFETY_CONTEXT_CHAR_BUDGET, _build_check_prompt, _format_messages_for_safety
+def test_prompt_keeps_all_source_messages_and_excludes_private_reasoning():
+    from ouroboros.safety import _build_check_prompt
 
     messages = [{"role": "user", "content": f"round{i} " + "x" * 400} for i in range(40)]
-    messages[-1] = {"role": "user", "content": "NEWEST_ROUND_MARKER"}
-
+    messages += [{"role": "assistant", "content": "PRIVATE_REASONING"}, {"role": "tool", "content": "TOOL_NOISE"}]
     prompt = _build_check_prompt("run_command", {"cmd": ["echo", "hello"]}, messages)
-
-    context = _format_messages_for_safety(messages)
-    assert "round0 " in prompt  # Mandatory sources are complete, unlike optional compact rendering.
-
-    assert len(context) <= _SAFETY_CONTEXT_CHAR_BUDGET
-    assert "NEWEST_ROUND_MARKER" in context, "the newest round must survive"
-    assert "round0 " not in context, "the oldest rounds must be dropped"
-
-    lines = context.splitlines()
-    matched = re.match(r"^\[… (\d+) older messages omitted\]$", lines[0])
-    assert matched, f"missing counted omission marker: {lines[0]!r}"
-    assert int(matched.group(1)) == len(messages) - (len(lines) - 1)
-
-    # The proposed call is the SUBJECT of the check and stays outside the budget.
+    assert all(f"round{i} " in prompt for i in range(40))
+    assert "PRIVATE_REASONING" not in prompt and "TOOL_NOISE" not in prompt
     assert '"cmd"' in prompt and "hello" in prompt
-
-
-def test_short_conversation_keeps_every_message_and_no_marker():
-    """Under budget: no marker, nothing dropped (the marker is not decoration)."""
-    from ouroboros.safety import _format_messages_for_safety
-
-    rendered = _format_messages_for_safety([
-        {"role": "user", "content": "first"},
-        {"role": "assistant", "content": "second"},
-    ])
-
-    assert rendered == "[user] first\n[assistant] second"
-    assert "omitted" not in rendered
 
 
 def test_rate_limit_retry_scopes_each_attempt_before_backoff(monkeypatch, tmp_path):
@@ -577,31 +547,6 @@ def test_local_fallback_lane_rate_limit_takes_the_audited_fail_open(monkeypatch,
     assert "Local safety runtime unreachable" in msg2
     assert len(other.calls) == 1
     assert _read_events(ctx2) == []
-
-
-def test_omission_marker_space_is_reserved_inside_the_budget():
-    """Boundary case: the messages tile the budget so tightly that the MARKER'S OWN
-    length decides the final cut. Without the reservation the last line still fits, the
-    marker is appended after the check, and the section overflows the budget."""
-    import re
-
-    from ouroboros.safety import _SAFETY_CONTEXT_CHAR_BUDGET, _format_messages_for_safety
-
-    # Each message renders to exactly 40 chars ("[user] " is 7).
-    messages = [{"role": "user", "content": "y" * 33} for _ in range(130)]
-    context = _format_messages_for_safety(messages)
-
-    assert len(context) <= _SAFETY_CONTEXT_CHAR_BUDGET, (
-        "the marker must be paid for INSIDE the budget, not appended after the check"
-    )
-    # Prove the case is genuinely tight: one more 40-char line would have fit if the
-    # marker had cost nothing, so this test fails the moment the reserve is dropped.
-    assert len(context) > _SAFETY_CONTEXT_CHAR_BUDGET - 80
-
-    lines = context.splitlines()
-    matched = re.match(r"^\[… (\d+) older messages omitted\]$", lines[0])
-    assert matched, f"missing counted omission marker: {lines[0]!r}"
-    assert int(matched.group(1)) == len(messages) - (len(lines) - 1)
 
 
 def test_marker_bearing_5xx_message_is_not_a_rate_limit_and_still_blocks(monkeypatch, tmp_path, _no_backoff):

@@ -921,22 +921,14 @@ def test_non_secret_keys_are_not_redacted(key):
     assert not _is_secret_key(key), f"{key!r} should NOT be classified as secret"
 
 
-def test_secret_crossing_truncation_boundary_is_still_redacted():
-    """Redaction must run BEFORE the 500-char message truncation so a
-    Bearer-style token that straddles the cutoff can't evade the regex."""
-    from ouroboros.safety import _format_messages_for_safety
+def test_complete_prompt_sources_are_redacted_without_truncation():
+    from ouroboros.safety import _build_check_prompt
 
     secret = "sk-crossingboundary1234567890ABCDEF"
-    # Place the secret so it starts well before the 500-char cutoff but
-    # extends past it; the pre-truncation redaction must catch the whole shape.
-    prefix = "A" * 480
-    long_text = prefix + secret + "B" * 200
-    output = _format_messages_for_safety([
-        {"role": "user", "content": long_text},
-    ])
-
-    assert "sk-crossingboundary" not in output
-    assert "REDACTED" in output
+    text = "A" * 480 + secret + "B" * 200 + "\nSOURCE_END"
+    prompt = _build_check_prompt("remote_write", {"text": "SUBJECT"}, [{"role": "user", "content": text}])
+    assert secret not in prompt and "REDACTED" in prompt
+    assert "SOURCE_END" in prompt and "SUBJECT" in prompt
 
 
 def test_check_safety_tolerates_none_arguments(monkeypatch):

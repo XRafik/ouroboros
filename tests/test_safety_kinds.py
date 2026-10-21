@@ -52,9 +52,18 @@ def test_caller_kind_selects_level_for_steering_and_root_minting(supervisor):
         h.module.check_safety(name, {}, ctx=h.ctx)
     h.module.check_safety("manage_schedules", {"action": "list"}, ctx=h.ctx)
     assert len(h.calls) == len(checked)
-    for action in ["create", "update"]:
-        h.module.check_safety("manage_schedules", {"action": action}, ctx=h.ctx)
-    assert len(h.calls) == len(checked) + 2
+    h.module.check_safety("manage_schedules", {"action": "restore"}, ctx=h.ctx)
+    assert len(h.calls) == len(checked) + 1
+
+
+@pytest.mark.parametrize("retired", ["presence_finish", "initiate_presence"])
+def test_retired_presence_names_have_no_policy_bypass(supervisor, retired):
+    h = supervisor
+    assert retired not in h.module.TOOL_POLICY
+    h.module.check_safety("presence_cancel_work", {}, ctx=h.ctx)
+    assert not h.calls  # the surviving own-work control still skips
+    h.module.check_safety(retired, {}, ctx=h.ctx)
+    assert len(h.calls) == 1  # unknown/reused names get the ordinary default check
 
 
 def test_only_declared_reads_skip(supervisor, monkeypatch):

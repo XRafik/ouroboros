@@ -99,6 +99,3 @@ def _emit_safety_mode_skip(ctx: Optional[Any], tool_name: str, mode: str, policy
         "safety_mode": mode,
         "policy": policy,
     })
-
-
-# Public entry point.
