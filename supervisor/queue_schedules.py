@@ -672,6 +672,7 @@ def _scan_outcomes(root, snapshot):
     from ouroboros.task_status import SETTLED_STATUSES
     from ouroboros.task_finalization import terminal_host_notice_text
     from ouroboros.terminal_time import terminal_time_fact
+    from ouroboros.store import acquisition_budget
 
     observed = {}
     for row in snapshot.get("tasks") or []:
@@ -679,7 +680,8 @@ def _scan_outcomes(root, snapshot):
         if not task_id or (row.get("last_outcome") or {}).get("task_id") == task_id:
             continue
         try:
-            result = load_task_result(root, task_id, strict=True)
+            with acquisition_budget(0):  # optional observation must not stall active rows
+                result = load_task_result(root, task_id, strict=True)
             if not result or result.get("status") not in SETTLED_STATUSES:
                 continue
             notice = terminal_host_notice_text(result)

@@ -154,6 +154,7 @@ def test_held_store_defers_the_pass_while_unrelated_queue_consumers_finish(q, mo
     assert ids.count(admitted["id"]) == 1 and len(ids) == 3
     rows = _rows(q)
     assert rows["due"]["occurrence"]["phase"] == "admitted" and not rows["due"].get("hold")
+    assert rows["due"]["last_outcome"]["task_id"] == "old-0"
     assert not any(row.get("hold") for row in rows.values())
 
 
