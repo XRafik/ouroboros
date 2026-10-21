@@ -1811,8 +1811,9 @@ export function createChatInstance({
         if (msg?.suggested_name) changed = applySuggestedName(taskId, msg.suggested_name) || changed;
         const finalizing = msg?.task_phase === 'finalizing' || msg?.outcome_final === false;
         changed = noteToolMetrics(taskId, msg, rawTs, { suppressDomInsert }) || changed;
-        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         const record = getLiveCardRecord(taskId);
+        msg = { quiet_effective: record.quietEffective ?? record.historicalTerminal?.quiet_effective, ...msg };
+        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         changed = noteTaskDetails(record, msg) || changed;
         syncSettledItems(record, msg);
         changed = Boolean(record.reviewController?.updateMany(reviewGroupsFromTaskDetail(msg, taskId))) || changed;

@@ -1,9 +1,28 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { after } from 'node:test';
 import { createChatInstance } from '../modules/chat.js';
 import { summarizeLogEvent, taskTerminalSummary } from '../modules/log_events.js';
 import { censusTaskPhase, desiredLiveCardPhase } from '../modules/task_phase_chip.js';
-import { installDom, restoreDom, walkCard } from './chat_dom_fixture.js';
+import { ElementStub, installDom, restoreDom, walkCard } from './chat_dom_fixture.js';
+
+// Retain each parsed row's markup, as in chat_activity_block.test.js.
+const innerHTML = Object.getOwnPropertyDescriptor(ElementStub.prototype, 'innerHTML');
+after(() => Object.defineProperty(ElementStub.prototype, 'innerHTML', innerHTML));
+Object.defineProperty(ElementStub.prototype, 'innerHTML', {
+    configurable: true,
+    get() { return innerHTML.get.call(this); },
+    set(value) {
+        innerHTML.set.call(this, value);
+        const html = String(value || '');
+        let cursor = 0;
+        for (const child of this.children) {
+            const index = html.indexOf(`<${child.tagName.toLowerCase()}`, cursor);
+            if (index < 0) continue;
+            child._innerHTML = html.slice(index);
+            cursor = index + 1;
+        }
+    },
+});
 
 const TS = '2026-10-21T12:00:00Z';
 const NOTICE = 'A tool this task used failed';
@@ -70,10 +89,12 @@ for (const [name, flags, headline, notice] of cases) {
             assert.ok(card, 'the task retains its card');
             assert.equal(card.dataset.finished, '1');
             assert.equal(card.querySelector('[data-live-phase]').textContent, headline);
+            card.querySelector('[data-live-disclosure]').listeners.get('click')[0]({ detail: 0 });
             const nodes = (node) => [node, ...(node.children || []).flatMap(nodes)];
             const markup = nodes(card).map(node => node.innerHTML || '').join('\n');
             if (notice) assert.ok(markup.includes(notice), 'the notice still shows inside the card');
             else assert.doesNotMatch(markup, /class="chat-live-line-body/, 'no empty answer box');
+            if (name === 'quiet') assert.match(markup, /Done · no message/, 'the terminal timeline shares the quiet headline');
             assert.equal(messages.children.some(node => node.classList.contains('assistant')
                 && !node.classList.contains('typing-bubble')), Boolean(answer), 'only an actual answer gets a bubble');
             // Replaying into the live card cannot erase or duplicate the terminal presentation.
