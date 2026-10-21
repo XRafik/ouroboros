@@ -2,6 +2,17 @@
  *  `api_types.js` indexes: the served main interface, the setup bootstrap, the settings writers' refusal,
  *  the auth gate's JSON login and the `GET /api/contract` document. */
 /**
+ * @typedef {Object} CommandInbound
+ * @property {Object=} client_surface
+ * @property {"command"} type
+ * @property {string} cmd
+ */
+/**
+ * Emergency request accepted on this connection; does not prove process exit.
+ * @typedef {Object} PanicAcceptedOutbound
+ * @property {"panic_accepted"} type
+ */
+/**
  * The main interface THIS server generation serves at `/` and `/static`: the applied selection (fixed until
  * the core restarts), not the requested value and not an asset digest.
  * @typedef {Object} ServedUiState
@@ -806,6 +817,26 @@
  * @typedef {Object} UiHoldsResponse
  * @property {boolean} ok
  * @property {number} named
+ */
+
+/**
+ * `POST /api/widgets/fault` (`gateway/widgets.py`): one fault a mounted module widget's card shows; identity is
+ * the page's mount, the rest the frame's clipped report.
+ * @typedef {Object} WidgetFaultRequest
+ * @property {string} skill
+ * @property {string} tab_id
+ * @property {string} revision
+ * @property {'board'|'message'} where
+ * @property {'error'|'rejection'|'csp'} kind
+ * @property {string} message
+ * @property {string} source
+ * @property {number} line
+ */
+
+/**
+ * @typedef {Object} WidgetFaultResponse
+ * @property {boolean} ok
+ * @property {boolean} logged
  */
 
 /**

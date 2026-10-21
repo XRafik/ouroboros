@@ -38,7 +38,7 @@ def test_the_window_counts_holds_per_kind_and_side_and_drain_resets_it(tmp_path)
             assert bucket["max_site"].split(":")[0] not in {"ouroboros.store", "ouroboros.task_store", "contextlib"}
     assert store_timing.drain() == {}
     with store.open_store(tmp_path, write=True):
-        time.sleep(0.05)  # the window's longest hold names the frame that opened it
+        time.sleep(0.07)  # the window's longest hold names the frame that opened it (a Windows tick's margin)
     longest = store_timing.drain()["current"]["write"]
     assert longest["max_sec"] >= 0.05 and longest["max_site"].startswith("tests.test_store_timing:test_the_window")
 
@@ -58,3 +58,16 @@ def test_a_failure_inside_the_hook_never_reaches_the_transaction(tmp_path, monke
     assert window["current"]["write"]["count"] >= 2 and window["current"]["write"]["max_site"] == ""
     write_task_result(tmp_path, "t", "completed")  # the healthy hook records the site again
     assert store_timing.drain()["current"]["write"]["max_site"]
+
+
+def test_a_clock_too_coarse_to_see_a_short_hold_still_names_its_site(tmp_path, monkeypatch):
+    """Windows' ``time.monotonic`` ticks at ~15.6 ms: a hold read by such a clock measures 0.0 and must still name its
+    site, as the window's longest hold so far."""
+    monkeypatch.setattr(store_timing, "clock", lambda: 1000.0)  # every hold measures 0.0
+    write_task_result(tmp_path, "t", "running")
+    with dialogue_store.transaction(tmp_path, write=True):
+        pass
+    window = store_timing.drain()
+    for kind in ("current", "dialog"):
+        bucket = window[kind]["write"]
+        assert bucket["count"] >= 1 and bucket["max_sec"] == 0.0 and bucket["max_site"], (kind, bucket)

@@ -114,7 +114,7 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
 
 - Radii by role, both themes: capsule `999px` (every one-line control and chip) · object `18px`
   (bubbles, cards, groups, menus, answer cards) · inner `12px` (trays and rows inside an object) ·
-  sheet `24px` (the Shade's lower corners).
+  sheet `24px` (the Shade's lower corners, the composer's field).
 - Type: the system face (SF Pro on Apple), 12 / 14 / 16 / 24; weight 400 to read,
   500 for a status word, a root's title or a setting's name, 600 for labels,
   controls and a setting's value.
@@ -423,11 +423,13 @@ Inside Telegram a level the finger reaches, and another level or mode pressed, t
 
 **On a phone the row folds while the owner reads back.** Scrolling back through a
 room's history folds the row of capsules away: its line collapses, the capsules
-fade, and ☰, still the row's first control, waits beside the field. Scrolling
+fade, and ☰, still the row's first control, waits beside the field on its last line, beside "+". Scrolling
 toward the latest, reaching it, focusing the field or another layout brings the row
 back; while the owner writes or works a capsule, or the field holds the focus, it
 stays. Only the owner's own scroll decides, as with Safari's bars: older history
-paging in or let go, and rows that arrive or grow, move nothing
+paging in or let go, and rows that arrive or grow, move nothing; nor does a swipe
+begun in a card's frame, which the feed never sees, or the app's own jump (the
+waiting pill to a question, which keeps the pill under the finger for the next one)
 (`web/modules/composer_fold.js`; owner 19.10).
 
 **Hover is an accelerator; the press always works.** With a hovering fine pointer a
@@ -450,6 +452,27 @@ The dictation mic has a slot between the field and Send that takes no room until
 engine is chosen. Contributed chips have a slot at the end of the capsule row that takes
 only the room the capsules leave (never a second line: the chips that do not fit fold
 into one "+N" whose list holds them) and steps aside with them.
+
+### The composer field
+
+**One object whose corner never grows.** The field is one floating object: a staged
+reply (Replies) is its first line, and the text row with "+", the words, the mic and
+Send its last. Its corner is the sheet radius, half its one-line height, and stays as
+the words grow: one line is a capsule, a paragraph a card with the same corner, never
+an oval. "+", the mic and Send ride on the words' last line, never their middle. The
+reply panel inside is concentric (the sheet radius less the field's 8 px inset) with no
+hairline of its own; the text row has no surface; the field takes the float shadow and
+the focus ring, drawn as shadows, so a border never adds to its height (owner 20.10, 1C).
+
+**A Send rises into the feed.** An accepted Send lifts a copy of the new bubble from
+where the draft stood, its words on the draft's, to the bubble's place in 340 ms on the
+iOS sheet curve: its box moves and resizes, never a scale, while the field's surface,
+corner and shadow turn into the bubble's, and its sender line grows in; the bubble
+shows as the copy lands. A bubble that moves under the flight (a phone's keyboard going
+down after a tap on Send) is followed to its place; a room that goes away (the drawer
+over it, a closed Project) ends the flight at once. Reduced motion, a hidden page or a
+bubble outside the feed's view: it simply appears (`web/modules/send_flight.js`; owner
+20.10, 2A).
 
 ### `.muted`
 
@@ -1607,7 +1630,7 @@ file (owner choice 1C/2A/3A/4A/5A/6A with mobile first-class).
 
 A reply names the row meant; Ouroboros decides what to do, routing nothing by it. Saved rows offer Reply beside
 Copy on bubbles and in row menus, a work card in its row menu only; never on hover only. Reply stages one
-composer strip (`Replying to`, quoted author, one line, ×; Esc cancels). Send
+strip, the composer field's first line (`Replying to`, quoted author, one line, ×; Esc cancels). Send
 carries only the address; the host makes the snippet. Answerable questions use their own field.
 
 One quote component serves bubbles, strips and relays: above the text, a 2 px
@@ -1935,7 +1958,8 @@ controls remain live; the unfinished checkpoint never erases the outcome.
 ### Widgets board
 
 The Widgets page is a board of live cards. The owner arranges the board; each
-widget's content belongs to its author.
+widget's content belongs to its author. The board scrolls with crisp edges: no
+fade dims a card where the list cuts it.
 
 - **A masonry in the owner's order.** Cards are packed into columns like a
   Pinterest board: in the order the owner set with each card's move handle,
@@ -2198,6 +2222,8 @@ never *look, I am still working*. It exists so the owner can leave the window
 and still be reached by a question or a finished task.
 
 **Startup & background.** Behavior owns host lifecycle choices; Appearance is client-local. Sign-in startup is opt-in and names the host computer, also in remote clients. OS registration is truth, never a saved-settings guess: another copy, OS-disabled entry and unavailable build remain visible. Automatic startup preserves Panic and saved pauses; an explicit owner start releases Panic. *Keep Ouroboros running in the background when the window is closed* is also opt-in, stored on the host. First close asks once whether to keep tasks, schedules and Telegram running; its answer sets the checkbox, dismissal quits. macOS uses Keep running/Quit; Windows uses standard OK/Cancel and explains which keeps running. Closing with background on hides only behind a live indicator, so a hidden process always has a visible way back; otherwise it quits. Windows keeps one icon even with background/notifications off: after runtime and PID-lock/automatic-start checks, before Git/bootstrap. macOS shows its menu-bar item and Dock while background is on. The menu names starting, confirmed work, errors, unconfirmed activity or no answer; it offers Open, Panic and Quit. Early Panic stops installation work, including the retained daemon, and persists the stop marker; failed stops/writes are disclosed. Quit, Cmd+Q and sign-out quit unasked. Automatic start hides only with both checkboxes on and a live indicator; opening during boot shows the window. There is no separate start-minimized setting. Linux says background is unavailable and closes to quit. Android retains automatic boot by default with Panic preservation. This card is last on Behavior; browser/Docker hosts explain it without offering unsupported controls. Unavailable controls explain why in meta ink, without a warning dot; duplicate reasons appear once after both. Changeable states (another copy, OS-disabled entry) use warning; failed reads/writes use error. Notes align with checkbox text, status dots hang beneath the checkbox.
+
+Panic sends immediately, without confirmation or an ordinary chat bubble. Acceptance clears only unchanged sent command text; unknown/refused delivery keeps it. Newer edits, reply and attachments stay. Desktop uses its independent stop bridge, also from the reconnect overlay; without that bridge the overlay hides Panic. Browser uses its captured socket, never a queue/reconnect. Missing acceptance says “Panic was not confirmed”, pointing desktop to its tray/menu bar and browser to the host computer.
 
 **Telegram completion messages are separate from these client alerts.** The
 existing completion toggle Off suppresses every additional terminal line, failures

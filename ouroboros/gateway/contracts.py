@@ -25,7 +25,7 @@ from ouroboros.gateway.attachment_contracts import (  # noqa: F401 -- public re-
     AttachmentManifestEntry, ChatAttachmentInbound, ChatAttachmentView,
 )
 from ouroboros.gateway.contributions import UiContribution, UiContributionsResponse, UiPreferencesResponse
-from ouroboros.gateway.widgets import ExtensionLiveSnapshot, WidgetTab, WidgetsResponse
+from ouroboros.gateway.widgets import ExtensionLiveSnapshot, WidgetFaultRequest, WidgetFaultResponse, WidgetTab, WidgetsResponse
 from ouroboros.gateway.decision_contracts import DecisionRequest, DecisionResponse  # noqa: F401 -- public re-exports
 from ouroboros.gateway.card_contracts import CardOutbound, CardStateOutbound  # noqa: F401 -- public re-exports
 from ouroboros.gateway.update_contracts import (  # noqa: F401 -- public re-exports
@@ -79,6 +79,13 @@ class CommandInbound(TypedDict):
 
     type: Literal["command"]
     cmd: str
+    client_surface: NotRequired[dict]
+
+
+class PanicAcceptedOutbound(TypedDict):
+    """The emergency owner accepted this connection's request; exit is unproved."""
+
+    type: Literal["panic_accepted"]
 
 
 class ExtensionInbound(TypedDict, total=False):
@@ -1399,6 +1406,7 @@ from ouroboros.gateway.client_contracts import FileBrowserListResponse, ServedUi
 WS_MESSAGE_TYPES: tuple[str, ...] = (
     "chat",
     "command",
+    "panic_accepted",  # immediate acceptance only, not proof of process exit
     "photo",
     "video",
     "document",
@@ -1421,7 +1429,7 @@ WS_MESSAGE_TYPES: tuple[str, ...] = (
 
 __all__ = [
     "CostPresentation",
-    "ChatInbound", "TaskConstraintInbound", "CommandInbound", "ExtensionInbound",
+    "ChatInbound", "TaskConstraintInbound", "CommandInbound", "PanicAcceptedOutbound", "ExtensionInbound",
     "TransportMetadata",
     "ChatOutbound",
     "PhotoOutbound", "VideoOutbound", "DocumentOutbound",
@@ -1466,7 +1474,7 @@ __all__ = [
     "ScheduledTasksResponse", "ScheduleUpsertResponse", "ScheduleDeleteResponse", "ScheduleActionResponse",
     "UploadResponse",
     "ExtensionsIndexResponse", "ExtensionLiveSnapshot", "WidgetTab",
-    "WidgetsResponse",
+    "WidgetsResponse", "WidgetFaultRequest", "WidgetFaultResponse",
     "SkillPublishPreflightResponse",
     "SkillLifecycleQueueResponse",
     "MarketplaceSearchResponse",

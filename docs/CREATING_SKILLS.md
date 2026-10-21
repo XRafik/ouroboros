@@ -895,6 +895,15 @@ gated by the host (token + fresh review + enablement + content-hash grants) and
 by core owner/chat binding, not by withholding control from the skill. See
 `docs/CHECKLISTS.md` → "Transport and control skills are first-class".
 
+`POST /chat/inject` treats text beginning with `/panic` (case-insensitive, surrounding whitespace ignored,
+trailing text included) as emergency intent. Only the positively bound owner/chat pair can stop.
+Unavailable or unauthorized Panic returns `503 {ok:false,error}` and never falls through to ordinary
+chat; this refusal of command-looking text is intentional. Accepted Panic returns `202 {ok:true,status:"accepted"}`,
+without a correlated operation or delivery replay, even with `client_message_id`. Telegram exposes owner
+Panic in every command mode, including strict; it sends once. Its clock-dependent rejection of old messages
+and boundary-second limits are defined in `CLIENT_CONTRACT.md` §15. A rejected message's previous outcome
+is unknown, not definitely undelivered.
+
 ### Presence behavior profiles and transport ingress
 
 Presence separates two ordinary reviewed skills: a **behavior skill** declares
@@ -2128,6 +2137,7 @@ def register(api):
 | `SKILL_REPAIR_STALE: ...` | The selected payload or its admission revision changed; inspect the current state and the reported conflict before continuing. |
 | `PluginAPI.register_*` raises `ExtensionRegistrationError` | Usually the skill is missing the matching permission in its manifest. For `register_companion_process` the name must also be alnum/underscore and declared under `companion_processes` — see "Declaring a companion process". |
 | Reviewer marks `widget_module_safety: FAIL` | `widget.js` fetches outside `/api/extensions/<skill>/`, talks to the parent through its own `postMessage` protocol, declares a `start` mode heavier than the widget needs, or keeps state only inside the frame. Move data through your own routes and save it from `__ouroWidgetOnDispose` (autosave while running until the host's dispose acknowledgement ships). |
+| A module widget's card says `Widget script error: …` or `Widget blocked by frame policy: …` | The frame threw, left a promise rejection unhandled, or its document policy refused a load; the widget keeps running. `GET /api/logs/events` keeps the same fault as a `widget_fault` row with the skill, tab and revision the page mounted (reported by the page, a few per minute per widget). WebKit shows only `Script error.`; the row still names the widget. |
 
 For deeper integration questions read
 [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) §13 (external skills layer)
