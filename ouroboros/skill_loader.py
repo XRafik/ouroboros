@@ -1465,9 +1465,9 @@ def list_available_for_execution(
     return out
 
 
-def summarize_skills(drive_root: pathlib.Path) -> Dict[str, Any]:
-    """Compact catalogue for the installed-skills context and list_skills tool."""
-    skills = discover_skills(drive_root)
+def summarize_skills(drive_root: pathlib.Path, skills: Optional[List[LoadedSkill]] = None) -> Dict[str, Any]:
+    """Compact catalogue for the installed-skills context and list_skills; ``skills`` reuses a caller's discovery."""
+    skills = discover_skills(drive_root) if skills is None else skills
     tool_surfaces_by_skill: Dict[str, List[Dict[str, str]]] = {}
     try:
         from ouroboros.extension_loader import _lock as _ext_lock, _tools as _ext_tools

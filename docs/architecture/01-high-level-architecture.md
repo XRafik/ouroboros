@@ -129,7 +129,7 @@ ouroboros/ — agent core and shared runtime (§6)
   delivery_seal.py — the root admission seal at an author stop, re-exported from `loop`; stored names keep the former fence's (§6 Result review)
   review_price.py — the measured price of one review by one reviewer row, from the usage ledger (§6 Result review; §7 Review pool)
   loop_llm_call.py — single-round LLM call, current-call event producer and usage accounting
-  transcript_prefix.py — shared prefix digests/comparison and signed-reasoning retirement; reporting/round facts cross the loop boundary only at call time (§6 Task lifecycle)
+  transcript_prefix.py — shared prefix digests/comparison, change counts by origin and signed-reasoning retirement; reporting/round facts cross the loop boundary only at call time (§6 Task lifecycle)
   loop_transport.py — transport-outage wait episodes and provider-failure terminal text (§6 Context fitting)
   loop_delivery.py — delivery candidates and the delivery-control protocol (§6 Task lifecycle)
   loop_budget.py, loop_forced_finalization.py, loop_messages.py, loop_model_call.py, primary_route_observation.py, loop_nudges.py, loop_round_limits.py — leaves of `loop.py`, one rail each as named; `loop_forced_finalization` is the one forced model call (§6 Task lifecycle)
@@ -262,7 +262,7 @@ ouroboros/ — agent core and shared runtime (§6)
   delegate_target_drift.py — read-only authority-tree drift evidence, never attributed to the child (§6 Delegated subagents)
   delegate_recovery.py, delegate_continuation.py, delegate_pending.py — exact-leaf recovery; `continue_from` after any stop; pending-invocation replay with the original key (§6 Delegated subagents)
   delegate_registration_policy.py, delegate_readonly_inputs.py — `resolve_registration` and STARTED-row field tables; readonly lineage inputs
-  delegate_terminal.py — terminal reconciliation and custody-audit persistence, audit-only in both directions; the typed `terminal_custody_notice` card row (§6 Delegated subagents)
+  delegate_terminal.py, owner_stop_receipt.py — terminal reconciliation, audit-only custody persistence, typed custody card rows, Wrap up's saved-work receipt (§6 Delegated subagents)
   subagent_dispatch_notes.py — executor-note exports shared with `agent.py`; the note/blocked-outcome pair is implemented in `agent_dispatch.py`
   subagent_messages.py, subagents.py, subagent_history.py — durable child messages; dispatch through `subagent_runtime`; context/UI receipts, never admission (§6 Delegated subagents)
   subagent_worktrees.py, worktree_removal.py — `state/subagent_worktrees.json` registry, `refs/ouroboros/delegated/` pins, custody GC, removal retries (§6 Delegated subagents)

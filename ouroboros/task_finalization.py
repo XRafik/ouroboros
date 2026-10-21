@@ -216,6 +216,13 @@ def prepare_terminal_send_event(
     custody_notice = terminal_custody_notice_text(usage)
     if not presence and custody_notice:
         send_event["terminal_custody_notice"] = custody_notice
+    if not presence:  # Wrap up's receipt: its own row, one Stop identity on every carrier
+        from ouroboros.owner_stop_receipt import retained_work_fields
+
+        try:  # a receipt that cannot render never holds the answer
+            send_event.update(retained_work_fields(usage))
+        except Exception:
+            log.warning("Wrap up receipt row unavailable for %s", task.get("id"), exc_info=True)
     if origin not in _STAMPED_TERMINAL_ORIGINS:
         return send_event
     canonical_root = pathlib.Path(task.get("budget_drive_root") or env_drive_root)

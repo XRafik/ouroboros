@@ -64,7 +64,7 @@ Named sends keep timestamp and id; an unnamed notice stays with its retrying pro
 
 ### Stop policy and hurry
 
-Stop policy is an axis on the same durable intent, independent of cascade scope. An omitted or empty-body cancellation is immediate (CLIENT_CONTRACT §8). `stop_policy=finalize_then_cancel` answers 202 with the intent open and runs one bounded finalization episode: descendants settle first, then the root's `finalize_now` allows at most one tool-less model turn, terminalizing under the honest owner reason (`supervisor/owner_stop.py` docstring). `OWNER_STOP_OUTER_CAP_SEC` bounds grace; explicit deadline and absolute ceiling stay independent. Transitions are monotonic (immediate hardens pending graceful; graceful never softens accepted immediate); Panic bypasses both.
+Stop policy is a durable-intent axis, scope-independent; omission is immediate (CLIENT_CONTRACT §8). `finalize_then_cancel` answers 202, intent open: descendants settle first, no final turn; then root `finalize_now` allows one tool-less turn under the honest owner reason (`supervisor/owner_stop.py`). `owner_stop_receipt.py` keeps child/run material and readers in the custody envelope: the turn's counted view, one card row per Stop, Files' on-read copy of all rows/texts, on any exit; model bytes untouched; no session transfer. `OWNER_STOP_OUTER_CAP_SEC`, deadline, ceiling bound grace. Immediate only hardens graceful; Panic bypasses both.
 
 Owner "hurry" is a typed task-local `kind=hurry` owner-mailbox control (`ouroboros/owner_hurry.py`; `gateway/task_hurry.py`): it makes that task's force-plan projection advisory; never a chat message, settings mutation or weakening of the P3 commit/review gates; attempt-scoped (`retry_reset` strips it on each same-id requeue).
 

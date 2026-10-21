@@ -185,6 +185,26 @@ the `list_skills` index and the "Installed Skills" context section, whole in
 manifest — so write it for the model, not for the human reviewer. Unknown keys or
 non-string values are refused at parse time.
 
+### Always-in-context instructions
+
+An instruction skill is normally read on demand: the model sees its name,
+description and trigger in the Installed Skills catalog and opens the body when
+the work matches. Guidance that should shape all work, such as a house writing
+style, may declare `always_in_context: true`. While the skill is enabled and its
+current bytes carry an executable review, its whole body joins every context the
+agent builds, in every context mode: the cached semi-stable block of tasks, rooms,
+Main turns and shared-input children, and the host references of external coding
+sessions. Its catalog line says so. A declared-input child keeps its explicit
+composition, so a parent passes the text to such a child when it writes for people.
+
+Every task pays for the body, so it is bounded at 16384 UTF-8 bytes
+(`MAX_ALWAYS_IN_CONTEXT_BODY_BYTES`): keep a compact core and move detail into
+reference files the body names, which stay read on demand. The field is refused
+on other skill types, on an empty body (a `skill.json` manifest has none) and on
+any value other than `true` or `false`. The context presents the text as guidance
+that never outranks BIBLE.md, the safety rules or an explicit instruction
+for the task. Say in `model_experience` that the body is always loaded.
+
 ### Passive context snapshots (extensions only)
 
 A reviewed extension may declare `context_snapshot: {path: context-snapshot.json}`
