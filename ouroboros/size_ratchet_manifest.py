@@ -180,7 +180,6 @@ BAND_PATHS = {
     "ouroboros/tools/review_subject.py": "Two halves of one subject: the managed resolution-delta capture and the review subject as an object (spec, freeze, isolated checkout at the round's deterministic path, the three identities). The subject operation's rejoin of a pending round (S2-2) grew the checkout materialization past 1000; the managed half is the split candidate on the next structural touch, not in a fix round.",
     "ouroboros/tools/services.py": "Existing service lifecycle publishes its held process before custody I/O and uses the same owner for nonblocking Emergency Stop requests.",
     "ouroboros/tools/skill_exec.py": None,
-    "ouroboros/tools/skill_preflight.py": "Entered the band by absorbing the upstream classic-script validator, widget entry/grammar findings and the preflight schema description beside the v7 typed _run_check rework they attach to.",
     "ouroboros/tools/skill_publish.py": "Entered the band from 952 lines: publish now writes the OuroborosHub publication receipt at pr_opened through the shared locked-update seam and maps the receipt from the validated serialized form (hubflow sprint, receipt-as-only-stored-fact design).",
     "ouroboros/tools/subagent_integration.py": "Existing native result integration owner handles source patches and complete file artifacts under one disposition and target authority.",
     "ouroboros/tools/tool_result.py": "Typed result composition owns producer payload and dispatch annotations together while preserving the status and metadata contract.",
