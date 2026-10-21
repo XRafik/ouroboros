@@ -37,6 +37,18 @@ def _drive_root(ctx: Any) -> Any:
             or getattr(ctx, "drive_root", None))
 
 
+class _PlacesUnreadable(RuntimeError):
+    """The place store needs repair; a connector's writes cannot be attributed."""
+
+
+def _declares_place(connector: str) -> bool:
+    """Whether the live publication of this skill declares a place (it is a connector)."""
+    from ouroboros.extension_registry_state import live_contribution_projection
+
+    return any(row.get("provides") == "place" and row.get("skill") == connector
+               for row in live_contribution_projection())
+
+
 def _call_destinations(ctx: Any, name: str, args: Mapping[str, Any], ext_tool: Any, is_mcp: bool):
     """Resolve each recipient separately so an Active To never hides a Silent Cc."""
     effect = effect_of(name, ext_tool=ext_tool, is_mcp=is_mcp, ctx=ctx)
@@ -44,7 +56,14 @@ def _call_destinations(ctx: Any, name: str, args: Mapping[str, Any], ext_tool: A
     connector, root = connector_of(name, ext_tool), _drive_root(ctx)
     if not connector or root is None:
         return effect, targets, [], [], True
-    siblings = places.places_of_connector(root, connector)
+    try:
+        siblings = places.places_of_connector(root, connector)
+    except places.PlaceError as exc:
+        # An unreadable place store never blocks skills that connect no place; a
+        # connector's writes wait for the repair (``dispatch_refusal`` names it).
+        if not _declares_place(connector):
+            return effect, targets, [], [], True
+        raise _PlacesUnreadable(str(exc)) from exc
     routing = {key: targets[key] for key in (effect.conversation, effect.thread) if key in targets}
     destinations = [{**routing, key: [value]} for key in (effect.targets or (effect.conversation,))
                     for value in targets.get(key, [])]
@@ -71,7 +90,14 @@ def dispatch_refusal(ctx: Any, name: str, args: Mapping[str, Any], *, ext_tool: 
     """The refusal text for this call, ``""`` to allow."""
     from ouroboros.consciousness_authority import is_observe_origin
 
-    effect, targets, resolved, siblings, attributable = _call_destinations(ctx, name, args, ext_tool, is_mcp)
+    try:
+        effect, targets, resolved, siblings, attributable = _call_destinations(ctx, name, args, ext_tool, is_mcp)
+    except _PlacesUnreadable as exc:
+        effect = effect_of(name, ext_tool=ext_tool, is_mcp=is_mcp, ctx=ctx)
+        if effect.effect == EFFECT_READ and not is_observe_origin(_metadata(ctx)):
+            return ""
+        return (_PREFIX + f"The place records need repair, so {name!r} cannot be attributed to a place: {exc}. "
+                "Writes through this connector wait until Consciousness › Places can read them again.")
     if not effect.effect:
         return ""
     if is_observe_origin(_metadata(ctx)) and not (effect.declared and effect.effect == EFFECT_READ):
@@ -106,7 +132,11 @@ def call_place_facts(ctx: Any, name: str, args: Mapping[str, Any], *, ext_tool: 
     ``{"effect", "declared", "targets": {arg: [values]}, "place_id", "place_label",
     "place_state", "conversation_key"}``; ``{}`` when no place is involved.
     """
-    effect, targets, resolved, siblings, attributable = _call_destinations(ctx, name, args, ext_tool, is_mcp)
+    try:
+        effect, targets, resolved, siblings, attributable = _call_destinations(ctx, name, args, ext_tool, is_mcp)
+    except _PlacesUnreadable as exc:
+        return {"effect": "", "declared": False, "targets": {}, "attributable": False, "places": [],
+                "places_unreadable": str(exc)}
     if name == "place_reply":
         effect = ToolEffect(EFFECT_MESSAGE, targets=("account_id", "conversation_id"),
                             conversation="conversation_id", thread="thread_id", declared=True, source="builtin")

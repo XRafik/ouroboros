@@ -112,3 +112,29 @@ def test_actual_registry_callsite_blocks_and_allows(published_tool, places):
     result = _capability_resource_guard_result(ctx, name, {"room": "C1"}, ext_tool=tool)
     assert result.code == "RESOURCE_CONSTRAINT_BLOCKED" and result.status == "blocked"
     assert _capability_resource_guard_result(ctx, name, {"room": "C2"}, ext_tool=tool) is None
+
+
+@pytest.mark.parametrize("declares_place", [True, False])
+def test_unreadable_place_store_holds_only_connector_writes(published_tool, places, monkeypatch, declares_place):
+    """A store that needs repair never blocks a skill that connects no place."""
+    from ouroboros import extension_registry_state as registry
+    from ouroboros.places import PlaceError
+
+    _, ctx = places
+
+    def broken(root, connector):
+        raise PlaceError("places_unreadable", "places.json", "Place records need repair")
+
+    monkeypatch.setattr(guard.places, "places_of_connector", broken)
+    rows = [{"provides": "place", "skill": "connector", "id": "place"}] if declares_place else []
+    monkeypatch.setattr(registry, "live_contribution_projection", lambda: rows)
+    name, tool = published_tool("write", target="channel")
+    refusal = guard.dispatch_refusal(ctx, name, {"channel": "C1"}, ext_tool=tool)
+    if declares_place:
+        assert "need repair" in refusal and "Consciousness › Places" in refusal
+    else:
+        assert refusal == ""
+    name, tool = published_tool("read", target="channel")
+    assert guard.dispatch_refusal(ctx, name, {"channel": "C1"}, ext_tool=tool) == ""
+    assert guard.call_place_facts(ctx, name, {"channel": "C1"}, ext_tool=tool).get("places_unreadable", "") == (
+        "Place records need repair" if declares_place else "")
