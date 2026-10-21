@@ -130,6 +130,61 @@ def kept_level(snapshot: mv.MemoryViewSnapshot, facts: Mapping[str, Any]) -> mv.
                          by_budget=int(floor.get("by_budget") or 0))
 
 
+def level_with(snapshot: mv.MemoryViewSnapshot, kept: mv.FloorLevel, addresses: Iterable[str]) -> mv.FloorLevel:
+    """Add exact inspected forms; core and governing words have no selectable address."""
+    eligible = {f"{step}:{ident}": (step, ident) for step, ident, *_ in floor_elements(snapshot)}
+    taken = {(step, ident) for step, ids in kept.addressed for ident in ids}
+    for address in addresses:
+        if address not in eligible:
+            raise ValueError(f"Unknown or protected view_address: {address}")
+        step, ident = eligible[address]
+        taken.add((step, ident))
+        if step in ("F6", "F6a"):
+            taken.update((prior, ident) for prior in ("F6r", "F6") if f"{prior}:{ident}" in eligible)
+    return mv.FloorLevel(tuple((step, tuple(ident for s, ident, *_ in floor_elements(snapshot)
+                                           if s == step and (s, ident) in taken)) for step in LADDER
+                               if any(s == step for s, _ in taken)), by_budget=kept.by_budget)
+
+
+def select_view(plan, mode: str, addresses: Iterable[str]):
+    """Render selected forms from the captured source, preserving all other projections and the tail."""
+    from ouroboros.context_fit import _governance_blocks, _system_blocks, _request_tokens
+
+    if plan is None or getattr(plan, "core", None) is None or not plan.core.memory_view_json:
+        raise ValueError("This actor has no captured memory view")
+    snapshot = mv.snapshot_from_json(plan.core.memory_view_json)
+    shown = plan.projection(mode)
+    level = level_with(snapshot, kept_level(snapshot, shown.memory_facts), addresses)
+    old = shown.memory_facts.get("floor") or {}
+    switched = old.get("mode_switch") or {}
+    note = floor_note(level, window_tokens=old.get("window_tokens"), mode=mode,
+                      target_tokens=old.get("target_tokens"), budget_mode=plan.preferred_mode,
+                      lowered_from=switched.get("from"))
+    story, room = mv.render_story(snapshot, level), mv.render_room(snapshot, level, floor_note=note)
+    facts = view_facts(snapshot, level, window_tokens=old.get("window_tokens"), mode=mode,
+                       allowances={"margin": old.get("allowance_tokens"), "physical": old.get("physical_allowance_tokens"),
+                                   "budget": old.get("budget_allowance_tokens")},
+                       target_tokens=old.get("target_tokens"), lowered_from=switched.get("from"))
+    system = _system_blocks(plan.core, _governance_blocks(None, plan.core, mode="low" if mode == "nano" else mode), story, room)
+    tokens = _request_tokens(system, shown.user_content_json or plan.user_content_json,
+                            current_messages=plan.messages_for(mode))
+    projection = dataclasses.replace(shown, system_content_json=json.dumps(system, ensure_ascii=False, sort_keys=True),
+        memory_facts=view_receipt(snapshot, story, room, facts), estimated_tokens=tokens,
+        calibrated_tokens=int(tokens * shown.calibration_ratio))
+    return dataclasses.replace(plan, **{f"{mode}_projection": projection})
+
+
+def view_inventory(plan, mode: str) -> List[Dict[str, Any]]:
+    if plan is None or getattr(plan, "core", None) is None or not plan.core.memory_view_json:
+        return []
+    snapshot = mv.snapshot_from_json(plan.core.memory_view_json)
+    level = kept_level(snapshot, plan.projection(mode).memory_facts)
+    chosen = {(step, ident) for step, ids in level.addressed for ident in ids}
+    return [{"view_address": f"{step}:{ident}", "kind": "memory", "tokens": whole,
+             "saving_tokens": max(0, whole - short), "eligible": True, "selected": (step, ident) in chosen}
+            for step, ident, whole, short in degradable_elements(snapshot)]
+
+
 def memory_read_path(tool_names: Optional[Iterable[str]]) -> str:
     """How this request reaches ``memory_read``, read from the names of the schemas it sends.
 

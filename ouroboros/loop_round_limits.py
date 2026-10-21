@@ -393,6 +393,25 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
             getattr(tool_ctx, "context_fit_plan", None), candidate, selected,
             mode, getattr(tool_ctx, "active_effort", "medium"), str(ctx.round_idx),
             usage=getattr(tool_ctx, "_accumulated_usage", None))
+    memory_plan, memory_price = None, None
+    addresses = proposal.get("view_address") or ()
+    if addresses:
+        from ouroboros.memory_floor import select_view, view_tokens
+        plan = getattr(tool_ctx, "context_fit_plan", None)
+        observed_plan = proposal["observed"].get("memory_plan")
+        try:
+            if plan is None or observed_plan is None or plan.core_sha256 != observed_plan.core_sha256:
+                raise ValueError("memory snapshot changed; inspect the current view")
+            memory_plan = select_view(plan, mode, addresses)
+        except ValueError as exc:
+            tool_ctx._pending_compaction = None
+            tool_ctx._context_view_receipt = {"status": "selection_failed", "reason": str(exc)}
+            return messages
+        memory_price = {"view_address": list(addresses), "re_read_input_tokens_estimate":
+                        view_tokens(json.dumps(messages, ensure_ascii=False)),
+                        "basis": "system prefix changes; later cached input may be re-read"}
+        original_fit = fit_candidate
+        fit_candidate = lambda candidate, selected: original_fit(memory_plan.reproject_transcript(candidate, mode), selected)
     if pending is None:
         # Schema-only enablement uses the same candidate fit/publication. It
         # does not fabricate an authored note or rewrite existing history.
@@ -445,6 +464,9 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
                 receipt.update(status="selection_failed", review_selection_error=f"{type(exc).__name__}: {exc}")
                 candidate = messages
                 ctx.emit_progress("Context view kept unchanged: review source/selection custody could not be retained.")
+    if memory_plan is not None and receipt["status"] in ("applied", "no_op"):
+        candidate = memory_plan.reproject_transcript(candidate, mode)
+        receipt.update(status="applied", memory_view=memory_price)
     if receipt["status"] != "no_op":
         from ouroboros.artifacts import store_actor_source_bytes
         import hashlib
@@ -459,6 +481,8 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
             notice = {"status": receipt["status"], "receipt_source": source}
         except (OSError, ValueError):
             notice = {"status": receipt["status"], "receipt_source": "unavailable"}
+        if memory_price:
+            notice["memory_view"] = memory_price
         exceptions = receipt.get("request_exceptions") or []
         if receipt.get("inherited_selections_unapplied"):
             notice["inherited_selections_unapplied"] = receipt["inherited_selections_unapplied"]
@@ -479,6 +503,7 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
             final_fit = {"accepted": False, "reason": type(exc).__name__}
         if final_fit.get("accepted") is True:
             candidate = with_receipt
+            receipt["fit_after"] = final_fit
         else:
             receipt.update(status="fit_rejected", fit=final_fit)
             candidate = messages
@@ -494,6 +519,11 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
             candidate = messages
             ctx.emit_progress("Context view kept unchanged: the review selection was not durably published.")
     if receipt["status"] == "applied":
+        if memory_plan is not None:
+            tool_ctx.context_fit_plan = memory_plan
+            tool_ctx._authored_memory_plan = memory_plan
+            from ouroboros.loop_model_call import _adopt_view_facts
+            _adopt_view_facts(tool_ctx, memory_plan, mode)
         receipt["view_revision"] = receipt["after_transcript_sha256"] = context_reclaim_transcript_sha256(candidate)
         from ouroboros.main_context_authority import publish_working_notes
 
@@ -1050,7 +1080,7 @@ def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_t
     return receipt
 
 
-def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None) -> bool:
+def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None, view_address=()) -> bool:
     """Narrow memory beside the actual transcript without inventing a smaller route window.
 
     The view saves the measured ``saving`` (else the capacity
@@ -1070,6 +1100,9 @@ def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None) ->
         current_messages=ctx.messages,
         refused_tokens=max(1, int(saving or measurement.capacity_deficit_tokens or 0)),
     )
+    if view_address:
+        from ouroboros.memory_floor import select_view
+        rebound = select_view(plan, mode, view_address)
     if rebound.projection(mode).system_content_json == before:
         return False
     ctx.context_fit_plan = rebound

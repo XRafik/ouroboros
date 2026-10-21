@@ -1334,6 +1334,10 @@ def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
     from ouroboros.loop_llm_call import timeout_repeat_blocked
     if timeout_repeat_blocked(ctx.accumulated_usage):
         return None, None, ctx.active_context_mode
+    selected = getattr(ctx.tools._ctx, "_authored_memory_plan", None)
+    if selected is not None and selected.core_sha256 == getattr(ctx.context_fit_plan, "core_sha256", None):
+        ctx.context_fit_plan = selected
+        ctx.tools._ctx._authored_memory_plan = None
     ctx.accumulated_usage.pop("_last_llm_failure", None)
     ctx.accumulated_usage.pop("_acting_route_failure", None)
     from ouroboros.primary_route_observation import observe_primary_route
