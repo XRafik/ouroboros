@@ -137,7 +137,7 @@ export function wakeRowHtml(wake) {
         const chip = CHECK_CHIPS[check.chip] || { label: check.chip.replace(/_/g, ' '), tone: 'neutral' };
         return chipHtml(chip.label, chip.tone);
     }).join(' ');
-    const cost = wake.costUsd !== null ? usdText(wake.costUsd) : wake.unmetered ? 'unmetered' : '—';
+    const cost = wake.costUsd !== null ? `up to ${usdText(wake.costUsd)}` : wake.unmetered ? 'unmetered' : '—';
     return `<li class="consciousness-wake${live ? ' is-live' : ''}">
         <time class="consciousness-wake-time"${wake.startedAt ? ` datetime="${escapeHtml(wake.startedAt)}"` : ''}>${escapeHtml(clockText(wake.startedAt) || '—')}</time>
         <div class="consciousness-wake-main">

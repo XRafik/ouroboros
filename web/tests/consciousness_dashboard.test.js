@@ -70,10 +70,10 @@ test('a place row: icon, label, state and wakes in words, the day\'s spend; unkn
 
 test('a recent wake: when, cause and where, how fast it answered, the check chips, the cost', () => {
     const [live, own, lena, held] = full().recentWakes;
-    assert.match(strip(wakeRowHtml(lena)), /Slack · Acme · Лена wrote in a direct message answered in 40 s · replied checked sent despite the check \$0\.04/);
+    assert.match(strip(wakeRowHtml(lena)), /Slack · Acme · Лена wrote in a direct message answered in 40 s · replied checked sent despite the check up to \$0\.04/);
     assert.match(wakeRowHtml(lena), /data-tone="warn"[^>]*>sent despite the check</);
     assert.match(wakeRowHtml(lena), /data-tone="neutral"[^>]*>checked</);
-    assert.match(strip(wakeRowHtml(own)), /Own time · read 4 places, wrote 2 memory pages done not checked \$0\.21/);
+    assert.match(strip(wakeRowHtml(own)), /Own time · read 4 places, wrote 2 memory pages done not checked up to \$0\.21/);
     assert.match(wakeRowHtml(live), /is-live/);
     assert.match(strip(wakeRowHtml(live)), /working/);
     assert.match(strip(wakeRowHtml(held)), /stayed silent held unmetered$/);

@@ -102,7 +102,7 @@ export function normalizeWake(raw) {
         firstReplyAt: text(wake.first_reply_at),
         finishedAt: text(wake.finished_at),
         outcome: text(wake.outcome),
-        costUsd: amount(wake.cost_usd),
+        costUsd: amount(wake.accounted_upper_bound_usd),  // an accounted upper bound, not settled spend
         unmetered: wake.unmetered === true,
         checks: list(wake.checks).map((check) => ({ chip: text(check?.chip), tool: text(check?.tool) }))
             .filter((check) => check.chip),
