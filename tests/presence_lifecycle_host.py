@@ -114,6 +114,7 @@ def main(root, generation, mode, scenario="incoming", with_event_bus=False):
     patch = pytest.MonkeyPatch()
     h = install_bootstrap_harness(patch, root / "data", repo=ROOT, enforcement=mode)
     patch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    patch.setattr("supervisor.consciousness_carriers.autonomous_work_enabled", lambda *_: True, raising=False)
     patch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {
         "status": "available", "remaining_usd": 100})
     patch.setattr("ouroboros.safety.check_safety", lambda *_a, **_kw: (True, ""))

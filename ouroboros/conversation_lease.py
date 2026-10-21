@@ -2,7 +2,7 @@
 
 The existing Presence gate retains lock order, coroutine admission, lending and
 stop-aware reacquisition. Author records are projections under the held lock;
-only a held conversation is addressable, while Stop also sees local lent authors.
+only a held conversation is addressable, while Stop also sees lent live authors.
 """
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any, Callable
@@ -54,9 +55,20 @@ class PresenceTurnLease:
         self._ended = False
         self.execution: Any = None
         self.task_id = ""
+        self._live_fd: int | None = None
+        self._live_path: Path | None = None
 
     def bind_author(self, task_id: str) -> None:
         self.task_id = task_id
+        if self._gate and self._gate._state_root and self._live_fd is None:
+            # One unique inode per live stack, held across lending. A PID alone
+            # would mistake a reused process id for the original author.
+            with self._gate._file_lock(self._gate._gate_file("authors-census.lock")):
+                self._live_path = self._gate._gate_file(f"author-{uuid.uuid4().hex}.live")
+                self._live_fd = os.open(self._live_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+                from ouroboros.platform_layer import file_lock_exclusive
+                file_lock_exclusive(self._live_fd)
+                os.write(self._live_fd, json.dumps({"task_id": task_id}).encode())
         with _AUTHORS_LOCK:
             _AUTHORS[(self._root(), task_id)] = self
         self._publish_author()
@@ -79,6 +91,15 @@ class PresenceTurnLease:
         if path and self.task_id:
             path.unlink(missing_ok=True)
 
+    def _clear_live_author(self) -> None:
+        fd, self._live_fd = self._live_fd, None
+        try:
+            if self._live_path:
+                self._live_path.unlink(missing_ok=True)
+        finally:
+            if fd is not None:
+                os.close(fd)
+
     def release(self) -> None:
         resources = None
         try:
@@ -90,6 +111,7 @@ class PresenceTurnLease:
                 finally:
                     with _AUTHORS_LOCK:
                         _AUTHORS.pop((self._root(), self.task_id), None)
+                    self._clear_live_author()
         finally:
             if resources is not None:
                 resources.close()
@@ -337,6 +359,7 @@ def live_authors(*, drive_root: Any = None) -> list[str]:
     with _AUTHORS_LOCK:
         found = {task for (where, task) in _AUTHORS if not root or where == root}
     if root:
+        found.update(_live_stack_authors(Path(root)))
         for path in (Path(root) / "state" / "presence_turn_gate").glob("*.author.json"):
             try:
                 row = json.loads(path.read_text(encoding="utf-8"))
@@ -346,3 +369,31 @@ def live_authors(*, drive_root: Any = None) -> list[str]:
             except (FileNotFoundError, ValueError, KeyError):
                 continue  # release can remove a projection during this census
     return sorted(found)
+
+
+def _live_stack_authors(root: Path) -> set[str]:
+    """O(live stacks + crash leftovers); reclaim only unlocked unique inodes."""
+    gate = PresenceTurnGate(state_root=root / "state")
+    with gate._file_lock(gate._gate_file("authors-census.lock")):
+        return _scan_live_stack_authors(root)
+
+
+def _scan_live_stack_authors(root: Path) -> set[str]:
+    found = set()
+    for path in (root / "state" / "presence_turn_gate").glob("author-*.live"):
+        try:
+            fd = os.open(path, os.O_RDWR)
+        except FileNotFoundError:
+            continue
+        try:
+            if _try_exclusive(fd):
+                path.unlink(missing_ok=True)  # its stack ended, including a hard crash
+            else:
+                row = json.loads(os.read(fd, 8192))
+                if row.get("task_id"):
+                    found.add(str(row["task_id"]))
+        except (FileNotFoundError, ValueError):
+            continue
+        finally:
+            os.close(fd)
+    return found
