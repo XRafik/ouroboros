@@ -201,9 +201,13 @@ def test_unproven_or_owner_stopped_restart_never_assigns(prepared, monkeypatch, 
     case = prepared
     if fault == "bad_proof":
         windows_successor(monkeypatch, case.host.root, case.handoff["restart_transaction_id"], binding={})
+    elif fault == "ordinary_restart":
+        # A new manual Restart supersedes the plan through its own transaction;
+        # an unbound old flag cannot rename an already prepared update.
+        recovery.prepare_owner_restart(case.host.root)
+        monkeypatch.setattr(recovery, "_PROCESS_GENERATION", "successor")
     else:
-        flag = "owner_restart_no_resume.flag" if fault == "ordinary_restart" else "panic_stop.flag"
-        (case.host.root / "state" / flag).write_text("panic" if flag == "panic_stop.flag" else "owner_restart", encoding="utf-8")
+        (case.host.root / "state/panic_stop.flag").write_text("panic", encoding="utf-8")
     restore(case)
     if fault == "panic":
         from ouroboros.work_stop import current_stop

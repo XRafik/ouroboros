@@ -63,11 +63,11 @@ checkpoint; browser and service handles are never resurrected. Only a turn
 with no task id or no durable root is excluded, and loudly
 (``resource_limit.exact_pause_unavailable``).
 
-Every refusal to restore, grant or dispatch is typed and RETAINS the pause: a
-corrupt or missing source, an unwritable revocation, a lifted root fence over
-a zero-dispatch sibling all become a durable non-dispatch HOLD on the queue
-row (``work_stop.hold_fact``) beside the saved pause, never a
-cancellation and never a silent dispatch; a grant is bound to ONE pause id
+Every refusal to restore, grant or dispatch is typed and RETAINS the pause:
+source and revocation failures live on the continuation point, read through
+``work_stop.continuation_refusal``. A lifted root fence leaves a sibling's
+selection stop (``work_stop.hold_fact``), never cancellation or silent dispatch.
+A grant is bound to ONE pause id
 and ONE resume generation, so ``pauseA -> Resume -> pauseB -> restart`` can
 never dispatch on the earlier grant. This module adds no scheduler, ledger or
 recovery framework: it reuses the queue's ``_budget_pause`` carrier, the actor

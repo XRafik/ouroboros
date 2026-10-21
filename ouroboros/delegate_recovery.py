@@ -159,11 +159,9 @@ def import_legacy_restart(root: Any) -> None:
         old_byte = False
     if old_flag.exists() or old_byte:
         if row.get("door") != "owner_restart" or row.get("door_applied_at"):
-            # Preserve an old build's prepared return transaction and its ACK.
-            if row and not row.get("returns_restored_at") and not row.get("door_applied_at"):
-                row.update(door="owner_restart", generation="legacy", door_applied_at="")
-                _write_restart_transaction(root, row)
-            else:
+            # Preserve an unconsumed transaction and its ACK. A legacy flag has
+            # no transaction identity and cannot rename an active update's door.
+            if not row or row.get("returns_restored_at") or row.get("door_applied_at"):
                 row = prepare_owner_restart(root, legacy=True)
         old_flag.unlink(missing_ok=True)
         if old_byte:
@@ -203,7 +201,7 @@ def owner_restart_in_progress(root: Any) -> bool:
     from ouroboros import server_restart
 
     return bool(pathlib.Path(root) == pathlib.Path(server_restart.DATA_DIR)
-                and (server_restart._OWNER_STOP_BEGAN.is_set() or server_restart._owner_restart_requested.is_set()))
+                and server_restart._OWNER_STOP_BEGAN.is_set())
 
 
 def consume_owner_restart(root: Any, row: dict) -> None:

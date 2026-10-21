@@ -198,7 +198,7 @@ def activity_stop_view(row: dict, raw: dict | None = None) -> dict:
 
 
 def release_refusal(stop: dict | None, actor: dict | None) -> dict | None:
-    """Permission to release, independent of proof that a continuation can run."""
+    """Release permission, not readiness; empty actor means owner, mind doors must use ``mind_control``."""
     stop, actor = stop or {}, actor or {}
     if stop.get("release") == "owner" and actor.get("actor", "owner") != "owner":
         return {"ok": False, "error": "panic_requires_owner_resume"}

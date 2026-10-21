@@ -506,7 +506,7 @@ def _restart_current_process(server, host: str, port: int) -> None:
         from ouroboros.server_control import _restart_stop_requested
         if _restart_stop_requested:
             server.os.environ.pop(PLANNED_RESTART_TRANSACTION_ENV, None)
-        elif (server.DATA_DIR == DATA_DIR and _OWNER_STOP_BEGAN.is_set()) or server._owner_restart_requested.is_set():
+        elif server.DATA_DIR == DATA_DIR and _OWNER_STOP_BEGAN.is_set():
             from ouroboros.server_restart import arm_owner_restart_transaction
 
             arm_owner_restart_transaction()  # only the work THIS owner Restart named returns

@@ -89,4 +89,8 @@ def remove_received_panic(root, identity: dict) -> None:
 
 if __name__ == "__main__":  # Android's installation gate, before any product import
     import sys
-    raise SystemExit(0 if installation_panic(sys.argv[1]) else 1)
+    try:
+        pending = installation_panic(sys.argv[1])
+    except Exception:
+        sys.exit(2)  # the shell falls back to the file; 1 means an explicit absence
+    sys.exit(0 if pending else 1)

@@ -18,10 +18,14 @@ probe_core() {
 panic_pending() {
   # New bodies understand the durable receipt; old bodies keep their original input.
   if [ -f "$base/rootfs/opt/ouroboros/repo/ouroboros/installation_stop.py" ]; then
-    unshare -m sh "$entry" python3 /opt/ouroboros/repo/ouroboros/installation_stop.py /opt/ouroboros/data
-  else
-    [ -f "$data/state/panic_stop.flag" ] && [ "$(cat "$data/state/panic_stop.flag")" = panic ]
+    if unshare -m sh "$entry" python3 /opt/ouroboros/repo/ouroboros/installation_stop.py /opt/ouroboros/data; then
+      return 0
+    else
+      # Only the reader's explicit no-Panic result supersedes the old input.
+      [ "$?" -ne 1 ] || return 1
+    fi
   fi
+  [ -f "$data/state/panic_stop.flag" ] && [ "$(cat "$data/state/panic_stop.flag")" = panic ]
 }
 case "$action" in
   port) echo "$port" ;;

@@ -230,7 +230,7 @@ export async function resumeTaskAction(taskId, { resume = resumeTask, toast = sh
         if (ack?.ok !== true) throw new Error('Resume acknowledgement is unknown; retry this action.');
         pauseRequestIds.delete(id);
         // An answered root's late work (D10) continues in place; its answer stays delivered.
-        toast(ack.tree_only ? 'Waiting for Ouroboros or you to resume it'
+        toast(ack.tree_only ? 'Resumed. Ouroboros or you choose which helpers continue.'
             : ack.late_phase ? 'Resuming: the work left after the delivered answer continues.'
             : 'Resuming: the task returns to the queue.', 'info');
     } catch (exc) {

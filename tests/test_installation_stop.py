@@ -172,6 +172,63 @@ def test_failed_skeleton_publication_restores_the_previous_pointer(tmp_path, mon
     assert len(list(pointer.parent.glob("*.json"))) == 2
 
 
+@pytest.mark.parametrize("status", ["prepared", "normal_exit_acknowledged"])
+def test_legacy_flag_cannot_rename_an_unconsumed_update_transaction(tmp_path, status):
+    from supervisor.restart_retention import prepare_restart_returns
+
+    prepare_restart_returns(tmp_path, {}, [], transaction_id="update")
+    transaction = dr.active_restart_transaction(tmp_path)
+    transaction.update(status=status, return_ids=["saved"], task_ids=["saved"])
+    dr._write_restart_transaction(tmp_path, transaction)
+    path = dr._restart_transaction_path(tmp_path, "update")
+    before = path.read_bytes()
+    (tmp_path / "state/owner_restart_no_resume.flag").write_text("owner_restart", encoding="utf-8")
+    assert dr.boot_door(tmp_path) == ""
+    assert path.read_bytes() == before
+    assert not (tmp_path / "state/owner_restart_no_resume.flag").exists()
+
+
+def test_owner_update_keeps_sleep_readiness_and_returns_saved_work_after_ack(tmp_path, monkeypatch):
+    import os
+    import threading
+    from ouroboros import server_process, server_restart
+    from ouroboros.task_results import write_task_result
+    from supervisor.restart_retention import prepare_restart_returns
+    from supervisor.sleep_wake import wake_ready_sleepers
+    from tests.test_model_sleep import _cold_park, _mail
+    from tests.test_restart_saved_work import _working_run
+
+    q, state, workers = _install_queue(tmp_path, monkeypatch)
+    monkeypatch.setattr(state, "budget_remaining", lambda *a, **kw: 5.0)
+    write_task_result(tmp_path, "peer", "running")
+    _cold_park(tmp_path, monkeypatch, workers, senders=["peer"])
+    _working_run(tmp_path, workers, "working")
+    prepare_restart_returns(tmp_path, workers.RUNNING, workers.PENDING, transaction_id="update")
+    monkeypatch.setattr(server_restart, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(server_restart, "_OWNER_STOP_BEGAN", threading.Event())
+    owner = threading.Event()
+    monkeypatch.setattr(server_restart, "_owner_restart_requested", owner)
+    monkeypatch.setattr(server_process, "_owner_restart_requested", owner)
+    monkeypatch.setattr(server_process, "_restart_requested", threading.Event())
+    server_process._request_restart_exit(owner=True)
+    assert owner.is_set()
+    in_progress = dr.owner_restart_in_progress(tmp_path)
+    assert workers.kill_workers(force=True, terminal_status="cancelled", result_reason="Managed update.",
+                                stop_source="server_shutdown", retain_saved_work=True, preserve_pending=True,
+                                archive_service_logs=False, reconcile_delegate_custody=False)
+    assert dr.acknowledge_observed_restart_exit(tmp_path, supervisor_pid=os.getpid(), exit_code=42)
+    owner.clear()  # the successor has fresh process latches; only durable stops survive
+    workers.PENDING.clear()
+    workers.RUNNING.clear()
+    assert q.restore_pending_from_snapshot() == 2
+    restored = {t["id"]: t for t in workers.PENDING}
+    assert not current_stop(restored["working"])
+    assert not current_stop(restored["sleeper"]), restored["sleeper"].get("_budget_pause_hold")
+    _mail(tmp_path, "sleeper", "ready", sender="peer")
+    assert wake_ready_sleepers(q)[0]["ok"]
+    assert not in_progress
+
+
 def test_restart_flag_names_exist_only_in_the_boot_compatibility_reader():
     import subprocess
 
@@ -271,3 +328,4 @@ def test_android_reader_cli_recognizes_the_receipt_without_product_import(tmp_pa
     assert subprocess.run(command, check=False).returncode == 0
     (state / "state.json").write_text(json.dumps({PANIC_RECEIPT: panic_input(tmp_path)}), encoding="utf-8")
     assert subprocess.run(command, check=False).returncode == 1
+    assert subprocess.run(command[:-1], check=False).returncode == 2

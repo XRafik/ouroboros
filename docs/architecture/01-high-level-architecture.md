@@ -662,7 +662,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   │   ├── panic_sweep_pending.json ← pending Panic sweep
 │   │   ├── obligations/           ← the old body's set files: import input, export output
 │   │   ├── migrations.json        ← completed schema generations, dependency fingerprint
-│   │   ├── body_adoption/         ← the one pending body adoption (handoff, captured switch.py, lock)
+│   │   ├── body_adoption/         ← body adoption (handoff, switch.py, installation_stop.py, lock)
 │   │   ├── owned_processes.json   ← ownership set with pending stops (§9)
 │   │   ├── server.lock            ← server-lifetime DATA admission; never unlinked
 │   │   ├── server_port            ← active HTTP port for launcher/browser handoff

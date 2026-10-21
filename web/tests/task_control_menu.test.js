@@ -112,7 +112,7 @@ test('Resume retires an unconfirmed Pause id, but a refused Resume leaves it ret
 test('tree Resume keeps helpers for selection and source refusals use the server sentence', async () => {
     const seen = [], toast = (text) => seen.push(text);
     await resumeTaskAction('answered', { resume: async () => ({ ok: true, tree_only: true }), toast });
-    assert.equal(seen.pop(), 'Waiting for Ouroboros or you to resume it');
+    assert.equal(seen.pop(), 'Resumed. Ouroboros or you choose which helpers continue.');
     const refusal = Object.assign(new Error('pause_source_unreadable'), {
         body: { message: 'Resume refused: Its saved state could not be restored' },
     });
