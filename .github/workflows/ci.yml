@@ -1,65 +1,61 @@
-name: Linux AppImage native experiment 1aff (diagnostic)
+name: Linux AppImage retained-artifact native check
 on:
   workflow_dispatch:
-    inputs:
-      candidate_sha:
-        description: Exact 40-character source SHA on the dispatched research branch
-        required: true
-        type: string
 permissions:
   contents: read
-concurrency:
-  group: linux-native-${{ github.run_id }}-${{ github.run_attempt }}
-  cancel-in-progress: false
+  actions: read
 jobs:
   native:
     if: github.ref == 'refs/heads/probe/linux-native-ready-1aff'
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          ref: ${{ inputs.candidate_sha }}
-          fetch-depth: 0
           persist-credentials: false
-      - name: Bind source and prepare separate disposable containers
+          fetch-depth: 2
+      - name: Retrieve and verify the already-built diagnostic artifact
         env:
-          EXPECTED_SHA: ${{ inputs.candidate_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-          test "$GITHUB_SHA" = "$EXPECTED_SHA"
-          mkdir -p "$RUNNER_TEMP/ob688-evidence" "$RUNNER_TEMP/ob688-build"
-          git rev-parse HEAD HEAD^{tree} > "$RUNNER_TEMP/ob688-evidence/source.txt"
-          docker build --progress=plain --target builder -f packaging/appimage/native-qualification.Dockerfile \
-            -t ob688-builder . 2>&1 | tee "$RUNNER_TEMP/ob688-evidence/docker-build.log"
-          docker build --progress=plain --target desktop -f packaging/appimage/native-qualification.Dockerfile \
-            -t ob688-desktop . 2>&1 | tee "$RUNNER_TEMP/ob688-evidence/docker-desktop.log"
-          docker image inspect ob688-builder ob688-desktop > "$RUNNER_TEMP/ob688-evidence/images.json"
-      - name: Build diagnostic AppImage and run focused tests
-        timeout-minutes: 90
+          mkdir -p "$RUNNER_TEMP/ob688-evidence"
+          gh api repos/razzant/ouroboros/actions/artifacts/12357242923/zip > "$RUNNER_TEMP/input.zip"
+          echo "7189ea924a4ca01298eaf5b603f2c85637b2af9c9f742556599a7e19e0f363fb  $RUNNER_TEMP/input.zip" | sha256sum -c -
+          python3 - "$RUNNER_TEMP/input.zip" "$RUNNER_TEMP/ob688-evidence" <<'PY'
+          import hashlib, json, pathlib, shutil, sys, zipfile
+          archive, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+          selected = {}
+          with zipfile.ZipFile(archive) as z:
+              for info in z.infolist():
+                  name = pathlib.PurePosixPath(info.filename).name
+                  if name.endswith('.AppImage') or name in ('appimage.sha256', 'gtk-manifest.json', 'repo_bundle_manifest.json', 'source-sha.txt', 'source-tree.txt', 'focused-tests.xml'):
+                      assert name not in selected, name
+                      with z.open(info) as src, (out / name).open('wb') as dst:
+                          shutil.copyfileobj(src, dst)
+                      selected[name] = info.filename
+          apps = list(out.glob('*.AppImage'))
+          assert len(apps) == 1
+          expected = (out / 'appimage.sha256').read_text().split()[0]
+          digest = hashlib.sha256()
+          with apps[0].open('rb') as f:
+              for block in iter(lambda: f.read(1024 * 1024), b''):
+                  digest.update(block)
+          assert digest.hexdigest() == expected
+          assert (out / 'source-sha.txt').read_text().strip() == '24b1451ed75d78e86df63eafebe71ae69b62e1b0'
+          apps[0].chmod(0o755)
+          (out / 'retained-artifact.json').write_text(json.dumps({'source_run':39626286193,'source_sha':'24b1451ed75d78e86df63eafebe71ae69b62e1b0','artifact_id':12357242923,'archive_sha256':'7189ea924a4ca01298eaf5b603f2c85637b2af9c9f742556599a7e19e0f363fb','appimage_sha256':expected,'selected_members':selected,'prior_tests':'19 failed, 227 passed; native phase was not run'}, indent=2))
+          PY
+      - name: Build the clean desktop without GTK or WebKit
         run: |
           set -euo pipefail
-          docker run --name ob688-build --rm \
-            -v "$GITHUB_WORKSPACE:/input:ro" -v "$RUNNER_TEMP/ob688-build:/work" \
-            -v "$RUNNER_TEMP/ob688-evidence:/evidence" -w /work ob688-builder \
-            bash -c 'set -euo pipefail
-              cp -R /input/. /work/
-              chown -R 0:0 /work
-              mkdir -p /tmp/ob688-build
-              python3 -I -S scripts/safe_test.py --temp-parent /tmp/ob688-build \
-                --evidence-dir /evidence/build-safe-test --timeout 5200 -- \
-                bash scripts/build_linux_native_experiment.sh /evidence' \
-            2>&1 | tee "$RUNNER_TEMP/ob688-evidence/build.log"
-      - name: Exercise actual AppImage on clean Linux X11 without network
+          docker build --progress=plain --target desktop -f packaging/appimage/native-qualification.Dockerfile -t ob688-desktop . 2>&1 | tee "$RUNNER_TEMP/ob688-evidence/docker-desktop.log"
+          docker image inspect ob688-desktop > "$RUNNER_TEMP/ob688-evidence/desktop-image.json"
+      - name: Exercise the same AppImage without network or host GUI libraries
         timeout-minutes: 18
         run: |
           set -euo pipefail
           chmod -R a+rwX "$RUNNER_TEMP/ob688-evidence"
-          # No GTK from the builder, no display socket from the runner, no secrets,
-          # no network and no privilege flag. Unconfined seccomp only lets a bwrap
-          # attempt, if WebKit made one, be observed rather than refused by Docker.
           docker run --name ob688-desktop-run --rm --network none --shm-size=1g \
             --security-opt seccomp=unconfined \
             -v "$GITHUB_WORKSPACE:/source:ro" -v "$RUNNER_TEMP/ob688-evidence:/evidence" \
@@ -73,19 +69,21 @@ jobs:
                   openbox > /evidence/openbox.log 2>&1 &
                   python3 -I -S scripts/qualify_linux_appimage.py /evidence/*.AppImage /evidence/native
                 '\''' 2>&1 | tee "$RUNNER_TEMP/ob688-evidence/native.log"
-      - name: Return container evidence to the runner
+      - name: Recover diagnostics without copying the AppImage again
         if: always()
         run: |
           if test -d "$RUNNER_TEMP/ob688-evidence"; then
             sudo chown -R "$(id -u):$(id -g)" "$RUNNER_TEMP/ob688-evidence"
             chmod -R u+rwX "$RUNNER_TEMP/ob688-evidence"
           fi
-      - name: Preserve every successful and failed attempt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: issue688-native-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/ob688-evidence
+          name: issue688-retained-native-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/ob688-evidence/*.json
+            ${{ runner.temp }}/ob688-evidence/*.log
+            ${{ runner.temp }}/ob688-evidence/native
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
