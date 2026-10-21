@@ -105,7 +105,12 @@ def host(harness, monkeypatch):
 
     with TestClient(create_host_service_app(h.data, presence_runner=runner)) as client:
         h.client = client
-        yield h
+        try:
+            yield h
+        finally:
+            h.release.set()
+            executions = client.app.state.host_service_context.presence_turns
+            wait_for(lambda: not executions.live(), timeout=90, what="Host author teardown")
 
 
 def turn(h, number, text="Please prepare the status report", version=1, thread="topic-1", reporting=0, transport_queue=None):

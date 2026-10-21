@@ -342,7 +342,8 @@ def confirmed_delivery_receipts(ctx: Any) -> frozenset[tuple[str, str]]:
     from ouroboros.tool_access import canonical_data_root
     presence = (getattr(ctx, "task_metadata", {}) or {}).get("presence") or {}
     key = (presence.get("event") or {}).get("conversation_key")
-    if not key or presence.get("delivery_reporting_version") != 1:
+    if not key or (presence.get("delivery_reporting_version") != 1
+                   and (getattr(ctx, "task_metadata", {}) or {}).get("wake_cause") != "focus"):
         return frozenset()
     latest = {}
     for row in _live_task_rows(canonical_data_root(ctx), str(getattr(ctx, "task_id", "")), key):

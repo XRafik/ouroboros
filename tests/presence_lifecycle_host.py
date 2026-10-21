@@ -190,7 +190,7 @@ def main(root, generation, mode, scenario="incoming", with_event_bus=False):
             ctx._swarm_handoff_attempt = {"status": "scheduled", "task_id": LATE_CHILD}
             return review(answer=REVISED_ANSWER)
         if scenario == "tool_delivered":
-            return finish("select", outcome="tool_delivered")
+            return finish("select", message=ANSWER)  # the actual receipt selects tool_delivered
         return finish("select", message=REVISED_ANSWER if scenario == "late_child" else ANSWER)
 
     h.script = script
