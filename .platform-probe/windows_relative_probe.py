@@ -517,11 +517,21 @@ def cases(api, base, run):
             directory = root / "mutating"
             directory.mkdir()
             with api.at(held, "mutating", True) as parent:
+                identity = api.identity(parent)
                 # A rename lock alone cannot address this race: mutate the same
                 # empty directory into a junction AFTER its type was checked.
                 api.junction(directory, outside, existing=True)
-                status = denied(lambda: api.read(parent, "escape.bin"), {RPE, MISSING})
-                return dict(status=status, mutation_completed=True)
+                check(api.identity(parent) == identity, "held directory identity changed")
+                check(api.info(parent).attributes & 0x400, "held directory is not reparse")
+                check((directory / "escape.bin").read_bytes() == BAD,
+                      "local junction positive control did not reach outside fixture")
+                # Native run 39529223008 returned STATUS_REPARSE_POINT_NOT_RESOLVED.
+                # Microsoft MS-ERREF defines 0xC0000280 as a failed NTFS link resolution.
+                # Accept it only for this mutated held-root case, not as no-network proof.
+                status = denied(lambda: api.read(parent, "escape.bin"),
+                                {RPE, MISSING, 0xC0000280})
+                return dict(status=status, mutation_completed=True, held_identity=identity,
+                            local_path_control=True)
 
         run("race_held_directory_becomes_reparse", mutate_held_directory)
 
