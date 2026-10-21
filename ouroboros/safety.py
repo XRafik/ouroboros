@@ -29,7 +29,7 @@ from ouroboros.utils import sanitize_tool_result_for_log
 from ouroboros.config import runtime_setting
 
 from ouroboros.safety_records import (
-    _safety_drive_root, _record_safety_usage, _emit_durable_safety_event, _emit_safety_mode_skip,
+    _safety_drive_root, _record_safety_usage, _emit_durable_safety_event, _emit_safety_mode_skip, coalesce_verdicts, verdict_history_bytes,
 )
 from ouroboros.consciousness_authority import work_kind, effective_runtime_mode
 
@@ -486,17 +486,17 @@ def _remember(ctx, digest, tool_name, assessment, *, speech_refused=False):
            "speech_refused": speech_refused}
     with _PRIOR_LOCK:
         previous = _PRIOR_VERDICTS.get(root, {})
-        row["verdicts"] = (*previous.get(digest, {}).get("verdicts", ()), *assessment.verdicts)
+        row["verdicts"] = coalesce_verdicts(previous.get(digest, {}).get("verdicts", ()), assessment.verdicts)
         history = _VerdictHistory({**previous, digest: row})
         history.omitted_safe = getattr(previous, "omitted_safe", 0)
         safe_rows = iter([key for key, value in history.items()
                          if not value.get("speech_refused") and value.get("verdicts")
                          and all(verdict["status"] == "SAFE" for verdict in value["verdicts"])])
-        while len(json.dumps(history, ensure_ascii=False).encode("utf-8", "replace")) > _SAFETY_PRIOR_BYTE_BUDGET:
+        while verdict_history_bytes(history) > _SAFETY_PRIOR_BYTE_BUDGET:
             key = next(safe_rows, None)
             if key is None:
                 return False  # decisive flags must fit in full
-            history.omitted_safe += len(history.pop(key)["verdicts"])
+            history.omitted_safe += sum(1 + verdict.get("repeat_count", 0) for verdict in history.pop(key)["verdicts"])
         if root not in _PRIOR_VERDICTS and len(_PRIOR_VERDICTS) >= 512:
             _PRIOR_VERDICTS.popitem(last=False)  # an evicted root earns no speech reissue
         _PRIOR_VERDICTS[root] = history
