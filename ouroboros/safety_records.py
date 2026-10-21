@@ -1,7 +1,9 @@
 """Verdict-neutral storage and accounting for the Safety Supervisor."""
 
+import json
 import logging
 import pathlib
+import threading
 from typing import Any, Dict, Optional
 
 from ouroboros.utils import utc_now_iso
@@ -10,6 +12,31 @@ log = logging.getLogger(__name__)
 
 _CHECK_CHIPS = ("checked", "warned", "sent_despite", "held", "not_checked")
 _CHECK_TOOL_CHARS = 160
+_RECORDED_CHIPS: dict[tuple[pathlib.Path, str], set[str]] = {}
+_CHIP_LOCK = threading.RLock()
+
+
+def coalesce_verdicts(previous, incoming):
+    """Retain distinct evidence in order; repeats carry a count instead of another row."""
+    def identity(verdict):
+        return tuple(verdict.get(key) for key in ("stage", "status", "reason"))
+
+    rows = {identity(verdict): dict(verdict) for verdict in previous}
+    for verdict in incoming:
+        key = identity(verdict)
+        if key in rows:
+            rows[key]["repeat_count"] = rows[key].get("repeat_count", 0) + 1
+        else:
+            rows[key] = {**verdict, "repeat_count": 0}
+    return tuple(rows.values())
+
+
+def verdict_history_bytes(history):
+    """Charge distinct rows and their counters once; counter growth is not new evidence."""
+    evidence = {key: {**row, "verdicts": [
+        {**verdict, "repeat_count": 0} for verdict in row["verdicts"]]}
+        for key, row in history.items()}
+    return len(json.dumps(evidence, ensure_ascii=False).encode("utf-8", "replace"))
 
 
 def _record_task_checks(ctx: Optional[Any], event: Dict[str, Any]) -> None:
@@ -18,6 +45,7 @@ def _record_task_checks(ctx: Optional[Any], event: Dict[str, Any]) -> None:
     Five entries at most, with bounded tool names; the full audit stays in events.
     The task store merges under its write lock, so parallel checks cannot lose chips
     or overwrite a terminal transition. Missing tasks are never manufactured here.
+    Confirmed chips are remembered for this process; repeats still reach the audit.
     """
     task_id = str(event.get("task_id") or "")
     if not task_id:
@@ -46,7 +74,14 @@ def _record_task_checks(ctx: Optional[Any], event: Dict[str, Any]) -> None:
         result = list(checks.values())
         return {**current, "safety_checks": result} if result != previous else None
 
-    patch_document(root, task_id, merge)
+    cache_key = (pathlib.Path(root).resolve(), task_id)
+    with _CHIP_LOCK:
+        if set(chips) <= _RECORDED_CHIPS.get(cache_key, set()):
+            return
+        document = patch_document(root, task_id, merge)
+        if document:
+            _RECORDED_CHIPS[cache_key] = {item["chip"] for item in document.get("safety_checks", ())
+                                        if item.get("chip") in _CHECK_CHIPS}
 
 
 def _safety_drive_root(ctx: Optional[Any]) -> pathlib.Path:

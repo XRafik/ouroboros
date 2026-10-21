@@ -14,6 +14,51 @@ from tests._store_shared import seed_result
 supervisor = supervisor_fixture
 
 
+@pytest.mark.parametrize("kind", ["safety_mode_skip", "safety_declared_read_skip", "safety_hold"])
+def test_repeated_chip_avoids_store_but_new_chip_and_other_root_write(tmp_path, monkeypatch, kind):
+    from ouroboros import task_store
+
+    original = task_store.patch_document
+    calls = []
+    def patch(*args):
+        calls.append(args[:2])
+        return original(*args)
+    monkeypatch.setattr(task_store, "patch_document", patch)
+    ctx = SimpleNamespace(drive_root=tmp_path, task_id="wake", drive_logs=lambda: tmp_path / "logs")
+    seed_result(tmp_path, "wake", {"status": "running"})
+    records._emit_durable_safety_event(ctx, {"type": kind})
+    records._emit_durable_safety_event(ctx, {"type": kind})
+    assert len(calls) == 1
+    assert len((tmp_path / "logs" / "events.jsonl").read_text().splitlines()) == 2  # Audit is not deduplicated.
+    records._emit_durable_safety_event(ctx, {"type": "safety_verdict", "verdicts": [{"status": "SAFE"}]})
+    assert len(calls) == 2 and len(read_document(tmp_path, "wake")["safety_checks"]) == 2
+    other = tmp_path / "other"
+    seed_result(other, "wake", {"status": "running"})
+    records._record_task_checks(SimpleNamespace(drive_root=other), {"type": kind, "task_id": "wake"})
+    assert len(calls) == 3 and len(read_document(other, "wake")["safety_checks"]) == 1
+
+
+def test_failed_chip_write_can_retry(tmp_path, monkeypatch):
+    from ouroboros import task_store
+
+    original = task_store.patch_document
+    attempts = []
+    def patch(*args):
+        attempts.append(args[:2])
+        if len(attempts) == 1:
+            raise OSError("temporary storage failure")
+        return original(*args)
+    monkeypatch.setattr(task_store, "patch_document", patch)
+    seed_result(tmp_path, "wake", {"status": "running"})
+    ctx = SimpleNamespace(drive_root=tmp_path)
+    event = {"type": "safety_mode_skip", "task_id": "wake"}
+    with pytest.raises(OSError):
+        records._record_task_checks(ctx, event)
+    records._record_task_checks(ctx, event)
+    records._record_task_checks(ctx, event)
+    assert len(attempts) == 2 and read_document(tmp_path, "wake")["safety_checks"] == [{"chip": "not_checked", "tool": ""}]
+
+
 def test_actual_safety_decisions_produce_panel_chips(supervisor, monkeypatch):
     h = supervisor
     from ouroboros import tool_effects

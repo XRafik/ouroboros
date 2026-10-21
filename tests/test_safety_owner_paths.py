@@ -113,3 +113,58 @@ def test_operator_checker_is_not_replaced_by_generic_save_of_the_disk_default(se
     allowed = client.post("/api/settings", json={"OUROBOROS_MODEL_HEAVY": "unrelated"})
     assert allowed.status_code == 200, allowed.json()
     assert config.load_settings()["OUROBOROS_MODEL_LIGHT"] == "operator/checker"
+
+
+def test_owner_roster_save_retires_legacy_lanes_only_with_catalog(settings_client):
+    client, path = settings_client
+    path.write_text(json.dumps({**json.loads(path.read_text()), "OUROBOROS_REVIEWER_SLOTS": "invalid legacy lanes"}))
+    model_only = client.post("/api/owner/safety-model", json={"settings": {"OUROBOROS_MODEL_LIGHT": "fixture/checker"}})
+    assert model_only.status_code == 200, model_only.json()
+    assert json.loads(path.read_text())["OUROBOROS_REVIEWER_SLOTS"] == "invalid legacy lanes"
+    roster = client.post("/api/owner/safety-model", json={"settings": {"OUROBOROS_SUBAGENTS": catalog(review_eligible=True)}})
+    assert roster.status_code == 200 and roster.json() == {"ok": True}
+    assert "OUROBOROS_REVIEWER_SLOTS" not in json.loads(path.read_text())
+
+
+@pytest.mark.parametrize("remote", [False, True])
+def test_owner_checker_save_preserves_startup_ready_route(settings_client, remote):
+    client, path = settings_client
+    path.write_text(json.dumps({
+        "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full", "LOCAL_MODEL_SOURCE": "fixture",
+        "OPENROUTER_API_KEY": "fixture-router" if remote else "",
+        "USE_LOCAL_MAIN": True, "USE_LOCAL_LIGHT": False, "USE_LOCAL_FALLBACK": False,
+    }))
+    before = path.read_bytes()
+    response = client.post("/api/owner/safety-model", json={"settings": {"USE_LOCAL_MAIN": False}})
+    if remote:
+        assert response.status_code == 200 and response.json() == {"ok": True}
+        assert json.loads(path.read_text())["USE_LOCAL_MAIN"] is False
+    else:
+        assert response.status_code == 400
+        assert response.json()["error"] == "Local-only setups must route at least one model to the local runtime."
+        assert path.read_bytes() == before
+    allowed = client.post("/api/owner/safety-model", json={"settings": {"USE_LOCAL_MAIN": False, "USE_LOCAL_LIGHT": True}})
+    assert allowed.status_code == 200 and allowed.json() == {"ok": True}
+    stored = json.loads(path.read_text())
+    assert stored["USE_LOCAL_MAIN"] is False and stored["USE_LOCAL_LIGHT"] is True
+
+
+def test_owner_checker_readiness_counts_an_environment_provider(settings_client, monkeypatch):
+    from ouroboros import config
+    from ouroboros.server_runtime import has_startup_ready_provider
+
+    client, path = settings_client
+    path.write_text(json.dumps({"OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full",
+                               "LOCAL_MODEL_SOURCE": "fixture", "USE_LOCAL_MAIN": True,
+                               "USE_LOCAL_LIGHT": False, "USE_LOCAL_FALLBACK": False}))
+    body = {"settings": {"USE_LOCAL_MAIN": False}}
+    before = path.read_bytes()
+    assert client.post("/api/owner/safety-model", json=body).status_code == 400
+    assert path.read_bytes() == before
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fixture-environment-provider")
+    assert has_startup_ready_provider({**config.load_settings(), **body["settings"]})
+    allowed = client.post("/api/owner/safety-model", json=body)
+    assert allowed.status_code == 200 and allowed.json() == {"ok": True}
+    stored = json.loads(path.read_text())
+    assert stored["USE_LOCAL_MAIN"] is False
+    assert stored.get("OPENROUTER_API_KEY") != "fixture-environment-provider"
