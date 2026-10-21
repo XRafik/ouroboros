@@ -208,7 +208,7 @@ def resolve_place(drive_root: Any, *, connector: str, provider: str = "", accoun
             continue
         if conversation_id and place.conversation_id and conversation_id != place.conversation_id:
             continue
-        if place.thread_id and thread_id and place.thread_id != thread_id:
+        if place.thread_id and (provider or account_id or conversation_id or thread_id) and place.thread_id != thread_id:
             continue
         candidates.append(place)
     candidates.sort(key=lambda p: (bool(p.account_id), bool(p.conversation_id), bool(p.thread_id)), reverse=True)

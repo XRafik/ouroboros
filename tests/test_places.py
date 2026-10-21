@@ -110,3 +110,14 @@ def test_owner_door_settings_do_not_create_places(tmp_path):
     assert p.load_places(tmp_path) == []
     connected = connect(tmp_path)
     assert p.load_places(tmp_path) == [connected]
+
+
+@pytest.mark.parametrize("thread_id,expected", [("topic", "thread"), ("", "room"), ("other", "room")])
+def test_thread_scope_resolves_only_the_exact_thread(tmp_path, monkeypatch, thread_id, expected):
+    room = p.Place("room", "slack-bridge", "slack", "team", "room")
+    thread = replace(room, place_id="thread", thread_id="topic")
+    monkeypatch.setattr(p, "load_places", lambda _root: [room, thread])
+    found = p.resolve_place(tmp_path, connector="slack-bridge", provider="slack", account_id="team",
+                            conversation_id="room", thread_id=thread_id)
+    assert found.place_id == expected
+    assert p.resolve_place(tmp_path, connector="slack-bridge", binding_id="thread") == thread
