@@ -470,8 +470,11 @@ def test_schedules_api_validates_five_field_cron(tmp_path):
         "trigger": {"type": "cron", "expr": "* * * * *"},
     })
     assert bad_id.status_code == 400
-    assert client.delete("/api/schedules/ok").json()["ok"] is True
-    assert client.get("/api/schedules").json()["tasks"] == []
+    deleted = client.delete("/api/schedules/ok").json()
+    assert deleted["ok"] is True and deleted["status"] == "withdrawn"
+    [withdrawn] = client.get("/api/schedules").json()["tasks"]
+    assert withdrawn["id"] == "ok" and not withdrawn["enabled"]
+    assert withdrawn["status"] == "delete_pending" and withdrawn["withdrawal"]["restorable"]
 
 
 def test_skill_manifest_parses_scheduled_tasks():
