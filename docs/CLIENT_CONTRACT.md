@@ -683,7 +683,7 @@ Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, mainten
   - `running_sha`: the commit this core started from; `current_sha`: the checkout's;
   - `available` and `safe_to_apply`;
   - `update_tx`: the update transaction in progress (`{active: false}` when none);
-  - `update_progress`: this process's in-memory progress (`{}` when none);
+  - `update_progress`: the last admitted update attempt (`{}` only when absent; unreadable state is `outcome:unknown`). `operation_id` and `generation` identify it; `current_generation`, `stage`, `active`, `result`, `outcome` and `concluded_by` separate progress from conclusion. `base_sha`, `target_sha`, `keep_branch` and `stash_note` retain exact source/local-work facts when known. `outcome` is applied/not_applied/rolled_back/failed/unknown, empty while unresolved. It is observation, never recovery authority; a pre-admission refusal remains its HTTP answer;
   - `letter`: the written description of the update, when there is one;
   - `check_ok`: null on status.
 - `POST /api/update/check` fetches first, may write the update letter and broadcasts `update_progress_changed`.
@@ -694,9 +694,9 @@ Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, mainten
 - **Replacement not applied:** 409 `reason: replace_not_applied`, `abandoned: true` means Git refused the first tree-changing command because its index lock was held. The transaction is disarmed without rollback; `rescue` and `keep_branch` disclose retained preparation artifacts. The lock is untouched. Diagnose it before another deliberate attempt; age alone never authorizes removal. Other partial or unknown failures keep fenced recovery and their error.
 - **What `200` means:** inspect `status`, not HTTP success alone. `ok` with `restarting:true` means a restart was requested, not adoption. `assisted_started` means a supervised task owns resolution. `manual` returns a plan without applying or restarting. `restart_required` means the restart that finishes the apply could not be requested (a store-less replace has not moved the checkout yet); show its error and offer the ordinary restart control.
 - **Watching it:**
-  - `update_progress_changed` frames mean "read the status again" (progress is kept in memory only).
+  - `update_progress_changed` frames mean "read the status again"; stages are live; the saved last admitted attempt and conclusion survive restart. `retention_unconfirmed:true` reports a failed or refused save without changing the update result; a never-saved attempt cannot be recovered after process loss. An update check does not erase saved results. The indicator may hide a dismissed terminal attempt locally; the panel retains it until the next attempt.
   - After reconnecting, confirm the executing generation (`running_sha`) against the landed transaction/`merge_commit` identity reported by the update, not blindly against the preflight's official `target_sha`. Preserving local commits can create a distinct two-parent merge. Until the landed identity and completed startup are known, adoption remains unconfirmed.
-  - A core whose startup check fails can roll back and restart again.
+  - A core whose startup check fails can roll back and restart again. An assisted-resolution rollback completed in the same generation may have no retained conclusion and display an unconfirmed outcome.
   - `update_status_ready` arrives after a fresh start.
 - **Retrying:** there is no idempotency key. A non-manual request can answer 409 while an update is active or its expected base/target no longer matches; `manual` may return another plan. When an outcome is unknown, read status and transaction facts before deciding—never infer failure or resend from a dropped connection.
 
