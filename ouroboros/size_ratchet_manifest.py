@@ -140,6 +140,7 @@ BAND_PATHS = {
     "ouroboros/memory_view.py": "Selected accounts and records told through them share the existing story and room capture; account-block rendering is already isolated in memory_view_account.",
     "ouroboros/model_wait.py": "The existing task wait owner coordinates confirmed resource waits, owner controls and warm/cold sleep through shared clocks and custody; keeping their wake and interruption rules together preserves one authority path.",
     "ouroboros/observability.py": "Owns forensic call and blob storage, exact-version readers and result-reference custody; graph traversal is independently owned by source_retention.",
+    "ouroboros/owner_mailbox.py": "Entered the band at 1,004 lines when the place-event mail kind (one delivery per message id under the mail lock, a context-only prefix) met the paused-author card-press handling; the provenance prefix chain is the split candidate on the next structural touch.",
     "ouroboros/owner_pause.py": "The existing launch-admission owner keeps ordinary tool and delegated-start claims under the same Pause boundary, with positive pre-effect contention retried outside its holds and no replay of handed work.",
     "ouroboros/owner_wait.py": "The existing native continuation owner keeps checkpoint, warm wait and restart handoff together; the published planning/review integration re-entered the band without recording this unchanged module.",
     "ouroboros/preflight_runner.py": None,
