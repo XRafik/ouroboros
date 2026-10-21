@@ -895,6 +895,7 @@ D20 = "Presence"
 "ouroboros/place_guard.py" = "D13"
 "ouroboros/places.py" = "D20"
 "ouroboros/tool_effects.py" = "D04"
+"ouroboros/icon_geometry.py" = "D14"
 
 [classification]
 # Module placements needing owner review are listed here and starred in
