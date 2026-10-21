@@ -59,6 +59,20 @@ def descendants(pid):
     return found
 
 
+def find_window(pattern, evidence):
+    """Retain the actual X11 observation instead of masking a failed command."""
+    args = ['xdotool', 'search', '--onlyvisible', '--name', pattern]
+    observed = subprocess.run(args, text=True, capture_output=True, timeout=10)
+    (evidence / 'window-search.json').write_text(json.dumps({
+        'argv': args, 'returncode': observed.returncode,
+        'stdout': observed.stdout, 'stderr': observed.stderr,
+        'DISPLAY': os.environ.get('DISPLAY'),
+    }, indent=2))
+    if observed.returncode not in (0, 1) or observed.stderr:
+        raise RuntimeError(f'X11 search failed: {observed.returncode}: {observed.stderr}')
+    return observed.stdout.strip() if observed.returncode == 0 else None
+
+
 def alive(pid):
     try:
         return Path(f'/proc/{pid}/stat').read_text().split(') ', 1)[1][0] != 'Z'
@@ -157,7 +171,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
                 # xdotool may read the legacy X11 title with a substituted Unicode dash.
-                setup = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros.*Setup$'), 'Setup', process=process)
+                setup = wait_for(lambda: find_window('^Ouroboros.*Setup$', evidence), 'Setup', process=process)
                 title = run('xprop', '-id', setup.splitlines()[0], '_NET_WM_NAME', 'WM_NAME')
                 (evidence / 'setup-title.txt').write_text(title)
                 assert 'Ouroboros' in title and 'Setup' in title, title
@@ -179,7 +193,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
                 run('xdotool', 'windowactivate', '--sync', setup.splitlines()[0])
                 run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
-                window = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros v'), 'Main window', process=process).splitlines()[0]
+                window = wait_for(lambda: find_window('^Ouroboros v', evidence), 'Main window', process=process).splitlines()[0]
                 proof = wait_for(lambda: received[0] if received else None, 'real MainApi shell_info roundtrip', process=process)
                 (evidence / 'bridge.json').write_text(json.dumps(proof, indent=2))
                 assert proof['info']['source_launcher'] is source, proof
@@ -224,6 +238,16 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
             process_evidence(process.pid, evidence, 'failure-processes.json')
             if native:
                 subprocess.run(['import', '-window', 'root', str(evidence / 'failure-desktop.png')], timeout=10)
+                for name, args in (
+                    ('x11-tree', ['xwininfo', '-root', '-tree']),
+                    ('x11-clients', ['xprop', '-root', '_NET_CLIENT_LIST']),
+                    ('x11-any-title', ['xdotool', 'search', '--name', '.*']),
+                ):
+                    diagnostic = subprocess.run(args, text=True, capture_output=True, timeout=10)
+                    (evidence / (name + '.json')).write_text(json.dumps({
+                        'argv': args, 'returncode': diagnostic.returncode,
+                        'stdout': diagnostic.stdout, 'stderr': diagnostic.stderr,
+                    }, indent=2))
             # Existing safe_test owns final tree cleanup if ordinary teardown fails.
             if pid_file.exists():
                 try:
