@@ -131,7 +131,7 @@ def test_unknown_root_identity_refuses_without_member_grant(host, monkeypatch, c
     def transient(*args, **kwargs):
         # Only the grant's classification fails; actual source/custody readers stay real.
         if sys._getframe(1).f_code.co_name == "root_actor" and sys._getframe(2).f_code.co_name in {
-                "resume_warm_owner_pause_root", "_grant_exact_resume", "resume_budget_paused_task"}:
+                "resume_warm_owner_pause_root", "_grant_exact_resume", "_resume_budget_paused_task"}:
             reads.append(args[1])
             raise OSError("transient lineage read failure")
         return real(*args, **kwargs)
@@ -142,8 +142,10 @@ def test_unknown_root_identity_refuses_without_member_grant(host, monkeypatch, c
     assert reads == ["held"]
     # Queued selection already refuses via its existing owner-fence authority;
     # warm/exact grant issuers must not reinterpret unknown as member authority.
-    expected = "selection_owner_held" if door in {"queued", "unsaved"} else "owner_pause_custody_unreadable"
-    assert result == {"ok": False, "error": expected}, result
+    expected, message = (("selection_owner_held", "Resume refused: selection owner held")
+                         if door in {"queued", "unsaved"} else
+                         ("owner_pause_custody_unreadable", "Resume refused: owner pause custody unreadable"))
+    assert result == {"ok": False, "error": expected, "message": message}, result
     assert owner_pause.read_fence(host.root, "held") == before
     assert queue.resume_budget_paused_task(task["id"])["ok"]
 
