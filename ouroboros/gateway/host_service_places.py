@@ -254,7 +254,8 @@ async def _api_presence_turn(request: Request) -> JSONResponse:
                 return _presence_error("too many in-flight presence requests", 429, "presence_capacity_full", "retry")
             # A version-1 consumer takes a continuing author's initial envelope; v0 waits for its terminal.
             result = await asyncio.wrap_future(execution.initial if continuing else execution.result)
-        return JSONResponse(turn_response(result, continuing))
+        return JSONResponse(await host._bounded_host_read(ctx, functools.partial(
+            turn_response, result, continuing, ctx.data_dir)))
     except json.JSONDecodeError:
         return _presence_error("invalid json", 400, "presence_payload_invalid", "rejected")
     except (PresenceAdmissionError, PresenceTurnError) as exc:
