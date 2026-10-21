@@ -147,3 +147,24 @@ def test_owner_checker_save_preserves_startup_ready_route(settings_client, remot
     assert allowed.status_code == 200 and allowed.json() == {"ok": True}
     stored = json.loads(path.read_text())
     assert stored["USE_LOCAL_MAIN"] is False and stored["USE_LOCAL_LIGHT"] is True
+
+
+def test_owner_checker_readiness_counts_an_environment_provider(settings_client, monkeypatch):
+    from ouroboros import config
+    from ouroboros.server_runtime import has_startup_ready_provider
+
+    client, path = settings_client
+    path.write_text(json.dumps({"OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full",
+                               "LOCAL_MODEL_SOURCE": "fixture", "USE_LOCAL_MAIN": True,
+                               "USE_LOCAL_LIGHT": False, "USE_LOCAL_FALLBACK": False}))
+    body = {"settings": {"USE_LOCAL_MAIN": False}}
+    before = path.read_bytes()
+    assert client.post("/api/owner/safety-model", json=body).status_code == 400
+    assert path.read_bytes() == before
+    monkeypatch.setenv("OPENROUTER_API_KEY", "fixture-environment-provider")
+    assert has_startup_ready_provider({**config.load_settings(), **body["settings"]})
+    allowed = client.post("/api/owner/safety-model", json=body)
+    assert allowed.status_code == 200 and allowed.json() == {"ok": True}
+    stored = json.loads(path.read_text())
+    assert stored["USE_LOCAL_MAIN"] is False
+    assert stored.get("OPENROUTER_API_KEY") != "fixture-environment-provider"

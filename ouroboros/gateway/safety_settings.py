@@ -115,10 +115,13 @@ def _persist(request: Request, changes: dict, action: str, audit: dict) -> dict:
     def merge(current):
         proposed = {**current, **changes}
         if action == "safety_model":
+            from ouroboros.config import load_settings_lock_held
             from ouroboros.gateway.settings import REVIEW_LANES_KEY
             from ouroboros.server_runtime import has_startup_ready_provider
 
-            if str(proposed.get("LOCAL_MODEL_SOURCE", "") or "").strip() and not has_startup_ready_provider(proposed):
+            # Provider access can come from the operator environment.
+            effective = {**load_settings_lock_held(), **changes}
+            if str(effective.get("LOCAL_MODEL_SOURCE", "") or "").strip() and not has_startup_ready_provider(effective):
                 raise ValueError("Local-only setups must route at least one model to the local runtime.")
             if changes.get("OUROBOROS_SUBAGENTS") not in (None, ""):
                 proposed.pop(REVIEW_LANES_KEY, None)
