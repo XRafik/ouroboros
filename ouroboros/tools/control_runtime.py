@@ -13,10 +13,9 @@ from ouroboros.tools.tool_result import ToolResult, _publish_tool_result, comple
 
 import logging
 import os
-from hashlib import sha256
 
 from ouroboros.tools.registry import ToolContext, ToolEntry
-from ouroboros.utils import append_jsonl, run_cmd, utc_now_iso, write_text
+from ouroboros.utils import run_cmd, utc_now_iso
 
 log = logging.getLogger(__name__)
 
@@ -305,6 +304,7 @@ def _update_scratchpad(ctx: ToolContext, content: str) -> str:
             "This likely means the tool call was malformed — check your arguments.")))
         )
     from ouroboros.memory import Memory
+    from ouroboros.knowledge import focus_signature
     from ouroboros.tool_access import canonical_data_root
 
     # One working memory, every room (P1): the scratchpad is the same file in
@@ -319,6 +319,7 @@ def _update_scratchpad(ctx: ToolContext, content: str) -> str:
             content,
             source="task",
             metadata={
+                "focus": focus_signature(ctx)["focus"],
                 "task_id": str(getattr(ctx, "task_id", "") or ""),
                 "task_type": str(getattr(ctx, "current_task_type", "") or ""),
                 "delegation_role": str((getattr(ctx, "task_metadata", {}) or {}).get("delegation_role", "")) if isinstance(getattr(ctx, "task_metadata", {}), dict) else "",
@@ -480,7 +481,7 @@ def _send_user_message(ctx: ToolContext, text: str, reason: str = "", destinatio
     return "OK: message queued for delivery."
 
 
-def _update_identity(ctx: ToolContext, content: str) -> str:
+def _update_identity(ctx: ToolContext, content: str, expected_revision: str | None = None) -> str:
     """Update identity manifest (who you are, who you want to become)."""
     if not content or not isinstance(content, str) or len(content.strip()) < 50:
         return (
@@ -498,34 +499,19 @@ def _update_identity(ctx: ToolContext, content: str) -> str:
     # _chat_history, so a forked execution drive still writes the identity the
     # canonical root reads back.
     mem = Memory(drive_root=canonical_data_root(ctx))
-    mem.ensure_files()
 
-    old_content = ""
-    path = mem.identity_path()
-    if path.exists():
-        try:
-            old_content = path.read_text(encoding="utf-8")
-        except Exception:
-            pass
+    from ouroboros.knowledge import focus_signature
+    from ouroboros.memory_publication import publish_memory_file, publication_refusal
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    write_text(path, content)
-
-    append_jsonl(mem.identity_journal_path(), {
-        "ts": utc_now_iso(),
-        "task_id": str(getattr(ctx, "task_id", "") or ""),
-        "source_type": str((getattr(ctx, "task_metadata", {}) or {}).get("delegation_role", "task")) if isinstance(getattr(ctx, "task_metadata", {}), dict) else "task",
-        "old_len": len(old_content),
-        "new_len": len(content),
-        "old_sha256": sha256(old_content.encode("utf-8")).hexdigest() if old_content else "",
-        "new_sha256": sha256(content.encode("utf-8")).hexdigest(),
-        "old_content": old_content,
-        "new_content": content,
-        "old_preview": old_content[:500],
-        "new_preview": content[:500],
-    })
-
-    result = f"OK: identity updated ({len(content)} chars)"
+    publication = publish_memory_file(
+        mem.identity_path(), expected_revision, lambda _old: content,
+        journal=mem.identity_journal_path(), author=focus_signature(ctx),
+        source_type=str((getattr(ctx, "task_metadata", {}) or {}).get("delegation_role") or "task"))
+    if not publication.ok:
+        return _publish_tool_result(ctx, ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED",
+            text=publication_refusal(publication, "memory/identity.md")))
+    old_content = publication.old_content
+    result = f"OK: identity updated ({len(content)} chars); revision={publication.revision}"
     old_len = len(old_content)
     if old_len >= 400 and len(content) < old_len * 0.5:
         result += (

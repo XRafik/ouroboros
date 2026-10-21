@@ -226,7 +226,7 @@ def _offline_light(monkeypatch):
     monkeypatch.setattr(context_fit, "resolve_context_fit_route", lambda task, *, allow_fetch: (
         {"model": task["model"], "provider": "openrouter"},
         CapabilityEvidence(1_000_000, "confirmed", "test", "route-test", model=task["model"], provider="openrouter")))
-    monkeypatch.setattr(context_fit, "_route_calibration_ratio", lambda *_: 1.0)
+    monkeypatch.setattr(context_fit, "_route_calibration_ratio", lambda *_, **_kw: 1.0)
 
 
 def _recorded_call_types(monkeypatch):
