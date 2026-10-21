@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from ouroboros.tools.github import GhResult, _gh_api, _gh_graphql, _refuse, _split_repo
+from ouroboros.tools.github import GhResult, _gh_api, _gh_graphql, _no_launch_yet, _refuse, _split_repo
 from ouroboros.tools.github_read import _MUTATION_RE, _repo_of
 from ouroboros.tools.registry import ToolContext
 from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
@@ -43,8 +43,9 @@ class _Write:
         self.ctx, self.method, self.repo, self.args = ctx, method, repo, args
         self.sent_at = ""
 
-    def refuse(self, text: str, code: str = "TOOL_ARG_ERROR") -> str:
-        return _refuse(self.ctx, text, code, no_effect=True)
+    def refuse(self, text: str, code: str = "TOOL_ARG_ERROR", *, no_effect: Optional[bool] = None) -> str:
+        """A typed refusal; unless stated, it attests no effect only while this invocation has launched no gh."""
+        return _refuse(self.ctx, text, code, no_effect=_no_launch_yet() if no_effect is None else no_effect)
 
     def number(self) -> Optional[int]:
         target = self.args.get("target")
@@ -82,6 +83,8 @@ class _Write:
                 readback: Optional[dict] = None, url: object = None, oid: object = None, actor: object = None,
                 at: object = None, lookup: str = "", extra: Optional[dict] = None) -> str:
         """Publish the one receipt shape; ``res`` is the failed transport answer when there is one."""
+        if res is not None and res.failure in ("target", "cli_missing"):
+            return res.text  # the transport already published its typed refusal; nothing was sent
         response = response if isinstance(response, dict) else {}
         receipt: Dict[str, Any] = {**(extra or {}),
             "effect": effect, "target": target,
@@ -183,7 +186,8 @@ def _comment(write: _Write) -> str:
         if not res.ok:
             return res.text
         if not isinstance(node, dict) or not node.get("id"):
-            return write.refuse(f"⚠️ GH_ERROR: discussion #{number} was not found (HTTP 404); nothing was sent.", "TOOL_ERROR")
+            return write.refuse(f"⚠️ GH_ERROR: discussion #{number} was not found (HTTP 404); nothing was sent.", "TOOL_ERROR",
+                                no_effect=True)  # the id read is a read; the comment was never sent
         variables = {"discussionId": node["id"], "body": body}
         if reply_to:
             variables["replyToId"] = str(reply_to)

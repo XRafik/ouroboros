@@ -38,9 +38,11 @@ def gh(monkeypatch, tmp_path):
     world.ctx, world.cwd = _context(tmp_path, "queued")
     world.ctx._active_builtin_tool_result = None
 
+    entry = next(item for item in github.get_tools() if item.name == "github_write")  # the registered, invocation-scoped handler
+
     def write(**args):
         world.ctx._active_builtin_tool_result = None
-        text = github_write.run_write(world.ctx, **args)
+        text = entry.handler(world.ctx, **args)
         world.result = world.ctx._active_builtin_tool_result
         return text
 

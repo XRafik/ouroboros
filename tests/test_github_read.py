@@ -91,7 +91,8 @@ def gh(monkeypatch, tmp_path):
 
     monkeypatch.setattr(subprocess, "run", run)
     world.ctx, world.cwd = _context(tmp_path, "queued")
-    world.read = lambda **args: github_read.run_read(world.ctx, **args)
+    entry = next(item for item in github.get_tools() if item.name == "github_read")  # the registered, invocation-scoped handler
+    world.read = lambda **args: entry.handler(world.ctx, **args)
     world.routes = lambda: [_call(argv).route for argv, _ in world.calls if argv[1] == "api"]
     return world
 
@@ -368,8 +369,8 @@ def test_search_discussions_is_a_graphql_search_without_repository_variables(gh)
 
 
 # ---- checks ------------------------------------------------------------------------------------------
-@pytest.mark.parametrize("target,expected", [(7, {"number": 7, "sha": ""}), ("7", {"number": 7, "sha": ""}), (SHA, {"number": 0, "sha": SHA}),
-                                             (SHA.upper(), {"number": 0, "sha": SHA})])
+@pytest.mark.parametrize("target,expected", [(7, {"number": 7, "sha": ""}), ("7", {"number": "7", "sha": ""}), (SHA, {"number": 0, "sha": SHA}),
+                                             (SHA.upper(), {"number": 0, "sha": SHA}), ("main", {"number": 0, "sha": "main"})])
 def test_checks_is_the_existing_reader_registered_as_a_method(gh, monkeypatch, target, expected):
     seen = {}
 

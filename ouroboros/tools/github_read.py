@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from ouroboros.tool_capabilities import tool_result_limit
-from ouroboros.tools.github import _gh_api, _gh_graphql, _gh_run, _refuse, _split_repo, github_token_from_env_or_settings
+from ouroboros.tools.github import _gh_api, _gh_graphql, _gh_run, _no_launch_yet, _refuse, _split_repo, github_token_from_env_or_settings
 from ouroboros.tools.registry import ToolContext
 
 METHODS = ("whoami", "get", "list", "search", "checks", "api")
@@ -26,7 +26,6 @@ _BODY_CHARS, _PREVIEW_CHARS, _DIFF_CHARS, _REPLIES = 2000, 200, 8000, 50
 _LINK_NEXT_RE = re.compile(r'<([^>]*)>;\s*rel="next"')
 _PAGE_RE = re.compile(r"[?&]page=(\d+)")
 _URL_REPO_RE = re.compile(r"^https://([^/]+)/([^/]+)/([^/]+)/")
-_FULL_SHA_RE = re.compile(r"[0-9a-f]{40}")
 # A GraphQL document whose operation is a mutation (the keyword outside a selection set).
 _MUTATION_RE = re.compile(r"(?:^|[\s,}])mutation\b")
 # Exact commit counts and the review decision of listed PRs by node id: one fixed read, no commit objects.
@@ -71,8 +70,9 @@ class _Read:
             self.limit = _LIMIT_MAX
 
     # ---- helpers -------------------------------------------------------------------------------
-    def refuse(self, text: str, code: str = "TOOL_ARG_ERROR") -> str:
-        return _refuse(self.ctx, text, code, no_effect=True)
+    def refuse(self, text: str, code: str = "TOOL_ARG_ERROR", *, no_effect: Optional[bool] = None) -> str:
+        """A typed refusal; unless stated, it attests no effect only while this invocation has launched no gh."""
+        return _refuse(self.ctx, text, code, no_effect=_no_launch_yet() if no_effect is None else no_effect)
 
     def number(self) -> Optional[int]:
         target = self.args.get("target")
@@ -170,7 +170,7 @@ class _Read:
         """Rows updated at or after ``since`` for endpoints without a ``since`` parameter (ordered newest first)."""
         if not self.since:
             return rows
-        kept = [r for r in rows if str(r.get(key) or "") >= self.since]
+        kept = [r for r in rows if isinstance(r, dict) and str(r.get(key) or "") >= self.since]
         if len(kept) < len(rows):
             facts.update(complete=True, next_cursor="")
         return kept
@@ -609,7 +609,8 @@ def _list(read: _Read) -> str:
         return error
     if not isinstance(rows, list):
         return read.refuse(f"⚠️ TOOL_ERROR: GitHub answered {kind} with no list: {str(rows)[:300]}", "TOOL_ERROR")
-    rows = [r for r in rows if isinstance(r, dict)]
+    if kind != "pr":  # a PR page keeps every row for the identity check of the count read
+        rows = [r for r in rows if isinstance(r, dict)]
     if kind == "issue":
         prs = sum("pull_request" in r for r in rows)
         if prs:
@@ -707,10 +708,10 @@ def _search(read: _Read) -> str:
 def _checks(read: _Read) -> str:
     from ouroboros.tools.github_checks import get_checks
 
+    # A string that is not a number is a commit SHA for the reader to validate; anything else is a PR number.
     target = read.args.get("target")
-    text = str(target or "").strip().lower()
-    number = read.number() if not _FULL_SHA_RE.fullmatch(text) else None
-    return get_checks(read.ctx, number=number or 0, sha="" if number else text, wait_seconds=read.args.get("wait_seconds") or 0, repo=read.repo)
+    sha = target.strip().lower() if isinstance(target, str) and target.strip() and not target.strip().isdigit() else ""
+    return get_checks(read.ctx, number=0 if sha else target, sha=sha, wait_seconds=read.args.get("wait_seconds") or 0, repo=read.repo)
 
 
 def _api(read: _Read) -> str:
