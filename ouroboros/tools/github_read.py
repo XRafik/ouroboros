@@ -755,18 +755,24 @@ def _api(read: _Read) -> str:
         if route.split("?", 1)[0].split()[0].upper() in ("POST", "PATCH", "PUT", "DELETE") or " " in route.split("?", 1)[0]:
             return read.refuse("⚠️ GH_API_READ_ONLY: github_read(method='api') sends GET routes only; a REST mutation goes "
                                "through github_write(method='api', http_method=..., route=...).")
-        res = _gh_api(read.ctx, route, repo=read.repo, timeout=60)
+        res = _gh_api(read.ctx, route, repo=read.repo, include=True, timeout=60)
         label = f"GET {route}"
     if not res.ok:
         return res.text
+    _status, headers, body = _split_http(res.text) if route else (None, {}, res.text)
     try:
-        data = json.loads(res.text)
+        data = json.loads(body)
     except ValueError:
-        data = res.text
+        data = body
     payload: Dict[str, Any] = {"request": label, "data": data if not read.fields or not isinstance(data, dict) else read.project(data)}
+    if route:
+        link = _LINK_NEXT_RE.search(headers.get("link", ""))
+        payload.update(complete=link is None, next_cursor=link.group(1) if link else "")
+        if link:
+            payload["more"] = f"github_read(method='api', route={link.group(1)!r})"
     if isinstance(data, dict) and data.get("errors"):
         payload["errors"] = data["errors"]
-    count = f"{len(data)} item(s)" if isinstance(data, list) else f"{len(res.text)} chars"
+    count = f"{len(data)} item(s)" if isinstance(data, list) else f"{len(body)} chars"
     return read.deliver(f"github_read api {label} in {read.repo or 'selected Project'}: {count}", payload)
 
 

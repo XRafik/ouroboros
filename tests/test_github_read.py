@@ -432,6 +432,21 @@ def test_checks_is_the_existing_reader_registered_as_a_method(gh, monkeypatch, t
 
 
 # ---- api ---------------------------------------------------------------------------------------------
+@pytest.mark.parametrize("next_route", [f"{API}/repos/owner/selected/issues/7/timeline?per_page=30&page=2", ""])
+def test_rest_api_preserves_pagination_and_a_usable_next_route(gh, next_route):
+    def answer(p, argv, kw):
+        assert p.include and p.method == "GET"
+        return _rest([{"event": "labeled"}], link_next=next_route)
+    gh.answer = answer
+    _line, payload = _payload(gh.read(method="api", route="repos/{owner}/{repo}/issues/7/timeline"))
+    assert payload["data"] == [{"event": "labeled"}]
+    assert (payload["complete"], payload["next_cursor"]) == (not bool(next_route), next_route)
+    if next_route:
+        assert next_route in payload["more"]
+        gh.read(method="api", route=payload["next_cursor"])
+        assert gh.routes()[-1] == next_route
+
+
 @pytest.mark.parametrize("document", [
     'query{search(query:"fix mutation bug",type:ISSUE,first:1){issueCount}}',
     'query{search(query:"""fix mutation bug\nwith a block string""",type:ISSUE,first:1){issueCount}}',
@@ -479,7 +494,7 @@ def test_api_sends_get_routes_and_graphql_queries_only(gh):
     gh.answer = lambda p, argv, kw: json.dumps([{"event": "labeled"}])
     line, payload = _payload(gh.read(method="api", route="repos/{owner}/{repo}/issues/7/timeline?per_page=100", repo="owner/selected"))
     assert line == "github_read api GET repos/{owner}/{repo}/issues/7/timeline?per_page=100 in owner/selected: 1 item(s)"
-    assert gh.calls[0][0] == ["gh", "api", "repos/owner/selected/issues/7/timeline?per_page=100"] and payload["data"] == [{"event": "labeled"}]
+    assert gh.calls[0][0] == ["gh", "api", "--include", "repos/owner/selected/issues/7/timeline?per_page=100"] and payload["data"] == [{"event": "labeled"}]
     gh.answer = lambda p, argv, kw: json.dumps({"data": {"viewer": {"login": "me"}}})
     _line, payload = _payload(gh.read(method="api", graphql="query { viewer { login } }"))
     assert payload["data"] == {"data": {"viewer": {"login": "me"}}} and "owner" not in _call(*gh.calls[-1]).fields
