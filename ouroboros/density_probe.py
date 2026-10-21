@@ -116,5 +116,3 @@ def cold_start_density_probe(
     # A witness the store refused (too few chars, an insane ratio) leaves the
     # cold cap standing — disclosed above by the unchanged source.
     return "measured" if density_source == "measured" else "unrecorded"
-
-

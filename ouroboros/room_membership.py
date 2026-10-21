@@ -46,4 +46,3 @@ def room_membership(chat_id: int, project_chat_ids: set, source_refs: list,
         return entry_chat not in project_chat_ids and not bound
 
     return matches
-
