@@ -77,7 +77,7 @@ def test_each_rewrite_updates_the_same_task_row_and_retains_the_sanction(tmp_pat
     assert "2 history changes (3 turns)" in progress[1][0]
     assert all("blocks" not in text for text, _ in progress)
     assert usage["reasoning_retired"] == 2
-    assert usage.get("prompt_prefix_breaks", 0) == (0 if sanctioned else 2)
+    assert usage["prompt_prefix_breaks"] == 2  # a sanction names the change, it never exempts it
     assert all(row["sanctioned_by"] == ("compaction" if sanctioned else None) for row in _events(tmp_path))
 
 

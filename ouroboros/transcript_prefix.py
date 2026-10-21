@@ -6,8 +6,10 @@ after initialization: loop_messages also consumes this module. Keep that
 boundary explicit rather than treating this module as a stdlib-only observer.
 
 Append-only sends preserve OpenAI-family prefix caching (#906, 2026-09-14).
-Sanctioned compaction names deliberate rewrites; other changes remain ordinary
-breaks. The same identity retires signed reasoning before preparation/pricing.
+Every change of sent history is counted; a seam's sanction names it and never
+exempts it (DEVELOPMENT 06 "Cache-friendliness invariant"). The next facts line
+names the change beside the cache share it preceded, and a small per-code-version
+record feeds the Health line. The same identity retires signed reasoning before preparation/pricing.
 Main records answered sends; review records every checked, dispatched attempt.
 Restored slots reuse their context observation. Helpers report only to Logs;
 Main additionally owns one updating task row and all sends carry the model fact.
@@ -16,9 +18,11 @@ Main additionally owns one updating task row and all sends carry the model fact.
 from __future__ import annotations
 
 import base64
+import functools
 import hashlib
 import json
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 #: Attribute the previous send's digests are parked on, per execution slot.
@@ -275,6 +279,94 @@ def _break_identity(fact: dict) -> tuple:
     return tuple(fact[key] for key in ("round", "index", "kind", "sanctioned_by"))
 
 
+#: Changes of sent history since the running code started, across tasks (the Health line's source).
+HISTORY_CHANGES_PATH = ("state", "sent_history_changes.json")
+_HISTORY_TASKS_KEPT = 32
+
+
+def history_change_origin(fact: Mapping[str, Any]) -> str:
+    """The stamping seam, else what changed; an unstamped message change says so."""
+    kinds = {"system_rewritten": "system view rebuilt", "tools_changed": "tool set changed"}
+    return str(fact.get("sanctioned_by") or kinds.get(str(fact.get("kind")), "origin not recorded"))
+
+
+def history_change_text(fact: Any, round_idx: Any) -> str:
+    """The facts-line clause for the round's request this change preceded; it states no cost."""
+    if not isinstance(fact, Mapping) or fact.get("round") != round_idx:
+        return ""
+    if fact.get("kind") == "system_rewritten":
+        return "; before that request the system view was rebuilt"
+    if fact.get("kind") == "tools_changed":
+        return "; before that request the tool set changed"
+    if fact.get("kind") == "shrunk":
+        return (f"; before that request sent history shrank from {fact.get('previous_messages')} "
+                f"to {fact.get('current_messages')} messages ({history_change_origin(fact)})")
+    return f"; before that request sent message {fact.get('index')} changed ({history_change_origin(fact)})"
+
+
+def history_drive_root(slot: Any) -> Optional[Path]:
+    """The installation's durable root even for an isolated execution drive."""
+    metadata = getattr(slot, "task_metadata", None)
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    root = metadata.get("budget_drive_root") or getattr(slot, "budget_drive_root", None) or getattr(slot, "drive_root", None)
+    return Path(root) if root else None
+
+
+def count_history_change(usage: dict, fact: Mapping[str, Any], *, drive_root: Any = None, task_id: str = "") -> None:
+    """Count every change of sent history once; its sanction names the change, never exempts it."""
+    usage["prompt_prefix_breaks"] = int(usage.get("prompt_prefix_breaks") or 0) + 1
+    usage["_last_prefix_break"] = {key: fact.get(key) for key in (
+        "round", "index", "kind", "sanctioned_by", "previous_messages", "current_messages")}
+    if drive_root:
+        _record_history_change(Path(drive_root), history_change_origin(fact), str(task_id or ""))
+
+
+@functools.lru_cache(maxsize=1)
+def _running_code() -> str:
+    """The commit this process imported (an update restarts every process)."""
+    from ouroboros.utils import get_git_info
+
+    return get_git_info(Path(__file__).resolve().parents[1])[1] or "unknown"
+
+
+def _record_history_change(drive_root: Path, origin: str, task_id: str) -> None:
+    from ouroboros.utils import update_json_locked, utc_now_iso
+
+    code, now = _running_code(), utc_now_iso()
+
+    def update(current: dict) -> dict:
+        record = current if current.get("code") == code else {"code": code, "since": now, "origins": {}}
+        row = record.setdefault("origins", {}).setdefault(origin, {"count": 0, "tasks": []})
+        row["count"], row["last"] = int(row.get("count") or 0) + 1, now
+        if task_id and task_id not in row["tasks"] and len(row["tasks"]) < _HISTORY_TASKS_KEPT:
+            row["tasks"].append(task_id)
+        return record
+
+    try:
+        path = drive_root.joinpath(*HISTORY_CHANGES_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        update_json_locked(path, update)
+    except Exception:
+        log.debug("sent-history change record unavailable", exc_info=True)
+
+
+def history_changes_line(drive_root: Any) -> str:
+    """Health fact for the running code: who changed sent history, how often, in how many tasks."""
+    from ouroboros.utils import read_json_dict
+
+    record = read_json_dict(Path(drive_root).joinpath(*HISTORY_CHANGES_PATH)) if drive_root else None
+    origins = (record or {}).get("origins") if (record or {}).get("code") == _running_code() else None
+    if not isinstance(origins, dict) or not origins:
+        return ""
+    rows = []
+    for origin, row in sorted(origins.items(), key=lambda item: -int(item[1].get("count") or 0)):
+        tasks = len(row.get("tasks") or [])
+        rows.append(f"{origin} {int(row.get('count') or 0)} in {tasks}{'+' if tasks >= _HISTORY_TASKS_KEPT else ''} "
+                    f"task{'s' if tasks != 1 else ''}")
+    return (f"INFO: SENT HISTORY CHANGES since this code ({str(record.get('code'))[:12]}, {str(record.get('since'))[:16]}) "
+            f"— {'; '.join(rows)}. Ordinary steps append; a change makes providers re-read what follows it.")
+
+
 def reasoning_retirement_fact(usage: dict, round_idx: Any) -> str:
     """One neutral sentence, present only in the round that retired reasoning."""
     fact = usage.get("_reasoning_retired_round") or {}
@@ -320,13 +412,12 @@ def prepare_reasoning_for_send(slot: Any, messages: list, tools: Any, *, round_i
     checkpoint = {"checkpoint_kind": CHECKPOINT_KIND, "round": round_idx, "index": fact["index"],
                   "previous_messages": len(previous) if isinstance(previous, list) else None,
                   "current_messages": len(messages), **details, "reasoning_retired": fact}
-    if not checkpoint["sanctioned_by"]:
-        usage["prompt_prefix_breaks"] = int(usage.get("prompt_prefix_breaks") or 0) + 1
     if slot is not None:
         slot._reasoning_retirement_break = _break_identity(checkpoint)
     main_context = context
     context = main_context if main_context is not None else slot
     task_id = str(getattr(context, "task_id", "") or "")
+    count_history_change(usage, checkpoint, drive_root=history_drive_root(slot), task_id=task_id)
     progress = (getattr(main_context, "emit_progress", None) or getattr(slot, "_reasoning_retirement_progress", None)
                 if main_context is not None else None)
     if callable(progress):

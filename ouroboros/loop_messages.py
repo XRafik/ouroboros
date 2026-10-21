@@ -669,8 +669,9 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
     ``measured=False`` names the input as unmeasured instead of reusing stale numbers.
     """
     from ouroboros.context_runtime_facts import round_clock_fact
+    from ouroboros.event_usage import event_token_counts
     from ouroboros.nanny_pacing import nanny_burn_fact
-    from ouroboros.transcript_prefix import reasoning_retirement_fact
+    from ouroboros.transcript_prefix import history_change_text, reasoning_retirement_fact
 
     usage = ctx.accumulated_usage
     tool_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
@@ -723,14 +724,15 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
     # The mind's own folds stay countable to it (17.10.2026: after 42 folds it told the owner it never folded).
     parts.append(f"own notes in view {sum(1 for row in ctx.messages if (_capsule_metadata(row)[1] or {}).get('authorship') == 'actor')}")
     previous = usage.get("_last_round_cache_usage") or {}
-    read, total = previous.get("cached_tokens"), previous.get("prompt_tokens")
+    counts = event_token_counts(previous)  # the provider's own report outranks a synthesized billing zero
+    read, total, written = counts["cached_tokens"], counts["prompt_tokens"], counts["cache_write_tokens"]
     share = (f"{int(read):,}/{int(total):,} tokens ({100 * read / total:.1f}%)"
              if read is not None and total is not None and total > 0 else "unknown")
     cache = f"previous usable input cache {share}"
     if previous:
         cache += f" [round {previous['round']}, {previous.get('provider') or 'provider unknown'}, {previous.get('model') or 'model unknown'}]"
-        written = previous.get("cache_write_tokens")
         cache += f"; write {int(written):,} tokens" if written is not None else "; write unknown"
+        cache += history_change_text(usage.get("_last_prefix_break"), previous["round"])
     parts.append(cache)
     cost = usage.get("cost")
     parts.append((f"own recorded cost ${float(cost):.2f}" + (" (total not final)" if usage.get("cost_final") is False else ""))

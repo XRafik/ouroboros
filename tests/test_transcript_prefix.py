@@ -348,8 +348,8 @@ def _assert_one_sanctioned_rewrite_at_round_three(f, usage):
     breaks = _prefix_breaks(f.events)
     assert [b["kind"] for b in breaks] == ["rewritten"], breaks
     assert breaks[0]["sanctioned_by"] == "compaction" and breaks[0]["round"] == 3, breaks
-    # A sanctioned rewrite is disclosed, never counted as an unexplained break.
-    assert "prompt_prefix_breaks" not in usage
+    # A sanction names the rewrite's origin; it is counted like every change of sent history.
+    assert usage["prompt_prefix_breaks"] == 1
     # The rounds after the compaction extend the compacted transcript again.
     _assert_prefix_chain(f.model_inputs[2:])
 
