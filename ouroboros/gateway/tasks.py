@@ -1390,8 +1390,9 @@ async def api_task_resume(request: Request) -> JSONResponse:
         # a held Continue's observed blockers (#1721): an existing successor, never Not Found
         "predecessor_writers_unsettled", "selection_owner_held",
     } else 404
-    return json_error(error, status, task_id=task_id, **{key: result[key] for key in ("action", "blockers")
-                                                          if result.get(key)})
+    return JSONResponse({"error": error, "task_id": task_id,
+                         **{key: result[key] for key in ("action", "blockers", "message") if result.get(key)}},
+                        status_code=status)
 
 
 # The task-event SSE endpoint and its follower live in gateway/task_events.py

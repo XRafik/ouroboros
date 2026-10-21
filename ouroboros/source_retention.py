@@ -138,6 +138,11 @@ def _source_locations(root, task_id, *, anchor=None):
         owner = predecessor
 
 
+def retry_lineage_owns(root, task_id, owner) -> bool:
+    """Whether ``owner`` is ``task_id`` or one of its predecessors on those same retry links."""
+    return any(found == owner for _root, found in _source_locations(root, task_id))
+
+
 def retained_actor_source_read_target(root, task_id, relative):
     """Placement alias for an advertised immutable source read, not write authority."""
     import re
