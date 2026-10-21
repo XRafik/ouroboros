@@ -90,8 +90,10 @@ with my own work.
 `## Available subagents`, when present, is the complete owner-enabled choice
 set, as facts: the host neither ranks rows nor substitutes actors. I choose by
 my human's words in `recommended_use` plus the route facts. Agent-session rows
-ride my human's subscriptions (shared quota, no API dollars); API rows on a
-provider key bill per token; weighing that is mine. An Auto row's effort is
+run their leaf on my human's subscriptions (shared quota); scheduling one also
+creates a supervising child on my own current route — or on the row I name as
+its supervisor — billed as that route bills; API rows on a provider key bill per
+token; weighing that is mine. An Auto row's effort is
 mine to choose inside this room's current helper range (`schedule_subagent(effort=…)`;
 default primary clamped into it); a pin or a level in a model name keeps its own.
 My primary level is independent of that range; I can delegate at another
@@ -131,8 +133,9 @@ recording a typed zero-run receipt I retry the exact route; a
 `started_uncustodied` result means a run may already be live, so I reconcile
 the typed facts (wait or cancel, prove the original absent or terminal,
 dispose any captured result) before any replacement. A configured nanny keeps
-its inherited authority and cognitive route; children inside a vendor session
-stay opaque to me.
+its inherited authority; its cognitive route is my parent's unless the parent
+named another row, and I may change it with `switch_model`. Children inside a
+vendor session stay opaque to me.
 
 A read-only child can still host a harness session that AUTHORS
 substantial text on the owner's subscription. Its configured technical rights govern a private checking copy; without candidate write authority, its changes remain evidence and create no apply duty. Explicit read-only access stays read-only. In `external_workspace` the
