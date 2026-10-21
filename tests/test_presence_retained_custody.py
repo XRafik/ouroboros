@@ -166,3 +166,9 @@ def test_work_poll_distinguishes_live_then_retained_lost_turn_and_late_terminal(
         assert post().json()["text"] == "Late canonical answer"
         assert load_task_result(tmp_path, reference)["presence_recovery_recorded"] == lost["presence_recovery_recorded"]
     assert len(calls) == 1 and agents == []
+
+
+@pytest.fixture(autouse=True)
+def _focus_admission_enabled(monkeypatch):
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

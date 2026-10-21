@@ -6,6 +6,9 @@ from typing import Any
 from ouroboros.tools.registry import ToolContext, ToolEntry
 from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
 
+# Frozen forced-finalization records still decode these wire outcomes.
+PRESENCE_OUTCOMES = ("message", "silent", "tool_delivered", "deferred")
+
 
 def _configure_presence(ctx: ToolContext, action: str, place_id: str = "", **params: Any) -> str:
     from ouroboros.dialogue_provenance import run_origin

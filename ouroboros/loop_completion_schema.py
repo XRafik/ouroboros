@@ -10,6 +10,10 @@ def completion_schema(tools: Any, schemas: list | None = None) -> str:
     getter = getattr(tools, "get_schema_by_name", None)
     if not callable(getter):
         return name
+    # An already-running pre-upgrade registry can still own its frozen completion
+    # tool. New registries never publish it; new focuses have no ceiling.
+    if (getattr(ctx, "task_contract", {}) or {}).get("capability_ceiling") and getter("presence_finish") is not None:
+        name = "presence_finish"
     schema = getter(name)
     if schema is None:
         return "no currently permitted completion tool"

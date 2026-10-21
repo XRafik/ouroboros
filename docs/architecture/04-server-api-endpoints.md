@@ -96,7 +96,10 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | POST | `/api/owner/context-mode` | |
 | POST | `/api/owner/effort-range` | |
 | POST | `/api/owner/safety-mode` | |
-| POST | `/api/owner/skills/{skill}/presence-runtime` | |
+| GET | `/api/places` | place records and installed connector declarations |
+| POST | `/api/places` | connect a place |
+| POST | `/api/places/{place_id}` | atomic owner-authored choices |
+| DELETE | `/api/places/{place_id}` | disconnect, retaining room history |
 | POST | `/api/owner/capability-ack` | |
 | GET | `/api/ui/contributions` | live skill controls, speech providers, offers |
 | GET | `/api/ui/preferences` | |
@@ -183,7 +186,8 @@ Every path-addressed `/api/files/*` operation resolves its requested `path` and 
 | POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/chat/cancel` | the existing cancellation owner; a typed outcome |
 | POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/chat/decision` | `task_decision.answer_decision` relayed for a transport skill |
 | POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/ui/language` | the same `ui_i18n.choose_language` writer as `/api/ui/i18n/language` |
-| POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/turn` | |
+| GET | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/place` | current place state for an authenticated connector |
+| POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/turn` | capture before attention |
 | POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/delivery` | |
 | GET | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/work/{work_ref}` | |
 | POST | `127.0.0.1:${OUROBOROS_HOST_SERVICE_PORT:-8767}/presence/work/{work_ref}` | retains transport queue observations |
