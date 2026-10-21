@@ -56,6 +56,15 @@ try {
             $driverCode = $LASTEXITCODE
             Write-Output "$driver stop exit=$driverCode; native observer must prove readiness"
         }
+        # A successful control request is not STOPPED. Observe the pending stop,
+        # never restart it or relabel an unavailable listener as a passing test.
+        $until = (Get-Date).AddSeconds(30)
+        do {
+            $observed = Get-CimInstance Win32_SystemDriver -Filter "Name='srvnet'"
+            Write-Output "srvnet observation: $($observed.State) at $((Get-Date).ToUniversalTime().ToString('o'))"
+            if ($observed.State -eq 'Stopped') { break }
+            Start-Sleep -Milliseconds 500
+        } while ((Get-Date) -lt $until)
     }
     Get-Service -Name LanmanServer,LanmanWorkstation | Format-List Name,Status | Out-File "$evidence/services-after.txt"
     & netstat.exe -ano -p tcp > "$evidence/tcp-after.txt"
