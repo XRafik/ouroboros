@@ -806,6 +806,48 @@ def test_the_earlier_verdict_is_the_record_review_json_names_and_no_index_is_cla
     assert legacy["files"] is None and "kept no file index" in legacy["index_missing"] and legacy["record_id"] == ""
 
 
+def test_the_earlier_verdict_survives_waves_that_formed_no_verdict(harness):
+    """opus R2-1: waves that formed no verdict (quorum failed, not dispatched) may sit between two verdicts;
+    the earlier verdict is searched over this skill's rows, never a window of its newest two, so 3A's change
+    focus does not lapse after two of them."""
+    from ouroboros.skill_loader import save_review_state
+    from ouroboros.skill_loader import find_skill
+    from ouroboros.tools import review_skill as subject
+
+    h = harness
+    first = _review(h, reviewers=["t1"], reason="small payload")
+    index = review_ledger.index_path(h.drive)
+    with index.open("a", encoding="utf-8") as handle:
+        for n in range(3):
+            handle.write(json.dumps({"record_id": f"no-verdict-{n}", "surface": "skill", "state": "settled",
+                                     "revision": 0, "ts": f"2026-10-21T23:5{n}:00+00:00",
+                                     "subject": {"skill": "weather"}, "verdict": {"aggregate": "QUORUM_FAILED"}}) + "\n")
+    subject._SKILL_ROWS_MEMO.clear()
+    assert [r["record_id"] for r in subject.settled_skill_records(h.drive, "weather", limit=1)] == [first.record_id]
+    state = _state(h)
+    state.record_id = ""  # the projection names no record: the search over this skill's rows must find it
+    save_review_state(h.drive, "weather", state)
+    earlier = subject.earlier_verdict(h.drive, find_skill(h.drive, "weather", repo_path=""))
+    assert earlier["record_id"] == first.record_id and earlier["files"] is not None
+
+
+def test_the_authors_answer_is_judged_against_the_bytes_never_binding():
+    """opus R2-2: the author's answer to the previous review is evidence the seats judge against the current
+    bytes (the shared rebuttal rule: valid → drop, not valid → keep and say why); neither the checklist the seats
+    receive nor the brief makes the author's own word binding (no review bypass for self-authored skills)."""
+    from ouroboros.tools.review_skill import _change_section, skill_rubric
+
+    rubric = skill_rubric()
+    assert "judge it against the current" in rubric and "binding guidance" not in rubric
+    change = {"hash": "a" * 64, "verdict": "blockers", "same_bytes": True, "added": [], "modified": [], "removed": [],
+              "diffs": {}, "diff_unavailable": "", "index_missing": "", "record_id": "rec-1",
+              "findings": [{"item": "path_confinement", "severity": "critical", "reason": "writes to ~/Documents",
+                            "model": "m"}]}
+    text = _change_section(change)
+    assert "Judge the author's answer against the files" in text and "keep one the files still earn" in text
+    assert "without new evidence" not in text
+
+
 def test_the_change_section_names_what_it_cut_and_where_the_whole_is():
     """astra R1-6: the brief's earlier findings keep a bound, and every cut is named (N more findings not shown;
     reason truncated) with the record that keeps the whole; nothing is said when nothing was cut."""

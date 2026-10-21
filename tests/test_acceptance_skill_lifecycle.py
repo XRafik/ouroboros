@@ -8,6 +8,8 @@ They are facts, never a gate on the execution route.
 
 from __future__ import annotations
 
+import json
+
 import pathlib
 
 from ouroboros.skill_loader import find_skill
@@ -180,17 +182,27 @@ def test_bounded_history_projection_discloses_both_omission_limits(tmp_path):
     }
 
     # An archived segment beside the hot index: older records live where the bounded read never looks — a cut
-    # for a task whose start is unknown or precedes the hot index's oldest row (opus R1-8, subagent 2); a task
-    # that started at or after that row has every row of its own in the hot index, and says so.
+    # for a task whose start is unknown or precedes the index's newest rotation (opus R1-8 / R2-3, subagent 2);
+    # a task that started after that rotation has every row of its own in the hot index, and says so. The
+    # rotation's time is the segment's name: a row carried into the fresh hot index (its record no longer
+    # resolves) can be far older than the rows the rotation archived, so the hot index's first row says nothing.
     (review_ledger.ledger_dir(drive_root) / "index.20260101T000000.jsonl").write_text("", encoding="utf-8")
+    assert review_ledger.newest_rotation_ts(drive_root) == "2026-01-01T00:00:00+00:00"
     history = _skill_names_from_review_history(drive_root, "root-1")
     assert history["names"] == ["visible"] and history["coverage"]["truncated"] is True
     assert history["coverage"]["complete"] is False and history["coverage"]["gap_reasons"] == ["tail_bytes_truncated"]
     before = _skill_names_from_review_history(drive_root, "root-1", task_started_at="2000-01-01T00:00:00+00:00")
     assert before["coverage"]["truncated"] is True and before["coverage"]["complete"] is False
-    oldest = review_ledger.hot_index_oldest_ts(drive_root)
-    assert oldest
-    since = _skill_names_from_review_history(drive_root, "root-1", task_started_at=oldest)
+    since = _skill_names_from_review_history(drive_root, "root-1", task_started_at="2026-01-02T00:00:00+00:00")
     assert since["names"] == ["visible"] and since["coverage"]["truncated"] is False
     assert since["coverage"]["complete"] is True and since["coverage"]["gap_reasons"] == []
+    # A later rotation archived rows of a task that started before it: a cut, whatever the hot head holds —
+    # here an old commit row carried into the fresh hot index ahead of everything (its record no longer resolves).
+    (review_ledger.ledger_dir(drive_root) / "index.20261021T000000.jsonl").write_text("", encoding="utf-8")
+    hot = review_ledger.index_path(drive_root)
+    carried = json.dumps({"record_id": "rl-carried", "surface": "commit_gate", "state": "settled",
+                          "ts": "2025-01-01T00:00:00+00:00", "subject": {}}) + "\n"
+    hot.write_text(carried + hot.read_text(encoding="utf-8"), encoding="utf-8")
+    spanning = _skill_names_from_review_history(drive_root, "root-1", task_started_at="2026-06-01T00:00:00+00:00")
+    assert spanning["coverage"]["truncated"] is True and spanning["coverage"]["complete"] is False
 

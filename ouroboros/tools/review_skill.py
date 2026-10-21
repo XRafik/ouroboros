@@ -228,11 +228,13 @@ def skill_record_rows(drive_root: Any, skill_name: str, *, limit: int = 100) -> 
 
 
 def settled_skill_records(drive_root: Any, skill_name: str, *, limit: int = 20) -> List[Dict[str, Any]]:
-    """This skill's SETTLED records with a verdict (PASS/FAIL), newest first, loaded whole."""
+    """This skill's SETTLED records with a verdict (PASS/FAIL), newest first, loaded whole. Every row of this
+    skill is a candidate (no window: waves that formed no verdict may sit between two verdicts); only a row
+    that names a verdict is loaded."""
     from ouroboros import review_ledger as ledger
 
     out: List[Dict[str, Any]] = []
-    for row in skill_record_rows(drive_root, skill_name, limit=limit * 2):
+    for row in skill_record_rows(drive_root, skill_name, limit=0):
         if row.get("state") != "settled" or str((row.get("verdict") or {}).get("aggregate") or "") not in ("PASS", "FAIL"):
             continue
         try:
@@ -391,8 +393,9 @@ def _change_section(change: Optional[Dict[str, Any]]) -> str:
                      else "the skill's review.json of that verdict")
             lines.append(f"(Cut for size: the full findings are on {where}.)")
         lines.append("")
-        lines.append("A finding the current bytes still earn is reported again; one they no longer earn is not. Do not "
-                     "re-raise what the author answered without new evidence from the files.")
+        lines.append("A finding the current bytes still earn is reported again; one they no longer earn is not. Judge "
+                     "the author's answer against the files: drop a finding it shows is no longer earned, keep one the "
+                     "files still earn and say why the answer does not resolve it.")
     return "\n".join(lines)
 
 

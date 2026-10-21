@@ -74,7 +74,10 @@ export function renderSkillReviewDisclosure(text, ref = null, deps = {}) {
  * explicitly replaces an error entry. Errors stay honest and inline.
  */
 function detailStoreKey(ref) {
-    return `${ref.skill}\u0000${detailId(ref)}`;
+    // The request names the record (detailId), but one cache entry belongs to one lifecycle job: a record is
+    // still open while its wave runs, so a later job that collected it must read it again, not inherit the
+    // earlier job's pending detail.
+    return `${ref.skill}\u0000${ref.jobId}${ref.recordId ? `\u0000${ref.recordId}` : ''}`;
 }
 
 async function responseJson(resp) {

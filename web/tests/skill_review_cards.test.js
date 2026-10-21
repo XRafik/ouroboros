@@ -410,15 +410,21 @@ test('a row without a record id (an earlier version) still asks by job id', asyn
     assert.deepEqual(calls, ['/api/skills/alpha/review-history/skill-job-1']);
 });
 
-test('two rows of one reused record share one detail read whatever their job ids', async () => {
+test('one job reads its record once; a later job of the same record reads it again', async () => {
     const store = new Map();
+    const bodies = ['pending: the review is still running', 'blockers: path_confinement'];
     let fetches = 0;
-    const deps = { store, fetchImpl: async () => { fetches += 1; return okResponse('shared record'); }, render: (m) => m };
-    await loadSkillReviewDetail(makeFull(), { skill: 'alpha', jobId: 'job-first', recordId: 'rec-shared' }, deps);
-    const again = makeFull();
-    assert.equal(await loadSkillReviewDetail(again, { skill: 'alpha', jobId: 'job-reused', recordId: 'rec-shared' }, deps), 'loaded');
+    const deps = { store, fetchImpl: async () => okResponse(bodies[fetches++]), render: (m) => m };
+    const left = makeFull();
+    assert.equal(await loadSkillReviewDetail(left, { skill: 'alpha', jobId: 'job-left', recordId: 'rec-1' }, deps), 'loaded');
+    assert.match(left.innerHTML, /still running/);
+    const sameJob = makeFull();
+    assert.equal(await loadSkillReviewDetail(sameJob, { skill: 'alpha', jobId: 'job-left', recordId: 'rec-1' }, deps), 'loaded');
     assert.equal(fetches, 1);
-    assert.match(again.innerHTML, /shared record/);
+    const collected = makeFull();
+    assert.equal(await loadSkillReviewDetail(collected, { skill: 'alpha', jobId: 'job-collected', recordId: 'rec-1' }, deps), 'loaded');
+    assert.equal(fetches, 2);
+    assert.match(collected.innerHTML, /blockers: path_confinement/);
 });
 
 test('nested attempts and wired bubbles carry the record id into the reference', async () => {

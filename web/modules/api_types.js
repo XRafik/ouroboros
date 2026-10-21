@@ -971,7 +971,7 @@
  * @property {string=} error
  * @property {boolean=} ok  // attest only
  * @property {number=} status_code  // attest refusal only
- * @property {boolean=} pending  // attest only: the job outlasted the answer bound; job_id and message name it
+ * @property {boolean=} pending  // attest: the job outlasted the answer bound; review: the wave is still open (its author left on an addressed message)
  * @property {string=} message  // attest only, with pending
  * @property {string[]=} reviewer_models
  * @property {string=} review_profile
@@ -993,7 +993,11 @@
  * @property {string=} extension_server_reconcile
  * @property {string|null=} extension_load_error
  * @property {boolean|null=} extension_live_loaded
- * @property {*=} convergence_hint
+ * @property {string=} record_id  // the review's ledger record
+ * @property {boolean=} reused  // a settled record of the same subject answered at $0
+ * @property {boolean=} paid
+ * @property {Object[]=} seats
+ * @property {Object=} governance
  * @property {string=} job_id
  * @property {string=} job_status
  * @property {string=} group_id

@@ -874,8 +874,9 @@ If you cannot satisfy all three, use **advisory**, not critical.
 One root cause = one FAIL entry. Do NOT split one underlying problem into
 multiple FAIL items that all require the same change. If the author's answer
 to the previous review (the brief's "The author's answer to the previous review
-of this skill" section) already addresses the same finding, do NOT re-raise it
-without new evidence — that section is binding guidance, not background reading.
+of this skill" section) addresses the same finding, judge it against the current
+bytes: do not re-raise a finding the bytes no longer earn; keep one they still
+earn and say why the answer does not resolve it.
 
 ### Marketplace-installed skill review (ClawHub provenance)
 

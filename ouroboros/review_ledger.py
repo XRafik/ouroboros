@@ -448,13 +448,16 @@ def index_stamp(drive_root: Any) -> tuple:
     return tuple(stamps)
 
 
-def hot_index_oldest_ts(drive_root: Any) -> str:
-    """The ``ts`` of the oldest row the hot index holds ("" when it is empty or unreadable): how far back a
-    bounded hot read reaches, so a reader can say whether an archived segment could hold rows it wanted."""
-    for row in iter_jsonl_objects(index_path(drive_root)):
-        if isinstance(row, dict) and row.get("ts"):
-            return str(row["ts"])
-    return ""
+def newest_rotation_ts(drive_root: Any) -> str:
+    """When the hot index last rotated, read off the newest archived segment's name (``index.<stamp>.jsonl``;
+    a directory listing, no row read) as an ISO timestamp, "" when none: rows written before it may live in
+    an archived segment, rows written after it are all in the hot index."""
+    stamps = [m.group(1) for path in _index_segments(drive_root)
+              if (m := re.fullmatch(r"index\.(\d{8}T\d{6})(?:_\d+)?\.jsonl", path.name))]
+    if not stamps:
+        return ""
+    s = max(stamps)
+    return f"{s[0:4]}-{s[4:6]}-{s[6:8]}T{s[9:11]}:{s[11:13]}:{s[13:15]}+00:00"
 
 
 def _index_rows(drive_root: Any, *, task_id: str = "", surface: str = "", limit: Optional[int] = None,
@@ -1394,7 +1397,7 @@ def coupling_outcome(verdict: dict, rows: list) -> CouplingOutcome:
 __all__ = [
     "ALL_PARTS", "PART_RESULT", "PART_SKILL", "REVIEW_LEDGER_SCHEMA_VERSION", "SINGLE_QUESTION_PARTS", "ReviewLedgerRecord",
     "answer_keys", "apply_severity_policy", "build_commit_gate_record",
-    "hot_index_oldest_ts", "index_stamp", "surface_records",
+    "newest_rotation_ts", "index_stamp", "surface_records",
     "build_rows", "build_wave_record",
     "distinct_model_facts", "find_reusable", "index_path", "index_row", "ledger_dir", "ledger_root", "load_record",
     "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision", "panel_facts", "read_source",
