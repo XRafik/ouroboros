@@ -101,7 +101,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         "persist_queue_snapshot", "restore_invalid_depth_admission", "sort_pending",
     })),
     "supervisor/queue_timeouts.py": ("supervisor/queue.py", "_queue", frozenset({
-        "DRIVE_ROOT", "FINALIZATION_GRACE_SEC", "HEARTBEAT_STALE_SEC", "PENDING",
+        "BUDGET_ROOT_FENCES", "DRIVE_ROOT", "FINALIZATION_GRACE_SEC", "HEARTBEAT_STALE_SEC", "PENDING",
         "QUEUE_MAX_RETRIES", "RUNNING", "_enforce_task_timeouts_locked", "_expire_pending_deadlines_locked",
         "_ensure_reaper_started", "_has_live_descendant", "_has_pending_descendant",
         "_is_descendant_of", "_queue_lock", "_reap_queue",

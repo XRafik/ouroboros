@@ -816,9 +816,15 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # own section-2 row; ``ouroboros/card_store.py`` writes all four).
 # 407 -> 408: ``state/panic_source.json`` is diagnostic latest-source evidence
 # (section 2); causal observations also use the existing ``logs/events.jsonl``.
-# The exact lane base scans 409 paths (the inherited 408 pin missed its place seam).
-# Focus adds the gate directory and its author-census member family, documented in section 2.
-EXPECTED_SCAN_PATHS = 413
+# 408 -> 407 (managed Node/npm): promotion adds immutable .g-* siblings rather than
+# displacing into node/.old-*; metadata reads use _node_roots instead of spelling
+# node/*-*/managed-node.json. Retained generations and legacy roots share section 4's cx row.
+# 407 -> 408: the upstream local evolution export adds task_results/artifacts/*/evolution-*.json.
+# 408 -> 409: ``state/body_adoption/installation_stop.py``, the stdlib Panic reader captured beside
+# the switch helper (body adoption row).
+# 409 -> 414: the place seam (one path the inherited pin missed) plus focus, the gate directory and its
+# author-census member family, documented in section 2.
+EXPECTED_SCAN_PATHS = 414
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
