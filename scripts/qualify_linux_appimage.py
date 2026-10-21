@@ -156,7 +156,11 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     return json.load(response)
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
-                setup = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros — Setup$'), 'Setup', process=process)
+                # xdotool may read the legacy X11 title with a substituted Unicode dash.
+                setup = wait_for(lambda: run('xdotool', 'search', '--onlyvisible', '--name', '^Ouroboros.*Setup$'), 'Setup', process=process)
+                title = run('xprop', '-id', setup.splitlines()[0], '_NET_WM_NAME', 'WM_NAME')
+                (evidence / 'setup-title.txt').write_text(title)
+                assert 'Ouroboros' in title and 'Setup' in title, title
                 # Only add a bridge witness; retain the shipped page and its actual UI.
                 page = state / 'app/repo/web/index.html'
                 original = page.read_text()
