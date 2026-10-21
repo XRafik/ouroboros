@@ -8,6 +8,7 @@ record. The seats are fake and offline (the golden physical seam); no model is e
 from __future__ import annotations
 
 import json
+import pathlib
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -846,6 +847,17 @@ def test_the_authors_answer_is_judged_against_the_bytes_never_binding():
     text = _change_section(change)
     assert "Judge the author's answer against the files" in text and "keep one the files still earn" in text
     assert "without new evidence" not in text
+
+
+def test_every_seat_reads_the_declared_tool_effect_rule_in_the_stable_half():
+    """#2141 (places): the reviewer compares each manifest ``tools:`` effect with its implementation; after the
+    fold that rule rides the brief's stable half (byte-identical across skills and rounds), not a deleted prompt
+    builder."""
+    from ouroboros.tools import review_skill as subject
+
+    assert "Place connectors must declare every tool" in subject._TOOL_EFFECT_RULE
+    source = pathlib.Path(subject.__file__).read_text(encoding="utf-8")
+    assert '"## Checklist (source of truth — follow it literally)", rubric, _TOOL_EFFECT_RULE,' in source
 
 
 def test_the_change_section_names_what_it_cut_and_where_the_whole_is():
