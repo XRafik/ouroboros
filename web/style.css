@@ -570,6 +570,26 @@ html[data-layout="stack"] .resize-handle { display: none; }
 .chat-bubble.project-answer > .system-message-actions,
 .chat-bubble.assistant > .system-message-actions { align-items: center; padding-block: var(--space-2) var(--space-1); }
 .project-answer-limitation { color: var(--text-meta); white-space: normal; overflow-wrap: anywhere; }
+/* A Project ending with no authored answer (project_answer.js paintEnding): the work's name and true outcome, then its
+   cause, recorded details and labelled preserved output, in the System voice at reading size; the Project's name is the
+   reference under it. The same details follow an answer's limitation that names an undescribed code. */
+.chat-bubble.system > .message.project-ending {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.project-ending-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-2); min-width: 0; }
+.project-ending-title { min-width: 0; font-weight: 500; }
+.project-ending-cause, .project-ending-salvage { margin: 0; }
+.project-ending-salvage { color: var(--text-meta); }
+.project-ending-details, .chat-episode-codes { color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); overflow-wrap: anywhere; }
+.project-answer-limitation + .project-ending-details { margin-top: var(--space-1); }
+.project-ending-details > summary { width: fit-content; min-height: var(--touch-target-min); align-content: center; cursor: pointer; }
+.project-ending-details > summary:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: 2px; }
+.project-ending-details > p { margin: var(--space-1) 0 0; }
 /* Main's questions and owner actions (docs/DESIGN.md "Project question mirror"). The waiting
    pill is one of the composer's pills (Swarm / Context / Effort): their row, height and type, at
    the row's end, amber for "waits for you"; a narrow row keeps the glyph and the number. */
