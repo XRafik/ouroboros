@@ -1097,10 +1097,13 @@ def _registry_row(source_id: str, fields: dict) -> str:
     return f"| {source_id} | {path} | {updated} | {gaps} |"
 
 
-def _build_installed_skills_section(env: Any, *, max_lines: int = 100) -> str:
-    try:
+def _build_installed_skills_section(env: Any, *, max_lines: int = 100, skills: Optional[List[Any]] = None) -> str:
+    try:  # ``skills``: the context build's own discovery, so this catalog and its always-on block agree
+        from ouroboros.skill_catalogue import always_in_context_skills, discover_context_skills
         from ouroboros.skill_loader import summarize_skills
-        summary = summarize_skills(pathlib.Path(env.drive_root))
+        skills = discover_context_skills(env.drive_root) if skills is None else skills
+        summary = summarize_skills(pathlib.Path(env.drive_root), skills)
+        always_on = {skill.name for skill in always_in_context_skills(skills)}
     except Exception:
         log.debug("Failed to build installed skills section", exc_info=True)
         return ""
@@ -1118,12 +1121,7 @@ def _build_installed_skills_section(env: Any, *, max_lines: int = 100) -> str:
     ]
     count = 0
     for skill in summary.get("skills") or []:
-        if not isinstance(skill, dict):
-            continue
-        if (
-            not skill.get("enabled")
-            or not bool(skill.get("executable_review"))
-        ):
+        if not isinstance(skill, dict) or not skill.get("enabled") or not skill.get("executable_review"):
             continue
         name = _field(skill.get("name"), 80)
         if not name:
@@ -1133,17 +1131,16 @@ def _build_installed_skills_section(env: Any, *, max_lines: int = 100) -> str:
         review_status = _field(skill.get("review_status"), 40)
         description = _field(skill.get("description"), 260)
         when = _field(skill.get("when_to_use"), 260)
-        surfaces = [
-            _field(item.get("name"), 100)
-            for item in (skill.get("tool_surfaces") or [])
-            if isinstance(item, dict) and item.get("name")
-        ]
+        surfaces = [_field(item.get("name"), 100) for item in (skill.get("tool_surfaces") or [])
+                    if isinstance(item, dict) and item.get("name")]
         meta = f"{kind}{', v' + version if version else ''}{', ' + review_status if review_status else ''}"
         lines.append(f"- {name} ({meta}): {description or 'No description.'}")
         if skill.get("review_gate", {}).get("author_accepted"):
             lines.append("  Current payload accepted by author under Advisory; reviewer evidence remains at its original hash.")
         if when:
             lines.append(f"  Trigger: {when}")
+        if skill.get("name") in always_on:
+            lines.append("  Context: always; its reviewed text is in the Always-in-context skills section.")
         # CPL-7 Model Experience: bounded prose; absent section renders nothing.
         experience = skill.get("model_experience")
         if isinstance(experience, dict):
@@ -1316,6 +1313,10 @@ def _capture_context_core(
     except Exception:
         log.warning("Failed to build the Review block", exc_info=True)
     semi_stable_parts.extend(build_memory_sections(context_memory, partition="stable"))
+    from ouroboros.skill_catalogue import always_in_context_section, discover_context_skills
+    skills = discover_context_skills(canonical_root)  # one view: the always-on block here, the catalog below
+    if always_on := always_in_context_section(skills):
+        semi_stable_parts.append(always_on)
     # Knowledge leads the changing block (its edits never cost the cached story) and
     # rides only where the view holds it: a child or nanny reads it by knowledge_read.
     head_parts = (build_knowledge_sections(context_env, project_id=resolve_project_id(task),
@@ -1352,7 +1353,7 @@ def _capture_context_core(
     registry_digest = _build_registry_digest(context_env)
     if registry_digest:
         dynamic_parts.append(registry_digest)
-    installed_skills = _build_installed_skills_section(context_env)
+    installed_skills = _build_installed_skills_section(context_env, skills=skills)
     if installed_skills:
         dynamic_parts.append(installed_skills)
     dynamic_parts.extend([
