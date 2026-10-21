@@ -204,6 +204,56 @@ def test_a_failed_marks_read_is_one_dated_fact(replay, monkeypatch):
     assert status["profiles"]["routing_evidence_read"]["state"] == "failed"
 
 
+def test_an_unreadable_operation_catalog_is_not_a_failed_marks_read(monkeypatch, tmp_path):
+    from ouroboros import claudexor_daemon as owned
+    from ouroboros.gateway.claudexor_accounts import _status_payload
+
+    asked = []
+
+    class Gateway:
+        engine_version = "4.5.0"
+
+        def __init__(self, _endpoint):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def handshake(self, **_kw):
+            return {}
+
+        def operations(self):
+            raise wire.ClaudexorUnavailable("internal", "catalog unreadable")
+
+        def agent_capabilities(self):
+            return {"harnesses": []}
+
+        def harnesses(self):
+            return []
+
+        def credential_profiles(self):
+            return {"profiles": [], "harnessAccounts": []}
+
+        def quota_snapshots(self):
+            return []
+
+        def _request(self, _method, path, **_kw):
+            asked.append(path)
+            return {"capabilities": []}
+
+    monkeypatch.setattr(owned, "get_owned_daemon", lambda: SimpleNamespace(status_dict=lambda: {"state": "running"}))
+    monkeypatch.setattr(owned, "owned_config_dir", lambda: tmp_path / "cfg")
+    monkeypatch.setattr(wire, "discover_daemon_at", lambda _path: object())
+    monkeypatch.setattr(wire, "ClaudexorGateway", Gateway)
+    payload = _status_payload(include_models=False)
+    # The catalog's own failure is resource_capabilities_read; marks were never asked.
+    assert payload["resource_capabilities_read"] == "failed"
+    assert "routing_evidence_read" not in payload["profiles"] and not asked
+
+
 def test_marks_ride_a_successful_account_read(replay, monkeypatch):
     f = replay("both")
     with pytest.raises(transport.ClaudexorModelError):

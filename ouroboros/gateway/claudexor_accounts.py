@@ -390,11 +390,15 @@ def _read_status_payload(include_models: bool) -> Dict[str, Any]:
                 from ouroboros.gateways.claudexor_routing import capability_marks_supported, read_capability_marks
                 from ouroboros.utils import utc_now_iso
 
-                # Optional and passive: an engine that does not advertise the rows is
+                # Optional and passive: an engine that does not advertise the rows (or
+                # whose catalog is unreadable: resource_capabilities_read owns that) is
                 # not asked, and a failed read is one dated fact, never "no marks".
                 try:
                     if not capability_marks_supported(operations_call.result()):
                         return None
+                except Exception:
+                    return None
+                try:
                     return {"evidence": read_capability_marks(gateway)}
                 except Exception:
                     return {"failed_at": utc_now_iso()}
