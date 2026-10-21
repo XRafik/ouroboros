@@ -140,7 +140,7 @@ def work_kind(metadata: Any) -> str:
     stamped = str(source.get("work_kind") or "").strip()
     if stamped in WORK_KINDS:
         return stamped
-    if is_consciousness_origin(source) or any(source.get(key) for key in (
+    if is_consciousness_origin(source) or any(key in source for key in (
         "presence", "presence_binding_authority", "presence_root_carrier",
     )):
         return WORK_KIND_CONSCIOUSNESS
@@ -180,6 +180,14 @@ def consciousness_origin_metadata(parent_metadata: Any, *, started_root: bool = 
         "usage_category": CONSCIOUSNESS_TASK_CATEGORY,
         "consciousness_autonomy": normalize_level(source.get("consciousness_autonomy")),
     }
+
+
+def stamp_manifest_schedule(previous: Mapping[str, Any], current: Dict[str, Any]) -> None:
+    """A published skill authors changed schedule content; readiness resync does not."""
+    authored = ("task", "trigger", "timezone", "name", "description", "skill_content_hash")
+    if "writer_kind" not in previous or any(previous.get(k) != current.get(k) for k in authored):
+        current.update(writer_kind=WORK_KIND_CONSCIOUSNESS,
+                       writer_origin={"work_kind": WORK_KIND_CONSCIOUSNESS, "consciousness_cause": "started"})
 
 
 def stamp_scheduled_work(task: Dict[str, Any], record: Mapping[str, Any], raw_metadata: Mapping[str, Any]) -> None:

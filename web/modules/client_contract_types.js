@@ -865,3 +865,8 @@
  * @typedef {Object} OwnerSafetyModelRequest
  * @property {Object} settings
  */
+
+/**
+ * @typedef {Object} OwnerSafetyModelResponse
+ * @property {boolean} ok
+ */

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import pathlib
 import tempfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -283,7 +284,7 @@ def test_llm_unparseable_response_blocks(monkeypatch):
     ok, msg = check_safety("create_github_issue", {"title": "x"})
 
     assert ok is False
-    assert "SAFETY_VIOLATION" in msg
+    assert "SAFETY_UNAVAILABLE" in msg
     assert "repair retry" in msg
     assert len(stub.calls) == 2
 
@@ -343,7 +344,7 @@ def test_llm_api_failure_blocks(monkeypatch):
     ok, msg = check_safety("create_github_issue", {"title": "x"})
 
     assert ok is False
-    assert "SAFETY_VIOLATION" in msg
+    assert "SAFETY_UNAVAILABLE" in msg
     assert "network down" in msg
 
 
@@ -680,7 +681,7 @@ def test_unknown_tool_with_no_safety_backend_fails_open_with_warning(monkeypatch
     stub = _StubLLMClient('{"status":"DANGEROUS","reason":"should not be called"}')
     _patch_llm_client(monkeypatch, stub)
 
-    ok, msg = check_safety("totally_new_tool_misconfigured", {"arg": 1})
+    ok, msg = check_safety("totally_new_tool_misconfigured", {"arg": 1}, ctx=SimpleNamespace(task_metadata={"work_kind": "owner"}))
     assert ok is True
     assert "SAFETY_WARNING" in msg
     assert "not configured" in msg
@@ -714,7 +715,7 @@ def test_openrouter_only_with_direct_provider_light_model_fails_open(monkeypatch
     stub = _StubLLMClient('{"status":"DANGEROUS","reason":"should not reach here"}')
     _patch_llm_client(monkeypatch, stub)
 
-    ok, msg = check_safety("totally_new_tool_mismatch", {"arg": 1})
+    ok, msg = check_safety("totally_new_tool_mismatch", {"arg": 1}, ctx=SimpleNamespace(task_metadata={"work_kind": "owner"}))
     assert ok is True
     assert "SAFETY_WARNING" in msg
     assert "provider key missing" in msg or "not configured" in msg
@@ -750,7 +751,7 @@ def test_mixed_remote_local_provider_mismatch_local_failure_fails_open(monkeypat
     stub = _StubLLMClient("unused", raise_exc=RuntimeError("local server down"))
     _patch_llm_client(monkeypatch, stub)
 
-    ok, msg = check_safety("totally_new_tool_mixed_config", {"arg": 1})
+    ok, msg = check_safety("totally_new_tool_mixed_config", {"arg": 1}, ctx=SimpleNamespace(task_metadata={"work_kind": "owner"}))
     assert ok is True
     assert "SAFETY_WARNING" in msg
     assert "Local safety runtime unreachable" in msg
@@ -779,7 +780,7 @@ def test_explicit_local_light_failure_still_blocks(monkeypatch):
 
     ok, msg = check_safety("some_tool", {"arg": 1})
     assert ok is False
-    assert "SAFETY_VIOLATION" in msg
+    assert "SAFETY_UNAVAILABLE" in msg
 
 
 def test_local_fallback_runtime_error_fails_open_with_warning(monkeypatch):
@@ -805,7 +806,7 @@ def test_local_fallback_runtime_error_fails_open_with_warning(monkeypatch):
     stub = _StubLLMClient("unused", raise_exc=RuntimeError("local server down"))
     _patch_llm_client(monkeypatch, stub)
 
-    ok, msg = check_safety("totally_new_tool_local_down", {"arg": 1})
+    ok, msg = check_safety("totally_new_tool_local_down", {"arg": 1}, ctx=SimpleNamespace(task_metadata={"work_kind": "owner"}))
     assert ok is True
     assert "SAFETY_WARNING" in msg
     assert "Local safety runtime unreachable" in msg

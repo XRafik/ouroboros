@@ -46,3 +46,20 @@ def test_explicit_new_key_is_not_overwritten_and_is_disk_authored(install, monke
     monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     assert cfg.load_settings()["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] == "full"
     assert not (cfg.DATA_DIR / "logs/events.jsonl").exists()
+
+
+def test_fresh_desktop_second_start_keeps_consciousness_full(install):
+    cfg = install
+    cfg.save_settings({"OUROBOROS_SAFETY_MODE": "light"}, onboarding_safety_default=True)
+    for _ in range(2):
+        settings = cfg.load_settings()
+        assert settings["OUROBOROS_SAFETY_MODE"] == "light"
+        assert settings["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] == "full"
+    assert not (cfg.DATA_DIR / "logs/events.jsonl").exists()
+
+
+def test_fresh_web_generic_defaults_end_full_full(install):
+    cfg = install
+    cfg.save_settings({"OUROBOROS_SAFETY_MODE": "full", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full"})
+    settings = cfg.load_settings()
+    assert settings["OUROBOROS_SAFETY_MODE"] == settings["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] == "full"

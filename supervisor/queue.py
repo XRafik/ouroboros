@@ -292,7 +292,7 @@ def enqueue_task(
     t = dict(task)
     from ouroboros.consciousness_authority import work_kind
     metadata = dict(t.get("metadata") or {})
-    metadata["work_kind"] = work_kind(metadata)
+    metadata["work_kind"] = work_kind({"origin_message_ref": t.get("origin_message_ref"), **metadata})
     t["metadata"] = metadata
     if not restoring_snapshot:
         t.pop("_project_scope_none", None)  # Only this host admission can attest absence.

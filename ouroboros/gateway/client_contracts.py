@@ -296,6 +296,10 @@ class OwnerSafetyModelRequest(TypedDict):
     settings: Dict[str, Any]
 
 
+class OwnerSafetyModelResponse(TypedDict):
+    ok: bool
+
+
 class OwnerEnabledRequest(TypedDict):
     """``{enabled}`` as a JSON boolean: ``POST /api/owner/auto-grant``, ``/api/desktop/autostart``,
     ``/api/desktop/background`` and ``PATCH /api/claudexor/credential-profiles/...``. Send only this
@@ -557,7 +561,7 @@ __all__ = [
     "SettingsReadResponse", "SettingsWriteRefusal",
     "AuthLoginRequest", "AuthLoginResponse",
     "ContractBody", "ContractHttpEntry", "ContractWsEntry", "ContractWs", "GatewayContractResponse",
-    "OwnerRuntimeModeRequest", "OwnerContextModeRequest", "OwnerEffortRangeRequest", "OwnerSafetyModeRequest", "OwnerSafetyRulesRequest", "OwnerSafetyRulesResponse", "OwnerSafetyModelRequest", "OwnerEnabledRequest",
+    "OwnerRuntimeModeRequest", "OwnerContextModeRequest", "OwnerEffortRangeRequest", "OwnerSafetyModeRequest", "OwnerSafetyRulesRequest", "OwnerSafetyRulesResponse", "OwnerSafetyModelRequest", "OwnerSafetyModelResponse", "OwnerEnabledRequest",
     "SettingsSecretRequest", "SettingsSecretResponse", "ChatUploadDeleteRequest", "ChatUploadDeleteResponse",
     "ProjectListResponse", "ProjectCreateResponse", "ProjectUpdateRequest", "ProjectUpdateResponse",
     "ProjectFromTaskRequest", "ProjectTaskBinding", "ProjectFromTaskResponse",

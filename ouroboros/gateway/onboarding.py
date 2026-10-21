@@ -800,8 +800,7 @@ def _persist(request: Request, old_settings: Dict[str, Any], current: Dict[str, 
         _start_supervisor_if_needed_for_request,
     )
 
-    to_save = dict(current)
-    to_save["OUROBOROS_RUNTIME_MODE"] = pending_mode
+    to_save = {**current, "OUROBOROS_RUNTIME_MODE": pending_mode}
     authored = ("OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE")
     # Under the seam-wide document lock: the fingerprint precondition protects
     # THIS write from a stale merge, but not a generic save whose (locked)
@@ -871,8 +870,6 @@ async def api_onboarding_complete(request: Request) -> JSONResponse:
     subscriptions_connected, skip_presets = parse_subscription_intent(body)
     eligible = preset_eligible(old_settings)
     safety_light = _fresh_settings_file()
-    if not old_settings.get("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"):
-        current["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] = "full"
     if safety_light:
         current["OUROBOROS_CONSCIOUSNESS_SAFETY_MODE"] = "full"
         # Rev.3-2 desktop-wizard parity: a genuinely FRESH install authors the new-install ``light``

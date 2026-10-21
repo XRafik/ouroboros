@@ -55,3 +55,25 @@ def test_schedule_lifecycle_edit_changes_writer(q):
                                   writer_kind="owner")
     [stored] = q.queue.list_scheduled_tasks(q.root)["tasks"]
     assert stored["writer_kind"] == "owner"
+
+
+def test_manifest_edit_replaces_writer_but_readiness_does_not():
+    from ouroboros.consciousness_authority import stamp_manifest_schedule
+    previous = {"writer_kind": "owner", "task": {"text": "old"}, "skill_content_hash": "one"}
+    resync = {**previous, "enabled": False}
+    stamp_manifest_schedule(previous, resync)
+    assert resync["writer_kind"] == "owner"
+    changed = {**previous, "skill_content_hash": "two"}
+    stamp_manifest_schedule(previous, changed)
+    assert changed["writer_kind"] == "consciousness"
+
+
+def test_legacy_owner_origin_at_admission_is_positive_provenance(q):
+    for task_id, origin, metadata, expected in [
+        ("owner", {"message_id": "owner-message"}, {}, "owner"),
+        ("unknown", None, {}, "consciousness"),
+        ("presence", {"message_id": "owner-message"}, {"presence": {}}, "consciousness"),
+    ]:
+        task = q.queue.enqueue_task({"id": task_id, "type": "task", "text": "work",
+                                    "origin_message_ref": origin, "metadata": metadata}, restoring_snapshot=True)
+        assert task["metadata"]["work_kind"] == expected

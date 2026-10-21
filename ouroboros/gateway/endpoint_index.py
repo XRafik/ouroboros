@@ -264,7 +264,7 @@ HTTP_SHAPES: dict[str, Shape] = {
     "POST /api/owner/effort-range": Shape(f"200:OwnerEffortRangeResponse {_SETTINGS_REFUSAL} 404:SettingsWriteRefusal", "OwnerEffortRangeRequest",
                                           note="helper min <= max; primary independent; optional project_id, otherwise Main"),
     "POST /api/owner/safety-rules": Shape(f"200:OwnerSafetyRulesResponse {_SETTINGS_REFUSAL}", "OwnerSafetyRulesRequest"),
-    "POST /api/owner/safety-model": Shape(f"200:OkResponse {_SETTINGS_REFUSAL}", "OwnerSafetyModelRequest"),
+    "POST /api/owner/safety-model": Shape(f"200:OwnerSafetyModelResponse {_SETTINGS_REFUSAL}", "OwnerSafetyModelRequest"),
     "POST /api/owner/safety-mode": Shape(f"200:OwnerSafetyModeResponse {_SETTINGS_REFUSAL}", "OwnerSafetyModeRequest"),
     "POST /api/owner/capability-ack": Shape(
         "200:ResponseLimitAckResponse|ContextWindowAckResponse 400:ErrorResponse", "CapabilityAckRequest",

@@ -211,10 +211,6 @@ def _build_policy_state(settings: Dict[str, Any]) -> dict:
             "applies": "next_task",
             "active_task_snapshot": running_task_snapshot,
         },
-        "supervisor_consciousness": {
-            "configured": _config.normalize_safety_mode(settings.get("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE")),
-            "effective": _config.get_safety_mode("consciousness"), "applies": "next_task",
-        },
         "running_task_snapshot": running_task_snapshot,
     }
 

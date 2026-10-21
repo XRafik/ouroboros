@@ -27,7 +27,7 @@ def audit_safety_change(request: Request, before: dict, after: dict) -> None:
     if safety_configuration(before) != safety_configuration(after):
         keys = SAFETY_MODEL_KEYS | {"OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "OUROBOROS_SAFETY_OWNER_RULES"}
         _owner_audit(request, "safety_settings", {"runtime_mode": get_runtime_mode(),
-                    "changed_keys": sorted(k for k in keys if before.get(k) != after.get(k))})
+                    "changed_settings": sorted(k for k in keys if before.get(k) != after.get(k))})
 
 
 async def _write(request: Request, writer: Any) -> JSONResponse:
@@ -53,8 +53,8 @@ def _api_owner_safety_mode_sync(request: Request, body: Any) -> JSONResponse:
     if mode not in config.VALID_SAFETY_MODES:
         return unsaved_error("'mode' must be one of: full, light, off", 400)
     key = "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE" if kind == "consciousness" else "OUROBOROS_SAFETY_MODE"
-    previous = _persist(request, {key: mode}, "safety_mode", {"kind": kind, "safety_mode": mode})
-    return JSONResponse({"ok": True, "safety_mode": mode}) if previous is not None else unsaved_error("Save failed", 503)
+    _persist(request, {key: mode}, "safety_mode", {"kind": kind, "safety_mode": mode})
+    return JSONResponse({"ok": True, "safety_mode": mode})
 
 
 @owner_write_guard
@@ -84,12 +84,17 @@ def _api_owner_safety_model_sync(request: Request, body: Any) -> JSONResponse:
 
     settings = dict(settings)
     try:
+        for key, value in settings.items():
+            if key in {"OUROBOROS_MODEL", "OUROBOROS_MODEL_LIGHT", "OUROBOROS_MODEL_SAFETY"} and not isinstance(value, str):
+                raise ValueError(f"{key} must be a model string")
+            if key.startswith("USE_LOCAL_") and not isinstance(value, bool):
+                raise ValueError(f"{key} must be a boolean")
         if "OUROBOROS_SUBAGENTS" in settings:
             settings["OUROBOROS_SUBAGENTS"] = normalize_configured_subagents(settings["OUROBOROS_SUBAGENTS"])[1]
         safety_configuration(settings)
     except (TypeError, ValueError) as exc:
         return unsaved_error(str(exc), 400)
-    _persist(request, settings, "safety_model", {"changed_keys": sorted(settings)})
+    _persist(request, settings, "safety_model", {"changed_settings": sorted(settings)})
     return JSONResponse({"ok": True})
 
 
