@@ -378,7 +378,10 @@ def _retired_github_method_refusal(ctx: Any, name: str, args: Any) -> str:
     """The refusal for a successor method a retired, disabled GitHub tool name covered; '' to allow."""
     if name not in ("github_read", "github_write"):
         return ""
-    args = args if isinstance(args, dict) else {}
+    from ouroboros.tools.github import _canonical_github_args
+
+    # Mutate the invocation's arguments so dispatch consumes exactly the values admitted here.
+    args = _canonical_github_args(args if isinstance(args, dict) else {})
     disabled = _disabled_tools(ctx)
     method = str(args.get("method") or "")
     for retired, (successor, rows) in _RETIRED_GITHUB_TOOLS.items():

@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlencode
 
 from ouroboros.tool_capabilities import tool_result_limit
-from ouroboros.tools.github import _gh_api, _gh_graphql, _gh_run, _graphql_operations, _no_launch_yet, _refuse, _split_repo, github_token_from_env_or_settings
+from ouroboros.tools.github import _canonical_github_args, _gh_api, _gh_graphql, _gh_run, _graphql_operations, _no_launch_yet, _refuse, _split_repo, github_token_from_env_or_settings
 from ouroboros.tools.registry import ToolContext
 
 METHODS = ("whoami", "get", "list", "search", "checks", "api")
@@ -790,7 +790,8 @@ def run_read(ctx: ToolContext, method: str = "", repo: str = "", **args: Any) ->
     """Dispatch one ``github_read`` call; the registry has already refused unknown arguments."""
     if not isinstance(repo, str):
         return _refuse(ctx, "⚠️ GH_TARGET_INVALID: repo must be a string; omit it to use the selected Project.", no_effect=_no_launch_yet())
-    method = str(method or "").strip()
+    args = _canonical_github_args({"method": method, **args})
+    method = args.pop("method")
     if method not in METHODS:
         return _refuse(ctx, f"⚠️ TOOL_ARG_ERROR: method must be one of {', '.join(METHODS)}.", no_effect=_no_launch_yet())
     read = _Read(ctx, method, repo, **args)

@@ -34,6 +34,14 @@ _GENERIC_TRANSPORT = object()
 _SUBMITTED: ContextVar[Optional[List[bool]]] = ContextVar("github_invocation_submitted", default=None)
 
 
+def _canonical_github_args(args: dict) -> dict:
+    """Canonical constrained values, shared by compatibility admission and direct dispatch."""
+    for key in ("method", "kind", "state"):
+        if key in args:
+            args[key] = str(args[key] or "").strip()
+    return args
+
+
 def _one_invocation(handler):
     """Scope ``_gh_run``'s first-submission fact to one public tool invocation."""
     @wraps(handler)

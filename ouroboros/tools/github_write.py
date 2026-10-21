@@ -15,7 +15,7 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from ouroboros.tools.github import GhResult, _gh_api, _gh_graphql, _graphql_operations, _no_launch_yet, _refuse, _split_repo
+from ouroboros.tools.github import GhResult, _canonical_github_args, _gh_api, _gh_graphql, _graphql_operations, _no_launch_yet, _refuse, _split_repo
 from ouroboros.tools.github_read import _repo_of
 from ouroboros.tools.registry import ToolContext
 from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
@@ -487,7 +487,8 @@ def run_write(ctx: ToolContext, method: str = "", repo: str = "", **args: Any) -
     """Dispatch one ``github_write`` call; the registry has already refused unknown arguments."""
     if not isinstance(repo, str):
         return _refuse(ctx, "⚠️ GH_TARGET_INVALID: repo must be a string; omit it to use the selected Project.", no_effect=_no_launch_yet())
-    method = str(method or "").strip()
+    args = _canonical_github_args({"method": method, **args})
+    method = args.pop("method")
     if method not in METHODS:
         return _refuse(ctx, f"⚠️ TOOL_ARG_ERROR: method must be one of {', '.join(METHODS)}.", no_effect=_no_launch_yet())
     write = _Write(ctx, method, repo, **args)

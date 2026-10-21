@@ -61,6 +61,34 @@ def _receipt(text):
     return line, json.loads(body)
 
 
+@pytest.mark.parametrize("retired,tool,blocked,allowed", [
+    ("comment_on_issue", "github_write", {"method": " comment ", "target": 7, "body": "x"},
+     {"method": " update ", "target": 7, "title": "New"}),
+    ("close_github_issue", "github_write", {"method": " update ", "target": 7, "state": " closed "},
+     {"method": " update ", "target": 7, "state": " open "}),
+    ("list_github_issues", "github_read", {"method": " list ", "kind": " issue "},
+     {"method": " list ", "kind": " label "}),
+])
+def test_registry_admission_and_dispatch_share_canonical_arguments(gh, monkeypatch, retired, tool, blocked, allowed):
+    from ouroboros.tools.registry import ToolRegistry
+
+    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
+    gh.ctx.task_metadata["task_contract"] = {"disabled_tools": [retired]}
+    registry = ToolRegistry(repo_dir=gh.ctx.repo_dir, drive_root=gh.ctx.drive_root)
+    registry.set_context(gh.ctx)
+    gh.answer = lambda p, argv, kw: "[]" if "/labels?" in p.route else json.dumps(_issue(7, title="New", state="open"))
+
+    refused = registry.execute(tool, blocked)
+    assert refused.startswith("⚠️ RESOURCE_CONSTRAINT_BLOCKED") and retired in refused
+    assert not gh.calls
+    admitted = registry.execute(tool, allowed)
+    assert admitted.startswith(tool + " "), admitted
+    assert len(gh.calls) == 1
+    if tool == "github_write":
+        assert gh.sent()[0][2] == ({"state": "open"} if "state" in allowed else {"title": "New"})
+
+
 # ---- comment -----------------------------------------------------------------------------------------
 def test_comment_on_an_issue_returns_the_shared_receipt_from_githubs_answer(gh):
     gh.answer = lambda p, argv, kw: json.dumps(_comment(501, body="hello", user={"login": "ouroboros-agent", "type": "User"}))
