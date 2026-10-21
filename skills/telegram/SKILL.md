@@ -1,7 +1,7 @@
 ---
 name: telegram
 description: Owner-only Telegram text bridge and Mini App gateway for the existing Ouroboros interface.
-version: 1.3.5
+version: 1.3.6
 type: extension
 entry: plugin.py
 plugin_api: "2.0"
@@ -67,6 +67,8 @@ reference their work, not an authored answer shown only in Main.
 Version 1.3.3 gives a finished root task's notice the task card's cost words for
 its whole tree: `$3.42` when final, `up to $3.42` while costs may still arrive,
 `Tracked:` when some step has no price; an unknown cost adds nothing.
+Version 1.3.6 sends Wrap up's saved-work receipt, which the host types as a terminal
+receipt, even with progress mirroring off; other card rows still follow that toggle.
 
 Version 1.2.1 marks questions that wait for an owner answer and clears the
 waiting line after an answer submitted through Telegram.

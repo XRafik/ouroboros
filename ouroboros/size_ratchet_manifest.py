@@ -141,6 +141,7 @@ BAND_PATHS = {
     "ouroboros/observability.py": "Owns forensic call and blob storage, exact-version readers and result-reference custody; graph traversal is independently owned by source_retention.",
     "ouroboros/owner_mailbox.py": "Entered the band at 1,004 lines when the place-event mail kind (one delivery per message id under the mail lock, a context-only prefix) met the paused-author card-press handling; the provenance prefix chain is the split candidate on the next structural touch.",
     "ouroboros/owner_pause.py": "The existing launch-admission owner keeps ordinary tool and delegated-start claims under the same Pause boundary, with positive pre-effect contention retried outside its holds and no replay of handed work.",
+    "ouroboros/owner_stop_receipt.py": "Wrap up's receipt owner keeps captured membership, truthful merges and the on-demand material view together; no new lifecycle authority or cap-driven helper split.",
     "ouroboros/owner_wait.py": "The existing native continuation owner keeps checkpoint, warm wait and restart handoff together; the published planning/review integration re-entered the band without recording this unchanged module.",
     "ouroboros/preflight_runner.py": None,
     "ouroboros/presence_runner.py": "Presence turn admission, durable retry identity and transport custody remain one owner; separating them now would duplicate the gate and receipt seam.",
