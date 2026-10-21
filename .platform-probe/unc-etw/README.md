@@ -60,8 +60,9 @@ runner recipe does not publish or dispatch anything.
 
 The sequence is:
 
-1. On a fresh numeric `127.x.y.z`, keep an ephemeral socket bound but **not**
-   listening. Require `WSAECONNREFUSED` and an attributable ETW Send, Connect,
+1. On a fresh numeric `127.x.y.z`, select an ephemeral port and release its
+   socket before connecting (the first native bound/nonlistener control returned
+   WSAEWOULDBLOCK, not a proven refusal). Require `WSAECONNREFUSED` and an attributable ETW Send, Connect,
    Retransmit, or Reconnect event for that port. Also require visible plain TCP
    controls to both 445 and 139. A Disconnect event alone cannot calibrate an
    attempt. Successful heartbeat traffic cannot satisfy the refused-port gate.

@@ -278,6 +278,10 @@ def run(args):
     tcp_target = fresh_target(used)
     with bound_socket(tcp_target, False) as guard:
         port = guard.getsockname()[1]
+        # A bound-but-not-listening Windows socket can leave SYNs pending instead
+        # of refusing them (native r1: WSAEWOULDBLOCK). Release the selected port;
+        # a concurrent listener would produce a non-10061 result and INCOMPLETE.
+        guard.close()
 
         def refuse():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
