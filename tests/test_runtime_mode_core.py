@@ -513,7 +513,9 @@ def test_api_settings_post_silently_drops_runtime_mode_changes(monkeypatch):
 
 
 def _registry(tmp_path):
-    return ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
+    registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
+    registry._ctx.task_metadata = {"work_kind": "owner"}
+    return registry
 
 
 class _CommitCtx:

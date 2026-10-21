@@ -550,7 +550,8 @@ def _needs_checker(ctx):
 
 def _hold(ctx, tool_name, reason, *, status="UNAVAILABLE"):
     _emit_durable_safety_event(ctx, {"type": "safety_hold", "tool": tool_name, "reason": reason, "hold": status})
-    return _Assessment(False, f"⚠️ SAFETY_{status}: {reason}. This call was not checked. Retry when review is available.", status=status)
+    marker = "SAFETY_SUBJECT_TOO_LARGE_BLOCKED" if status == "TOO_LARGE" else "SAFETY_UNAVAILABLE"
+    return _Assessment(False, f"⚠️ {marker}: {reason}. This call was not checked. Retry when review is available.", status=status)
 
 
 def _build_check_prompt(tool_name, arguments, messages=None, *, args_json=None, ctx=None, resolved_binding=None):
@@ -1322,7 +1323,8 @@ def check_safety(
         assessment = _run_llm_check(tool_name, arguments, messages, ctx, resolved_binding)
     except Exception as exc:
         from ouroboros.llm_claudexor import propagate_model_error
-        propagate_model_error(exc)
+        from ouroboros.model_wait import propagate_model_control
+        (propagate_model_control if cyber else propagate_model_error)(exc)
         assessment = _hold(ctx, tool_name, sanitize_tool_result_for_log(f"{type(exc).__name__}: {exc}"))
     allowed, message = assessment
     verdicts = getattr(assessment, "verdicts", ())
