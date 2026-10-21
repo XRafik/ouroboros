@@ -121,7 +121,8 @@ def test_observe_delegated_session_stays_readonly_when_access_is_omitted(tmp_pat
 
 def test_schedule_control_is_root_authority_but_reading_is_not(tmp_path):
     """A delegated task may LIST; only the root turn may change a schedule."""
-    child = _registry(tmp_path, {"delegation_role": "subagent"})
+    # The child of an owner task: the Supervisor does not hold it, so the refusal is the schedule tool's own.
+    child = _registry(tmp_path, {"delegation_role": "subagent", "work_kind": "owner"})
     listed = child.execute_result("manage_schedules", {"action": "list"})
     assert listed.status == "ok" and json.loads(listed.text)["tasks"] == []
     for action in ("disable", "delete", "restore"):
