@@ -1382,7 +1382,10 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
         // final (with its own end time) arrives as a message.
         toolCalls, ...cost, record.finished ? '' : clockLabel(record),
     ].filter(Boolean).map((item) => `<span class="chat-live-meta-text">${escapeHtml(item)}</span>`)) : metaLineHtml([
-        executorIdentityMarkup(record.executorChip, { agentModel: compactModel(agentModel) }),
+        executorIdentityMarkup(record.executorChip, {
+            agentModel: compactModel(agentModel),
+            coordinatorProvenance: record?.coordinatorProvenance || record?.executorChip?.coordinatorProvenance || '',
+        }),
         effortChipMarkup(record.effort),
         ...[
             record.initiator === 'consciousness' ? 'Consciousness' : '',

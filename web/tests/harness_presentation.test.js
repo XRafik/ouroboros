@@ -342,4 +342,24 @@ test('#516 the card meta line separates its parts with real text, not a CSS gap'
     const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
     const chipRule = css.slice(css.indexOf('.chat-live-executor-chip {'), css.indexOf('.chat-live-executor-chip {') + 400);
     assert.doesNotMatch(chipRule, /margin-right/);
+
+    // S2: Coordinator provenance from the recorded snapshot (inherited / chosen by the delegator (<row>) / parent's fallback).
+    assert.match(
+        executorIdentityMarkup(chip, { agentModel: 'sonnet', coordinatorProvenance: 'inherited' }),
+        /Coordinator: sonnet \(inherited\)/,
+    );
+    assert.match(
+        executorIdentityMarkup(chip, {
+            agentModel: 'sonnet',
+            snapshot: { parent_cognitive_route: { model: 'sonnet', chosen_by: 'delegator', supervisor_subagent_id: 'claude=sonnet' } },
+        }),
+        /Coordinator: sonnet \(chosen by the delegator \(claude=sonnet\)\)/,
+    );
+    assert.match(
+        executorIdentityMarkup(chip, {
+            agentModel: 'sonnet',
+            snapshot: { parent_cognitive_route: { model: 'sonnet', source_role: 'fallback' } },
+        }),
+        /Coordinator: sonnet \(parent&#39;s fallback\)/,
+    );
 });
