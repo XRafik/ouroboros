@@ -234,3 +234,26 @@ def test_partial_migration_preserves_successes_failures_and_source_bytes(tmp_pat
         assert owner.get('/api/places').json()['migration_problems'] == problems
     new = places.connect_place(tmp_path, connector='bridge', provider='chat', conversation_id='missing')
     assert new in places.load_places(tmp_path)
+
+
+def test_author_lifetime_closes_its_handle_before_removing_the_file(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+    from ouroboros.conversation_lease import PresenceTurnGate, live_authors
+    lease = PresenceTurnGate(state_root=tmp_path/'state').acquire('room')
+    lease.bind_author('author')
+    path, fd = lease._live_path, lease._live_fd
+    unlink = Path.unlink
+    def windows_unlink(candidate, *args, **kwargs):
+        if candidate == path:
+            try:
+                os.fstat(fd)
+            except OSError:
+                pass
+            else:
+                raise PermissionError('cannot remove an open author handle')
+        return unlink(candidate, *args, **kwargs)
+    monkeypatch.setattr(Path, 'unlink', windows_unlink)
+    assert path.exists() and live_authors(drive_root=tmp_path) == ['author']
+    lease.release()
+    assert not path.exists() and live_authors(drive_root=tmp_path) == []

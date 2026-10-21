@@ -94,11 +94,11 @@ class PresenceTurnLease:
     def _clear_live_author(self) -> None:
         fd, self._live_fd = self._live_fd, None
         try:
-            if self._live_path:
-                self._live_path.unlink(missing_ok=True)
-        finally:
             if fd is not None:
                 os.close(fd)
+        finally:
+            if self._live_path:
+                self._live_path.unlink(missing_ok=True)
 
     def release(self) -> None:
         resources = None
@@ -385,9 +385,10 @@ def _scan_live_stack_authors(root: Path) -> set[str]:
             fd = os.open(path, os.O_RDWR)
         except FileNotFoundError:
             continue
+        retire = False
         try:
             if _try_exclusive(fd):
-                path.unlink(missing_ok=True)  # its stack ended, including a hard crash
+                retire = True  # its stack ended, including a hard crash
             else:
                 row = json.loads(os.read(fd, 8192))
                 if row.get("task_id"):
@@ -396,4 +397,6 @@ def _scan_live_stack_authors(root: Path) -> set[str]:
             continue
         finally:
             os.close(fd)
+            if retire:
+                path.unlink(missing_ok=True)  # Windows requires closing the locked handle first
     return found
