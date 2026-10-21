@@ -41,6 +41,11 @@ SANCTION_ATTR = "_transcript_rewrite_sanctioned"
 REWRITE_EPOCH_ATTR = "_transcript_rewrite_epoch"
 
 
+#: The observer's per-slot state a continuation checkpoint carries (``owner_wait``): the last
+#: sent digests, an unconsumed origin stamp, the rewrite count and a change already counted.
+OBSERVER_STATE_ATTRS = (DIGEST_ATTR, TOOLS_DIGEST_ATTR, SANCTION_ATTR, REWRITE_EPOCH_ATTR, "_reasoning_retirement_break")
+
+
 def sanction_rewrite(slot: Any, by: str = "compaction") -> None:
     """Name the rewrite the next ``observe_send`` should attribute (one-shot)."""
     setattr(slot, SANCTION_ATTR, by)
@@ -201,6 +206,7 @@ def observe_send(
     """
     current = [message_digest(message) for message in messages]
     reported = getattr(slot, "_reasoning_retirement_break", None)
+    reported = tuple(reported) if isinstance(reported, list) else reported  # a restored checkpoint holds a list
     setattr(slot, "_reasoning_retirement_break", None)
     previous, before_tools = _baseline(slot)  # a restored slot compares with its context observation
     current_tools = tools_digest(tools)

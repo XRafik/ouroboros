@@ -158,7 +158,7 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
 
 
 def _append_or_merge_user_content(
-    messages: List[Dict[str, Any]], content: Any, *, slot: Any = None, kind: str = "",
+    messages: List[Dict[str, Any]], content: Any, *, slot: Any = None, kind: str = "", stamp: Any = None,
 ) -> None:
     """Append user content without flattening multipart blocks.
 
@@ -167,14 +167,14 @@ def _append_or_merge_user_content(
     proves the tail absent; an unknown or sent tail stays intact. ``kind`` types
     the row at delivery (``context_budget.OWNER_WORDS_KIND``): a typed row is its
     own row, and nothing merges into a typed tail, so provenance never has to be
-    recovered from text.
+    recovered from text. ``stamp`` (else ``slot``) receives the eviction's origin.
     """
     from ouroboros.transcript_prefix import sanction_rewrite, unsent_in_previous_send
 
     if isinstance(content, list) and any(
             isinstance(b, dict) and b.get("type") in ("image_url", "image") for b in content):
-        if _evict_stale_image_blocks([*messages, {"content": content}]) and slot is not None:
-            sanction_rewrite(slot, "image_eviction")
+        if _evict_stale_image_blocks([*messages, {"content": content}]) and (stamp or slot) is not None:
+            sanction_rewrite(stamp or slot, "image_eviction")
     if kind or not (messages and unsent_in_previous_send(slot, messages[-1])
                     and set(messages[-1]) <= {"role", "content"}):
         # Typed words, unknown or sent content and any typed tail stay intact (slot-less producers too).

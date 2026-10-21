@@ -966,7 +966,7 @@ def _call_forced_model_once(
             configured_api_child=is_configured_api_child(owner_ctx),  # a forced call is still that actor's call
         )
     ctx.accumulated_usage["_forced_response_meta"] = response_meta
-    if owner_ctx is not None:  # the forced final is an accepted send outside the round observer
+    if owner_ctx is not None and final_msg is not None:  # an answered forced final, outside the round observer
         from ouroboros.transcript_prefix import count_accepted_send
         count_accepted_send(owner_ctx, ctx.messages, getattr(ctx, "tool_schemas", None),
                             round_idx=ctx.round_idx, usage=ctx.accumulated_usage)
