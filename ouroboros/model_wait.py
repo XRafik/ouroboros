@@ -1085,10 +1085,14 @@ def announce_capability_refusal(error: Exception, *, drive_root: Any) -> None:
     root = owner.canonical_root or drive_root
     try:
         from ouroboros.projects_registry import task_presentation_snapshot
+
+        label = task_presentation_snapshot(root, owner.task_id, task=owner.task).get("target_label") or ""
+    except Exception:
+        label = ""  # the notice outranks its label
+    try:
         from supervisor.schedule_notes import owner_chat_id
         from supervisor.terminal_delivery import enqueue_terminal_delivery_outcome
 
-        label = task_presentation_snapshot(root, owner.task_id, task=owner.task).get("target_label") or ""
         enqueue_terminal_delivery_outcome(root, {
             "type": "send_message", "chat_id": owner_chat_id(root), "task_id": "",
             "text": text + (f"\nFirst seen in {label}." if label else ""), "role": "system",

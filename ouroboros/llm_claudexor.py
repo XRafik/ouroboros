@@ -557,8 +557,7 @@ class _ModelInvocation:
                     return result
                 outage_started = None
             except ClaudexorUnavailable as error:
-                if not self.operation_id and (error.code == "model_request_invalid" or (
-                        error.code == "model_retry_invalid" and self.payload.get("retryOfOperationId"))):
+                if not self.operation_id and error.code == "model_request_invalid":
                     # This exact create refusal is minted by the engine only
                     # after its idempotency lookup proves no accepted command,
                     # and before enqueue. A GET or an arbitrary 4xx cannot mint
@@ -903,6 +902,7 @@ def chat_claudexor(target: dict, messages: list, tools: list | None, **parameter
                                                and error.physical_attempt_capture.state == "released")
                 cause.presence_all_operations_not_started = all_operations_not_started
                 raise cause from None
+            capability.unsent(error)
             raise
         finally:
             _usage_wait.close_unless_abandoned(invocation)  # an owner Pause's abandoned wait: the sender closes it
@@ -1057,6 +1057,7 @@ async def chat_claudexor_async(target: dict, messages: list, tools: list | None,
                 if isinstance(cause, ClaudexorModelError):
                     cause.presence_all_operations_not_started = all_operations_not_started
                 raise cause from None
+            capability.unsent(error)
             raise
         finally:
             if not invocation.defer_close:

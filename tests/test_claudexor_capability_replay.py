@@ -145,6 +145,41 @@ def test_real_wire_transport(replay, monkeypatch, name, asynchronous):
         assert context["nextStep"] in rows[0]["text"] and context["retryOnOtherAccount"] is False
 
 
+@pytest.mark.parametrize("fits", [True, False], ids=["fits", "refused_at_dispatch"])
+def test_an_ordinary_round_send_keeps_the_grant(replay, fits):
+    """The round's own send seam: its bound check stays bound for the whole chat and
+    judges the correlated send at its own dispatch; a refusal there (an exact admitted
+    candidate is not this request) ends as the original refusal, not a ledger error."""
+    from ouroboros.loop_llm_call import _send_main_candidate
+    from tests.test_claudexor_capability_engine import MODEL
+
+    f = replay("serve")
+    judged = []
+
+    def fit(request):
+        judged.append(request)
+        return None if fits or len(judged) == 1 else False
+
+    messages = [{"role": "user", "content": "hello"}]
+
+    def send():
+        return _send_main_candidate(
+            f.client, {"messages": messages, "model": MODEL}, model=MODEL, use_local=False, deadline_ts=None,
+            physical_context=None, candidate_predicate=None, physical_fit_predicate=fit)
+
+    if fits:
+        assert send()[0]["content"] == "served by b"
+        assert f.uploads[1] == {**f.uploads[0], "account": {"mode": "auto"},
+                                "retryOfOperationId": f.uploads[1]["retryOfOperationId"]}
+    else:
+        with pytest.raises(transport.ClaudexorModelError) as raised:
+            send()
+        assert raised.value.code == "model_capability_refused"
+        assert raised.value.problem["context"]["retryOnOtherAccount"] is True  # the first refusal itself
+        assert len(f.uploads) == 1 and len(raised.value.ledger_attempt_ids) == 2
+    assert len(judged) == 2
+
+
 @pytest.mark.parametrize("scenario", ["continuation", "preferred", "third", "returns"])
 def test_real_wire_engine_stories(replay, monkeypatch, scenario):
     from tests import test_claudexor_capability_engine as engine

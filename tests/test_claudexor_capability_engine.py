@@ -44,7 +44,7 @@ def real_engine(request, tmp_path, monkeypatch):
     # AF_UNIX paths must stay short, even inside a safe_test pytest root.
     import tempfile
     home = Path(tempfile.mkdtemp(prefix="cx-", dir=os.environ["OUROBOROS_TEST_TEMP_ROOT"]))
-    stderr = (home / "stderr.log").open("w+")
+    stderr = (home / "stderr.log").open("w+", encoding="utf-8")
     process = subprocess.Popen([node, str(DRIVER.resolve()), engine, str(home), scenario],
                                cwd=engine, stdout=subprocess.PIPE, stderr=stderr, text=True)
     records, uploads, ids = [], [], []
@@ -116,7 +116,7 @@ def real_engine(request, tmp_path, monkeypatch):
                 "engine_tree": os.environ.get("CAPABILITY_ENGINE_TREE", TREE),
                 "scenario": scenario, "provider": "offline Codex HTTP fixture",
                 "uploads": uploads, "idempotency_keys": ids, "wire": records,
-                "provider_posts": json.loads((home / "provider-posts.json").read_text()) if (home / "provider-posts.json").exists() else [],
+                "provider_posts": json.loads((home / "provider-posts.json").read_text(encoding="utf-8")) if (home / "provider-posts.json").exists() else [],
             }, prefixes=[(str(DRIVER.resolve().parent), "/tmp/cx-capability"),
                          (str(home.resolve()), f"/tmp/cx-capability/{scenario}"),
                          (str(home), f"/tmp/cx-capability/{scenario}")])
@@ -249,10 +249,10 @@ def test_one_notice_per_episode(real_engine, monkeypatch):
         with pytest.raises(transport.ClaudexorModelError):
             call(f)
     assert len(notices(f, monkeypatch)) == 1
-    (f.home / "provider-mode.json").write_text(json.dumps({"serving": ["a"]}))
+    (f.home / "provider-mode.json").write_text(json.dumps({"serving": ["a"]}), encoding="utf-8")
     answer, _ = call(f)
     assert answer["content"] == "served by a"
-    (f.home / "provider-mode.json").write_text(json.dumps({"serving": []}))
+    (f.home / "provider-mode.json").write_text(json.dumps({"serving": []}), encoding="utf-8")
     with pytest.raises(transport.ClaudexorModelError):
         call(f)
     # History is cumulative: the returning failure is a new episode, delivered once more.
@@ -323,7 +323,7 @@ def test_expired_correlation_keeps_original(real_engine, monkeypatch):
                 if row["path"].startswith("/v2/model-operations")]
     assert any(row.get("problem", {}).get("code") == "model_retry_invalid"
                and row["dispatch"]["state"] == "not_started" for row in terminal if row.get("problem"))
-    assert len(json.loads((f.home / "provider-posts.json").read_text())) == 1
+    assert len(json.loads((f.home / "provider-posts.json").read_text(encoding="utf-8"))) == 1
     context = raised.value.problem["context"]
     assert context["retryOnOtherAccount"] is True
     assert context["nextStep"] not in raised.value.display_message

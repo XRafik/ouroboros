@@ -59,6 +59,14 @@ class TestNoticeGate:
     def test_an_unrecognized_refusal_counts_once_its_account_is_marked(self):
         assert capability_notice(refusal(code="invalid_request", capabilityKind="unclassified")) is not None
 
+    def test_a_step_addressed_to_the_sender_becomes_the_owners(self):
+        from ouroboros.llm_substitution import OWNER_STEP
+
+        sender = "The history carries native continuation bound to this account; start a new conversation."
+        text = capability_notice(refusal(nextStep=sender, retryBlockedBy="native_continuation"))[1]
+        assert text.splitlines()[-1] == OWNER_STEP and sender not in text
+        assert capability_notice(refusal(nextStep=sender))[1].splitlines()[-1] == sender
+
 
 class TestEpisodeIdentity:
     def test_order_and_reason_text_do_not_change_the_episode(self):
@@ -101,6 +109,17 @@ class TestRetryGrant:
         assert updated == {**copy.deepcopy(call.payload), "account": {"mode": "auto"}, "retryOfOperationId": "op-1"}
         # After the one correlated operation nothing else re-asks: no rotation stacks on it.
         assert policy.ends_chain(error(refusal(code="rate_limited")))
+
+    @pytest.mark.parametrize("bound", [lambda request: None, lambda request: False], ids=["fit", "rejecting"])
+    def test_a_bound_send_predicate_does_not_withhold_it(self, bound, monkeypatch):
+        """Every task round binds its context-fit check for the whole chat; the identical
+        resend is judged by that check again at its own dispatch, so it is not withheld."""
+        from ouroboros.usage_accounting import bind_physical_attempt_context
+
+        policy = CapabilityRetry()
+        monkeypatch.setattr(policy, "announce", lambda *_: pytest.fail("a granted retry announces nothing"))
+        with bind_physical_attempt_context(None, candidate_predicate=bound):
+            assert policy.refused(invocation(), error(refusal(retryOnOtherAccount=True)))["retryOfOperationId"] == "op-1"
 
     @pytest.mark.parametrize("guard", ["no_grant", "generation_started", "unsettled", "unknown",
                                        "already_correlated", "pin", "other_operation", "second"])
@@ -164,6 +183,22 @@ class TestOwnerDelivery:
         from supervisor.terminal_delivery import enqueue_terminal_delivery_outcome
         assert enqueue_terminal_delivery_outcome(tmp_path, event, event_queue=queue.Queue()) == ENQUEUE_ALREADY_DELIVERED
 
+    def test_a_project_helper_is_named_by_project_and_task_in_the_owner_chat(self, tmp_path, monkeypatch):
+        from ouroboros.contracts.chat_id_policy import project_chat_id
+        from ouroboros.projects_registry import create_project
+        from supervisor import schedule_notes
+
+        monkeypatch.setattr(schedule_notes, "owner_chat_id", lambda root: 1)
+        create_project(tmp_path, "launch", name="Launch Plan")
+        events, scope = self.scope(tmp_path, project_id="launch", chat_id=project_chat_id("launch"))
+        with scope:
+            model_wait.announce_capability_refusal(error(refusal()), drive_root=tmp_path)
+        event = events.get_nowait()
+        assert (event["chat_id"], event["task_id"]) == (1, "")
+        assert event["text"].endswith("\nFirst seen in Launch Plan › Draft the outline.")
+
     def test_a_bare_library_caller_has_no_chat_side_effect(self, tmp_path):
+        from supervisor.terminal_delivery import pending_deliveries
+
         model_wait.announce_capability_refusal(error(refusal()), drive_root=tmp_path)
-        assert not (tmp_path / "state").exists() or not list((tmp_path / "state").glob("*delivery*"))
+        assert pending_deliveries(tmp_path) == []

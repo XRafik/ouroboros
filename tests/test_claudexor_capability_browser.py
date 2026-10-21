@@ -54,7 +54,7 @@ def capability_ui(tmp_path, monkeypatch, replay):
     evidence.mkdir(parents=True, exist_ok=True)
     (evidence / "browser-consumed.json").write_text(json.dumps({
         "engine_tree": TREE, "status": status, "history": history,
-    }, ensure_ascii=False, indent=2))
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
     monkeypatch.setenv("OUROBOROS_RUN_UI_SMOKE", "1")
     if os.environ.get("CAPABILITY_BROWSER_EXECUTABLE"):
         monkeypatch.setenv("OUROBOROS_UI_BROWSER_EXECUTABLE", os.environ["CAPABILITY_BROWSER_EXECUTABLE"])
@@ -85,7 +85,7 @@ def capability_ui(tmp_path, monkeypatch, replay):
                     body = response.read()
                 assert body == candidate.state.files[path][0]
                 hashes[path] = hashlib.sha256(body).hexdigest()
-            (evidence / "browser-source.json").write_text(json.dumps(hashes, indent=2))
+            (evidence / "browser-source.json").write_text(json.dumps(hashes, indent=2), encoding="utf-8")
             yield ui, evidence
         finally:
             generator.close()
@@ -124,7 +124,7 @@ def test_capability_line_and_main_notice(capability_ui, width, height, theme):
         assert measure["font"] == "12px"
     stem = f"{width}-{theme}"
     page.screenshot(path=str(evidence / f"accounts-{stem}.png"), animations="disabled")
-    (evidence / f"geometry-{stem}.json").write_text(json.dumps(geometry, indent=2))
+    (evidence / f"geometry-{stem}.json").write_text(json.dumps(geometry, indent=2), encoding="utf-8")
     navigate(page, "chat")
     notice = page.locator('#chat-messages .chat-bubble[data-system-type="model_capability_notice"]')
     notice.wait_for()

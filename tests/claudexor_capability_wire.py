@@ -26,7 +26,7 @@ def write_capture(folder, name, value, *, prefixes):
     folder.mkdir(parents=True, exist_ok=True)
     raw = folder / "raw"
     raw.mkdir(exist_ok=True)
-    (raw / name).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    (raw / name).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     def neutralize(item):
         if isinstance(item, str):
@@ -52,23 +52,23 @@ def write_capture(folder, name, value, *, prefixes):
         shared = {"engine_tree": tree, "sha256": sha, "body_utf8": body}
         path = folder / ref
         if path.exists():
-            assert json.loads(path.read_text()) == shared, f"Changed body at {ref}"
+            assert json.loads(path.read_text(encoding="utf-8")) == shared, f"Changed body at {ref}"
         else:
-            path.write_text(json.dumps(shared, ensure_ascii=False, indent=2) + "\n")
+            path.write_text(json.dumps(shared, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         row.pop("body_utf8")
         row.update(body_ref=ref, body_sha256=sha)
     value["wire"] = compact_rows(value["wire"])
-    (folder / name).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    (folder / name).write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def read_capture(path):
-    value = json.loads(path.read_text())
+    value = json.loads(path.read_text(encoding="utf-8"))
     rows = []
     for row in value["wire"]:
         if "body_ref" in row:
             ref = row["body_ref"]
             assert Path(ref).name == ref
-            shared = json.loads((path.parent / ref).read_text())
+            shared = json.loads((path.parent / ref).read_text(encoding="utf-8"))
             assert shared["engine_tree"] == value["engine_tree"]
             assert digest(shared["body_utf8"]) == shared["sha256"] == row["body_sha256"]
             row["body_utf8"] = shared["body_utf8"]

@@ -6,7 +6,8 @@ Identities, JWTs and injected provider responses are synthetic; no real provider
 or operator account is used. Uploads, keys and provider requests are recorded.
 
 Candidate transcripts carry tree `94eaa9ef8cb232b3d3a4b31628c9e1a9c1b5c666`
-(Claudexor 4.5.0 release commit `f9ea707a5`): `serve`, `both`, `pin`, `no_alternative`
+(`f9ea707a5`; Claudexor 4.5.0 shipped from `2b2dfc15e`, whose engine sources are
+the same apart from one line of an engine test): `serve`, `both`, `pin`, `no_alternative`
 (recognized refusals), `generic_serve`, `generic_both` (an unrecognized HTTP 400),
 `third` (two refusing accounts and a serving third), `returns` (one notice per
 mark episode, a new one after the mark cleared), `continuation`, `preferred` and
@@ -18,7 +19,8 @@ mark episode, a new one after the mark cleared), `continuation`, `preferred` and
 at capture time, mechanical prefix replacement maps the driver directory to
 `/tmp/cx-capability` and the isolated engine home (both lexical and resolved
 spellings) to `/tmp/cx-capability/<scenario>`. No other response bytes change.
-Unmodified transcripts stay in the capture directory's `raw/` evidence.
+Unmodified transcripts stay in the capture run's own `raw/` directory, outside
+the repository.
 
 Each distinct operations body is stored once per tree in `operations-*.json`;
 other repeated large bodies use `body-*.json`. A wire row's `body_ref` and
