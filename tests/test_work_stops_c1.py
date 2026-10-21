@@ -126,7 +126,7 @@ def test_c1_four_bound_model_receivers_are_unknown_until_addressed_resume(tmp_pa
     for task_id in ("child-run", "root-1"):
         _park(tmp_path, monkeypatch, queue, workers, task_id)
     assert control.refresh_owner_pause_tree("root-1") == "requested"
-    before = ua.read_usage_records(tmp_path, final_only=True)
+    before = ua.read_usage_records(tmp_path, final_only=False)
     work = _card(tmp_path, tail="a model request has no recorded result")
     assert [(t["code"], t["state"], len(t["ids"])) for t in work["tails"]] == [("model_handoff", "unknown", 4)]
     assert not load_task_result(tmp_path, "child-run").get("retired_model_consumers"), "GET never repairs"
@@ -140,7 +140,7 @@ def test_c1_four_bound_model_receivers_are_unknown_until_addressed_resume(tmp_pa
         assert result["error"] == "owner_pause_effects_unsettled"
         assert len([b for b in result["blockers"] if b["kind"] == "model_handoff"]) == 4
         assert "a model request has no recorded result" in result["message"]
-    assert ua.read_usage_records(tmp_path, final_only=True) == before, "repair cannot re-execute or settle unknown cost"
+    assert ua.read_usage_records(tmp_path, final_only=False) == before, "repair cannot re-execute or settle unknown cost"
 
 
 @pytest.mark.parametrize("recipient", ["dead", "live", "none"])
