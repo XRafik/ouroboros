@@ -1,4 +1,4 @@
-"""The quiet-wake door: finish_task(silent=true) on a consciousness wake's own turn.
+"""The quiet door: finish_task(silent=true) on a wake or a schedule-born root.
 
 The scenarios run the real loop (scripted model responses) and the real terminal
 pipeline: a clean silent wake publishes no final row and owes no outbox delivery,
@@ -22,6 +22,7 @@ from ouroboros.tools.registry import ToolRegistry
 
 TASK_ID = "wake-task"
 WAKE = {"initiator": "consciousness", "usage_category": CONSCIOUSNESS_CATEGORY, "wake_reason": "heartbeat"}
+SCHEDULE = {"schedule_occurrence": {"schedule_id": "daily-check", "token": "occurrence-1"}}
 
 
 def finish(answer=None, **kw):
@@ -247,6 +248,66 @@ def test_owner_quiz_closure_counts_as_owner_words(wake):
 
 
 # --- who may use the door ----------------------------------------------------------------
+
+@pytest.mark.parametrize("origin", [{}, {
+    "initiator": "consciousness", "usage_category": CONSCIOUSNESS_TASK_CATEGORY,
+}], ids=["scheduled-root", "consciousness-followup-root"])
+def test_schedule_born_root_may_finish_quietly(wake, origin):
+    wake.ctx.is_direct_chat = False
+    text, usage, trace, _ = wake.run([finish("Internal check result.", silent=True)],
+                                      metadata={**origin, **SCHEDULE})
+    assert usage.get("wake_silent") is True and text == "Internal check result."
+    assert not trace.get("completion_refusals")
+
+
+@pytest.mark.parametrize("extra,occurrence,parent", [
+    ({"delegation_role": "subagent"}, SCHEDULE["schedule_occurrence"], None),
+    ({}, SCHEDULE["schedule_occurrence"], "parent-task"),
+    ({"root_task_id": "other-root"}, SCHEDULE["schedule_occurrence"], None),
+    ({"presence": {"binding_id": "b1"}}, SCHEDULE["schedule_occurrence"], None),
+    ({"presence": {}}, SCHEDULE["schedule_occurrence"], None),
+    ({}, {"schedule_id": "daily-check"}, None),
+    ({}, {"token": "occurrence-1"}, None),
+    ({}, {"schedule_id": "daily-check", "token": " "}, None),
+    ({}, "daily-check", None),
+], ids=["delegated", "parent", "non-root", "presence", "empty-presence",
+        "missing-token", "missing-schedule", "empty-token", "invalid-occurrence"])
+def test_schedule_marker_does_not_bypass_quiet_authority(wake, extra, occurrence, parent):
+    from ouroboros.tools.control_runtime import _finish_task
+
+    wake.ctx.is_direct_chat = False
+    wake.ctx.task_id = TASK_ID
+    wake.ctx.parent_task_id = parent
+    wake.ctx.task_metadata = {**extra, "schedule_occurrence": occurrence}
+    assert "COMPLETION_ARGUMENT" in _finish_task(wake.ctx, action="finish", silent=True)
+    assert getattr(wake.ctx, "_completion_request", None) is None
+    assert "completion_requested" in _finish_task(wake.ctx, action="finish", answer="Ordinary answer.")
+
+
+def test_presence_ceiling_alone_refuses_quiet_schedule_finish(wake):
+    from ouroboros.tools.control_runtime import _finish_task
+
+    wake.ctx.is_direct_chat = False
+    wake.ctx.task_id = TASK_ID
+    wake.ctx.task_metadata = dict(SCHEDULE)
+    wake.ctx.task_contract = {"capability_ceiling": {}}
+    assert "COMPLETION_ARGUMENT" in _finish_task(wake.ctx, action="finish", silent=True)
+    wake.ctx.task_contract = {}
+    assert "completion_requested" in _finish_task(wake.ctx, action="finish", silent=True)
+
+
+def test_schedule_born_root_owes_a_reply_to_owner_words_mid_run(wake):
+    wake.ctx.is_direct_chat = False
+    _, usage, trace, _ = wake.run([
+        wake.owner_writes("Anything new?", call("chat_history", {}), "scheduled-owner-message"),
+        finish(silent=True),
+        call("send_user_message", {"text": "Nothing new."}),
+        finish(silent=True),
+    ], metadata=SCHEDULE)
+    reasons = [row["reason"] for row in trace.get("completion_refusals") or []]
+    assert len(reasons) == 1 and reasons[0].startswith("owner_reply_owed")
+    assert usage.get("wake_silent") is True and len(wake.calls) == 4
+
 
 @pytest.mark.parametrize("metadata,direct", [
     ({"initiator": "owner", "usage_category": "chat"}, True),
