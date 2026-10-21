@@ -4,7 +4,7 @@ Not a tool module: ``github.py`` registers the tool and owns the transport this 
 Every write returns ONE receipt ``{effect, target, url, id, actor, at, outcome}`` as JSON behind one
 human line; ``actor`` is GitHub's acting identity or null, and local times are labelled. The response is read back against what was
 sent where that is cheap. A send whose answer never came (timeout, 5xx, reset) is looked up once by
-its exact body and target; found → confirmed, otherwise the outcome stays ``unknown`` and the text
+its exact body, target and acting identity; found → confirmed, otherwise the outcome stays ``unknown`` and the text
 says so — nothing is resent. A 4xx is ``not_applied``: GitHub refused and nothing changed.
 """
 
@@ -43,6 +43,7 @@ class _Write:
     def __init__(self, ctx: ToolContext, method: str, repo: str, **args: Any):
         self.ctx, self.method, self.repo, self.args = ctx, method, repo, args
         self.sent_at = ""
+        self.observed_match = None
 
     def refuse(self, text: str, code: str = "TOOL_ARG_ERROR", *, no_effect: Optional[bool] = None) -> str:
         """A typed refusal. Unless stated, an argument refusal attests no effect only while this public invocation
@@ -111,6 +112,8 @@ class _Write:
             prefix = f"⚠️ GH_WRITE_NOT_APPLIED: GitHub refused (HTTP {res.http_status}); nothing changed. "
         else:
             receipt.update(outcome="unknown", error=res.text, failure=res.failure)
+            if self.observed_match:
+                receipt["observed_match"] = self.observed_match
             if res.http_status is not None:
                 receipt["http_status"] = res.http_status
             if lookup:
@@ -292,7 +295,8 @@ def _update(write: _Write) -> str:
                              at=got.get("updated_at"), actor=_actor(got, "closed_by") if fields.get("state") == got.get("state") == "closed" else None)
     if _definite(res):
         return write.receipt("issue.update", target, res=res)
-    current = _find(write, f"repos/{{owner}}/{{repo}}/issues/{number}", {}, lambda row: compare(row)["verified"])
+    current = _find(write, f"repos/{{owner}}/{{repo}}/issues/{number}", {}, lambda row: compare(row)["verified"],
+                    actor=lambda row: _actor(row, "closed_by") if fields.get("state") == "closed" else None)
     if current:
         return write.receipt("issue.update", target, response=current, readback={"verified": True, "mismatch": [], "via": "lookup"},
                              at=current.get("updated_at"), actor=_actor(current, "closed_by") if fields.get("state") == "closed" else None)
@@ -352,7 +356,8 @@ def _resolve_thread(write: _Write) -> str:
         return write.receipt(effect, target, res=res, oid=thread, url="", actor="", at="")
     check = _gh_graphql(write.ctx, _GQL["thread"], {"id": thread}, repo=write.repo, repo_vars=False)
     node = ((_parse(check) or {}).get("data") or {}).get("node") if check.ok else None
-    if isinstance(node, dict) and node.get("isResolved") is expected:
+    if isinstance(node, dict) and node.get("isResolved") is expected and _confirm_own(
+            write, [node], actor=lambda row: _actor(row, "resolvedBy") if expected else None):
         return write.receipt(effect, target, oid=thread, url="", actor=_actor(node, "resolvedBy") if expected else None, at=write.sent_at,
                              readback={"verified": True, "mismatch": [], "via": "lookup"}, extra={"at_source": "local"})
     return write.receipt(effect, target, res=res, oid=thread, url="", actor="", at="",
@@ -426,7 +431,22 @@ def _definite(res: GhResult) -> bool:
     return res.failure in ("target", "cli_missing") or (res.failure == "exit" and res.http_status is not None and 400 <= res.http_status < 500)
 
 
-def _find(write: _Write, route: str, params: dict, match) -> Optional[dict]:
+def _confirm_own(write: _Write, rows: list, *, actor=_actor) -> Optional[dict]:
+    """A content/state match alone is evidence, not proof that our unanswered send applied."""
+    if not rows:
+        return None
+    identity = _gh_api(write.ctx, "user", repo=write.repo)
+    login = (_parse(identity) or {}).get("login") if identity.ok else None
+    found = next((row for row in rows if login and str(actor(row) or "").casefold() == str(login).casefold()), None)
+    if found is None:
+        row = rows[0]
+        write.observed_match = {"id": row.get("id"), "url": row.get("html_url") or row.get("url"),
+                                "actor": actor(row), "acting_login": login,
+                                "note": "Matching content/state does not establish this acting identity's effect."}
+    return found
+
+
+def _find(write: _Write, route: str, params: dict, match, *, actor=_actor) -> Optional[dict]:
     """One lookup read after an unknown send: the matching row (or object), else None."""
     from urllib.parse import urlencode
 
@@ -439,7 +459,7 @@ def _find(write: _Write, route: str, params: dict, match) -> Optional[dict]:
     except ValueError:
         return None
     rows = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
-    return next((row for row in rows if isinstance(row, dict) and match(row)), None)
+    return _confirm_own(write, [row for row in rows if isinstance(row, dict) and match(row)], actor=actor)
 
 
 def run_write(ctx: ToolContext, method: str = "", repo: str = "", **args: Any) -> str:

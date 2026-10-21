@@ -21,7 +21,7 @@ NOW = "2026-10-22T10:00:00+00:00"
 @pytest.fixture
 def gh(monkeypatch, tmp_path):
     """A recording fake gh; ``world.answer(parts, argv, kwargs)`` returns stdout, ``(code, stderr)`` or raises."""
-    world = SimpleNamespace(calls=[], answer=lambda parts, argv, kwargs: "{}")
+    world = SimpleNamespace(calls=[], identity="ouroboros-agent", answer=lambda parts, argv, kwargs: "{}")
     monkeypatch.setattr(github, "github_token_from_env_or_settings", lambda: "ghp_fixture")
     monkeypatch.setattr(github_write, "utc_now_iso", lambda: NOW)
 
@@ -29,6 +29,8 @@ def gh(monkeypatch, tmp_path):
         world.calls.append((argv, kwargs))
         if argv[1:5] == ["repo", "view", "--json", "nameWithOwner"]:
             return SimpleNamespace(returncode=0, stdout=json.dumps({"nameWithOwner": "owner/selected"}), stderr="")
+        if argv[1] == "api" and _call(argv).route == "user":
+            return SimpleNamespace(returncode=0, stdout=json.dumps({"login": world.identity}), stderr="")
         answer = world.answer(_call(argv, kwargs) if argv[1] == "api" else SimpleNamespace(route=" ".join(argv[1:3])), argv, kwargs)
         if isinstance(answer, Exception):
             raise answer
@@ -245,6 +247,39 @@ def test_expect_refuses_before_sending_when_the_target_moved(gh):
 
 
 # ---- outcomes: not_applied and unknown -------------------------------------------------------------------
+@pytest.mark.parametrize("method,args,row", [
+    ("comment", {"target": 7, "body": "Thanks!"}, _comment(3, body="Thanks!")),
+    ("create_issue", {"title": "Same", "body": "Same"}, _issue(4, title="Same", body="Same")),
+    ("review", {"target": 7, "event": "APPROVE"}, {"id": 5, "body": "", "state": "APPROVED", "submitted_at": "2026-10-22T09:59:30Z"}),
+])
+@pytest.mark.parametrize("author", ["someone-else", "ouroboros-agent"])
+def test_unanswered_create_confirms_only_the_acting_authors_row(gh, method, args, row, author):
+    gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60) if p.method == "POST" else json.dumps([
+        {**row, "user": {"login": author}}])
+    _line, receipt = _receipt(gh.write(method=method, repo="github.example/owner/selected", **args))
+    assert receipt["outcome"] == ("confirmed" if author == gh.identity else "unknown")
+    if author != gh.identity:
+        assert receipt["observed_match"]["actor"] == author
+        assert gh.result.meta["operation_outcome"] == "unknown"
+    assert [s[0] for s in gh.sent()] == ["POST", "GET", "GET"]
+    assert gh.sent()[-1][1] == "user" and all(_call(argv).hostname == "github.example" for argv, _kw in gh.calls)
+    assert len({kw["env"]["GH_TOKEN"] for _argv, kw in gh.calls}) == 1
+
+
+def test_matching_update_without_actor_evidence_stays_unknown(gh):
+    gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60) if p.method == "PATCH" else json.dumps(
+        _issue(7, title="New", user={"login": "ouroboros-agent"}))
+    _line, receipt = _receipt(gh.write(method="update", target=7, title="New"))
+    assert receipt["outcome"] == "unknown" and receipt["observed_match"]["actor"] is None
+
+
+def test_matching_comment_with_unavailable_identity_stays_unknown(gh):
+    gh.identity = None
+    gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60) if p.method == "POST" else json.dumps([_comment(3, body="Thanks!")])
+    _line, receipt = _receipt(gh.write(method="comment", target=7, body="Thanks!"))
+    assert receipt["outcome"] == "unknown" and receipt["observed_match"]["acting_login"] is None
+
+
 def test_a_github_4xx_is_not_applied_and_proves_no_effect(gh):
     gh.answer = lambda p, argv, kw: (1, "gh: Validation Failed (HTTP 422)")
     line, receipt = _receipt(gh.write(method="create_issue", title="T"))
@@ -283,10 +318,10 @@ def test_an_unanswered_send_not_found_stays_unknown_and_is_never_resent(gh, look
 
 def test_each_method_has_its_own_lookup_after_an_unanswered_send(gh):
     cases = {
-        "create_issue": (dict(title="T", body="B"), "repos/{owner}/{repo}/issues?state=all&since=", [_issue(4, title="T", body="B")], "owner/selected#4"),
-        "update": (dict(target=7, state="closed"), "repos/{owner}/{repo}/issues/7", _issue(7, state="closed"), "selected Project#7"),
+        "create_issue": (dict(title="T", body="B"), "repos/{owner}/{repo}/issues?state=all&since=", [_issue(4, title="T", body="B", user={"login": "ouroboros-agent"})], "owner/selected#4"),
+        "update": (dict(target=7, state="closed"), "repos/{owner}/{repo}/issues/7", _issue(7, state="closed", closed_by={"login": "ouroboros-agent"}), "selected Project#7"),
         "review": (dict(target=7, event="APPROVE", body="ok"), "repos/{owner}/{repo}/pulls/7/reviews?per_page=100",
-                   [{"id": 1, "body": "ok", "state": "APPROVED", "submitted_at": "2026-10-22T09:59:30Z", "user": {"login": "me"}}], "selected Project#7"),
+                   [{"id": 1, "body": "ok", "state": "APPROVED", "submitted_at": "2026-10-22T09:59:30Z", "user": {"login": "ouroboros-agent"}}], "selected Project#7"),
     }
     for method, (args, route, found, target) in cases.items():
         gh.calls.clear()
@@ -295,9 +330,9 @@ def test_each_method_has_its_own_lookup_after_an_unanswered_send(gh):
         assert receipt["outcome"] == "confirmed" and receipt["readback"]["via"] == "lookup" and receipt["target"] == target, (method, receipt)
         assert gh.sent()[1][1].startswith(route), (method, gh.sent())
     gh.calls.clear()
-    gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60) if "mutation" in p.graphql else json.dumps({"data": {"node": {"id": "PRRT_1", "isResolved": True}}})
+    gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60) if "mutation" in p.graphql else json.dumps({"data": {"node": {"id": "PRRT_1", "isResolved": True, "resolvedBy": {"login": "ouroboros-agent"}}}})
     _line, receipt = _receipt(gh.write(method="resolve_thread", target="PRRT_1"))
-    assert receipt["outcome"] == "confirmed" and receipt["readback"]["via"] == "lookup" and len(gh.calls) == 2
+    assert receipt["outcome"] == "confirmed" and receipt["readback"]["via"] == "lookup" and len(gh.calls) == 3
     gh.calls.clear()
     gh.answer = lambda p, argv, kw: subprocess.TimeoutExpired(["gh"], 60)
     _line, receipt = _receipt(gh.write(method="api", http_method="DELETE", route="repos/{owner}/{repo}/issues/comments/5"))
