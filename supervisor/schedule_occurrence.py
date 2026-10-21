@@ -10,7 +10,7 @@ result and the queue snapshot — never a second ledger or scheduler:
   schedule list show it, and the mind decides whether to say anything;
 - task result ``schedule_admission``: ``{schedule_id, token, due_at, status,
   dispatch: none|possible, task}`` — the frozen task an accepted occurrence runs;
-- queued task ``metadata.schedule_occurrence``: ``{schedule_id, token, due_at, claimed_at}``.
+- queued task ``metadata.schedule_occurrence``: identity/timing plus the matching previous-run outcome.
 
 A pass claims under the queue+table locks (briefly), prepares everything
 expensive WITHOUT them (resource intent, folder checks, preflight, memory fork,
@@ -32,7 +32,7 @@ survive restart; no process-local witness is needed. Unreadable or foreign
 results and admitted rows with missing receipts remain unknown. Dispatch
 possibility lives monotonically on the row and receipt, so a first attempt whose
 receipt still says none never reached a worker (``first_dispatch_unsent``); restore
-holds a positive one visibly (``restore_verdict``). Deletion reads the
+holds a positive one visibly (``restore_verdict``). Retention removal reads the
 receipt from the table's exact root and preserves accepted or unknown obligations.
 
 A refusal at admission is a hold, not a stored witness. An older admission
@@ -61,7 +61,7 @@ from ouroboros.utils import utc_now_iso
 
 log = logging.getLogger(__name__)
 
-# Host-owned row fields: never authored by a payload, never copied into a task.
+# Host-owned row fields: never authored by a template; admission mints task facts.
 OCCURRENCE_FIELDS = ("occurrence", "hold", "continuation_of", "delete_requested_at",
                      "delete_requested_by", "delete_reason", "last_outcome", "previous_run_open")
 _FINGERPRINT_FIELDS = ("task", "trigger", "timezone", "cron", "name", "description", "enabled", "manual_override",
