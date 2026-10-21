@@ -111,8 +111,10 @@ ouroboros/ — agent core and shared runtime (§6)
   process_interpreters.py — Python and Node resolvers for the process launch surfaces (§2; CLI / Headless Boundary below)
   post_task_checkpoint.py — root phase/cost and saved late-work Pause (§6)
   terminal_projection.py, terminal_time.py — cognition-free settled-result projection and durable Main delivery; per-attempt end time (§3 Main rows; §6 Post-task work)
-  presence_profile.py, presence_runtime.py, presence_capabilities.py, presence_authority.py, presence_bindings.py, presence_admission.py, presence_context.py — Presence admission: profile parser, defaults, capability selections and the immutable ceiling, room → skill bindings, per-turn snapshot and context (§12)
-  presence_runner.py, presence_continuation.py, presence_observations.py, presence_delivery.py, presence_recovery.py — Presence: capped, conversation-serialized fresh agents; continuation, observations, delivery receipts, retained room facts (§12)
+  presence_admission.py, presence_context.py — connector events resolved to a place, the focus metadata and its FOCUS assignment (§12)
+  presence_authority.py, presence_capabilities.py, presence_bindings.py — frozen readers: old task ceilings and old bindings stay decodable for retained work and the one-time place migration (§12)
+  place_intake.py, place_reply.py, place_projection.py, places_migration.py — model-free attention after capture, the automatic reply's Silent/Safety boundary, owner-facing place views, binding → place import (§12)
+  presence_runner.py, presence_continuation.py, presence_observations.py, presence_delivery.py, presence_recovery.py — the connector turn carrier a focus runs on: conversation-serialized fresh agents, continuation, observations, delivery receipts, retained room facts (§12)
   places.py, conversation_lease.py — the host place record (state, wake list, notes, owner accounts, folder, model) and one author per place conversation with the physical conversation bound (§12)
   dialogue_provenance.py — exact transport-provenance rendering for history, memory and consolidation
   extension_companion.py, extension_reconcile_queue.py — host-supervised companion processes for transport skills; durable worker→server reconcile markers (§12; §13)
@@ -550,7 +552,7 @@ ouroboros/ — agent core and shared runtime (§6)
     skill_publish.py, skill_source_tools.py — PR-receipt-gated publish; source/search/install/update tools
     skill_preflight.py — Read-only skill preflight; a module widget's `render.entry` is containment-checked and parsed as a classic script: the widget frame runs it inline
     project_journal.py — journal/workpad read and write, `update_focus`, journal_tail_digest; foreign project reads for roots, foreign writes refused; `mirror_tree_coordination_to_journal`
-    presence.py — configure_presence, initiate_presence, typed completion/cancel
+    presence.py — configure_presence (the place verb: list, inspect, state, wakes, notes, folder, model, owner accounts) and presence_cancel_work
     task_tree.py — tree_note/tree_read (storage SSOT: task_tree_ledger.py)
     followup.py — the agent's two schedule tools over `state/scheduled_tasks.json`: `manage_schedules` (root-only audited disable/delete/restore) and `schedule_followup` (`notify=true` leaves a note)
     join_ledger.py — Child-result absorption: validates lineage and exact hashes; dispositions integrated/irrelevant/deferred; `CHILD_RESULT_STALE`; keeps peek_task/discard_child_result

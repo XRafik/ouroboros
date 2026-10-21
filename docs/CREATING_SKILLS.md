@@ -888,6 +888,43 @@ Panic in every command mode, including strict; it sends once. Its clock-dependen
 and boundary-second limits are defined in `CLIENT_CONTRACT.md` §15. A rejected message's previous outcome
 is unknown, not definitely undelivered.
 
+### Declaring a place, tool effects and an icon
+
+A connector skill (it connects a place: a Slack workspace, a Telegram group, an inbox) declares three facts in its
+manifest; core reads them from the reviewed, published release:
+
+```yaml
+icon: ui/icon.svg              # or a host icon name; geometry only, drawn by the host in currentColor
+tools:
+  - name: slack_send
+    effect: message            # read | message | write; absent or unknown = write
+    target: channel_or_user    # the argument(s) naming where the effect lands; a list for to/cc/bcc
+    conversation: channel_or_user
+    thread: thread_ts
+  - name: slack_history
+    effect: read
+    target: channel_id
+contributes:
+  - id: place
+    provides: place
+    label: Slack
+    destination: vendor:Slack
+    scope: account             # account | conversation
+    wakes: [direct_message, group_dm, mention, my_thread, reply_to_me]   # suggestions; the owner edits the list
+    source: {route: status, refresh_s: 15}                               # optional status chip
+```
+
+- `effect` is one fact with three consumers: Advises (autonomy) refuses everything but a declared read; a Silent or
+  Paused place refuses `message` and `write` aimed at it; the Safety Supervisor skips declared reads at Light/Full and
+  gives `message` its speech semantics (a flagged message returns to the mind; the identical re-issue is sent and
+  recorded). A tool that reads or writes depending on its arguments is `write`. MCP tools are always `write`.
+- `target`/`conversation`/`thread` let the host attribute a call to one place; a write it cannot attribute is held
+  while any place of that connector is Silent or Paused, and the refusal says so.
+- `icon` is reduced at staging to viewBox and geometry (path, circle, ellipse, line, polyline, polygon, rect, g),
+  bounded, with fills and strokes set to `currentColor`; anything else falls back to the house glyph.
+- `provides: place` requires `type: extension` and the `presence` permission. The Browse "Connectors" filter and
+  "Connects <Service>" are derived from it; no tag or suffix is needed.
+
 ### Places and focus transport ingress
 
 A reviewed connector declares `permissions: [presence]` and `provides: place`.
@@ -1041,9 +1078,9 @@ custody. A later arrival can still race the author's decision and delivery.
 
 #### Reporting actual Presence delivery
 
-Use the current event's exact conversation/thread for a reply; the binding's
-origin is an admission filter and its destination is the separate default for
-initiated contact. Selected transport tools may still address other intended
+Use the current event's exact conversation/thread for a reply; the place's scope
+admits the event, and a destination migrated from an old binding is kept only as a
+record. Selected transport tools may still address other intended
 conversations. The host projection names these roles under `communication`.
 A first or intermediate reply uses an explicit transport-tool call after choosing
 to contribute or undertake work for that conversation; observation alone owes no
@@ -1052,9 +1089,8 @@ from an initiated cycle or an inherited work order. Assistant narration is only 
 `queued` does not establish delivery, and an early acknowledgement does not
 replace the substantive final result.
 
-After the current tool batch, `presence_finish` with nonblank reply text or a
-silent/tool-delivered outcome enters normal completion checks without an extra
-model round. If a check requests more work, continue and finish again. An omitted
+After the current tool batch, an ordinary `finish_task` with nonblank reply text or
+`silent=true` enters normal completion checks without an extra model round. If a check requests more work, continue and finish again. An omitted
 message/deferred body retains the later model-answer path. Native inline turns
 return their persisted result before optional post-task cognition; transport
 outbox custody still owns actual delivery.
@@ -1064,8 +1100,8 @@ status notices stay in the owner task; an empty deferred body sends nothing but
 still requires polling. Cached and late results preserve that empty body rather
 than substituting the task diagnostic. This does not turn failure into success.
 Ordinary implicit replies and genuine authored best-effort answers remain valid.
-A forced final separates the task record from the reply: only a `presence_finish`
-declared in that answer is spoken, so an undeclared record sends nothing new.
+A forced final separates the task record from the reply: only an answer the mind
+authored is spoken, so a host-authored record sends nothing new.
 
 `GET /identity` advertises `presence_delivery_version: 1` on supporting hosts.
 Only then request `delivery_reporting_version: 1` alongside `binding_id` and

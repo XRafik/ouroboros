@@ -818,7 +818,7 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # (section 2); causal observations also use the existing ``logs/events.jsonl``.
 # The exact lane base scans 409 paths (the inherited 408 pin missed its place seam).
 # Focus adds the gate directory and its author-census member family, documented in section 2.
-EXPECTED_SCAN_PATHS = 411
+EXPECTED_SCAN_PATHS = 413
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
