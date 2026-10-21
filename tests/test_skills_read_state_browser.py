@@ -44,6 +44,7 @@ def test_retired_presence_runtime_has_no_form(skills_browser, browser_name, widt
         browser.close()
 
 
+@pytest.mark.parametrize("browser_name", ["chromium", "webkit"])
 @pytest.mark.parametrize("width", [390, 1440])
 def test_skills_failure_recovery_and_catalog_refresh(skills_browser, browser_name, width):
     """Failed reads stay distinct from empty, keep prior content and recover in place."""

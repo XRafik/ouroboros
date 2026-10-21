@@ -13,6 +13,7 @@ role_ui = roles.role_ui
 
 @pytest.mark.parametrize("width", [1360, 390])
 def test_delivery_choice_saves_and_reloads(role_ui, width):
+    from playwright.sync_api import expect
     ui = role_ui
     roles.configure_mixed(ui)
     roles.api_lane(ui, "openai")
@@ -29,8 +30,11 @@ def test_delivery_choice_saves_and_reloads(role_ui, width):
         page.locator("#btn-save-settings").click()
     saved = roles.saved_catalog(ui)["items"][1]
     assert saved["review_eligible"] is True and "delivery" not in saved, "native is the default delivery"
+    # Reload is ignored while a Save is still finishing; it repaints the rows after its pool read.
+    expect(page.locator("#settings-status")).to_contain_text("Settings saved")
     with page.expect_response("**/api/review-pool"):
         page.locator("#btn-reload-settings").click()
+    expect(page.locator("#settings-status")).to_have_text("Settings loaded")
     delivery = page.locator("[data-subagent-row]").nth(1).locator('[data-subagent-field="delivery"]')
     assert delivery.input_value() == "native"
     delivery.select_option("packet")
