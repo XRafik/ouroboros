@@ -99,7 +99,7 @@ function notesHtml(place, ui) {
 function folderHtml(place, ui) {
     const value = ui.drafts.folder ?? place.workingFolder;
     return `<div class="place-field-row">
-            <input class="ui-control place-mono" data-place-draft="folder" value="${escapeHtml(value)}" spellcheck="false" autocomplete="off" aria-label="Working folder" aria-describedby="place-folder-help" placeholder="No folder">
+            <input class="ui-control ui-control-code" data-place-draft="folder" value="${escapeHtml(value)}" spellcheck="false" autocomplete="off" aria-label="Working folder" aria-describedby="place-folder-help" placeholder="No folder">
             <button type="button" class="btn btn-default btn-sm" data-place-act="save-folder">Save</button>
         </div>
         <div class="ui-field-help" id="place-folder-help">An address, not a fence: work for this place starts here.</div>`;

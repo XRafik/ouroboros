@@ -39,7 +39,7 @@ export function safetySectionHtml() {
                 <input id="s-consciousness-safety-mode" type="hidden" value="full">
                 ${renderSegmentedField({ target: 's-consciousness-safety-mode', title: LOWERING_TITLE, options: LEVEL_OPTIONS })}
                 <div class="settings-inline-note" data-policy-state="supervisor_consciousness" role="status" aria-live="polite"></div>
-                <p class="safety-line" data-safety-check-fully-line hidden><button type="button" class="consciousness-inline-link" data-safety-check-fully>Check consciousness fully</button></p>
+                <p class="safety-line" data-safety-check-fully-line hidden><button type="button" class="consciousness-inline-link ui-hit-area" data-safety-check-fully>Check consciousness fully</button></p>
             </div>
         </div>
         <p class="safety-line" data-safety-checker></p>
@@ -88,9 +88,9 @@ function paintLines(root, settings) {
     const meta = settings?._meta || {};
     const recheck = normalizeRecheck(meta.policy_state?.safety_recheck);
     const set = (selector, html) => { const node = root.querySelector(selector); if (node) node.innerHTML = html; };
-    set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · <button type="button" class="consciousness-inline-link" data-settings-goto="models">Change in Models</button>`);
+    set('[data-safety-checker]', `${escapeHtml(checkerText(settings))} · <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="models">Change in Models</button>`);
     set('[data-safety-second-check]', `${escapeHtml(secondCheckText(recheck, settings))}${recheck.known
-        ? ' · <button type="button" class="consciousness-inline-link" data-settings-goto="agents">Change in Agents</button>' : ''}`);
+        ? ' · <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="agents">Change in Agents</button>' : ''}`);
     const unmeasured = root.querySelector('[data-safety-unmeasured]');
     if (unmeasured) unmeasured.hidden = !(recheck.rowId && !recheck.measured);
     syncRecheckState(recheck, root);
@@ -145,8 +145,8 @@ export function safetyOwnerDraft(root, body = {}) {
     };
 }
 
-async function confirmLowering(kindLabel, current, next, confirm) {
-    const ok = await confirm({
+async function confirmLowering(kindLabel, current, next, askOwner) {
+    const ok = await askOwner({
         title: 'Lower a safety level',
         body: `Lower the safety level for ${kindLabel.toLowerCase()} from ${levelLabel(current)} to ${levelLabel(next)}?\n\n`
             + 'Fixed rules still guard protected files at every level, and every step the lower level lets through is recorded.',
@@ -161,7 +161,7 @@ async function confirmLowering(kindLabel, current, next, confirm) {
  * the rules, the Safety Supervisor model, the second-check row. Returns what was saved, what failed and
  * whether any outcome is unknown; one failure never stops the others.
  */
-export async function saveSafetyOwnerChanges(draft, current = {}, { confirm = openConfirmDialog } = {}) {
+export async function saveSafetyOwnerChanges(draft, current = {}, { askOwner = openConfirmDialog } = {}) {
     const saved = [];
     const errors = [];
     let unknown = false;
@@ -182,7 +182,7 @@ export async function saveSafetyOwnerChanges(draft, current = {}, { confirm = op
         if (!next || next === now) continue;
         const kindLabel = SAFETY_KINDS[kind];
         await run(`Safety for ${kindLabel.toLowerCase()}`, async () => {
-            if ((SAFETY_RANK[next] ?? 2) < (SAFETY_RANK[now] ?? 2)) await confirmLowering(kindLabel, now, next, confirm);
+            if ((SAFETY_RANK[next] ?? 2) < (SAFETY_RANK[now] ?? 2)) await confirmLowering(kindLabel, now, next, askOwner);
             await saveSafetyLevel(next, kind);
             return `Safety for ${kindLabel.toLowerCase()} saved as ${levelLabel(next)}.`;
         });

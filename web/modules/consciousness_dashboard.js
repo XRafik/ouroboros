@@ -110,7 +110,7 @@ export function placesCardHtml(places, { error = '', awakeIn = '' } = {}) {
             <button type="button" class="btn btn-default btn-sm" data-cx-act="connect">Connect a place</button>
         </div>
         ${body}
-        <p class="consciousness-foot">Allowance, own tasks and concurrent conversations: <button type="button" class="consciousness-inline-link" data-cx-act="settings">Settings ›</button></p>`;
+        <p class="consciousness-foot">Allowance, own tasks and concurrent conversations: <button type="button" class="consciousness-inline-link ui-hit-area" data-cx-act="settings">Settings ›</button></p>`;
 }
 
 const OUTCOME_WORDS = {

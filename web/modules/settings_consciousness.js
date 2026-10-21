@@ -64,7 +64,7 @@ export function consciousnessSectionHtml() {
                     <div class="form-field ui-field">
                         <label id="s-consciousness-model-label">Model</label>
                         <div class="consciousness-model-value" aria-labelledby="s-consciousness-model-label"><span data-consciousness-model>Uses Main</span>
-                            <button type="button" class="consciousness-inline-link" data-settings-goto="models">Change in Models</button></div>
+                            <button type="button" class="consciousness-inline-link ui-hit-area" data-settings-goto="models">Change in Models</button></div>
                     </div>
                 </div>
             </div>

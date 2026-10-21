@@ -158,7 +158,7 @@ test('Save writes only what changed, each through its owner endpoint; lowering a
     try {
         const draft = safetyOwnerDraft(draftRoot({ yourWork: 'light', consciousness: 'full', rules: settings.OUROBOROS_SAFETY_OWNER_RULES }),
             { OUROBOROS_MODEL_SAFETY: 'anthropic::claude-opus-5.5' });
-        result = await saveSafetyOwnerChanges(draft, settings, { confirm: async (dialog) => { asked.push(dialog.title); return true; } });
+        result = await saveSafetyOwnerChanges(draft, settings, { askOwner: async (dialog) => { asked.push(dialog.title); return true; } });
     } finally { stub.restore(); }
     assert.deepEqual(asked, ['Lower a safety level']);
     assert.deepEqual(stub.calls.map(({ url, body }) => [url, body]), [
@@ -175,7 +175,7 @@ test('a refused lowering keeps the level and still saves the rest; an unknown se
     let result;
     try {
         const draft = { yourWork: 'off', consciousness: 'off', rules: 'Ask before paying.', recheck: null, model: 'x', useLocal: undefined };
-        result = await saveSafetyOwnerChanges(draft, settings, { confirm: async () => false });
+        result = await saveSafetyOwnerChanges(draft, settings, { askOwner: async () => false });
     } finally { stub.restore(); }
     // No OUROBOROS_CONSCIOUSNESS_SAFETY_MODE / OUROBOROS_MODEL_SAFETY in the document: those rows are not written.
     assert.deepEqual(stub.calls.map(({ url }) => url), ['/api/owner/safety-rules']);
