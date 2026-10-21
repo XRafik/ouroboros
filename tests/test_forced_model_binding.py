@@ -464,7 +464,8 @@ def test_a_resumed_task_keeps_one_change_and_its_origin(acting, stage):
     # The facts line names the change beside the request that carried it.
     carrier = ctx.round_idx if stage == "after_forced_send" else resumed
     assert "(image_eviction)" in transcript_prefix.history_change_text(usage["_recent_prefix_breaks"], carrier)
-    # The carried identity is spent: a later, separate change still counts.
+    # The carried identity is spent: a later change of the same message by the same origin still counts.
+    transcript_prefix.sanction_rewrite(restored, "image_eviction")
     messages[1] = {**messages[1], "content": "An earlier message edited later"}
     loop._record_transcript_prefix(restored, messages, resumed + 1, usage, None, ctx.task_id,
                                    slot.drive_root / "logs", ctx.tool_schemas)
