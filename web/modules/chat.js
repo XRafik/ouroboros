@@ -2168,6 +2168,7 @@ export function createChatInstance({
             persistedHistory.push({
                 text, role, ts, markdown: !!markdown, ...meta, narration: opts.narration,
                 originProjected: !!opts.originProjected, terminalTime: opts.terminalTime || null,
+                completionNotice: opts.completionNotice || null,
                 skillReview: opts.skillReview || null, evidenceRef: opts.evidenceRef || null,
                 attachments: attachments.length ? attachments : null,
                 textPlaceholder: opts.textPlaceholder === true,
