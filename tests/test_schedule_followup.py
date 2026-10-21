@@ -762,7 +762,9 @@ def test_scheduled_tasks_digest_projects_run_at_for_once_records(tmp_path):
     })
     env = SimpleNamespace(drive_path=lambda rel: tmp_path / rel)
     digest = _scheduled_tasks_digest(env)
-    rows = {row["id"]: row for row in digest["active"]}
+    rows = {row["id"]: row for row in digest["standing"] + digest["one_shots"]}
+    assert [row["id"] for row in digest["standing"]] == ["cr"]
+    assert [row["id"] for row in digest["one_shots"]] == ["fu"]
     assert rows["fu"]["run_at"] == "2030-01-01T00:00:00+00:00"
     assert "cron" not in rows["fu"]
     assert rows["cr"]["cron"] == "0 3 * * *"

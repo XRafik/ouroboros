@@ -65,7 +65,6 @@ from ouroboros.update_letter import official_update_projection  # contract: neve
 from ouroboros.i18n_memory import current_language as _ui_language_tag
 from ouroboros.utils import (
     get_git_info,
-    read_json_dict,
     read_text,
     safe_relpath,
     utc_now_iso,
@@ -240,40 +239,10 @@ def _build_attachment_image_blocks(task: Dict[str, Any]) -> List[Dict[str, Any]]
 
 
 def _scheduled_tasks_digest(env: Any, *, limit: int = 8) -> Optional[Dict[str, Any]]:
-    """Compact digest of active schedules (cron + one-shot) for task/consciousness
-    context. Keeps the agent aware of standing schedules without inlining the full
-    schedule table; notes how many active schedules were omitted past ``limit``.
-    """
-    try:
-        data = read_json_dict(env.drive_path("state/scheduled_tasks.json")) or {}
-    except Exception:
-        log.debug("Failed to read scheduled tasks for context digest", exc_info=True)
-        return None
-    from supervisor.followup_policy import observed_store
-    from supervisor.queue_schedules import schedule_lifecycle_status
-    root = pathlib.Path(env.drive_path("state/scheduled_tasks.json")).parent.parent
-    data = observed_store(root, data)
-    # A deleted row still finishing accepted work stays in view until it goes.
-    tasks = [t for t in data.get("tasks", []) if isinstance(t, dict) and (t.get("enabled", True)
-             or t.get("followup_hold") or t.get("followup_wait") or t.get("delete_requested_at"))]
-    if not tasks:
-        return None
-    out: Dict[str, Any] = {"active": [], "held": [], "waiting": []}
-    for record in tasks[:limit]:
-        trigger = record.get("trigger") or {}
-        status = schedule_lifecycle_status(record)
-        entry = {"id": record.get("id"), "name": record.get("name"), "status": status,
-                 "relation": record.get("relation"), "followup_hold": record.get("followup_hold"),
-                 "followup_wait": record.get("followup_wait"), "hold_persisted": record.get("hold_persisted"),
-                 "timezone": record.get("timezone") or "local", "next_run_at": record.get("next_run_at") or ""}
-        entry["run_at" if trigger.get("type") == "once" else "cron"] = trigger.get("run_at" if trigger.get("type") == "once" else "expr", "")
-        if status == "delete_pending":
-            out.setdefault("delete_pending", []).append(entry)
-            continue
-        out["held" if record.get("followup_hold") else "waiting" if record.get("followup_wait") else "active"].append(entry)
-    if len(tasks) > limit:
-        out["omitted_count"] = len(tasks) - limit
-    return out
+    from datetime import datetime, timezone
+    from supervisor.schedule_view import digest
+    data = schedule_store_fact(env)
+    return data if "unavailable" in data else digest(data["tasks"], datetime.now(timezone.utc), limit=limit)
 
 
 # The owner-surface note is shared by the runtime-section builder.
@@ -303,6 +272,7 @@ from ouroboros.context_runtime_facts import (  # noqa: E402,F401 — re-exported
     _runtime_budget_info,
     task_execution_clock_fact,
     task_schedule_fact,
+    schedule_store_fact,
     storage_fact,
 )
 
@@ -1144,6 +1114,15 @@ def _build_installed_skills_section(env: Any, *, max_lines: int = 100) -> str:
             lines.append("  Current payload accepted by author under Advisory; reviewer evidence remains at its original hash.")
         if when:
             lines.append(f"  Trigger: {when}")
+        suggestions = skill.get("suggested_schedules") or []
+        for suggestion in suggestions:
+            lines.append(f"  Suggests schedule {_field(suggestion.get('name'), 96)}: "
+                         f"cron {_field(suggestion.get('cron'), 160)} "
+                         f"({_field(suggestion.get('timezone') or 'local', 80)}) — "
+                         f"{_field(suggestion.get('description'), 260)}. Not scheduled unless adopted.")
+        if suggestions:
+            lines.append(f"  Schedule source: list_skills(name={name!r}) supplies manifest.read; "
+                         f"{skill.get('suggested_schedules_omitted_count', 0)} more suggestions omitted.")
         # CPL-7 Model Experience: bounded prose; absent section renders nothing.
         experience = skill.get("model_experience")
         if isinstance(experience, dict):
