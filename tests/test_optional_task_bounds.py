@@ -165,7 +165,7 @@ def test_round_limit_resolution_keeps_the_presence_inline_cap(monkeypatch):
 
 
 def test_presence_inline_cap_stays_finite_without_a_global_limit():
-    from ouroboros.presence_runtime import (
+    from tests.frozen_presence_runtime import (
         PresenceRuntimeDefaults, PresenceRuntimeError, PresenceRuntimeOverrides, resolve_presence_runtime,
     )
 

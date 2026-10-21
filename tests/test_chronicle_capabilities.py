@@ -122,9 +122,10 @@ def test_integrating_mind_writes_pages_and_presence_reads_and_marks_only():
 
 
 def test_presence_ceiling_reads_and_marks_memory_but_writes_no_page():
-    from ouroboros.presence_authority import build_presence_capability_ceiling, presence_ceiling_allows_tool
-    from ouroboros.presence_capabilities import PresenceProfileResolution
-    from ouroboros.presence_runtime import ResolvedPresenceRuntime
+    from ouroboros.presence_authority import presence_ceiling_allows_tool
+    from tests.frozen_presence_authority import build_presence_capability_ceiling
+    from tests.frozen_presence_capabilities import PresenceProfileResolution
+    from tests.frozen_presence_runtime import ResolvedPresenceRuntime
 
     resolution = PresenceProfileResolution(
         active=(), missing_required=(), missing_optional=(), orphaned=(),

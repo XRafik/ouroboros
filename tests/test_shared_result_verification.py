@@ -440,8 +440,9 @@ def test_early_refusals_keep_verdict_and_custody_without_absorption(env, refusal
 
 def presence(parent, root, prefix):
     """Real Presence assembly: the profile selects this tool and one read resource."""
-    from ouroboros.presence_authority import build_presence_capability_ceiling, presence_ceiling_payload
-    from ouroboros.presence_capabilities import PresenceResourceTarget, PresenceToolTarget
+    from ouroboros.presence_authority import presence_ceiling_payload
+    from tests.frozen_presence_authority import build_presence_capability_ceiling
+    from tests.frozen_presence_capabilities import PresenceResourceTarget, PresenceToolTarget
     from tests.test_presence_authority import _resolution
     assembled = build_presence_capability_ceiling(
         skill_name="fixture", skill_content_hash="c" * 64, state_fingerprint="d" * 64,

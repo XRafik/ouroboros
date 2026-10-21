@@ -12,13 +12,9 @@ import types
 
 import pytest
 
-from ouroboros.presence_authority import (
-    PresenceAuthorityError,
-    build_presence_capability_ceiling,
-    presence_ceiling_from_payload,
-    presence_ceiling_payload,
-)
-from ouroboros.presence_capabilities import PresenceToolTarget
+from ouroboros.presence_authority import PresenceAuthorityError, presence_ceiling_from_payload, presence_ceiling_payload
+from tests.frozen_presence_authority import build_presence_capability_ceiling
+from tests.frozen_presence_capabilities import PresenceToolTarget
 from ouroboros.task_results import load_task_result, write_task_result
 from ouroboros.tools.registry import ToolContext, ToolRegistry
 from ouroboros.utils import atomic_write_json

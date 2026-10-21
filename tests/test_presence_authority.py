@@ -4,17 +4,9 @@ from pathlib import Path
 import pytest
 
 from ouroboros.contracts.task_contract import build_task_contract
-from ouroboros.presence_authority import (
-    PresenceAuthorityError,
-    build_presence_capability_ceiling,
-    presence_ceiling_allows_binding,
-    presence_ceiling_allows_delegated_read,
-    presence_ceiling_allows_delegated_surface,
-    presence_ceiling_allows_tool,
-    presence_ceiling_from_payload,
-    presence_ceiling_payload,
-)
-from ouroboros.presence_capabilities import (
+from ouroboros.presence_authority import PresenceAuthorityError, presence_ceiling_allows_binding, presence_ceiling_allows_delegated_read, presence_ceiling_allows_delegated_surface, presence_ceiling_allows_tool, presence_ceiling_from_payload, presence_ceiling_payload
+from tests.frozen_presence_authority import build_presence_capability_ceiling
+from tests.frozen_presence_capabilities import (
     PresenceArgumentBinding,
     PresenceProfileResolution,
     PresenceResourceTarget,
@@ -24,7 +16,7 @@ from ouroboros.presence_capabilities import (
     PresenceToolTarget,
     presence_state_fingerprint,
 )
-from ouroboros.presence_runtime import ResolvedPresenceRuntime
+from tests.frozen_presence_runtime import ResolvedPresenceRuntime
 from ouroboros.tool_access import ResolvedResourceBinding
 from ouroboros.tools.registry import ToolContext, ToolEntry, ToolRegistry
 
@@ -240,7 +232,6 @@ def test_registry_filters_schema_dispatch_and_resolved_targets(tmp_path):
     names = {schema["function"]["name"] for schema in registry.schemas()}
     assert names == {
         "finish_task",  # ceiling-only work has no speaker metadata; local completion grants no resource
-        "presence_finish",
         "presence_cancel_work",
         "read_file",
         "chat_history",

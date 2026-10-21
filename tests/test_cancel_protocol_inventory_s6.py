@@ -109,6 +109,9 @@ TERMINAL_WRITERS = {
     # Same terminal status under the locked projector; this records only the
     # deterministic successor link after a positive first-round no-effect proof.
     ('ouroboros/presence_runner.py::_retry_target', 'STATUS_FAILED'): 'terminal',
+    # A captured place arrival which did not claim attention is completed
+    # silently, create-only: an already-running author keeps its custody.
+    ('ouroboros/place_intake.py::settle_heard', '"completed"'): 'terminal',
     # D12 durable new-work intent (start_task): prepare creates the "requested" row
     # before emission; claim moves its locked projector to "admitting" and keeps
     # "requested". Boot reconciliation (prior workers proved gone) settles ONLY a
@@ -196,6 +199,8 @@ SETTLE_INTENT_CALLERS = {
 # C9 — lanes that terminalize a task and deliberately register NOTHING as owed,
 # each with the reason there is nothing to deliver.
 NO_DELIVERABLE_LANES = {
+    'ouroboros/place_intake.py::settle_heard':
+        'a model-free heard-only arrival has no authored answer to deliver',
     'supervisor/task_lifecycle.py::_finish_captured_pending':
         'cancelled before it ever started: no answer exists',
     'supervisor/workers.py::_settle_cancelled_pending_row':

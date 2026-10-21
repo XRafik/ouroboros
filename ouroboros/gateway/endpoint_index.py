@@ -44,7 +44,10 @@ HTTP_ENDPOINTS: tuple[str, ...] = (
     "POST /api/owner/safety-model",
     "POST /api/owner/capability-ack",
     "POST /api/owner/skills/{skill}/attest-review",
-    "POST /api/owner/skills/{skill}/presence-runtime",
+    "GET /api/places",
+    "POST /api/places",
+    "POST /api/places/{place_id}",
+    "DELETE /api/places/{place_id}",
     "POST /api/skills/{skill}/publish-preflight",
     "GET /api/model-catalog",
     "POST /api/tasks",
@@ -272,10 +275,10 @@ HTTP_SHAPES: dict[str, Shape] = {
     "POST /api/owner/skills/{skill}/attest-review": Shape(
         "200,409:SkillReviewResponse 400:ErrorResponse", "SkillRevisionRequest",
         note=f"the owner's review verdict; 409 when refused (ok false); {_IN_LANE}"),
-    "POST /api/owner/skills/{skill}/presence-runtime": Shape(
-        "200:OwnerSkillPresenceRuntimeResponse 400:ErrorResponse 404:SkillActionRefusal "
-        "409:SkillActionRefusal|ErrorResponse", "OwnerSkillPresenceRuntimeRequest",
-        note="compare-and-set on expected_state_fingerprint (409 presence_state_conflict when it moved)"),
+    "GET /api/places": Shape("200:json", note="Places and installed connector declarations; §12 Places"),
+    "POST /api/places": Shape("200:json 400:json", "json", note="connect from a declared connector"),
+    "POST /api/places/{place_id}": Shape("200:json 400,409:json", "json", note="atomic owner-authored place choices"),
+    "DELETE /api/places/{place_id}": Shape("200:json 400:json", note="disconnect; room history stays"),
     "POST /api/skills/{skill}/publish-preflight": Shape(
         "200,400,404,409,503:SkillPublishPreflightResponse", "SkillPublishPreflightRequest",
         note="read-only; every status carries the same shape; state hard_block is a refusal; destination "

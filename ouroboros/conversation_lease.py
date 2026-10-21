@@ -1,23 +1,348 @@
-"""One author per conversation, across processes, and the physical bound on conversations.
+"""Conversation authorship and the cross-process physical conversation bound.
 
-Today's Presence gate generalized: a turn authoring a place conversation holds
-that conversation's lease (a process-local lock plus a cross-process file lock,
-lendable at a qualified review wait), and at most N conversations run at once
-(``OUROBOROS_PRESENCE_MAX_ACTIVE``, shown as "Concurrent conversations").
-
-Seam stub: no live authors until the package lands.
+The existing Presence gate retains lock order, coroutine admission, lending and
+stop-aware reacquisition. Author records are projections under the held lock;
+only a held conversation is addressable, while Stop also sees local lent authors.
 """
-
 from __future__ import annotations
 
-from typing import Any
+import asyncio
+import hashlib
+import json
+import os
+import threading
+import time
+from contextlib import ExitStack, contextmanager
+from pathlib import Path
+from typing import Any, Callable
+
+from ouroboros.utils import atomic_write_json
+
+_AUTHORS_LOCK = threading.Lock()
+_AUTHORS: dict[tuple[str, str], "PresenceTurnLease"] = {}
+
+_GATE_POLL_SEC = 0.05
+# A stop check reads task controls from disk; a queued reacquisition asks at this cadence.
+_GATE_STOP_POLL_SEC = 1.0
+
+
+def _try_exclusive(fd: int) -> bool:
+    from ouroboros.platform_layer import file_lock_exclusive_nb
+
+    try:
+        file_lock_exclusive_nb(fd)
+    except OSError:
+        return False
+    return True
+
+
+class PresenceTurnLease:
+    """The gate resources one admitted turn holds; its owner releases them exactly once.
+
+    A lease minted by a gate can also be LENT at a qualified review wait (#1536): the
+    conversation and active slot return to the gate while the same author stays live, and
+    ``reacquire`` takes both again, in admission order, before any model or tool step.
+    ``execution`` is the Host turn whose initial envelope that author may publish.
+    """
+
+    def __init__(self, conversation_key: str, resources: ExitStack,
+                 gate: "PresenceTurnGate | None" = None) -> None:
+        self.conversation_key = conversation_key
+        self._resources: ExitStack | None = resources
+        self._lock = threading.Lock()
+        self._gate = gate
+        self._ended = False
+        self.execution: Any = None
+        self.task_id = ""
+
+    def bind_author(self, task_id: str) -> None:
+        self.task_id = task_id
+        with _AUTHORS_LOCK:
+            _AUTHORS[(self._root(), task_id)] = self
+        self._publish_author()
+
+    def _root(self) -> str:
+        return str(self._gate._state_root.parent) if self._gate and self._gate._state_root else ""
+
+    def _author_path(self) -> Path | None:
+        return (self._gate._conversation_file(self.conversation_key).with_suffix(".author.json")
+                if self._gate and self._gate._state_root else None)
+
+    def _publish_author(self) -> None:
+        path = self._author_path()
+        if path and self.task_id:
+            atomic_write_json(path, {"task_id": self.task_id, "conversation_key": self.conversation_key,
+                                     "pid": os.getpid()})
+
+    def _clear_author(self) -> None:
+        path = self._author_path()
+        if path and self.task_id:
+            path.unlink(missing_ok=True)
+
+    def release(self) -> None:
+        resources = None
+        try:
+            with self._lock:
+                resources, self._resources, self._ended = self._resources, None, True
+                try:
+                    if resources is not None:
+                        self._clear_author()
+                finally:
+                    with _AUTHORS_LOCK:
+                        _AUTHORS.pop((self._root(), self.task_id), None)
+        finally:
+            if resources is not None:
+                resources.close()
+
+    def lendable(self) -> bool:
+        """Held, minted by a gate and not ended: ``lend`` can return it and ``reacquire`` take it back."""
+        with self._lock:
+            return self._gate is not None and not self._ended and self._resources is not None
+
+    def lend(self) -> bool:
+        """Return the held resources while keeping the lease reacquirable; False when it cannot."""
+        with self._lock:
+            if self._gate is None or self._ended or self._resources is None:
+                return False
+            self._clear_author()
+            resources, self._resources = self._resources, None
+        resources.close()
+        return True
+
+    def held(self) -> bool:
+        with self._lock:
+            return self._resources is not None
+
+    def reacquire(self, should_stop: Callable[[], bool]) -> bool:
+        """Wait for the conversation and a slot again; False when ``should_stop`` ends the wait.
+
+        A stop seen before the first attempt or right after the last one leaves nothing held,
+        so a stopped author never acts even when both resources were free at once.
+        """
+        if self._gate is None:
+            return False
+        if self.held():
+            return not should_stop()
+        resources = self._gate.acquire_resources(self.conversation_key, should_stop)
+        if resources is None:
+            return False
+        with self._lock:
+            if self._ended or self._resources is not None:
+                stale = resources
+            else:
+                self._resources, stale = resources, None
+                self._publish_author()
+        if stale is not None:
+            stale.close()
+        return stale is None
+
+
+class PresenceTurnGate:
+    """Cross-process cap plus one active turn for each conversation.
+
+    ``run`` waits on a thread (the tool path); ``admit`` takes the same resources as a
+    coroutine for the Host, whose queued turns must hold no thread while they wait.
+    """
+
+    def __init__(self, max_active: int = 2, *, state_root: Path | None = None) -> None:
+        self._max_active = max(1, int(max_active))
+        self._slots = threading.BoundedSemaphore(max(1, int(max_active)))
+        self._guard = threading.Lock()
+        self._conversations: dict[str, threading.Lock] = {}
+        self._state_root = Path(state_root).resolve(strict=False) if state_root is not None else None
+        self._claimed_slots: set[int] = set()
+
+    def _gate_file(self, name: str) -> Path:
+        root = self._state_root / "presence_turn_gate"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / name
+
+    def _conversation(self, conversation_key: str) -> tuple[str, threading.Lock]:
+        key = str(conversation_key or "").strip()
+        if not key:
+            from ouroboros.presence_runner import PresenceTurnError
+            raise PresenceTurnError("presence_conversation_key_required", "conversation_key")
+        with self._guard:
+            return key, self._conversations.setdefault(key, threading.Lock())
+
+    def _conversation_file(self, key: str) -> Path:
+        return self._gate_file(f"conversation-{hashlib.sha256(key.encode('utf-8')).hexdigest()}.lock")
+
+    @contextmanager
+    def _file_lock(self, path: Path):
+        from ouroboros.platform_layer import file_lock_exclusive, file_unlock
+
+        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            file_lock_exclusive(fd)
+            yield
+        finally:
+            try:
+                file_unlock(fd)
+            finally:
+                os.close(fd)
+
+    def _try_slot(self) -> Callable[[], None] | None:
+        """Claim one free active slot without waiting: its release, or None while all are taken."""
+        if self._state_root is None:
+            return self._slots.release if self._slots.acquire(blocking=False) else None
+        from ouroboros.platform_layer import file_unlock
+
+        for index in range(self._max_active):
+            with self._guard:
+                if index in self._claimed_slots:
+                    continue
+                self._claimed_slots.add(index)
+            try:
+                fd = os.open(self._gate_file(f"slot-{index}.lock"), os.O_CREAT | os.O_RDWR, 0o600)
+            except BaseException:  # an unopenable slot is an error, never a slot left claimed
+                with self._guard:
+                    self._claimed_slots.discard(index)
+                raise
+            if not _try_exclusive(fd):  # another process holds it
+                os.close(fd)
+                with self._guard:
+                    self._claimed_slots.discard(index)
+                continue
+
+            def release(index: int = index, fd: int = fd) -> None:
+                try:
+                    file_unlock(fd)
+                finally:
+                    os.close(fd)
+                    with self._guard:
+                        self._claimed_slots.discard(index)
+
+            return release
+        return None
+
+    def run(self, conversation_key: str, callback: Callable[[], Any]) -> Any:
+        lease = self.acquire(conversation_key)
+        try:
+            return callback()
+        finally:
+            lease.release()
+
+    def _acquisition(self, conversation_key: str):
+        """Take what ``run`` takes, in the same order, without ever blocking.
+
+        A generator that yields while a resource is busy and returns the ExitStack holding
+        everything; closing it early releases whatever was already taken. The coroutine and
+        the thread admissions differ only in how they sleep between attempts.
+        """
+        from ouroboros.platform_layer import file_unlock
+
+        key, conversation_lock = self._conversation(conversation_key)
+        with ExitStack() as held:
+            while not conversation_lock.acquire(blocking=False):
+                yield
+            held.callback(conversation_lock.release)
+            if self._state_root is not None:
+                fd = os.open(self._conversation_file(key), os.O_CREAT | os.O_RDWR, 0o600)
+                held.callback(os.close, fd)
+                while not _try_exclusive(fd):
+                    yield
+                held.callback(file_unlock, fd)
+            while (release_slot := self._try_slot()) is None:
+                yield
+            held.callback(release_slot)
+            return held.pop_all()
+
+    async def admit(self, conversation_key: str) -> PresenceTurnLease:
+        """Take what ``run`` takes, in the same order, as a coroutine.
+
+        Every attempt is non-blocking and every wait is an asyncio sleep, so a turn queued
+        behind its conversation or the active cap parks no thread. Cancellation releases
+        whatever was already taken; success hands it all to the returned lease.
+        """
+        key, _lock = self._conversation(conversation_key)
+        steps = self._acquisition(key)
+        try:
+            while True:
+                try:
+                    next(steps)
+                except StopIteration as done:
+                    return PresenceTurnLease(key, done.value, self)
+                await asyncio.sleep(_GATE_POLL_SEC)
+        finally:
+            steps.close()
+
+    def acquire_resources(self, conversation_key: str,
+                          should_stop: Callable[[], bool] | None = None) -> ExitStack | None:
+        """The thread form of ``admit``; None when ``should_stop`` ends the wait.
+
+        ``should_stop`` is asked before the first attempt, every ``_GATE_STOP_POLL_SEC``
+        while waiting, and once more after the last attempt succeeds: what was taken as a
+        stop landed is returned at once instead of handed to a stopped caller.
+        """
+        if should_stop is not None and should_stop():
+            return None
+        steps = self._acquisition(conversation_key)
+        checked = time.monotonic()
+        try:
+            while True:
+                try:
+                    next(steps)
+                except StopIteration as done:
+                    resources = done.value
+                    break
+                if should_stop is not None and time.monotonic() - checked >= _GATE_STOP_POLL_SEC:
+                    checked = time.monotonic()
+                    if should_stop():
+                        return None
+                time.sleep(_GATE_POLL_SEC)
+        finally:
+            steps.close()
+        if should_stop is not None and should_stop():
+            resources.close()
+            return None
+        return resources
+
+    def acquire(self, conversation_key: str) -> PresenceTurnLease:
+        key, _lock = self._conversation(conversation_key)
+        return PresenceTurnLease(key, self.acquire_resources(key), self)
+
 
 
 def live_author(conversation_key: str, *, drive_root: Any = None) -> str:
-    """The task id authoring this conversation now, ``""`` when none."""
-    return ""
+    root = str(Path(drive_root).resolve()) if drive_root is not None else ""
+    with _AUTHORS_LOCK:
+        local = list(_AUTHORS.items())
+    for (where, task), lease in local:
+        if (not root or where == root) and lease.conversation_key == conversation_key and lease.held():
+            return task
+    if not root:
+        return ""
+    path = Path(root) / "state" / "presence_turn_gate" / (
+        "conversation-" + hashlib.sha256(conversation_key.encode()).hexdigest() + ".lock")
+    try:
+        fd = os.open(path, os.O_RDWR)
+    except FileNotFoundError:
+        return ""
+    try:
+        if _try_exclusive(fd):
+            from ouroboros.platform_layer import file_unlock
+            file_unlock(fd)
+            return ""
+        row = json.loads(path.with_suffix(".author.json").read_text(encoding="utf-8"))
+        return str(row.get("task_id") or "") if row.get("conversation_key") == conversation_key else ""
+    except (FileNotFoundError, ValueError):
+        return ""
+    finally:
+        os.close(fd)
 
 
 def live_authors(*, drive_root: Any = None) -> list[str]:
-    """Every task id authoring a place conversation in this process now (Stop reaches them)."""
-    return []
+    root = str(Path(drive_root).resolve()) if drive_root is not None else ""
+    with _AUTHORS_LOCK:
+        found = {task for (where, task) in _AUTHORS if not root or where == root}
+    if root:
+        for path in (Path(root) / "state" / "presence_turn_gate").glob("*.author.json"):
+            try:
+                row = json.loads(path.read_text(encoding="utf-8"))
+                task = live_author(row["conversation_key"], drive_root=root)
+                if task:
+                    found.add(task)
+            except (FileNotFoundError, ValueError, KeyError):
+                continue  # release can remove a projection during this census
+    return sorted(found)

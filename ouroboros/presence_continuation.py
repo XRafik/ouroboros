@@ -162,6 +162,11 @@ def _hard_stop_check(ctx: Any) -> Callable[[], bool]:
 
     def stop() -> bool:
         reason = control.control_reason() if control is not None else None
+        if (getattr(ctx, "task_metadata", {}) or {}).get("wake_cause") == "focus":
+            from ouroboros.presence_admission import focus_enabled
+            from ouroboros.tool_access import canonical_data_root
+            if not focus_enabled(canonical_data_root(ctx)):
+                reason = "cancelled"
         if reason in HARD_STOPS:
             stop.reason = reason
         return bool(stop.reason)
