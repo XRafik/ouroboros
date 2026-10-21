@@ -105,14 +105,15 @@ def test_a_never_listed_catalog_is_unknown_health_not_a_miss():
         {"id": "canvas", "enabled": True, "transport": "streamable_http", "url": "https://e.example/mcp"}]})
 
     unlisted = manager._call_tool_result("mcp_canvas__report", {})
-    assert (unlisted.status, unlisted.code) == ("unavailable", "MCP_UNAVAILABLE")
-    assert "(it has not been listed yet); whether 'mcp_canvas__report' exists is unknown" in unlisted.text
+    assert (unlisted.status, unlisted.code) == ("unavailable", "MCP_CATALOG_UNAVAILABLE")
+    assert "(not listed yet); whether 'mcp_canvas__report' exists is unknown" in unlisted.text
 
     assert manager.refresh_server("canvas")["ok"]
     miss = manager._call_tool_result("mcp_canvas__report", {})
     assert (miss.status, miss.code) == ("error", "UNKNOWN_TOOL")
-    assert miss.text == ("⚠️ MCP_TOOL_NOT_FOUND: 'mcp_canvas__report' is not in the current tool catalog "
-                         "of MCP server 'canvas'. Nothing was executed.")
+    listed_at = manager.status_payload()["servers"][0]["listed_at"]
+    assert miss.text == (f"⚠️ MCP_TOOL_NOT_FOUND: 'mcp_canvas__report' is absent from the listing of {listed_at}. "
+                         "Nothing was executed.")
     assert "Settings" not in miss.text and manager.call_tool("mcp_canvas__report", {}) == miss.text
     assert transport.call_calls == [] and transport.list_calls == ["canvas"]
 
@@ -127,8 +128,9 @@ def test_canvas_raw_name_names_the_canonical_call_and_runs_nothing(world):
 
     assert (miss.status, miss.code) == ("error", "UNKNOWN_TOOL")
     lines = miss.text.splitlines()
-    assert lines[0] == (f"⚠️ MCP_TOOL_NOT_FOUND: 'mcp_canvas__{raw}' is not in the current tool catalog "
-                        "of MCP server 'canvas'. Nothing was executed.")
+    listed_at = mcp_client.get_manager().status_payload()["servers"][0]["listed_at"]
+    assert lines[0] == (f"⚠️ MCP_TOOL_NOT_FOUND: 'mcp_canvas__{raw}' is absent from the listing of {listed_at}. "
+                        "Nothing was executed.")
     assert lines[1] == "Currently callable in mcp_canvas (raw MCP name → callable name):"
     assert f"- {raw!r} → {wire}" in lines
     assert lines[-1] == (f"Naming-rule identity (exact; not called): {raw!r} corresponds to raw MCP "
@@ -143,20 +145,17 @@ def test_canvas_raw_name_names_the_canonical_call_and_runs_nothing(world):
     assert json.dumps(transport.call_calls[0][2]) == json.dumps(args)
 
 
-def test_name_miss_never_reloads_settings_or_reconfigures_mcp(world, monkeypatch):
+def test_name_miss_reads_catalog_without_discovery_or_safety(world, monkeypatch):
     registry, transport, safety = world
     from ouroboros.loop_tool_execution import _execute_single_tool
 
-    # The active catalog is already populated, but the settings file could have
-    # a newer mtime. The lookup must use the current registration unchanged;
-    # even refresh=False on ensure_configured_from_settings would reconfigure.
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("a name miss must not enter the settings/configuration seam")
-
-    monkeypatch.setattr(mcp_client, "ensure_configured_from_settings", forbidden)
+    from unittest.mock import Mock
+    read = Mock(wraps=mcp_client.ensure_configured_from_settings)
+    monkeypatch.setattr(mcp_client, "ensure_configured_from_settings", read)
     miss = registry.execute_result("mcp_canvas__never_registered", {})
     assert (miss.status, miss.code) == ("error", "UNKNOWN_TOOL")
     assert "mcp_canvas__canvas_get_assignme_df6acab471ce" in miss.text
+    assert read.called
     assert safety == [] and transport.call_calls == []
     # The production loop asks get_timeout() BEFORE calling the registry.
     # The direct registry test alone did not cover that earlier read seam.
@@ -179,7 +178,7 @@ def test_exact_hit_rechecks_saved_settings_before_safety_or_dispatch(world, monk
     monkeypatch.setattr(mcp_client, "ensure_configured_from_settings", disable_mcp)
     result = registry.execute_result(wire, {"course_id": 12})
     assert (result.status, result.code) == ("unavailable", "MCP_UNAVAILABLE")
-    assert observed == [False]  # only a catalog hit checks current saved authority
+    assert observed == [False, False]  # hit revocation, then current-catalog refusal context
     assert safety == [] and transport.call_calls == []
     # Restore fixture configuration after exercising the revocation edge.
     manager.reconfigure({"MCP_ENABLED": True, "MCP_TOOL_TIMEOUT_SEC": 60, "MCP_SERVERS": [
@@ -328,11 +327,9 @@ def test_unknown_health_disabled_server_and_unknown_server_stay_distinct(world):
     _bind_loop(registry)
 
     down = registry.execute_result("mcp_down__never", {})
-    assert (down.status, down.code) == ("unavailable", "MCP_UNAVAILABLE")
-    assert down.text.splitlines()[0] == (
-        "⚠️ MCP_CATALOG_UNAVAILABLE: MCP server 'down' has no current tool catalog in this process "
-        "(its last listing failed: ConnectionError: upstream refused); whether 'mcp_down__never' "
-        "exists is unknown. Nothing was executed.")
+    assert (down.status, down.code) == ("unavailable", "MCP_CATALOG_UNAVAILABLE")
+    assert "never listed under the current configuration; latest attempt" in down.text
+    assert "ConnectionError: upstream refused" in down.text and "exists is unknown" in down.text
     off = registry.execute_result("mcp_off__dormant", {})
     assert (off.status, off.code) == ("unavailable", "MCP_UNAVAILABLE")
     assert off.text.startswith("⚠️ MCP_DISABLED: MCP server 'off' is disabled in Settings → Advanced;")
@@ -462,3 +459,14 @@ def test_loop_executor_records_the_miss_as_unknown_tool_and_the_exact_call_as_ok
     assert hit["is_error"] is False and hit["result_meta"]["status"] == "ok"
     assert transport.call_calls == [("canvas", CANVAS[0], args)]
     assert len(safety) == 1
+
+
+@pytest.fixture(autouse=True)
+def _private_mcp_catalog_root(tmp_path, monkeypatch):
+    from ouroboros import config
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    configure = mcp_client.reconfigure_from_settings
+    def configured(settings):
+        monkeypatch.setattr(config, "load_settings", lambda: settings)
+        configure(settings)
+    monkeypatch.setattr(mcp_client, "reconfigure_from_settings", configured)

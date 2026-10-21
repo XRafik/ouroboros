@@ -1011,3 +1011,9 @@ def test_duplicate_tool_names_disclose_instead_of_crashing(monkeypatch, tmp_path
     assert out.get("ok") is True, out
     assert out.get("tool_count") == 1
     assert "collision" in (mgr._servers["dup"].last_error or ""), mgr._servers["dup"].last_error
+
+
+@pytest.fixture(autouse=True)
+def _private_mcp_catalog_root(tmp_path, monkeypatch):
+    from ouroboros import config
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)

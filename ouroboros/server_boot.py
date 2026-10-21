@@ -96,10 +96,10 @@ def reconcile_review_jobs(root: pathlib.Path) -> None:
 
 
 def mcp_startup(settings: dict) -> None:
-    from ouroboros.mcp_client import reconfigure_from_settings, refresh_all_background
+    from ouroboros.mcp_client import get_manager, configuration_changed
 
-    reconfigure_from_settings(settings)
-    refresh_all_background(reason="startup")
+    get_manager().become_lister()
+    configuration_changed(settings, reason="startup")
 
 
 def wait_store_published(root: pathlib.Path, stop: threading.Event, document: BootDocument = BOOT) -> None:
