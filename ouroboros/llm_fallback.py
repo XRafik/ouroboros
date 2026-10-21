@@ -30,6 +30,7 @@ from ouroboros.llm_attempt import (
     preserve_prior_dispatch,
     strongest_dispatch_capture,
     processing_refusal,
+    single_physical_send_active,
 )
 from ouroboros.context_budget import context_overflow_message
 from ouroboros.deadline_utils import physical_dispatch_timeout
@@ -482,6 +483,12 @@ class _RecoveryLadderMixin:
                 self._pop_effort_clamp_disclosure()
                 raise
 
+        if single_physical_send_active():
+            try:
+                return _send(kwargs)  # preserve the repeat's error/body; no repair or affinity mutation
+            except Exception:
+                self._pop_effort_clamp_disclosure()
+                raise
         try:
             resp = _send(kwargs)
         except UsageAccountingError:
@@ -638,6 +645,12 @@ class _RecoveryLadderMixin:
                 self._pop_effort_clamp_disclosure()
                 raise
 
+        if single_physical_send_active():
+            try:
+                return await _send(kwargs)
+            except Exception:
+                self._pop_effort_clamp_disclosure()
+                raise
         try:
             resp = await _send(kwargs)
         except UsageAccountingError:
