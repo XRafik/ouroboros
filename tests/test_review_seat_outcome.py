@@ -104,6 +104,18 @@ def test_pending_and_interruption_are_not_model_losses(tmp_path, state, transpor
         assert actor.outcome["status"] == "interrupted" and actor.parse_status == "unavailable"
 
 
+@pytest.mark.parametrize("paused", [True, False])
+def test_unsent_pause_refusal_is_not_a_reviewer_failure(tmp_path, paused):
+    from ouroboros.review_seat_outcome import finalize_seat_outcome
+
+    actor = ReviewActorRecord("seat", "m", "not_dispatched", operation_id="refused",
+        operation_state="not_dispatched", usage={"owner_pause_preparing": paused}, error="unsent")
+    request = ReviewRequest(surface="multi_model_review", goal="g", policy={"parts": ["result"]})
+    finalize_seat_outcome(request, ReviewSlot("seat", "m"), actor)
+    triad_review.emit_review_run_errors(None, request, [actor], drive_root=tmp_path)
+    assert len(_errors(tmp_path)) == (0 if paused else 1)
+
+
 def test_quorum_uses_assigned_seats_and_ignores_additional():
     from ouroboros.review_ledger import reduce_verdict
 
@@ -213,13 +225,16 @@ def test_no_detach_waits_for_settlement_and_outer_exception_is_durable_before_re
 
 def test_failed_durable_publication_never_marks_the_entry_ready(tmp_path):
     import queue
+    from ouroboros.review_wave import ReviewWave
 
+    wave = ReviewWave(1)
     entry = review_custody.ActiveReviewAttempt("write-failed", "write-failed")
     actor = ReviewActorRecord("seat", "m", "ok", raw_text="[]\nNO_FINDINGS")
     def refuse(*_args):
         raise OSError("disk unavailable")
     with pytest.raises(OSError, match="disk unavailable"):
-        review_custody._settle_review_attempt(entry, ReviewSlot("seat", "m"), actor,
-            usage_ctx=None, request=ReviewRequest(surface="multi_model_review", goal="g"), task_id="t",
-            result_queue=queue.Queue(), settle_actor=refuse)
-    assert not entry.event.is_set() and entry.actor is actor
+        with wave.worker(entry):
+            review_custody._settle_review_attempt(entry, ReviewSlot("seat", "m"), actor,
+                usage_ctx=None, request=ReviewRequest(surface="multi_model_review", goal="g"), task_id="t",
+                result_queue=queue.Queue(), settle_actor=refuse)
+    assert not entry.event.is_set() and entry.actor is actor and wave.running == 1

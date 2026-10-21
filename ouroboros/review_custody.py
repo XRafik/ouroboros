@@ -65,6 +65,7 @@ class ActiveReviewAttempt:
     # operation an earlier process paid for, whose send moment it cannot know.
     started_at: str = ""
     logical_deadline: Optional[float] = None  # in this operation's slot clock
+    waiting_for_capacity: bool = False
     assignment: tuple = ()  # original inputs, including preparation before prompt persistence
     # The operation-owned wait/lifetime this worker belongs to (None: no owner).
     operation: Any = field(default_factory=current_review_operation)
@@ -1205,7 +1206,9 @@ def run_custodied_review_slots(*, request: Any, slots: List[Any], usage_ctx: Any
     A slot whose operation could not be retained before its send is refused at
     $0; a slot another live worker owns, or a settled one, still runs as before.
     """
-    with review_operation_scope(request=request, slots=slots, usage_ctx=usage_ctx,
+    from ouroboros.review_wave import review_wave_scope
+
+    with review_wave_scope(), review_operation_scope(request=request, slots=slots, usage_ctx=usage_ctx,
                                 task_id=str(custody.get("task_id") or "")) as binding:
         # A refused row names the operation its caller reserved for it (the commit's
         # write-ahead roster), so reconciliation reads a $0 refusal, never lost custody.
@@ -1224,6 +1227,44 @@ def run_custodied_review_slots(*, request: Any, slots: List[Any], usage_ctx: Any
         return sorted(actors, key=lambda actor: order.get(str(actor.slot_id), len(order)))
 
 
+def _execute_review_attempt(*, admitted, request, slot, entry, usage_ctx, task_id,
+                            review_usage_scope, run_slot, error_actor, settle_actor,
+                            result_queue, logical_deadline):
+    from ouroboros.usage_accounting import usage_scope
+
+    _emit_operation(
+        usage_ctx, task_id=task_id, request=request, entry=entry, slot=slot,
+        phase="started",
+    )
+    try:
+        if not admitted:
+            actor = error_actor(slot, "Owner paused before review dispatch", entry.operation_id, "not_dispatched")
+            actor.usage["owner_pause_preparing"] = True
+        else:
+            with (usage_scope(review_usage_scope),
+                  calendar_scope(str(getattr(request, "deadline_at", "") or "")),
+                  execution_deadline_scope(logical_deadline, review_slot_id=str(slot.slot_id)),
+                  review_pause.slot_episode(entry, review_usage_scope)):
+                actor = run_slot(
+                    slot, entry.operation_id, entry.retry_state,
+                    logical_deadline,
+                    entry.pending_invocation_checkpoint,
+                )
+    except Exception as exc:
+        operation_state = _worker_exception_operation_state(
+            exc, entry.retry_state,
+        )
+        actor = error_actor(
+            slot, f"{type(exc).__name__}: {exc}", entry.operation_id,
+            operation_state,
+        )
+        _attach_worker_exception_facts(actor, exc, entry.retry_state)
+    _settle_review_attempt(
+        entry, slot, actor, usage_ctx=usage_ctx, request=request,
+        task_id=task_id, result_queue=result_queue, settle_actor=settle_actor,
+    )
+
+
 def _run_custodied_review_slots(
     *,
     request: Any,
@@ -1237,8 +1278,10 @@ def _run_custodied_review_slots(
     settle_actor: Any = None,
 ) -> List[Any]:
     """Run slots with independent logical windows and late-result custody."""
-    from ouroboros.usage_accounting import usage_scope
+    import contextlib
+    from ouroboros.review_wave import current_review_wave
 
+    wave = current_review_wave()
     result_queue: "queue.Queue[Any]" = queue.Queue()
     slot_entries: Dict[str, ActiveReviewAttempt] = {}
     slot_deadlines: Dict[str, float] = {}
@@ -1358,6 +1401,7 @@ def _run_custodied_review_slots(
                         # physical operation is sent from here, and only now.
                         started_at="" if exact_recovery else utc_now_iso(),
                         logical_deadline=slot_deadlines[slot_id],
+                        waiting_for_capacity=wave.capacity is not None and not exact_recovery,
                         assignment=copy.deepcopy((request, slot)),
                     )
                     entry.recovery_binding = review_operation_binding(request, slot, entry.operation_id)
@@ -1391,6 +1435,7 @@ def _run_custodied_review_slots(
             )
             return
         slot_entries[slot_id] = entry
+        wave.register(entry)
         if not owner and bool(getattr(request, "reconcile_only", False)) and entry.logical_deadline is not None:
             # A live rejoin uses the original clock/window, never another full
             # slot timeout. The operation scope has rebound that same clock.
@@ -1418,33 +1463,21 @@ def _run_custodied_review_slots(
             if entry.operation is not None:
                 entry.operation.note_dispatch()
             def worker() -> None:
-                _emit_operation(
-                    usage_ctx, task_id=task_id, request=request, entry=entry, slot=slot,
-                    phase="started",
-                )
-                try:
-                    with (usage_scope(review_usage_scope),
-                          calendar_scope(str(getattr(request, "deadline_at", "") or "")),
-                          execution_deadline_scope(slot_deadlines[slot_id], review_slot_id=slot_id),
-                          review_pause.slot_episode(entry, review_usage_scope)):
-                        actor = run_slot(
-                            slot, entry.operation_id, entry.retry_state,
-                            slot_deadlines[slot_id],
-                            entry.pending_invocation_checkpoint,
-                        )
-                except Exception as exc:
-                    operation_state = _worker_exception_operation_state(
-                        exc, entry.retry_state,
-                    )
-                    actor = error_actor(
-                        slot, f"{type(exc).__name__}: {exc}", entry.operation_id,
-                        operation_state,
-                    )
-                    _attach_worker_exception_facts(actor, exc, entry.retry_state)
-                _settle_review_attempt(
-                    entry, slot, actor, usage_ctx=usage_ctx, request=request,
-                    task_id=task_id, result_queue=result_queue, settle_actor=settle_actor,
-                )
+                if exact_recovery:
+                    permit = contextlib.nullcontext(True)  # Observing a paid run buys no worker permit.
+                else:
+                    permit = wave.worker(entry)
+                with permit as admitted:
+                    if entry.waiting_for_capacity:
+                        # The old fan-out semaphore waited before opening the slot window.
+                        slot_deadlines[slot_id] = monotonic_now(slot_id) + _logical_timeout(slot, request, usage_meta)
+                        entry.logical_deadline = slot_deadlines[slot_id]
+                        entry.waiting_for_capacity = False
+                    _execute_review_attempt(
+                        admitted=admitted, request=request, slot=slot, entry=entry, usage_ctx=usage_ctx,
+                        task_id=task_id, review_usage_scope=review_usage_scope, run_slot=run_slot,
+                        error_actor=error_actor, settle_actor=settle_actor, result_queue=result_queue,
+                        logical_deadline=slot_deadlines[slot_id])
 
             threading.Thread(
                 target=copy_wait_context().run, args=(worker,),
@@ -1481,16 +1514,22 @@ def _run_custodied_review_slots(
         calendar_remaining = seconds_until(getattr(request, "deadline_at", ""))
         wait_context = current_model_wait()
         waiting_slots = wait_context.waiting_slots() if wait_context is not None else set()
-        expired = {slot_id for slot_id in pending if slot_deadlines[slot_id] <= monotonic_now(slot_id)}
+        for slot_id in pending:
+            entry = slot_entries[slot_id]
+            if not entry.waiting_for_capacity and entry.logical_deadline is not None:
+                slot_deadlines[slot_id] = entry.logical_deadline
+        expired = {slot_id for slot_id in pending if not slot_entries[slot_id].waiting_for_capacity
+                   and slot_deadlines[slot_id] <= monotonic_now(slot_id)}
         if calendar_remaining == 0.0:
             expired.update(pending & waiting_slots)
         pending.difference_update(expired)
         if not pending:
             break
-        if operation is not None and author_detaches(operation, [slot_entries.get(slot_id) for slot_id in pending]):
+        if operation is not None and wave.observe_detach(operation, author_detaches):
             detached = True  # launched episodes finish; unsent preparation stays owned and cannot launch
             break
-        remaining = min(slot_deadlines[slot_id] - monotonic_now(slot_id) for slot_id in pending)
+        remaining = min(review_pause.DETACH_POLL_SEC if slot_entries[slot_id].waiting_for_capacity
+                        else slot_deadlines[slot_id] - monotonic_now(slot_id) for slot_id in pending)
         if calendar_remaining is not None and pending & waiting_slots:
             remaining = min(remaining, calendar_remaining)
         if drain_deadline is not None:

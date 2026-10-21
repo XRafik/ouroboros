@@ -432,8 +432,13 @@ def test_cold_terminal_loss_keeps_its_type_without_blaming_restart_on_reviewer(
               if json.loads(line).get("type") == "review_model_error"] if events.exists() else []
     assert len(errors) == error_count
     if state in {"cancelled", "interrupted"}:
+        from ouroboros.review_substrate import compact_review_projection
+
         assert actor["failure_code"] == "review_run_cancelled"
         assert actor["transport_status"] == actor["outcome"]["status"] == "interrupted"
+        card = compact_review_projection([{"request": {"surface": SURFACE}, "actors": [actor]}])["panels"][0]["actors"][0]
+        assert card["transport_status"] == "interrupted" and card["parse_status"] == "unavailable"
+        assert not card["semantic_verdict"]
         text = review_actor_progress_text(SURFACE, "finished", ReviewSlot("s", "codex"), ReviewActorRecord(**actor))
         assert "answer may be lost" in text and "didn't answer" not in text
     else:
