@@ -42,6 +42,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     monkeypatch.setenv("OUROBOROS_ALLOW_MUTATIVE_SUBAGENTS", "true")
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     monkeypatch.setattr("ouroboros.tool_access._user_files_root", lambda: tmp_path)
     parent = ToolContext(repo_dir=system, drive_root=drive, task_id="parent",
                          workspace_root=a, workspace_mode="external")

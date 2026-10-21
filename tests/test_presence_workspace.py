@@ -42,6 +42,7 @@ def installed(tmp_path, monkeypatch):
     monkeypatch.setattr(state, "STATE_PATH", data / "state" / "state.json")
     monkeypatch.setattr(queue, "DRIVE_ROOT", data)
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     monkeypatch.setenv("MCP_ENABLED", "false")
     skill_dir = data / "skills" / "external" / "community-helper"
     skill_dir.mkdir(parents=True)

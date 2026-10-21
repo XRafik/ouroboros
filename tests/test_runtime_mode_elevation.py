@@ -342,6 +342,7 @@ def test_write_file_preserves_ordinary_content_json(tmp_path, monkeypatch, body)
     drive_root.mkdir()
     monkeypatch.setattr(cfg, "DATA_DIR", drive_root, raising=True)
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     ctx = _make_drive_ctx(tmp_path)
     ctx.repo_dir.mkdir()
@@ -894,6 +895,9 @@ def test_every_settings_writer_routes_through_the_shared_prologue():
 
     # (module, function) -> why it may write settings.json without the prologue
     exempt = {
+        ("ouroboros/safety_config.py", "_migrate_consciousness_safety"):
+            "one-time startup migration under the settings lock: copies only the existing "
+            "owner level to the new consciousness key; merging defaults would author unrelated settings.",
         ("ouroboros/utils.py", "atomic_write_json"):
             "generic atomic serializer: the settings filename selects indentation only; "
             "semantic settings writers enforce the prologue before calling this primitive.",
@@ -1672,6 +1676,7 @@ def test_run_shell_writes_skill_state_examples(shape, filename, tmp_path, monkey
     payload.write_text('{"status":"pass","enabled":true}', encoding="utf-8")
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     if os.name == "nt":
         # ``bash`` on hosted Windows resolves to WSL, which has no distro in
@@ -1812,6 +1817,7 @@ def test_run_shell_waits_for_a_helper_writing_a_skill_state_example(tmp_path, mo
     )
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     result = reg.execute("run_command", {"cmd": [sys.executable, "-c", parent_code, str(drive_root), child_code]})
     assert "exit_code=0" in result, result
@@ -1832,6 +1838,7 @@ def test_detached_helper_does_not_make_printed_words_a_skill_state_mutation(tmp_
     )
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     reg = ToolRegistry(repo_dir=tmp_path, drive_root=drive_root)
     result = reg.execute("run_command", {"cmd": [sys.executable, "-c", code]})
     assert "exit_code=0" in result and "state skills" in result, result
