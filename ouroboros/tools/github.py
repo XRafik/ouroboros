@@ -205,7 +205,7 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
                                "target")
             if workspace or room_dir or project:
                 env.pop("GH_REPO", None)  # Ambient defaults cannot replace the selected Project.
-            if repo:
+            if repo and args[:1] != ["api"]:  # `gh api` has no --repo: its route names the repository.
                 cmd.extend(["--repo", repo])
         if submitted is not None:
             submitted[0] = True
@@ -254,6 +254,76 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
 def _gh_cmd(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Optional[str] = None,
             *, repo: object = _GENERIC_TRANSPORT) -> str:
     return _gh_run(args, ctx, timeout=timeout, input_data=input_data, repo=repo).text
+
+
+_REPO_RE = re.compile(r"^(?:(?P<host>[^/\s]+)/)?(?P<owner>[^/\s]+)/(?P<name>[^/\s]+)$")
+
+
+def _split_repo(repo: str) -> Optional[tuple]:
+    """``(host, owner, name)`` of an explicit ``[HOST/]OWNER/REPO``; None when it is not one."""
+    match = _REPO_RE.fullmatch(str(repo or "").strip())
+    return (match["host"] or "", match["owner"], match["name"]) if match else None
+
+
+def _target_refusal(ctx: ToolContext, text: str) -> GhResult:
+    submitted = _SUBMITTED.get()
+    first = submitted is not None and not submitted[0]
+    return GhResult(False, _refuse(ctx, text, no_effect=first), None, None, "target")
+
+
+def _gh_api(ctx: ToolContext, route: str, *, repo: str, method: str = "GET", body: Optional[dict] = None,
+            include: bool = False, timeout: int = 30) -> GhResult:
+    """One REST call through ``gh api`` under the public repository binding.
+
+    A bound Project (``repo=""``) keeps gh's ``{owner}/{repo}`` placeholders, which gh resolves
+    from the bound directory exactly as ``gh issue list`` does; an explicit repo is substituted
+    into the route and its host passed as ``--hostname``. ``include`` keeps the status line and
+    headers in the output (pagination reads the ``Link`` header)."""
+    args = ["api"]
+    if method != "GET":
+        args.extend(["--method", method])
+    if include:
+        args.append("--include")
+    host = ""
+    if repo:
+        parts = _split_repo(repo)
+        if parts is None:
+            return _target_refusal(ctx, "⚠️ GH_TARGET_INVALID: repo must be [HOST/]OWNER/REPO; omit it to use the selected Project.")
+        host, owner, name = parts
+        route = route.replace("{owner}/{repo}", f"{owner}/{name}")
+    args.append(route)
+    if host:
+        args.extend(["--hostname", host])
+    input_data = None
+    if body is not None:
+        args.extend(["--input", "-"])
+        input_data = json.dumps(body)
+    return _gh_run(args, ctx, timeout=timeout, input_data=input_data, repo=repo)
+
+
+def _gh_graphql(ctx: ToolContext, document: str, variables: dict, *, repo: str, repo_vars: bool = True,
+                timeout: int = 30) -> GhResult:
+    """One GraphQL call under the public repository binding; ``$owner``/``$name`` name the repository.
+
+    Bound Project: gh's ``{owner}``/``{repo}`` placeholders in typed fields; explicit repo: literal values."""
+    args = ["api", "graphql", "-f", f"query={document}"]
+    host = ""
+    if repo:
+        parts = _split_repo(repo)
+        if parts is None:
+            return _target_refusal(ctx, "⚠️ GH_TARGET_INVALID: repo must be [HOST/]OWNER/REPO; omit it to use the selected Project.")
+        host, owner, name = parts
+        if repo_vars:
+            args.extend(["-f", f"owner={owner}", "-f", f"name={name}"])
+    elif repo_vars:
+        args.extend(["-F", "owner={owner}", "-F", "name={repo}"])
+    for key, value in (variables or {}).items():
+        if value is None:
+            continue
+        args.extend(["-F", f"{key}={json.dumps(value)}"] if isinstance(value, (bool, int)) else ["-f", f"{key}={value}"])
+    if host:
+        args.extend(["--hostname", host])
+    return _gh_run(args, ctx, timeout=timeout, repo=repo)
 
 
 def _list_issues(ctx: ToolContext, state: str = "open", labels: str = "", limit: int = 20, repo: str = "") -> str:
@@ -665,8 +735,18 @@ def _get_checks(ctx: ToolContext, number: int = 0, sha: str = "", wait_seconds: 
     return get_checks(ctx, number=number, sha=sha, wait_seconds=wait_seconds, repo=repo)
 
 
+def _github_read(ctx: ToolContext, method: str = "", repo: str = "", **args) -> str:
+    """``github_read``: the methods live in ``github_read`` and call this module's transport."""
+    from ouroboros.tools.github_read import run_read
+
+    return run_read(ctx, method, repo, **args)
+
+
 def get_tools() -> List[ToolEntry]:
+    from ouroboros.tools.github_read import SCHEMA as READ_SCHEMA
+
     tools = [
+        ToolEntry("github_read", READ_SCHEMA, _github_read),
         ToolEntry("list_github_prs", {
             "name": "list_github_prs",
             "description": (

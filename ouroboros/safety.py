@@ -84,6 +84,7 @@ TOOL_POLICY: Dict[str, str] = {
     "extract_video_frames": POLICY_SKIP,
     "browse_page": POLICY_SKIP,
     "browser_action": POLICY_SKIP,
+    "github_read": POLICY_SKIP,
     "list_github_prs": POLICY_SKIP,
     "get_github_pr": POLICY_SKIP,
     "get_github_checks": POLICY_SKIP,
