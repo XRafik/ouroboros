@@ -240,7 +240,7 @@ export const SAFETY_MODEL_KEYS = Object.freeze([
 
 /** One owner transaction for any of SAFETY_MODEL_KEYS; a refusal throws the server's sentence. */
 export async function saveCheckerSettings(settings) {
-    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), 'The model settings');
+    return ownerAnswer(await jsonPost('/api/owner/safety-model', { settings }), 'The change');
 }
 
 /** The Agents roster as saved (`OUROBOROS_SUBAGENTS`, a JSON string or object), or null when unreadable. */

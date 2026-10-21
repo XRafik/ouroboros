@@ -1,7 +1,7 @@
 // Settings › Behavior › Safety Supervisor: two coverage levels over one checker — "Your work" (what the owner
 // asked for) and "Consciousness" (what Ouroboros does on its own, places included) — the checker and second-check
 // facts, and the owner's rules. Every value here is owner-only: the generic settings save never carries it. Save
-// writes the checker's settings (from Models and Agents) through one owner transaction BEFORE the generic save,
+// writes the checker's changed settings (from Models and Agents) in one owner transaction BEFORE the generic save,
 // and each changed level and the rules through their audited owner endpoints after it (consciousness_api.js).
 import { renderSegmentedField } from './page_header.js';
 import { escapeHtmlAttr as escapeHtml } from './utils.js';
