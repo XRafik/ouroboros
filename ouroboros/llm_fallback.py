@@ -30,11 +30,15 @@ from ouroboros.llm_attempt import (
     preserve_prior_dispatch,
     strongest_dispatch_capture,
     processing_refusal,
+    single_physical_send_active,
 )
+from ouroboros.context_budget import context_overflow_message
 from ouroboros.deadline_utils import physical_dispatch_timeout
 from ouroboros.llm_stream import consume_stream, consume_stream_async
 from ouroboros.reasoning_artifacts import (
+    note_replay_omission,
     pop_reasoning_pin_note,
+    pop_replay_omission,
     transcript_has_sealed_reasoning,
 )
 from ouroboros.request_wire_recovery import (
@@ -158,11 +162,18 @@ class _RecoveryLadderMixin:
             return None
         if _is_structured_context_overflow_exception(exc) or _is_provider_policy_refusal(exc):
             return None
+        if context_overflow_message(str(exc)):
+            # An upstream's "prompt is too long" inside the aggregated 400 is the loop's
+            # size recovery (the same shared classifier), never a reasoning strip.
+            return None
         if not target.get("supports_openrouter_extensions"):
             return None
         if not self._is_http_status(exc, 400):
             return None
-        return self._reroute_same_model_kwargs(target, kwargs)
+        retry_kwargs = self._reroute_same_model_kwargs(target, kwargs)
+        if retry_kwargs is not None:
+            log.warning("OpenRouter 400: retrying once without the replayed reasoning")
+        return retry_kwargs
 
     @staticmethod
     def _rotate_openrouter_session_affinity(payload: Dict[str, Any]) -> None:
@@ -365,8 +376,10 @@ class _RecoveryLadderMixin:
         kwargs: Dict[str, Any],
         target: Dict[str, Any],
     ) -> Any:
-        # Discard a prior aborted ladder's pin note.
+        # Discard a prior aborted ladder's pin note and omission fact.
         pop_reasoning_pin_note()
+        pop_replay_omission()
+        replayed = self._has_replayed_reasoning_metadata(kwargs.get("messages") or [])
         transport_timeout = kwargs.get("timeout")
         prior_capture = None
 
@@ -398,6 +411,9 @@ class _RecoveryLadderMixin:
                 note_wire_send_succeeded(last_physical_attempt_capture())
                 prior_capture = strongest_dispatch_capture(prior_capture, last_physical_attempt_capture())
                 self._stage_reasoning_pin_disclosure(candidate)
+                # Only a generated answer means the model read this send; a body error read nothing.
+                note_replay_omission(replayed and _response_body_error(self, result) is None
+                                     and not self._has_replayed_reasoning_metadata(candidate.get("messages") or []))
                 return result
             except UsageAccountingError as exc:
                 # Admission failure cannot leave its disclosure for a later call.
@@ -467,6 +483,12 @@ class _RecoveryLadderMixin:
                 self._pop_effort_clamp_disclosure()
                 raise
 
+        if single_physical_send_active():
+            try:
+                return _send(kwargs)  # preserve the repeat's error/body; no repair or affinity mutation
+            except Exception:
+                self._pop_effort_clamp_disclosure()
+                raise
         try:
             resp = _send(kwargs)
         except UsageAccountingError:
@@ -525,8 +547,10 @@ class _RecoveryLadderMixin:
         kwargs: Dict[str, Any],
         target: Dict[str, Any],
     ) -> Any:
-        # Discard a prior aborted ladder's pin note.
+        # Discard a prior aborted ladder's pin note and omission fact.
         pop_reasoning_pin_note()
+        pop_replay_omission()
+        replayed = self._has_replayed_reasoning_metadata(kwargs.get("messages") or [])
         transport_timeout = kwargs.get("timeout")
         prior_capture = None
 
@@ -555,6 +579,9 @@ class _RecoveryLadderMixin:
                 note_wire_send_succeeded(last_physical_attempt_capture())
                 prior_capture = strongest_dispatch_capture(prior_capture, last_physical_attempt_capture())
                 self._stage_reasoning_pin_disclosure(candidate)
+                # Only a generated answer means the model read this send; a body error read nothing.
+                note_replay_omission(replayed and _response_body_error(self, result) is None
+                                     and not self._has_replayed_reasoning_metadata(candidate.get("messages") or []))
                 return result
             except UsageAccountingError as exc:
                 # Sync-driver parity: central UAE discard (triad r4).
@@ -618,6 +645,12 @@ class _RecoveryLadderMixin:
                 self._pop_effort_clamp_disclosure()
                 raise
 
+        if single_physical_send_active():
+            try:
+                return await _send(kwargs)
+            except Exception:
+                self._pop_effort_clamp_disclosure()
+                raise
         try:
             resp = await _send(kwargs)
         except UsageAccountingError:

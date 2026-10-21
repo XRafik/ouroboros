@@ -332,6 +332,11 @@ def _admit_chat_task(
                 task["text"] = late_answer_model_text(
                     _pool().DRIVE_ROOT, task_metadata.get("late_answer"), str(text or ""),
                 )
+            elif task_metadata.get("card_press") is not None:
+                # A press on a finished author's card: the same, with the card frame rebuilt from the stored press.
+                from ouroboros.gateway.card_decision import card_press_model_text
+
+                task["text"] = card_press_model_text(_pool().DRIVE_ROOT, task_metadata.get("card_press"), str(text or ""))
             # The ingress-captured origin identity rides on the TASK RECORD so a
             # later post-hoc "Turn into project" reads it from the persisted
             # result instead of re-deriving identity from content.
