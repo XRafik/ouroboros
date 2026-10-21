@@ -713,7 +713,7 @@ async def _run_owner_skill_action(request: Request, skill_name: str, action: str
 
 
 async def api_skill_review(request: Request) -> JSONResponse:
-    """Queue tri-model skill review from the UI without blocking the event loop."""
+    """Queue the skill review from the UI without blocking the event loop."""
     skill_name = str(request.path_params.get("skill") or "").strip()
     if not skill_name:
         return json_error("missing skill name", 400)
