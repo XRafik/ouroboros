@@ -89,6 +89,9 @@ def _seed_reviewing_behavior(data_dir: pathlib.Path) -> str:
 
 @pytest.fixture
 def host(harness, monkeypatch):
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})
     h = harness
     monkeypatch.setenv("OUROBOROS_PRESENCE_MAX_ACTIVE", "1")
     _seed_token(h.data, skill="telegram-bot", token=_TOKEN, permissions=["presence"], manifest_permissions=["presence"])
@@ -421,9 +424,3 @@ def test_reporting_v1_receipts_own_outgoing_history_and_reach_the_resuming_autho
     assert h.client.post("/presence/delivery", headers=_HEADERS, json=final).status_code == 200
     assert [row["text"] for row in dialogue_test.log_rows(chat) if row.get("direction") == "out"] == ["Noted.", ANSWER]
 
-
-@pytest.fixture(autouse=True)
-def _focus_authority_available(monkeypatch):
-    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
-    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
-    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {"status": "available", "remaining_usd": 10})

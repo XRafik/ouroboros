@@ -102,6 +102,10 @@ def install_bootstrap_harness(monkeypatch, data, *, repo=None, review_mode="requ
     (the addressed message the author leaves the wave for). ``h.factory`` only
     observes the actual production constructor.
     """
+    monkeypatch.setattr("ouroboros.presence_admission.focus_enabled", lambda _root: True)
+    monkeypatch.setattr("ouroboros.presence_admission.focus_allowance", lambda _root: {
+        "status": "available", "remaining_usd": 10})
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_args, **_kwargs: (True, ""))
     from ouroboros import agent_task_pipeline as pipeline, context_health, review_custody
     from ouroboros.review_execution import ReviewAttemptResult
 
