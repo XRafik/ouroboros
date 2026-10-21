@@ -288,3 +288,44 @@ def test_recent_tasks_keeps_whole_queue_text_it_has_no_reader_for(tmp_path):
     row = json.loads(_handle_recent_tasks(_ctx(tmp_path)))["running"][0]
 
     assert row["description"] == "QUEUE-TEXT " * 2_000
+
+
+
+def _fake_listing(monkeypatch, rows, running=()):
+    """recent_tasks over fixed rows: the inventory, the records and the live-work header."""
+    from ouroboros.tools import recent_tasks
+
+    monkeypatch.setattr(recent_tasks, "_task_inventory", lambda root: [{"name": row["task_id"]} for row in rows])
+    by_id = {row["task_id"]: row for row in rows}
+    monkeypatch.setattr(recent_tasks, "_task_record", lambda name, **k: (dict(by_id[name]), None))
+    monkeypatch.setattr(recent_tasks, "_running_tasks", lambda *a: [dict(item) for item in running])
+    return recent_tasks
+
+
+def test_recent_tasks_running_header_neither_stubs_nor_trims_rows_that_fit(tmp_path, monkeypatch):
+    """The live-work header is shown whole and outside the cursor's page: it does not shorten task rows."""
+    small = {"task_id": "small", "status": "completed", "description": "fits",
+             "source_read": "get_task_result(task_id='small', include_authority=True)"}
+    recent_tasks = _fake_listing(monkeypatch, [small], running=[
+        {"task_id": "live", "status": "running", "description": "LIVE " * 20_000}])
+
+    page = recent_tasks.recent_tasks_page(tmp_path, limit=5)
+
+    assert page["tasks"] == [small] and page["running"][0]["description"] == "LIVE " * 20_000
+    assert "page_chars_bound" not in page
+
+
+def test_recent_tasks_never_shortens_a_row_without_a_reader(tmp_path, monkeypatch):
+    """A row with no source_read (queue-only, or withheld for another binding) arrives whole even alone over
+    the page; the page then claims no bound. A row with a reader becomes its addressed stub."""
+    body = "B" * 90_000
+    unreadable_body = {"task_id": "queued", "status": "pending", "description": body, "source": "queue_snapshot"}
+    recent_tasks = _fake_listing(monkeypatch, [unreadable_body])
+    page = recent_tasks.recent_tasks_page(tmp_path, limit=5)
+    assert page["tasks"] == [unreadable_body] and "page_chars_bound" not in page
+
+    addressed = {**unreadable_body, "task_id": "stored", "source_read": "get_task_result(task_id='stored')"}
+    recent_tasks = _fake_listing(monkeypatch, [addressed])
+    page = recent_tasks.recent_tasks_page(tmp_path, limit=5)
+    assert page["tasks"][0]["omitted_chars"] > 90_000 and page["tasks"][0]["source_read"] == addressed["source_read"]
+    assert page["page_chars_bound"] == recent_tasks.tool_result_limit("recent_tasks")

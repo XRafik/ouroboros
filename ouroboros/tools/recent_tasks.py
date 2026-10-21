@@ -84,7 +84,7 @@ def _contract_facts(contract: Dict[str, Any], *, description: str) -> Dict[str, 
 
 
 def _row_stub(row: Dict[str, Any], chars: int) -> Dict[str, Any]:
-    """A row that alone exceeds the page: its identity, origin, size and reader."""
+    """A row with a reader that alone exceeds the page: its identity, origin, size and that reader."""
     keep = ("task_id", "status", "presence_origin", "source_read")
     return {**{key: row[key] for key in keep if key in row},
             "description": _preview(row.get("description")), "omitted_chars": chars}
@@ -461,19 +461,24 @@ def recent_tasks_page(
 
     base = assemble(entries)
     bound = tool_result_limit("recent_tasks")
-    if stable and not include_results and not include_traces and len(_page_json(base)) > bound:
-        # The declared producer page (tool_capabilities.TOOL_RESULT_LIMITS) holds whole rows, measured
-        # as sent; the rest is the next page. Explicit result/trace bodies are the caller's chosen size.
-        def over(page: Dict[str, Any]) -> bool:
-            return len(_page_json({**page, "page_chars_bound": bound})) > bound
 
+    def paged_chars(rows: List[tuple[str, Any]]) -> int:
+        # What the cursor pages, as sent: the live-work header is outside it and stays whole.
+        return len(_page_json({**assemble(rows), "running": [], "page_chars_bound": bound}))
+
+    if stable and not include_results and not include_traces and paged_chars(entries) > bound:
+        # The declared producer page (tool_capabilities.TOOL_RESULT_LIMITS) holds whole rows; the rest
+        # is the next page. Explicit result/trace bodies are the caller's chosen size, and a row
+        # without a reader (no source_read) is never shortened.
         fitted = entries
-        while len(fitted) > 1 and over(base):
+        while len(fitted) > 1 and paged_chars(fitted) > bound:
             fitted = fitted[:-1]
-            base = assemble(fitted)
-        if fitted and fitted[0][0] == "task" and over(base):
-            base = assemble([("task", _row_stub(fitted[0][1], len(_page_json(fitted[0][1]))))])
-        base["page_chars_bound"] = bound
+        row = fitted[0][1] if fitted and fitted[0][0] == "task" else {}
+        if paged_chars(fitted) > bound and row.get("source_read"):
+            fitted = [("task", _row_stub(row, len(_page_json(row))))]
+        base = assemble(fitted)
+        if paged_chars(fitted) <= bound:
+            base["page_chars_bound"] = bound
     if not stable:
         return {
             **base,
@@ -537,7 +542,8 @@ def get_tools() -> List[ToolEntry]:
                 "Read recent task results from the canonical task root. Use when prior work, "
                 "continuations, retries, or incomplete current context may matter. Rows are compact: "
                 "previews, counts and each task's get_task_result address; a page holds the whole rows "
-                "that fit its size and `next` continues it (include_results/include_traces pages are not fitted)."
+                "that fit its size and `next` continues it. The running list, rows without an address and "
+                "include_results/include_traces pages are not shortened."
             ),
             "parameters": {
                 "type": "object",
