@@ -65,7 +65,7 @@ log = logging.getLogger(__name__)
 OCCURRENCE_FIELDS = ("occurrence", "hold", "continuation_of", "delete_requested_at",
                      "delete_requested_by", "delete_reason", "last_outcome", "previous_run_open")
 _FINGERPRINT_FIELDS = ("task", "trigger", "timezone", "cron", "name", "description", "enabled", "manual_override",
-                       "followup_origin", "followup_relation")
+                       "followup_origin", "followup_relation", "writer_kind", "writer_origin")
 _SETTLED = "settled"
 
 

@@ -74,7 +74,7 @@ _RUNTIME_OWNED_FIELDS: tuple[str, ...] = (
 _AUDIT_ROW_KEYS: tuple[str, ...] = (
     "id", "name", "enabled", "source", "skill", "trigger", "timezone",
     "created_at", "updated_at", "last_run_at", "last_task_id", "completed_at",
-    "next_run_at", "delete_requested_at", "delete_requested_by", "delete_reason",
+    "next_run_at", "delete_requested_at", "delete_requested_by", "delete_reason", "writer_kind",
     "followup_relation", "followup_origin", "followup_hold", "followup_wait",
 )
 # ``manage_schedules`` is a model-facing tool.  Keep one page comfortably below
@@ -641,10 +641,10 @@ def _task_from_schedule(record: Dict[str, Any], *, task_id: str = "") -> Dict[st
         if task.get("deadline_at"):
             task["task_contract"]["deadline_at"] = task["deadline_at"]
     bind_task(_queue().DRIVE_ROOT, task, record)
+    from ouroboros.consciousness_authority import stamp_scheduled_work
+    stamp_scheduled_work(task, record, raw_metadata)
     task["task_contract"] = build_task_contract(apply_consciousness_authority(task))
     workspace = task["task_contract"]["workspace"]
-    # Presence-bound work (a speaker's follow-up, or one acting for a descendant's binding)
-    # runs in the folder its inherited contract admitted, with canonical shared memory.
     if presence_metadata_binding(metadata) is not None and workspace["root"]:
         task.update(
             workspace_root=workspace["root"], workspace_mode=workspace["mode"],

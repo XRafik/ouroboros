@@ -40,7 +40,7 @@ import json
 import uuid
 from typing import Any, Dict, List
 
-from ouroboros.consciousness_authority import consciousness_origin_metadata
+from ouroboros.consciousness_authority import consciousness_origin_metadata, work_kind
 from ouroboros.deadline_utils import parse_deadline_ts
 from ouroboros.dialogue_provenance import presence_caller_binding, presence_root_carrier
 from ouroboros.settings_scales import EFFORT_SCALE, requested_effort
@@ -121,7 +121,9 @@ def _manage_schedules(
         outcome = mutate_scheduled_task(
             operation, schedule_id, reason=reason, actor="agent",
             task_id=str(getattr(ctx, "task_id", "") or ""), drive_root=root,
-            expected_hold_id=expected_hold_id, relation=relation)
+            expected_hold_id=expected_hold_id, relation=relation,
+            writer_kind=work_kind(getattr(ctx, "task_metadata", None)),
+            writer_metadata={**(getattr(ctx, "task_metadata", None) or {}), "task_id": str(getattr(ctx, "task_id", "") or "")})
     except ScheduleRefused as exc:
         # Same typed marker the sibling refusals carry: the text channel is the
         # registered ABI, so a refusal must be legible there and not only in the
@@ -207,7 +209,10 @@ def _update_schedule(ctx: ToolContext, root: Any, schedule_id: str, reason: str,
     elif "cron" in patch:
         patch["trigger"] = {"type": "cron", "expr": patch.pop("cron")}
     outcome = patch_scheduled_task(schedule_id, patch, reason=reason, actor="agent",
-                                   task_id=str(getattr(ctx, "task_id", "") or ""), drive_root=root)
+                                   task_id=str(getattr(ctx, "task_id", "") or ""), drive_root=root,
+                                   writer_kind=work_kind(getattr(ctx, "task_metadata", None)),
+                                   writer_metadata={**(getattr(ctx, "task_metadata", None) or {}),
+                                                    "task_id": str(getattr(ctx, "task_id", "") or "")})
     if outcome.get("ok") is False:
         return publish_no_effect(ctx, json.dumps(outcome, ensure_ascii=False), tool_name="manage_schedules")
     facts = {key: outcome[key] for key in ("status", "changed_fields", "audit", "reconsidered_claim")}
@@ -571,6 +576,8 @@ def _register_note(ctx: ToolContext, task_id: str, drive_root: Any, objective: s
     try:
         stored = upsert_scheduled_task(
             record, drive_root=drive_root, actor="agent:schedule_followup", task_id=task_id,
+            writer_kind=work_kind(getattr(ctx, "task_metadata", None)),
+            writer_metadata={**(getattr(ctx, "task_metadata", None) or {}), "task_id": str(getattr(ctx, "task_id", "") or "")},
             reason=f"note registered by task {task_id}",
             host_followup={"followup_origin": origin, "followup_relation": relation})
     except ScheduleRefused as exc:
@@ -641,9 +648,10 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
             **({"chat_id": source_chat_id} if source_chat_id not in (None, "") else {}),
         },
     }
-    # A follow-up from a consciousness turn/tree starts a consciousness root: the
-    # origin, category and level ride the template; admission derives the rest.
-    record["task"]["metadata"].update(consciousness_origin_metadata(metadata_src))
+    # The host writer persists this origin separately; the template is not its
+    # authority. Only independent work uses the root-start exception and cause.
+    record["task"]["metadata"].update(consciousness_origin_metadata(
+        metadata_src, started_root=relation["kind"] == "independent"))
     # The resource choice rides BY VALUE (#1315): the origin's producer-stamped intent,
     # else a direct turn's own (its room's default, or Main's system repo).
     intent = followup_resource_intent(ctx, metadata_src, project_id)
@@ -669,6 +677,8 @@ def _register_followup(ctx: ToolContext, task_id: str, drive_root: Any,
     try:
         stored = upsert_scheduled_task(
             record, drive_root=drive_root, actor="agent:schedule_followup", task_id=task_id,
+            writer_kind=work_kind(getattr(ctx, "task_metadata", None)),
+            writer_metadata={**(getattr(ctx, "task_metadata", None) or {}), "task_id": str(getattr(ctx, "task_id", "") or "")},
             reason=f"follow-up registered by task {task_id}",
             host_followup={"followup_origin": origin, "followup_relation": relation},
             # Host-authored provenance of a NAMED continuation (never payload/prose):

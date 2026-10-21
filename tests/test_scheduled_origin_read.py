@@ -47,6 +47,7 @@ def origin(host, monkeypatch, tmp_path):  # noqa: F811
     monkeypatch.setenv("TOTAL_BUDGET", "1000")
     monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "advanced")
     monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
     monkeypatch.setattr("ouroboros.config.get_bg_wakeup_min_sec", lambda: 0)
     write_task_result(host.root, ORIGIN, "running", root_task_id=ORIGIN, billing_group=BINDING)
     for task_id, name, text in ((ORIGIN, "report.md", "ORIGIN_DRIVE"), (GRAND, "notes.md", "GRAND_DRIVE"),
