@@ -665,7 +665,7 @@ class RoomLabelResolver:
             if name:
                 return f"Project {name} [chat_id={chat_id}]"
             return f"Project name unavailable [chat_id={chat_id}]"
-        # A presence room is named only by transport facts that re-derive this exact chat id.
+        # A place room is named only by transport facts that re-derive this exact chat id.
         # Inbound, initiated and receipt rows carry ``transport``; a turn's summary row carries the
         # same facts as ``presence_provenance``. One room, one label, whichever row opens a block.
         from ouroboros.presence_bindings import conversation_key
@@ -681,7 +681,7 @@ class RoomLabelResolver:
 
         clean = lambda value: " ".join(value.replace("[", " ").replace("]", " ").split())[:64]  # noqa: E731
         topic = f" topic {clean(thread)}" if thread not in {"", "0"} else ""
-        return f"Presence {clean(provider)} {clean(conversation)}{topic} [chat_id={chat_id}]"
+        return f"Place {clean(provider)} {clean(conversation)}{topic} [chat_id={chat_id}]"
 
 
 
