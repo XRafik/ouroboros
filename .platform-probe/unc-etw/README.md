@@ -1,16 +1,19 @@
 # #1297: bounded UNC observer experiment
 
-**Native status: NOT_RUN.** This is an executable feasibility candidate for the
-parent's disposable GitHub Windows2022 job. No Windows observation or thirteenth
-case PASS is claimed. The existing twelve-case result remains separate.
+**Native status: INCOMPLETE.** Two preserved Windows2022 ETW runs compiled and
+recorded scoped reconnect events with no reported loss, but stopped at a Winsock
+control that returned 10035 rather than the assumed 10061. Neither reached UNC.
+The revised attempt-based calibration below is unrun. No thirteenth-case PASS
+is claimed; the existing twelve-case result remains separate.
 
 The observer uses an owned ETW system-logger session and the documented TcpIp
 metadata provider. It never binds 445/139, stops services, changes firewall or
 registry state, installs drivers, creates SMB shares, or supplies credentials.
 PID 4 may continue to own SMB. This removes the demonstrated port-ownership
 bottleneck; it does **not** establish that this ETW provider observes every SYN.
-The first native control tests that unresolved premise and stops INCOMPLETE if
-it cannot observe a refused connection attempt.
+The controls test bounded observability of attempted connections and stop
+INCOMPLETE if those attempts are not visible. This is not packet capture or a
+claim that every network operation on every Windows installation is observable.
 
 Files are research deliverables, not product changes. `unc_probe.py` imports
 `Win`, `read`, `denied`, and fixture helpers from the existing experiment, whose
@@ -61,11 +64,14 @@ runner recipe does not publish or dispatch anything.
 The sequence is:
 
 1. On a fresh numeric `127.x.y.z`, select an ephemeral port and release its
-   socket before connecting (the first native bound/nonlistener control returned
-   WSAEWOULDBLOCK, not a proven refusal). Require `WSAECONNREFUSED` and an attributable ETW Send, Connect,
-   Retransmit, or Reconnect event for that port. Also require visible plain TCP
-   controls to both 445 and 139. A Disconnect event alone cannot calibrate an
-   attempt. Successful heartbeat traffic cannot satisfy the refused-port gate.
+   socket before connecting. Preserve the raw Winsock result: 10061 is refusal,
+   10035/10060 is an unfinished/timed-out connection, never relabelled as refusal.
+   Require an attributable ETW Send, Connect, Retransmit or Reconnect event for
+   that port and independently for both plain-TCP 445/139 controls. A successful
+   connection on the selected unused port invalidates the fixture. A Disconnect
+   or heartbeat event alone cannot satisfy any of these attempt checks. This
+   changes our calibration assumption after the two native counterexamples;
+   it changes neither the confined reader nor either real UNC control below.
 2. On another fresh address/share, attempt a real `CreateFileW` UNC open under
    `ImpersonateAnonymousToken`. Require a port-445 attempt event; the file need
    not open. Anonymous rejection before networking is INCOMPLETE.
