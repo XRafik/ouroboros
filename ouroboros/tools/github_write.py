@@ -526,7 +526,7 @@ SCHEMA: Dict[str, Any] = {
         "state": {"type": "string", "enum": ["open", "closed", "resolved", "unresolved"],
                   "description": "update: open|closed; resolve_thread: resolved (default) | unresolved"},
         "state_reason": {"type": "string", "enum": list(STATE_REASONS), "description": "update: why it is closed or reopened"},
-        "labels": {"type": "array", "items": {"type": "string"}, "default": [],
+        "labels": {"type": "array", "items": {"type": "string"},
                    "description": "create_issue: labels to add; update: the full label list (replaces)"},
         "event": {"type": "string", "enum": list(REVIEW_EVENTS), "description": "review: APPROVE, REQUEST_CHANGES or COMMENT"},
         "comments": {"type": "array", "default": [], "items": {"type": "object", "properties": {

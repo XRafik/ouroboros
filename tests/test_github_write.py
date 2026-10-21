@@ -121,6 +121,15 @@ def test_create_issue_sends_title_body_and_labels_in_one_request(gh):
 
 
 # ---- update ------------------------------------------------------------------------------------------
+def test_omitted_labels_preserve_them_and_explicit_empty_labels_clear_them(gh):
+    assert "default" not in github_write.SCHEMA["parameters"]["properties"]["labels"]
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7, title="New"))
+    gh.write(method="update", target=7, title="New")
+    assert gh.sent()[-1][2] == {"title": "New"}
+    gh.write(method="update", target=7, title="New", labels=[])
+    assert gh.sent()[-1][2] == {"title": "New", "labels": []}
+
+
 @pytest.mark.parametrize("fields,actor", [({"state": "closed"}, "ouroboros-agent"), ({"title": "New"}, None)])
 def test_update_actor_is_the_closer_or_unknown_never_the_issue_author(gh, fields, actor):
     gh.answer = lambda p, argv, kw: json.dumps(_issue(7, **fields, user={"login": "alice"}, closed_by={"login": "ouroboros-agent"}))
