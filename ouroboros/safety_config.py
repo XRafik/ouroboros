@@ -2,18 +2,27 @@
 
 import os
 
+
+def _safety_values(settings: dict) -> dict:
+    from ouroboros.settings_defaults import SETTINGS_DEFAULTS
+    from ouroboros.server_runtime import authored_model_slots, propose_unauthored_model_slots, apply_runtime_provider_defaults
+
+    values = {**SETTINGS_DEFAULTS, **settings}
+    propose_unauthored_model_slots(values, authored_model_slots(settings))
+    return apply_runtime_provider_defaults(values)[0]
+
+
 def safety_configuration(settings: dict) -> tuple:
     """Resolved checker identity; unrelated model/catalog changes remain ordinary writes."""
+    return _resolved_safety_configuration(_safety_values(settings))
+
+
+def _resolved_safety_configuration(values: dict) -> tuple:
     from ouroboros.configured_subagents import parse_configured_subagents
     from ouroboros.settings_defaults import SETTINGS_DEFAULTS
     from ouroboros.settings_scales import normalize_safety_mode
     from ouroboros.model_slots import (model_role_option, MODEL_ACCOUNTS_KEY,
                                      MODEL_CONTEXT_WINDOWS_KEY, MODEL_PROCESSING_PREFERENCES_KEY)
-    from ouroboros.server_runtime import authored_model_slots, propose_unauthored_model_slots, apply_runtime_provider_defaults
-
-    values = {**SETTINGS_DEFAULTS, **settings}
-    propose_unauthored_model_slots(values, authored_model_slots(settings))
-    values = apply_runtime_provider_defaults(values)[0]
     slot = "safety" if str(values.get("OUROBOROS_MODEL_SAFETY") or "").strip() else "light"
     if slot == "light" and not str(values.get("OUROBOROS_MODEL_LIGHT") or "").strip():
         slot = "main"
@@ -38,6 +47,28 @@ def safety_configuration(settings: dict) -> tuple:
             str(values.get("OUROBOROS_SAFETY_OWNER_RULES") or ""))
 
 
+def safety_configuration_requires_owner(previous: dict, settings: dict) -> bool:
+    """Judge a prepared write, with unauthored slots absent from both documents.
+
+    Only new provider proposals for still-unauthored slots may explain a changed
+    checker. Keep every other checker input at its previous resolved value, so
+    this exception never authorizes an explicit model, route, mark or rules edit.
+    """
+    from ouroboros.settings_defaults import SETTINGS_DEFAULTS
+    from ouroboros.server_runtime import provider_slot_proposals
+
+    proposed = {**previous, **settings}
+    after = safety_configuration(proposed)
+    expected = _safety_values(previous)
+    if _resolved_safety_configuration(expected) == after:
+        return False
+    proposals = provider_slot_proposals({**SETTINGS_DEFAULTS, **proposed})
+    for key in ("OUROBOROS_MODEL", "OUROBOROS_MODEL_LIGHT"):
+        if key not in previous and key not in settings:
+            expected[key] = proposals[key]
+    return _resolved_safety_configuration(expected) != after
+
+
 def _guard_safety_configuration(settings: dict, *, owner_write: bool = False) -> None:
     from ouroboros import config as cfg
     rules = settings.get("OUROBOROS_SAFETY_OWNER_RULES", "")
@@ -46,7 +77,7 @@ def _guard_safety_configuration(settings: dict, *, owner_write: bool = False) ->
     if owner_write or cfg.runtime_mode_at_least(cfg.get_runtime_mode(), "cyber_pro"):
         return
     previous = cfg._settings_integrity.read_settings_json_verified(cfg.SETTINGS_PATH) or {}
-    if safety_configuration(previous) != safety_configuration({**previous, **settings}):
+    if safety_configuration_requires_owner(previous, settings):
         raise PermissionError("The resolved Safety Supervisor is owner-controlled; use /api/owner/safety-model, safety-mode or safety-rules.")
 
 

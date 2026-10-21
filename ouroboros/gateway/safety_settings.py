@@ -21,13 +21,15 @@ SAFETY_MODEL_KEYS = frozenset({
 
 
 def audit_safety_change(request: Request, before: dict, after: dict) -> None:
-    """A resolved checker change through generic Cyber settings is recorded too."""
+    """Record resolved checker changes, including unauthored provider proposals."""
     from ouroboros.config import safety_configuration, get_runtime_mode
 
-    if safety_configuration(before) != safety_configuration(after):
+    previous, current = safety_configuration(before), safety_configuration(after)
+    if previous != current:
         keys = SAFETY_MODEL_KEYS | {"OUROBOROS_SAFETY_MODE", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "OUROBOROS_SAFETY_OWNER_RULES"}
         _owner_audit(request, "safety_settings", {"runtime_mode": get_runtime_mode(),
-                    "changed_settings": sorted(k for k in keys if before.get(k) != after.get(k))})
+                    "changed_settings": sorted(k for k in keys if before.get(k) != after.get(k)),
+                    "previous_checker": previous[0], "checker": current[0]})
 
 
 async def _write(request: Request, writer: Any) -> JSONResponse:
@@ -79,8 +81,9 @@ def _api_owner_safety_model_sync(request: Request, body: Any) -> JSONResponse:
     settings = body.get("settings") if isinstance(body, dict) else None
     if not isinstance(settings, dict) or not settings or set(settings) - SAFETY_MODEL_KEYS:
         return unsaved_error("'settings' must contain Safety Supervisor model or catalog settings only", 400)
-    from ouroboros.configured_subagents import normalize_configured_subagents
-    from ouroboros.config import safety_configuration
+    from ouroboros.configured_subagents import normalize_configured_subagents, roster_save_error
+    from ouroboros.config import load_settings, safety_configuration
+    from ouroboros.gateway.settings import ALLOW_EMPTY_REVIEW_POOL, review_pool_save_judgement
 
     settings = dict(settings)
     try:
@@ -90,7 +93,15 @@ def _api_owner_safety_model_sync(request: Request, body: Any) -> JSONResponse:
             if key.startswith("USE_LOCAL_") and not isinstance(value, bool):
                 raise ValueError(f"{key} must be a boolean")
         if "OUROBOROS_SUBAGENTS" in settings:
-            settings["OUROBOROS_SUBAGENTS"] = normalize_configured_subagents(settings["OUROBOROS_SUBAGENTS"])[1]
+            canonical = normalize_configured_subagents(settings["OUROBOROS_SUBAGENTS"])[1]
+            stored = load_settings()
+            roster_error = roster_save_error(canonical, stored, settings)
+            if roster_error:
+                return unsaved_error(roster_error, 400)
+            pool_error = review_pool_save_judgement(canonical, stored, allow_empty=body.get(ALLOW_EMPTY_REVIEW_POOL) is True)
+            if pool_error:
+                return unsaved_error(pool_error, 400, code="empty_review_pool")
+            settings["OUROBOROS_SUBAGENTS"] = canonical
         safety_configuration(settings)
     except (TypeError, ValueError) as exc:
         return unsaved_error(str(exc), 400)
