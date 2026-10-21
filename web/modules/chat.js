@@ -22,6 +22,8 @@ import { createHostStart } from './host_starting_status.js';
 import { createModelWaitController, isModelWaitReference } from './model_wait.js';
 import { syncSettledItems } from './settled_card.js';
 import { createChatReadingPosition } from './chat_reading_position.js';
+import { createRowSleep } from './chat_row_sleep.js';
+import { onRefit } from './text_fit.js';
 import { createChatHistoryPager, historyCoverage, historyIslandAtEdge } from './chat_history.js';
 import { createProjectReadReceipt, isAtNewestMessage, newestMessageOffset } from './project_read_state.js';
 import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, historyStamps, stampHistoryNode, compareHistoryPosition } from './chat_history_replay.js';
@@ -350,8 +352,10 @@ export function createChatInstance({
     // One derived physical coverage/status for the mounted reading window.
     let historyWindow = null;
     let _hasNewActivity = false;
+    // A Project room app.js retired is leaving the screen (it fades out inside the room card): not shown, not read.
+    let leaving = false;
     const isInstanceVisible = () =>
-        Boolean(messagesDiv) && messagesDiv.offsetParent !== null && !document.hidden;
+        !leaving && Boolean(messagesDiv) && messagesDiv.offsetParent !== null && !document.hidden;
     const LIVE_CARD_CAP = 200;
     const liveCardBound = createLiveCardBound(LIVE_CARD_CAP);
     const liveCardRecords = new Map();
@@ -444,6 +448,46 @@ export function createChatInstance({
             fetchTaskDetail(childId).then((detail) => {
                 if (destroyed || !isTerminalTaskDetail(detail)) return;
                 withStableViewport(() => routeSubagentTerminalToCard(childId, { ...detail, task_id: childId }));
+            }).catch(() => {}).finally(() => managedTaskDetailReads.delete(childId));
+        }
+    }
+    // Root census rows omit children; complete work membership can admit their own
+    // result read before the root ends. Unknown/nonterminal replies retry on the
+    // existing refresh; a confirmed 404 waits for new card evidence or reconnect.
+    function settleAbsentChildren(snapshotRequestedAt) {
+        for (const [childId, record] of liveCardRecords) {
+            if (!record.isSubagent || record.finished || !record.root?.isConnected) continue;
+            if (workState.members.has(childId)) {
+                record.childDetailRead = undefined;
+                if (record.historicalUnavailable) withStableViewport(() => {
+                    setHistoricalUnavailable(record, false);
+                    renderLiveCardMeta(record);
+                    return true;
+                });
+                continue;
+            }
+            const observedAt = record.lastLiveObservedAt || 0;
+            const updates = record.updates;
+            if (!workState.complete || observedAt >= snapshotRequestedAt
+                    || (record.childDetailRead?.missing && record.childDetailRead.updates === updates)
+                    || managedTaskDetailReads.has(childId)
+                    || !subagentChildParents.has(childId)) continue;
+            // Queue departure and membership share this read; keep the visible hold
+            // until actual recovery or terminal evidence, not just absence.
+            record.projectHoldQueued = false;
+            const observation = record.childDetailRead = { updates };
+            managedTaskDetailReads.add(childId);
+            fetchTaskDetailStrict(childId).then((detail) => {
+                if (destroyed || ws.isConnected?.() === false || !workState.complete
+                        || liveCardRecords.get(childId) !== record || record.finished
+                        || workState.members.has(childId) || record.updates !== updates
+                        || record.childDetailRead !== observation) return;
+                if (detail === null) {
+                    observation.missing = true;
+                    withStableViewport(() => settleMissingTaskRecord(record));
+                } else if (isTerminalTaskDetail(detail)) {
+                    withStableViewport(() => routeSubagentTerminalToCard(childId, { ...detail, task_id: childId }));
+                }
             }).catch(() => {}).finally(() => managedTaskDetailReads.delete(childId));
         }
     }
@@ -563,6 +607,7 @@ export function createChatInstance({
         if (data) void refreshChildProjectHolds();
         const before = workState;
         workState = reconcileWorkState(workState, data, chatId, ws.isConnected?.() !== false);
+        if (Array.isArray(data?.works)) settleAbsentChildren(snapshotRequestedAt);
         applyCardWorkViews(liveCardRecords, workState);
         changedOffers(liveCardRecords, before, workState).forEach(syncCancelRunButton);
         syncHeaderControlState(data ?? { accounting: { available: false } });
@@ -612,9 +657,16 @@ export function createChatInstance({
 
     const { captureVisibleTimelineAnchor, restoreVisibleTimelineAnchor, serializeTimelineAnchor, anchorOwnersReady } =
         createTimelineAnchors({ messagesDiv, liveCardRecords });
+    // Far rows skipped once laid out (style.css); after a restyle every row's size may change at once, and the reading
+    // owner places the passage again.
+    const rowSleep = createRowSleep({ feed: messagesDiv, onRestyle: () => reading.reflow() });
+    // A fitted line re-fits on the frame after its width changed (text_fit.js): a reader at the newest message is placed
+    // there again once the room's lines have their size (Main shown again laid out its newest message before).
+    const offRefit = onRefit((els) => { if (reading.stick && els.some((el) => messagesDiv.contains(el))) reading.reflow(); });
     const reading = createChatReadingPosition({
         feed: messagesDiv, alive: () => !destroyed,
-        afterWrite: () => roomWork?.update(), activity: () => { _hasNewActivity = true; },
+        // A row asleep that the write changed is laid out before the place is restored (chat_row_sleep.js).
+        afterWrite: () => { rowSleep.flush(); roomWork?.update(); }, activity: () => { _hasNewActivity = true; },
         updateButton: updateScrollButton,
         visible: () => !destroyed && isInstanceVisible(),
         ready: () => historyLoaded && anchorOwnersReady(reading.target?.historyAnchor, reviewHydrator.ready),
@@ -965,6 +1017,18 @@ export function createChatInstance({
         if (!setHistoricalUnavailable(record, false, held)) return;
         renderLiveCardMeta(record);
         syncCancelRunButton(record);
+    }
+
+    function settleMissingTaskRecord(record) {
+        const historical = record.historicalTerminal;
+        if (historical) {
+            const changed = applyHistoricalModelExecution(record, historical) && renderLiveCardMeta(record);
+            return finishLiveCard(record.groupId, historical.phase) || changed;
+        }
+        const changed = setHistoricalUnavailable(record, true);
+        renderLiveCardMeta(record);
+        syncChatStatus();
+        return changed;
     }
 
     function markTaskCancelable(taskId = '') {
@@ -2611,7 +2675,7 @@ export function createChatInstance({
             return lastHistorySyncSucceeded;
         },
         // A destroyed page reports hidden===false, hence the lifecycle flag.
-        isShown: () => !destroyed && !page.hidden,
+        isShown: () => !destroyed && !leaving && !page.hidden,
         // A place still being restored is not where the reader is.
         isReadingLatest: latest => !destroyed && !reading.pending && !replies.revealing && isInstanceVisible() && isAtNewestMessage(latest, {
             ...newestFacts, atBottom: () => isNearBottom() && !historyPager.getState().canNewer,
@@ -2727,12 +2791,35 @@ export function createChatInstance({
         }
         if (destroyed || !current()) return;
         reading.stick = true;
+        for (const record of liveCardRecords.values()) record.childDetailRead = undefined;
         reading.followAfterLayout();
         updateScrollButton();
     }
     scrollBottomBtn?.addEventListener('click', showLatest);
 
+    // The composer's height once its reply strip has finished moving (chat_reply.js `data-motion`): opening, the strip
+    // counts at its full height (`--reply-h`) and the wrap's gap; leaving, not at all. The reserve then moves once per
+    // motion, not on every frame of it: each write restyles the whole room (~90 ms a write on a 34k-element Main in
+    // WebKit, where four in a row made the strip's close stutter).
+    function composerHeightAtRest() {
+        const strips = inputArea.querySelectorAll('.chat-quote--composer[data-motion]');
+        if (!strips.length) return inputArea.offsetHeight || 0;
+        // Mid-motion heights are fractional: whole pixels would differ by one from frame to frame and write again.
+        let height = inputArea.getBoundingClientRect().height;
+        for (const strip of strips) {
+            // The room a strip takes is its box and its margins (style.css): opening it ends at --reply-room, shut at none.
+            const { marginTop, marginBottom } = getComputedStyle(strip);
+            const now = strip.getBoundingClientRect().height + (parseFloat(marginTop) || 0) + (parseFloat(marginBottom) || 0);
+            const end = strip.dataset.motion === 'open' ? (parseFloat(strip.style.getPropertyValue('--reply-room')) || 0) : 0;
+            height += end - now;
+        }
+        return height;
+    }
+
     function updateMessagesPadding(preserveStickiness = true) {
+        // A room not displayed (Main behind a page) measures its bars as 0: it keeps the reserves it was laid out
+        // with, or it would come back with its newest message under the composer.
+        if (!page.getClientRects().length) return false;
         const mutate = () => {
             let changed = false;
             if (pageHeader && messagesDiv) {
@@ -2751,7 +2838,7 @@ export function createChatInstance({
                 }
             }
             if (inputArea && messagesDiv) {
-                const reserve = Math.max(92, Math.ceil(inputArea.offsetHeight || 0) + 16);
+                const reserve = Math.max(92, Math.ceil(composerHeightAtRest()) + 16);
                 const value = `${reserve}px`;
                 if (page.style.getPropertyValue('--chat-input-reserve') !== value) {
                     page.style.setProperty('--chat-input-reserve', value);
@@ -2847,8 +2934,11 @@ export function createChatInstance({
 
     let headerControlInterval = null;
     if (asPanel) {
-        // Late panels missed socket open; seed from the socket and latest snapshot.
-        hostStart.read(stateSnapshots.latest?.());
+        // Late panels missed socket open; seed from the socket and latest snapshot, its works included: a working
+        // Project opened from its row said Online until its own first read (owner 20.10).
+        const latest = stateSnapshots.latest?.();
+        hostStart.read(latest);
+        workState = reconcileWorkState(workState, latest, chatId, ws.isConnected?.() !== false);
         const seed = deriveChatStatus();
         if (ws.isConnected?.()) setStatus(seed);
     } else headerControlInterval = setInterval(refreshHeaderControlState, 3000);
@@ -3119,17 +3209,7 @@ export function createChatInstance({
                 const vouched = !missingManagedTaskIds.has(taskId) || activeDirectActivities.has(taskId);
                 if (!vouched && detail === null) {
                     revokeManagedTaskCancelAuthority(taskId);
-                    const historical = currentRecord.historicalTerminal;
-                    if (historical) {
-                        if (applyHistoricalModelExecution(currentRecord, historical)) {
-                            changed = renderLiveCardMeta(currentRecord) || changed;
-                        }
-                        return finishLiveCard(taskId, historical.phase) || changed;
-                    }
-                    changed = setHistoricalUnavailable(currentRecord, true) || changed;
-                    renderLiveCardMeta(currentRecord);
-                    syncChatStatus();
-                    return changed;
+                    return settleMissingTaskRecord(currentRecord) || changed;
                 }
                 if (cancelPending || (!vouched && !isTerminalTaskDetail(detail))) {
                     if (currentRecord.isSubagent && detail?.status) missingManagedTaskIds.delete(taskId);
@@ -3448,6 +3528,7 @@ export function createChatInstance({
             }
             let changed = false;
             for (const [id, record] of liveCardRecords) {
+                record.childDetailRead = undefined;
                 changed = syncParkedPhase(record, 'unknown', activeDirectActivities.get(id)) || changed;
             }
             return changed;
@@ -3496,6 +3577,10 @@ export function createChatInstance({
         // modal a file card opened (reader, file dialog) closes and its read
         // stops; staged attachments and uploads are untouched.
         closeTransient: () => { reading.cancel(); roomWork?.leave(); chatMedia.closeTransient(); },
+        // app.js retires a room that is leaving the screen and keeps it whole for its exit: its paint receipt, its
+        // reading and its transients stop at once, it is neither shown nor read; `stay` is a reopen meanwhile.
+        leave: () => { leaving = true; readReceipt.cancel(); reading.cancel(); roomWork?.leave(); chatMedia.closeTransient(); },
+        stay: () => { leaving = false; },
         // Full teardown (P3): release every resource this instance acquired —
         // ws subscriptions, window/document listeners, the ResizeObserver, all
         // timers — then drop the buffered collections and remove the DOM last.
@@ -3506,6 +3591,8 @@ export function createChatInstance({
             composer.destroy();
             replies.destroy();
             rowMenu.destroy();
+            rowSleep.destroy();
+            offRefit();
             unconfirmed.release();
             emptyWelcome?.dispose();
             readReceipt.cancel();

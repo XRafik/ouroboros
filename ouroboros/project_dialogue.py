@@ -65,6 +65,7 @@ QUESTION_STATUS = {
     "expired_terminal": "Unanswered · task finished",
     "answered": "You answered",
     "answer_pending": "Answer recorded · delivery pending",
+    "answer_saved": "Answer saved · the task reads it when it continues",
     "answer_unknown": "Answer recorded · delivery unknown",
     "closure_pending": "Question closed · update pending",
     "superseded": "Replaced by a newer question",
@@ -133,8 +134,10 @@ def project_question_pointer(row: Dict[str, Any], block: Any, project: Any,
     delivery = question_delivery_projection(block)
     if known and state in {"answered", "closed"} and delivery.get("state") == "owed":
         # An accepted late answer whose dispatch witness ended with its process: no retry knows more.
+        reason = delivery.get("reason_code")
         lead = QUESTION_STATUS["closure_pending" if state == "closed" else "answer_unknown"
-                               if delivery.get("reason_code") == "late_answer_delivery_unknown" else "answer_pending"]
+                               if reason == "late_answer_delivery_unknown" else "answer_saved"
+                               if reason == "awaiting_recipient_read" else "answer_pending"]
     options = next((value for value in (quiz.get("options"), block.get("options")) if isinstance(value, list)), [])
     labels = [str(option.get("label") if isinstance(option, dict) else option or "") for option in options]
     # Aligned details from the row's option objects or the block's own list (a legacy ask has none).

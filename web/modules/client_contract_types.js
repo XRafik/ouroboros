@@ -726,6 +726,7 @@
  * @property {string} at
  * @property {'owed'|'delivered'|'forwarded'} delivery
  * @property {string} request_id
+ * @property {string=} reason_code  // 'awaiting_recipient_read' until a paused, held or queued author reads it
  */
 
 /**
@@ -817,6 +818,26 @@
  * @typedef {Object} UiHoldsResponse
  * @property {boolean} ok
  * @property {number} named
+ */
+
+/**
+ * `POST /api/widgets/fault` (`gateway/widgets.py`): one fault a mounted module widget's card shows; identity is
+ * the page's mount, the rest the frame's clipped report.
+ * @typedef {Object} WidgetFaultRequest
+ * @property {string} skill
+ * @property {string} tab_id
+ * @property {string} revision
+ * @property {'board'|'message'} where
+ * @property {'error'|'rejection'|'csp'} kind
+ * @property {string} message
+ * @property {string} source
+ * @property {number} line
+ */
+
+/**
+ * @typedef {Object} WidgetFaultResponse
+ * @property {boolean} ok
+ * @property {boolean} logged
  */
 
 /**
