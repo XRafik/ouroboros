@@ -520,6 +520,7 @@ def test_global_ttl_docstrings_name_every_consumer():
         if p.name not in definition_sites and call.search(p.read_text(encoding="utf-8"))
     )
     assert consumers == [
+        "ouroboros/effort_evidence.py",
         "ouroboros/llm_attempt.py",
         "ouroboros/tools/review_helpers.py",
         "ouroboros/usage_accounting.py",
@@ -531,8 +532,14 @@ def test_global_ttl_docstrings_name_every_consumer():
         f"the setting: {consumers}"
     )
     assert "cached_prompt_blocks" in finalizer_doc  # names the other reader
+    assert "session_prompt_cache_ttl_request" in finalizer_doc
     resolver_doc = resolve_prompt_cache_ttl.__doc__ or ""
-    for name in ("_normalize_payload_cache_ttl", "cached_prompt_blocks", "_reservation_cost"):
+    for name in (
+        "_normalize_payload_cache_ttl",
+        "cached_prompt_blocks",
+        "session_prompt_cache_ttl_request",
+        "_reservation_cost",
+    ):
         assert name in resolver_doc, f"config's docstring omits the {name} consumer"
 
 

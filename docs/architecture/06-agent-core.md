@@ -261,7 +261,7 @@ Children coordinate through `tree_note` and `tree_read`; only the parent may use
 
 #### Delegated spend and token reads
 
-**What a delegated run costs.** Claudexor reports cash per attempt (`attemptExecution[].usageCost.cashUsd` with `cashKnowledge` exact|estimated) and in `summary.spendUsd`/`summary.spendEstimated`; `delegate_custody.disclosed_spend` is the single reader, preferring the per-attempt figures, so the ledger row and the payload the nanny relays cannot tell different stories. Runs ask `authPreference: subscription` explicitly: the engine default falls back to a paid key invisibly. Four cases:
+**What a delegated run costs.** Claudexor reports cash per attempt (`attemptExecution[].usageCost.cashUsd` with `cashKnowledge` exact|estimated) and in `summary.spendUsd`/`summary.spendEstimated`; `delegate_custody.disclosed_spend`, the single reader, prefers per-attempt figures, so the ledger row and the nanny's payload agree. Runs ask `authPreference: subscription` explicitly: the engine default falls back to a paid key invisibly. Four cases:
 
 | disclosure | ledger | finality |
 |---|---|---|
@@ -272,7 +272,7 @@ Children coordinate through `tree_note` and `tree_read`; only the parent may use
 
 An undisclosed spend contributes `0.0` to known `settled_usd` and `accounted_usd`: a conservative bound would fabricate a number the harness never gave (BIBLE P1), so a `TOTAL_BUDGET` fence cannot stop spend it was never told about; the honest consequence is lost finality, not a guessed charge.
 
-**What a delegated run reads.** Harnesses count input tokens with incompatible conventions, so `settle_run` copies the engine's normalized `summary.inputTokenUsage` onto the `subscription_session` row as the optional `input_token_usage` object; `record_subscription_session` is the one validator, and a partial object is unknown as a whole: a repaired counter reads exactly like a measured one. The object stays outside the idempotent row identity, so an engine that starts reporting never rewrites a session already settled without it.
+**What a delegated run reads.** Harness token conventions differ, so `settle_run` records normalized `summary.inputTokenUsage` as `input_token_usage` outside row identity (settled rows never change); `record_subscription_session` drops a partial object as unknown: a repaired counter reads like a measured one. Before measurement/custody, `effort_evidence.session_prompt_cache_ttl_request` sends captured tiers advertised in `harnesses[].promptCacheTtls` as `promptCacheTtl` (Default/continuations omit it). Final-attempt `prompt_cache_ttl` separates intent and observation.
 
 #### Nanny, transport and custody
 
