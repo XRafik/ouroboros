@@ -2924,10 +2924,9 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
        role · Details · chevron — over its model/executor metadata (DESIGN.md
        §5) instead of dropping the title to a third band once its own inline
        width crosses this threshold (#623). The row never wraps: the side
-       controls keep their size and the role (nowrap/ellipsis, below) takes the
-       rest, so a long role ellipsizes before Details would drop to a row
-       of its own. A long waiting status wraps inside its chip. Higher specificity than the .chat-live-title rule
-       above, so the cascade decides, not source order. */
+       controls keep their size and the role reserves a readable fragment before
+       ellipsizing. A long waiting status wraps inside its chip. Higher specificity
+       than the .chat-live-title rule above, so the cascade decides, not source order. */
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button > .chat-live-summary {
         flex-wrap: nowrap;
     }
@@ -2944,7 +2943,7 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-title {
         order: 0;
         flex: 1 1 0;
-        min-width: 0;
+        min-width: 4em;
     }
 
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-summary-side {
