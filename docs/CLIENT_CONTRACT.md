@@ -455,9 +455,10 @@ Every settings writer (Settings, setup, owner controls, language, desktop backgr
 - `POST /api/owner/auto-grant` `{enabled}`.
 - `POST /api/owner/effort-range` `{min, recommended, max, project_id?}`: effort tiers (`none` to `ultra`), min ≤ max; primary `recommended` is independent. Omitted `project_id` means Main. Both endpoints return `project_id` and the saved `cognition` (`context_mode`, `effort_range`); project summaries carry the same object. Main state fields remain Main's.
 
-`POST /api/owner/capability-ack` (`CapabilityAckRequest`) vouches for one exact route's maximum response or context window. It writes acknowledgement evidence, never settings, and a repeat overwrites it.
+`POST /api/owner/capability-ack` (`CapabilityAckRequest`) vouches for one exact route's maximum response or context window. It writes acknowledgement evidence, never settings; a repeat overwrites it and zero revokes that exact route's acknowledgement with an audit.
 
 **Other settings routes:**
+- `GET /api/settings?response_limit_preview=1&model=…&local=false&account=…&role=main&window=0` reads stored output/window evidence without fetching catalogs or writing. Optional `window` previews a role draft; omission uses its saved value. `window` returns tokens, kind, reserve, source, observation date, disagreement, retired history and shared text; `window_route` plus `window_ack` supports exact-route Clear.
 - `GET`/`POST /api/ui/preferences` hold installation-wide owner preferences shared by windows and devices (including widget arrangement). Unknown keys are refused. These are separate from browser-local appearance; do not initialize shared preferences as if they belonged to one replacement client.
 - `POST /api/settings/secret` reveals one stored secret on purpose: exactly one of `{key}`, `{mcp_server_id}` or `{mcp_server_id, header_name}`. It writes nothing; `value` is `""` when the secret is not set.
 - `GET`/`POST /api/desktop/autostart` and `/api/desktop/background` (`{enabled}`) read and set the desktop app's start-at-login and keep-running choices. Where this host cannot honour one, its `state` is `unavailable` with a `reason`.

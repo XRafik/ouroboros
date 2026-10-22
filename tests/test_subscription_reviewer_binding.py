@@ -156,7 +156,7 @@ def test_unknown_or_changed_binding_cannot_mint_owner_ack(tmp_path, accounts, ch
 def test_manual_sizing_stays_separate_from_explicit_scope_ack(tmp_path, accounts, monkeypatch):
     monkeypatch.setenv("OUROBOROS_MODEL_CONTEXT_WINDOWS", json.dumps({"deep_review": 1_200_000}))
     window = resolve_reviewer_window(MODEL, model_role="deep_review", credential_profile_id="account-a")
-    assert window.sizing_window() == 1_200_000 and window.window_tokens == 200_000
+    assert window.sizing_window() == 1_200_000 and window.window_record.contradicted_by.tokens == 200_000
     assert window.sizing_source == "user_setting" and ce.list_owner_acks(tmp_path) == []
 
 

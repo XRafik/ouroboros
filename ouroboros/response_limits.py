@@ -272,6 +272,14 @@ def response_limit_preview(drive_root, route: dict, *, account="", settings=None
     window = int(model_role_option(MODEL_CONTEXT_WINDOWS_KEY, role, settings=settings)) if window is None else int(window)
     evidence = ce.with_role_window(evidence, window)
     reserve = main_output_reserve_tokens(use_local=bool(route.get("use_local")), evidence=evidence)
+    if role in {"light", "deep_review"}:
+        from ouroboros.consolidator import LIGHT_ANSWER_CEILING_TOKENS
+        from ouroboros.deep_self_review import _DEEP_MAX_OUTPUT_TOKENS
+        reserve = LIGHT_ANSWER_CEILING_TOKENS if role == "light" else _DEEP_MAX_OUTPUT_TOKENS
+        if route.get("use_local"):
+            from ouroboros.llm_local import local_context_limits
+            reserve = local_context_limits(reserve)[1]
+        reserve = ResponseLimit(**response).ceiling(reserve)
     scope = route_observation_scope({**window_route, "use_local": bool(route.get("use_local"))}, settings)
     record = resolve_window(evidence, reserve, root=drive_root, observation_fp=scope,
                             bound=provider != "claudexor" or bool(account))

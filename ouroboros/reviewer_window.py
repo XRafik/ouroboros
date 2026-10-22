@@ -29,7 +29,10 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
+
+if TYPE_CHECKING:
+    from ouroboros.context_window import WindowRecord
 
 logger = logging.getLogger(__name__)
 
@@ -101,30 +104,25 @@ class ReviewerWindow:
     stale: bool = False           # past TTL and not re-verifiable (expired / outage)
     observed_at: str = ""         # ISO timestamp of the observation, "" when unknown
     model: str = ""
-    # An owner-asserted sizing number is separate from the sourced window, so a
-    # disclosure can say which one a send was sized against.
+    # Retain the authored role value beside the resolved record: a refusal may
+    # cap it without erasing the owner's declaration.
     asserted_window_tokens: int = 0
     model_route: dict = field(default_factory=dict)
+    window_record: Optional[WindowRecord] = None
 
     @property
     def sizing_source(self) -> str:
-        return "user_setting" if self.asserted_window_tokens else self.status
+        return self.window_record.limiting.source if self.window_record and self.window_record.limiting else "layout_assumption"
 
     def sizing_window(self, unknown_window: int = REVIEWER_FULL_WINDOW) -> int:
-        """Window to SIZE a prompt against — a fit estimate, never an authority.
-
-        A stale number is still the best available estimate of a route's real size,
-        so sizing keeps using it and discloses its provenance
-        (:attr:`sizing_source`, :attr:`stale`, :attr:`observed_at`)."""
-        if self.asserted_window_tokens > 0:
-            return int(self.asserted_window_tokens)
-        from ouroboros.provider_models import provider_for_model
-
-        if not self.window_tokens and provider_for_model(self.model) == "claudexor":
-            # Raw subscriptions have no numeric unknown-window assumption. The
-            # assembler keeps its own input budget, never a made-up provider size.
-            return 0
-        return int(self.window_tokens) if int(self.window_tokens) > 0 else int(unknown_window)
+        """Fresh resolved capacity, or the caller's labelled layout assumption."""
+        if self.window_record and self.window_record.boundary is not None:
+            value = self.window_record.boundary
+        elif self.window_record is None and not self.stale and self.window_tokens:
+            value = self.window_tokens  # legacy caller's explicit layout hint
+        else:
+            value = unknown_window
+        return SizedWindow(int(value), self.model_route, self.window_record)
 
 
 def reviewer_route(model_id: str, *, session: bool = False) -> tuple:
@@ -204,8 +202,9 @@ def resolve_reviewer_window(
     sharing remote fetches through the cache."""
     model = str(model_id or "")
     try:
-        from ouroboros.capability_evidence import model_account_options, probe, route_fingerprint
-        from ouroboros.config import DATA_DIR
+        from ouroboros.capability_evidence import model_account_options, probe, route_fingerprint, with_role_window
+        from ouroboros.config import DATA_DIR, runtime_settings
+        from ouroboros.context_window import resolve_window, route_observation_scope
         from ouroboros.model_slots import MODEL_CONTEXT_WINDOWS_KEY, model_role_option
         from ouroboros.provider_models import review_model_uses_local
 
@@ -241,14 +240,23 @@ def resolve_reviewer_window(
                 api_key=_probe_api_key,
                 options=options,
             )
-        window = int(getattr(ev, "window_tokens", 0) or 0)
+        ev = with_role_window(ev, asserted_window)
+        options = {**(options or {}), **{key: getattr(ev, key) for key in (
+            "source_id", "credential_profile_id", "account_fingerprint") if getattr(ev, key, "")}}
+        scope = (route_fingerprint(provider=effective_provider, model=model, base_url=base_url,
+                    options={"credential_profile_id": credential_profile_id} if credential_profile_id else None)
+                 if session else route_observation_scope(dict(provider=effective_provider, model=model,
+                    base_url=base_url, options=options, use_local=use_local), runtime_settings()))
+        record = resolve_window(ev, 0, root=DATA_DIR, observation_fp=scope, bound=bool(scope))
+        limit = record.limiting
         return ReviewerWindow(
-            window_tokens=window,
-            status=str(getattr(ev, "status", "") or ""),
-            stale=bool(getattr(ev, "stale", False)),
-            observed_at=str(getattr(ev, "ts", "") or ""),
+            window_tokens=record.boundary if limit else int(getattr(ev, "window_tokens", 0) or 0),
+            status="confirmed" if limit and limit.source in {"refusal", "accepted"} else str(getattr(ev, "status", "") or ""),
+            stale=False if limit else bool(getattr(ev, "stale", False)),
+            observed_at=limit.observed_at if limit else str(getattr(ev, "ts", "") or ""),
             model=model,
             asserted_window_tokens=asserted_window,
+            window_record=record,
             model_route={
                 "source": str(getattr(ev, "source_id", "") or ""),
                 "model": model.partition("=")[2],
@@ -268,10 +276,20 @@ class SizedWindow(int):
     same observation instead of a cache-only lookup under the unbound route; a plain
     int (an older or substituted caller) carries none."""
 
-    def __new__(cls, value: int, model_route: Optional[dict] = None):
+    def __new__(cls, value: int, model_route: Optional[dict] = None, window_record: Optional[WindowRecord] = None):
         sized = super().__new__(cls, value)
         sized.model_route = dict(model_route or {})
+        sized.window_record = window_record
         return sized
+
+
+def reviewer_input_limit(window: int, reserve: int) -> int:
+    """Charge the caller's reply reserve only to a total limit; unknowns remain layout hints."""
+    from dataclasses import replace
+
+    record = getattr(window, "window_record", None)
+    return (replace(record, reserve=reserve).usable if record and record.boundary is not None
+            else max(0, int(window) - reserve))
 
 
 def observed_binding(window: Any, binding: Optional[dict]) -> dict:
@@ -308,7 +326,7 @@ def reviewer_context_window(
         credential_profile_id=credential_profile_id, model_route=model_route,
         allow_fetch=allow_fetch,
     )
-    return SizedWindow(resolved.sizing_window(unknown_window), resolved.model_route)
+    return resolved.sizing_window(unknown_window)
 
 
 def window_scaled_reserves(
