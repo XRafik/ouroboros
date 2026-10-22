@@ -1745,6 +1745,8 @@ jobs:
             syft_sha256: e32fdb9d47823fa633748a1efca2528fd77c37469ea93c9e40ab835da44e4cce
             syft_binary: syft
           - os: ubuntu-latest
+            # Keep the artifact/matrix label; the shipped GTK closure has a Jammy ABI floor.
+            build_runner: ubuntu-22.04
             artifact: tar.gz
             proof_id: linux-x86_64
             syft_archive: syft_1.50.0_linux_amd64.tar.gz
@@ -1756,7 +1758,7 @@ jobs:
             syft_archive: syft_1.50.0_windows_amd64.zip
             syft_sha256: 815ee6973ec5dff6a671d7f41b0e78835a8c45b91d5a39f4743ea1cee833d3be
             syft_binary: syft.exe
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.build_runner || matrix.os }}
     # Build workers have no signing Environment. Signing uses a separate
     # fresh Windows runner after this worker has exited. The runner drops
     # empty outputs, so only the Windows leg sets this one.
@@ -1938,9 +1940,41 @@ jobs:
           security delete-keychain "$KEYCHAIN_PATH" || true
 
       # —— Linux build ——
+      - name: Install Linux GTK closure build inputs (Ubuntu 22.04)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # Source retrieval is exact-version and fails closed. Do not substitute
+          # current source for a superseded binary still installed on the runner.
+          sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/ouroboros-native-sources.list
+          test -s /etc/apt/sources.list.d/ouroboros-native-sources.list
+          sudo apt-get update
+          # Match native qualification: superseded runner binaries may no longer
+          # have their exact source version in the authenticated archive.
+          sudo apt-get -y --no-install-recommends dist-upgrade
+          # Jammy's libwebkit2gtk-4.1-dev does not depend on the WebKit2 typelib package.
+          sudo apt-get install -y --no-install-recommends build-essential pkg-config \
+            libgirepository1.0-dev libcairo2-dev libwebkit2gtk-4.1-dev gir1.2-webkit2-4.1 \
+            libgtk-3-bin librsvg2-common glib-networking gsettings-desktop-schemas \
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good bubblewrap xdg-dbus-proxy \
+            adwaita-icon-theme hicolor-icon-theme shared-mime-info
+
       - name: Build Linux binary
         if: matrix.os == 'ubuntu-latest'
+        env:
+          OUROBOROS_BUNDLE_LINUX_GTK: '1'
         run: bash build_linux.sh
+
+      - name: Retain Linux native corresponding-source inputs
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: linux-native-sources-${{ github.sha }}
+          path: |
+            dist/linux-native-sources/
+            dist/native-sources-linux-*.tar.gz
+            dist/native-sources-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
 
       # —— Windows build ——
       - name: Build Windows executable
@@ -2154,7 +2188,7 @@ jobs:
             echo "AppImage launcher has unresolved shared libraries" >&2
             exit 1
           fi
-          APPIMAGE_RUNTIME_ROOT="${LAUNCHER_EXE%/usr/lib/ouroboros/Ouroboros}"
+          APPIMAGE_RUNTIME_ROOT="${LAUNCHER_EXE%/usr/lib/ouroboros/Ouroboros.bin}"
           APPIMAGE_PRIVATE_BASE="${APPIMAGE_RUNTIME_ROOT%/*}"
           APPIMAGE_CUSTODIAN_PID="$(ps -o ppid= -p "$LAUNCHER_PID" | tr -d '[:space:]')"
           if [ -z "$APPIMAGE_CUSTODIAN_PID" ] || ! kill -0 "$APPIMAGE_CUSTODIAN_PID" 2>/dev/null; then
@@ -2438,6 +2472,8 @@ jobs:
             dist/release-smoke-${{ matrix.proof_id }}.json
             dist/sbom-${{ matrix.proof_id }}.cdx.json
             dist/*.AppImage
+            dist/native-sources-linux-*.tar.gz
+            dist/native-sources-linux-*.tar.gz.sha256
             dist/release-smoke-linux-appimage-x86_64.json
             dist/sbom-linux-appimage-x86_64.cdx.json
             dist/ouroboros_*_amd64.deb
