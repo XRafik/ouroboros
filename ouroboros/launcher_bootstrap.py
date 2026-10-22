@@ -17,6 +17,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from ouroboros.desktop_media import host_environment
+
 
 BUNDLE_REPO_NAME = "repo.bundle"
 BUNDLE_MANIFEST_NAME = "repo_bundle_manifest.json"
@@ -184,7 +186,8 @@ def checkout_sha(repo_dir: pathlib.Path) -> str:
 
     try:
         shown = subprocess.run(["git", "rev-parse", "HEAD"], **merge_hidden_kwargs(
-            {"cwd": str(repo_dir), "capture_output": True, "text": True, "encoding": "utf-8", "check": False}))
+            {"cwd": str(repo_dir), "capture_output": True, "text": True, "encoding": "utf-8", "check": False,
+             **({"env": host_environment()} if sys.platform == "linux" else {})}))
     except OSError:
         return ""
     return shown.stdout.strip() if shown.returncode == 0 else ""
@@ -253,7 +256,8 @@ def launcher_sources_changed(repo_dir: pathlib.Path, loaded_sha: str | None = No
         if relative is not None:
             loaded.add((relative.with_suffix(".py") if relative.suffix == ".pyc" else relative).as_posix())
     probe = subprocess.run(["git", "diff", "--quiet", loaded_sha, head, "--", *sorted(loaded)],
-                           **merge_hidden_kwargs({"cwd": str(repo_dir), "capture_output": True, "check": False}))
+                           **merge_hidden_kwargs({"cwd": str(repo_dir), "capture_output": True, "check": False,
+                               **({"env": host_environment()} if sys.platform == "linux" else {})}))
     return probe.returncode == 1
 
 
@@ -284,7 +288,9 @@ def embedded_python_env(data_dir: pathlib.Path, base: dict[str, str] | None = No
     stated here rather than changed unilaterally. Recovery is manual and total:
     delete ``<data>/state/python-userbase`` and relaunch.
     """
-    env = dict(os.environ if base is None else base)
+    # Defaults are for bootstrap host commands. Source-launcher probe/exec pass
+    # their explicit GUI base and must retain it for GI and WebKit helpers.
+    env = dict((host_environment() if sys.platform == "linux" else os.environ) if base is None else base)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     state_dir = pathlib.Path(data_dir) / "state"
     pycache_dir = state_dir / "pycache"
@@ -715,7 +721,7 @@ def bootstrap_repo(context: BootstrapContext) -> bool:
         if not world_path.exists():
             # Roots ride the environment and the path argv (a quote in it cannot break the
             # program text); the one-argument call also suits an older seed's profiler.
-            env = {**os.environ, "PYTHONPATH": str(context.repo_dir),
+            env = {**(host_environment() if sys.platform == "linux" else os.environ), "PYTHONPATH": str(context.repo_dir),
                    "OUROBOROS_REPO_DIR": str(context.repo_dir), "OUROBOROS_DATA_DIR": str(context.data_dir)}
             context.hidden_run(
                 [
@@ -1016,14 +1022,9 @@ def source_handoff_argv(argv, *, keep_runtime_venv: bool = False) -> list[str]:
 
 def automatic_launch_allowed(intent: str, data_dir: pathlib.Path, log: Any) -> bool:
     if intent == "automatic":
-        # The server consumes this existing marker on an explicit owner start.
-        # A boot entry must not start it and accidentally erase the owner's Stop.
-        # The same file also carries owner_restart_no_resume: that is a restart,
-        # not Panic, and must remain launchable. No second stop-state store.
-        try:
-            stopped = (data_dir / "state" / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic"
-        except FileNotFoundError:
-            stopped = False
+        from ouroboros.installation_stop import installation_panic
+
+        stopped = installation_panic(data_dir)
         if stopped:
             log.info("Automatic start skipped: Ouroboros was stopped with Panic.")
             print("Ouroboros is stopped. Use Start to resume.", flush=True)

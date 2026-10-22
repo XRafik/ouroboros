@@ -71,7 +71,7 @@ def _managed_update_payload(*, fetch: bool, include_tags: bool) -> dict[str, Any
     try:
         tx = active_update_tx()
     except Exception:
-        tx = {}
+        tx = None  # Unread is not absent for the retained attempt.
     update_tx = (
         {
             "active": True,
@@ -100,7 +100,7 @@ def _managed_update_payload(*, fetch: bool, include_tags: bool) -> dict[str, Any
         "latest_version": latest_version,
         "official_tags": official_tags,
         "update_tx": update_tx,
-        "update_progress": update_progress.snapshot(),
+        "update_progress": update_progress.snapshot(tx),
         "letter": letter,
         **status,
     }
@@ -407,8 +407,8 @@ async def api_update_check(_request: Request) -> JSONResponse:
             include_tags=True,
         )
         if payload.get("check_ok") is True:
-            update_progress.acknowledge_failure()
-            payload["update_progress"] = update_progress.snapshot()
+            # Availability may have changed for every client; the retained attempt has not (#1818).
+            update_progress.notify_changed()
         return JSONResponse(payload)
     except Exception as exc:
         return json_exception(exc)
@@ -526,7 +526,7 @@ def _stop_repo_writers(reason: str) -> list[str]:
             return_ids = prepare_restart_returns(DRIVE_ROOT, worker_state.RUNNING, list(worker_state.PENDING),
                                                 transaction_id=restart_transaction_id,
                                                 direct=worker_state.direct_chat_turns(),
-                                                owner_wait_ids=preserve_running_task_ids)
+                                                owner_wait_ids=owner_wait_ids)
         except Exception as exc:
             open_repo_writer_admission()
             log.warning("Managed update owner-wait handoff preparation failed", exc_info=True)
@@ -636,7 +636,7 @@ def _abandon_replace_refused_before_tree(tx: Dict[str, Any], exc: BaseException)
                                      cmd=cmd, stderr=detail)
 
 
-def _restart_response(request: Request, *, strategy: str, plan: dict) -> JSONResponse:
+def _restart_response(request: Request, *, strategy: str, plan: dict, keep_branch: str = "") -> JSONResponse:
     try:
         restarting = _request_restart(request)
     except Exception as exc:
@@ -659,11 +659,13 @@ def _restart_response(request: Request, *, strategy: str, plan: dict) -> JSONRes
                 "error": restart_error,
                 "strategy": strategy,
                 "merge_plan": plan,
+                **({"keep_branch": keep_branch} if keep_branch else {}),
             }
         )
     update_progress.advance("restart_requested")
     return JSONResponse(
-        {"status": "ok", "restarting": True, "strategy": strategy, "merge_plan": plan}
+        {"status": "ok", "restarting": True, "strategy": strategy, "merge_plan": plan,
+         **({"keep_branch": keep_branch} if keep_branch else {})}
     )
 
 
@@ -702,6 +704,7 @@ def _stash_local_work_fenced(
         "local_work_carrier": "none",
         "requested_at": utc_now_iso(),
     }
+    update_progress.link(tx)  # bound before this transaction can be written
     rc_ds, dirty_now, dirty_error = git_capture(["git", "status", "--porcelain"])
     if rc_ds != 0:
         _respawn_workers_after_failed_update()
@@ -1046,7 +1049,7 @@ def _apply_smart_update_fenced(
     try:
         if active_update_tx():
             return JSONResponse({"error": "a managed update is already in progress"}, status_code=409)
-        update_progress.begin()
+        update_progress.begin(base_sha=expected_base_sha, target_sha=expected_target_sha)
         blockers = _quiesce_repo_writers("smart")
         if blockers:
             return _fence_failure(blockers)
@@ -1186,7 +1189,7 @@ def _apply_replace_recovery_fenced(
     try:
         if active_update_tx():
             return JSONResponse({"error": "a managed update is already in progress"}, status_code=409)
-        update_progress.begin()
+        update_progress.begin(base_sha=expected_base_sha, target_sha=expected_target_sha)
         blockers = _quiesce_repo_writers("replace_recovery")
         if blockers:
             return _fence_failure(blockers)
@@ -1225,6 +1228,7 @@ def _apply_replace_recovery_fenced(
             "attempt_id": uuid.uuid4().hex[:12],
             "strategy": "replace",
         }
+        update_progress.link(tx, keep_branch=str(payload.get("keep_branch") or ""))
         write_update_tx(tx)
         _write_update_intent(dict(payload["update_intent"]))
         try:
@@ -1266,7 +1270,7 @@ def _apply_replace_recovery_fenced(
                 )
             tx["pre_restart_smoke"] = "passed"
             write_update_tx(tx)
-        return _restart_response(request, strategy="replace", plan=plan2)
+        return _restart_response(request, strategy="replace", plan=plan2, keep_branch=str(payload.get("keep_branch") or ""))
     except Exception as exc:
         log.error("managed replace recovery failed after writer fence", exc_info=True)
         if active_update_tx():

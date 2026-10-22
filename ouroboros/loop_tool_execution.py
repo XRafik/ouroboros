@@ -1341,7 +1341,7 @@ def _maybe_auto_attach_image(
         observation = {"status": "unavailable"}
         from ouroboros.tools.vision import attach_local_image_to_context
 
-        ok, note = attach_local_image_to_context(ctx, path)
+        ok, note = attach_local_image_to_context(ctx, path, stamp=getattr(tools, "_ctx", None))  # the live slot, not a staged copy
         observation["status"] = "attached" if ok else "unavailable"
         if not ok:
             log.debug("auto-attach skipped for %s: %s", path, note)
@@ -1449,9 +1449,11 @@ def process_tool_results(
         # A delivered refusal wake too: ``acknowledge_pending_wake`` itself verifies what the text carried.
         if ctx is not None and published.get("supervision_wake_id"):
             try:
-                from ouroboros.delegate_supervision import acknowledge_pending_wake
+                from ouroboros.delegate_supervision import acknowledge_pending_wake, stage_pending_wake_exposure
+                from ouroboros.working_checkpoint import defer_content_ack
 
-                acknowledge_pending_wake(ctx, truncated_result)
+                stage_pending_wake_exposure(ctx, truncated_result)
+                defer_content_ack(ctx, lambda delivered=truncated_result: acknowledge_pending_wake(ctx, delivered))
             except Exception:
                 log.debug("Failed to acknowledge injected delegate wake", exc_info=True)
 

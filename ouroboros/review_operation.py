@@ -115,10 +115,11 @@ def controller_state(identity: Any) -> str:
 
 
 def operation_stop_state(root: pathlib.Path, task_id: str) -> str:
-    """Panic, immediate/settled cancellation, clear or unknown; unreadable authority is never clear."""
+    """Current Restart, immediate/settled cancellation, clear or unknown."""
     try:
-        if any((root / "state" / name).exists() for name in ("panic_stop.flag", "owner_restart_no_resume.flag")):
-            return "panic"
+        from ouroboros.delegate_recovery import owner_restart_in_progress
+        if owner_restart_in_progress(root):
+            return "owner_restart"
         from ouroboros.cancel_intents import cancel_pending, resolve_owner_stop_intent
         from ouroboros.task_results import load_task_result
         if cancel_pending(root, task_id, strict=True) and not resolve_owner_stop_intent(root, task_id, propagate_busy=control_probe_active())[1]:
@@ -245,7 +246,7 @@ class ReviewOperation:
                 if control_probe_requires_current():
                     raise
                 self.control_state = "unknown"  # A paid receiver keeps its operation and late result.
-            if self.control_state in {"panic", "cancelled"}:
+            if self.control_state in {"panic", "cancelled", "owner_restart"}:
                 self._control = self.control_state
             if self.control_state != "unknown":
                 self._checked_at = now
@@ -807,7 +808,7 @@ def _invocation_for_operation(root: Any, slot: Any, operation_id: str, row: dict
 
 
 def _observe_delegated_review(root: Any, request: Any, slot: Any, row: dict, operation_id: str,
-                              *, controller_known: bool = True) -> Tuple[Any, str]:
+                              *, controller_known: bool = True, usage_ctx: Any = None) -> Tuple[Any, str]:
     """Attach-only reading of a delegated reviewer whose worker is gone.
 
     Only a terminal run read, or the daemon's definite refusal, settles the row.
@@ -842,7 +843,7 @@ def _observe_delegated_review(root: Any, request: Any, slot: Any, row: dict, ope
             return _row_actor(slot, operation_id, row, state="custody_lost",
                               reason="The recorded delegated invocation belongs to another operation."), UNAVAILABLE
     if record is not None and record.get("state") == "started" and record.get("run_id"):
-        observed = _attach_only_run(root, request, slot, operation_id, str(record["run_id"]), record)
+        observed = _attach_only_run(root, request, slot, operation_id, str(record["run_id"]), record, usage_ctx)
         return (observed, COLLECTED) if observed is not None else (_frozen_actor(row, slot), DEFERRED)
     if not controller_known:
         return _frozen_actor(row, slot), DEFERRED
@@ -858,7 +859,8 @@ def _observe_delegated_review(root: Any, request: Any, slot: Any, row: dict, ope
         "and it is never re-posted.")), UNAVAILABLE
 
 
-def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_id: str, invocation: dict) -> Any:
+def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_id: str, invocation: dict,
+                     usage_ctx: Any = None) -> Any:
     """Read one existing run: authenticated protocol handshake, GET run, GET output, local parse.
 
     The handshake is the engine's non-generative protocol negotiation (an HTTP
@@ -872,6 +874,10 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     from ouroboros.gateways.claudexor import final_attempt_facts
     from ouroboros.review_records import ReviewActorRecord
     from ouroboros.review_verdict_extraction import canonicalize_session_verdict
+    from ouroboros.review_session_usage import session_usage_facts
+    from ouroboros.delegate_custody_usage import observe_session_usage
+    from ouroboros.tools.review_helpers import emit_review_usage
+    from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
     from ouroboros.triad_review import default_output_contract, request_output_shape
 
     try:
@@ -885,6 +891,19 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
             return None
         summary = custody.summary_of(detail)
         state = str(summary.get("state") or "")
+        observed = final_attempt_facts(detail, run_id)
+        routes = (invocation.get("request") or {}).get("harnesses") or []
+        requested_route = str(routes[0]) if len(routes) == 1 else ""
+        usage = session_usage_facts(run_id, requested_route=requested_route, observed_attempt=observed, summary=summary)
+        if usage_ctx is not None:  # Observe terminal facts even if the output read below fails.
+            observe_session_usage(lambda facts: emit_review_usage(
+                usage_ctx, model=str(facts.get("resolved_model") or ""), usage=facts,
+                source=f"review_substrate:{request.surface}", extra={
+                    "task_id": request.task_id, "root_task_id": invocation.get("root_task_id") or request.task_id,
+                    "parent_task_id": invocation.get("parent_task_id") or "",
+                    "delegation_role": "subagent" if invocation.get("parent_task_id") else "",
+                    **{key: str(invocation.get(key) or "") for key in REVIEW_ATTRIBUTION_KEYS},
+                    "surface": request.surface, "slot_id": slot.slot_id}), usage)
         text = _full_session_text(gateway, run_id, detail) if state == "succeeded" else ""
     except Exception:
         log.debug("attach-only review observation of %s did not complete", run_id, exc_info=True)
@@ -894,9 +913,8 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
             gateway.close()
         except Exception:
             log.debug("attach-only gateway close failed", exc_info=True)
-    usage = {"provider": "claudexor", "delegated_run_started": True, "delegated_run_id": run_id,
-             "invocation_id": str(invocation.get("invocation_id") or ""),
-             "collection": "attach_only_observation", "cost": None, "run_state": state}
+    usage.update(invocation_id=str(invocation.get("invocation_id") or ""),
+                 collection="attach_only_observation", cost=None, run_state=state)
     try:
         from ouroboros.review_checking import terminal_seat_evidence
 
@@ -910,16 +928,12 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
                     "error": f"{type(exc).__name__}: {exc}"}
     if evidence:
         usage["checking_evidence"] = evidence
-    observed = final_attempt_facts(detail, run_id)
     if isinstance(observed.get("effort_resolution"), dict):
         usage["effort_resolution"] = observed["effort_resolution"]
     # Requested identity comes only from this paid invocation, never live settings
     # or the summary's request echoes. Absent final-attempt facts stay unknown.
-    routes = (invocation.get("request") or {}).get("harnesses") or []
-    requested_route = str(routes[0]) if len(routes) == 1 else ""
-    from ouroboros.review_session_usage import session_usage_facts  # #1578: one session usage projection
-
-    usage.update(session_usage_facts(run_id, requested_route=requested_route, observed_attempt=observed, summary=summary))
+    if invocation.get("prompt_cache_ttl"):  # its recorded TTL intent, where a live seat's rides
+        usage["review_source_delivery"] = {"prompt_cache_ttl": copy.deepcopy(invocation["prompt_cache_ttl"])}
     usage.update(resolved_model=observed.get("model", ""), observed_attempt=observed,
                  delegated_route=observed.get("harness_id", ""), requested_route=requested_route,
                  applied_profile=observed.get("profile_id", ""))
@@ -997,7 +1011,8 @@ def _collect_pending_row(root: Any, request: Any, slot: Any, row: dict, usage_ct
     # is not presumed dead.
     state = controller_state(identity) if isinstance(identity, dict) and identity else "dead"
     if state != "alive" and str(getattr(slot.route, "value", slot.route) or "") == "agent_session":
-        return _observe_delegated_review(root, request, slot, row, operation_id, controller_known=state != "unknown")
+        return _observe_delegated_review(root, request, slot, row, operation_id,
+                                         controller_known=state != "unknown", usage_ctx=usage_ctx)
     if state in {"alive", "unknown"}:
         return _frozen_actor(row, slot), DEFERRED  # another process owns or may own this worker
     return _row_actor(slot, operation_id, row, state="custody_lost", reason=(

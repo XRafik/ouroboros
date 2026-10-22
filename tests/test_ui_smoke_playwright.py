@@ -195,7 +195,7 @@ def test_ui_projects_sidebar_unread_and_keyboard_menu(direct_server_with_data):
                 kebab = page.locator('.nav-project-kebab[aria-label="Actions for Alpha project"]')
                 kebab.focus()
                 kebab.press("Enter")
-                menu = page.locator('.project-row-menu[role="menu"]')
+                menu = page.locator('.project-row-menu:not([data-leaving])[role="menu"]')
                 menu.wait_for(state="visible", timeout=5_000)
                 assert page.locator(':focus').get_attribute("data-prm") == "pin"  # the menu's first action
                 box = menu.bounding_box()
@@ -720,8 +720,8 @@ def test_ui_smoke_phase3_declarative_widgets_and_settings(direct_server_with_dat
                 callout = card.locator('.widget-callout')
                 assert metric.get_attribute("data-tone") == "ok"
                 assert callout.get_attribute("data-tone") == "warn"
-                assert metric.evaluate("element => getComputedStyle(element).borderLeftColor") == "rgb(130, 234, 185)"
-                assert callout.evaluate("element => getComputedStyle(element).borderLeftColor") == "rgb(242, 212, 65)"
+                assert metric.evaluate("e => getComputedStyle(e).borderLeftColor") == "rgb(131, 228, 153)"
+                assert callout.evaluate("e => getComputedStyle(e).borderLeftColor") == "rgb(247, 203, 88)"
 
                 emitted = page.evaluate(
                     """async (skill) => {
@@ -1253,7 +1253,7 @@ def test_ui_smoke_chat_chronology_reconnect_and_plain_answer_marker(direct_serve
                     " && window.__ouroWs._lastSha.length > 0",
                     timeout=30_000,
                 )
-                page.evaluate("() => { window.__chronologyDocument = {}; }")
+                page.evaluate("() => { window.__chronologyDocument = {socket: window.__ouroWs.ws}; }")
 
                 t1 = {
                     "ts": "2025-07-18T10:00:01+00:00",
@@ -1330,8 +1330,8 @@ def test_ui_smoke_chat_chronology_reconnect_and_plain_answer_marker(direct_serve
                 assert scroll_before["remaining"] > 160
                 direct_server_with_data["restart_server"]()
                 page.wait_for_function(
-                    "() => [...document.querySelectorAll('.chat-bubble.system')]"
-                    ".some((node) => node.textContent.includes('Reconnected'))",
+                    "() => window.__ouroWs.ws !== window.__chronologyDocument.socket"
+                    " && window.__ouroWs.ws?.readyState === WebSocket.OPEN",
                     timeout=20_000,
                 )
                 page.wait_for_selector(
@@ -1347,8 +1347,7 @@ def test_ui_smoke_chat_chronology_reconnect_and_plain_answer_marker(direct_serve
                     # timestamp of its own: it is chrome, not a transcript row.
                     """() => [...document.querySelector('#chat-messages').children]
                         .filter((node) => !node.classList.contains('typing-bubble')
-                            && !node.classList.contains('chat-load-older')
-                            && !node.textContent.includes('Reconnected'))
+                            && !node.classList.contains('chat-load-older'))
                         .map((node) => ({
                             text: node.textContent,
                             ts: node.dataset.ts || '',

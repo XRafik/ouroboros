@@ -483,6 +483,28 @@ def test_skip_flag_completes_without_any_preset_key(onboarding):
     assert onboarding.calls["supervisor"] == 1
 
 
+def test_native_qualification_inert_payload_completes_without_subscription_or_starter_install(onboarding):
+    """The native fixture uses a real transaction, not a readiness bypass."""
+    import runpy
+    from pathlib import Path
+    from ouroboros.server_runtime import has_startup_ready_provider
+
+    qualifier = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'scripts/qualify_linux_appimage.py'))
+    payload = qualifier['setup_payload']('http://127.0.0.1:4321/v1')
+    response = onboarding.client.post('/api/onboarding/complete', json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()['ok'] is True
+    assert response.json()['restart_required'] is False
+    saved = onboarding.saved()
+    assert saved[ONBOARDING_COMPLETED_KEY]
+    assert has_startup_ready_provider(saved)
+    assert saved['OUROBOROS_MODEL'] == payload['OUROBOROS_MODEL']
+    assert saved['OPENAI_COMPATIBLE_BASE_URL'] == payload['OPENAI_COMPATIBLE_BASE_URL']
+    assert not saved.get('OPENAI_COMPATIBLE_API_KEY')
+    assert onboarding.calls['snapshot'] == 0
+    assert onboarding.calls['starter'][0][1] == []
+
+
 def test_no_subscription_declared_never_reads_the_daemon(onboarding):
     response = onboarding.client.post("/api/onboarding/complete", json=dict(WIZARD_PAYLOAD))
 
@@ -1407,7 +1429,7 @@ def test_get_onboarding_read_writes_nothing(monkeypatch, tmp_path):
     assert not settings_path.exists(), "GET /api/onboarding created settings.json"
 
     # And with a settings file present, its bytes and mtime are untouched.
-    settings_path.write_text(json.dumps({"OUROBOROS_MODEL": "openai/gpt-5.6-luna"}),
+    settings_path.write_text(json.dumps({"OUROBOROS_MODEL": "openai/gpt-5.6-luna", "OUROBOROS_CONSCIOUSNESS_SAFETY_MODE": "full"}),
                              encoding="utf-8")
     before_bytes = settings_path.read_bytes()
     before_mtime = settings_path.stat().st_mtime_ns

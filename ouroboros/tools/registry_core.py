@@ -447,9 +447,9 @@ class ToolRegistry:
         ``verify_and_record`` is normally an acting/workspace code tool because its
         other contract kinds execute commands or inspect deliverables.  An
         actor-first configured session needs one exceptional, non-shell use: a
-        typed ``delegation_zero_run`` receipt when its selected leaf is still
-        pending.  Keep that exception bound to the private host bootstrap marker;
-        the handler applies the same check again at execution time.
+        typed ``delegation_zero_run`` receipt before a physical leaf exists.
+        Restoring cognition clears auto-start activity, not this eligibility.
+        The private host marker binds the exception; the handler proves custody.
         """
         if name in LOCAL_READONLY_SUBAGENT_TOOL_NAMES | schema_selection_tools_for_context(self._ctx):
             return True
@@ -460,10 +460,6 @@ class ToolRegistry:
             isinstance(bootstrap, dict)
             and not bool(bootstrap.get("physical_started"))
             and not bool(bootstrap.get("zero_run_receipt_recorded"))
-            and (
-                bool(bootstrap.get("exact_start_pending", True))
-                or str(bootstrap.get("zero_run_evidence_status") or "") == "unknown"
-            )
         )
 
     def initial_tool_names(self) -> frozenset[str]:
@@ -667,13 +663,16 @@ class ToolRegistry:
         meta = getattr(self._ctx, "task_metadata", {})
         capability_root = pathlib.Path((meta.get("budget_drive_root") if isinstance(meta, dict) else "") or getattr(self._ctx, "budget_drive_root", "") or getattr(self._ctx, "drive_root", "") or ".").resolve(strict=False)
         with _ext_lock:
-            rows = [
-                dict(tool)
-                for tool in _ext_tools.values()
-                if _ext_is_live(str(tool.get("skill") or ""), capability_root, repo_path=str(tool.get("skills_repo_path") or "") or None)
-                and _presence_tool_allowed(self._ctx, tool["name"])
-                and (grants is None or tool["name"] in grants)
-            ]
+            # One verdict per skill in this enumeration; the next call reads anew.
+            live = {}
+            rows = []
+            for tool in _ext_tools.values():
+                key = (str(tool.get("skill") or ""), str(tool.get("skills_repo_path") or "") or None)
+                if key not in live:
+                    live[key] = _ext_is_live(key[0], capability_root, repo_path=key[1])
+                if (live[key] and _presence_tool_allowed(self._ctx, tool["name"])
+                        and (grants is None or tool["name"] in grants)):
+                    rows.append(dict(tool))
         return self._visible_dynamic_tools("extensions", rows) if record else _partition_shadowed_tools(rows, self._entries)[0]
 
     def _mcp_rows(self, *, refresh: bool, record: bool) -> List[Dict[str, Any]]:

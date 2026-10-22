@@ -803,6 +803,7 @@ async def _list_tools_async(cfg: MCPServerConfig, *, timeout_sec: int) -> List[D
                                 "name": getattr(tool, "name", ""),
                                 "description": getattr(tool, "description", "") or "",
                                 "input_schema": getattr(tool, "inputSchema", {}) or {},
+                                "annotations": getattr(tool, "annotations", None),
                                 **({"metadata": metadata} if (metadata := tool_metadata(tool)) else {}),
                             }
                         )
@@ -821,7 +822,8 @@ async def _list_tools_async(cfg: MCPServerConfig, *, timeout_sec: int) -> List[D
                             "MCP tool listing stopped at the 50-page bound with "
                             "nextCursor still present; catalog is PARTIAL",
                         )
-                return tools_raw
+                from ouroboros.tool_effects import record_mcp_annotations
+                return record_mcp_annotations(cfg.id, tools_raw)
 
     # A task's discovery passes that task's launch admission before each
     # transport entry (a stdio server starts there); Settings probes name none.

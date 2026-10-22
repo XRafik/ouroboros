@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Literal, Mapping, O
 
 if TYPE_CHECKING:
     from ouroboros.context_anchor import InputAnchor
+    from ouroboros.physical_attempt_context import PhysicalAttemptContext
 
 from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
@@ -108,6 +109,7 @@ class MainFitMeasurement:
     # (``capacity_total_tokens`` is then None and ``window_reading_tokens`` keeps the stated number).
     accepted_input_tokens: Optional[int] = None
     window_reading_tokens: Optional[int] = None
+    view_kind: str = ""
 
 
 @dataclass(frozen=True)
@@ -149,6 +151,7 @@ class ContextFitPlan:
     evidence_source: str = ""
     nano_projection: Optional[ContextFitProjection] = None
     core: Optional["ContextCore"] = None  # the capture a new route re-renders the memory view from
+    view_kind: str = ""
 
     def reproject_for_route(self, *, window_tokens: int, known_window: bool, ratio: float, output_reserve: int,
                             tool_schemas: Optional[List[Dict[str, Any]]], start_mode: Optional[str] = None,
@@ -359,99 +362,63 @@ def _system_blocks(core: ContextCore, governance: Tuple[str, ...], story: str = 
     ]
 
 
-def seal_task_transcript(
-    messages: List[Dict[str, Any]],
-    keep_active: int = 5,
-    min_prefix_tokens: int = 2048,
-) -> None:
+def seal_task_transcript(messages: List[Dict[str, Any]], min_prefix_tokens: int = 2048) -> None:
     """Mark ONE stable message-side boundary for provider prompt caching.
 
-    Until enough tool results exist to seal a rolling boundary among them, the
-    boundary is the task message itself: without it everything after the
-    SYSTEM markers -- the mutable context block and the task contract -- is
-    re-sent uncached every round, which is exactly the short-lived nanny and
-    leaf shape. The marker MIGRATES to the rolling tool seal in the same call
-    that first qualifies. Anthropic permits four breakpoints: A', optional D,
-    B and this one. The finalizer marks schemas only if a slot remains; keeping
-    both message boundaries could exceed the cap and lose the rolling seal.
+    The boundary is the newest user or tool row with text, so no tool result
+    waits outside it (#596) and a tool-free stretch advances it too (#1186).
+    Assistant turns, replayed native content included, never carry it; an
+    empty or opaque tool result is skipped (``logical_tool_result_text``). The
+    loop normally seals before fresh facts, clock and answer; a recovery
+    reseal can include existing facts. Until that prefix is worth a breakpoint the
+    task message is the anchor: without it everything after the SYSTEM markers
+    -- the mutable context block and the task contract -- is re-sent uncached
+    every round, the short-lived nanny and leaf shape. A message without text
+    is never marked: Anthropic rejects a marker on an empty text block.
+
+    The mark is host-only, a message-level ``cache_control``: the send copies
+    of marker-carrying routes render it on the row's last non-empty text block
+    and every other copy drops it, so canonical content, host-row bindings and
+    a marker-free route's bytes never change. Anthropic permits four
+    breakpoints: A', optional D, B and this one; the finalizer marks schemas
+    only if a slot remains. The old in-place seal is undone without another
+    shape change: a text-only tool list flattens to its exact text, as every
+    seal has done, and a block-list task message only loses its markers.
     """
     from ouroboros.tool_result_record import logical_tool_result_text
 
     for msg in messages:
-        if msg.get("role") != "tool":
-            continue
+        msg.pop("cache_control", None)  # this function's previous boundary
         content = msg.get("content")
-        if isinstance(content, list) and (plain := logical_tool_result_text(content)) is not None:
-            # Flatten the old sealed boundary before choosing a new one.
+        if msg.get("role") == "tool" and isinstance(content, list) and (
+                plain := logical_tool_result_text(content)) is not None:
             msg["content"] = plain
     first_user = next((m for m in messages if m.get("role") == "user"), None)
     if isinstance(first_user, dict) and isinstance(first_user.get("content"), list):
-        # Drop this function's own previous task-message marker, so exactly one
-        # message-side breakpoint survives whichever branch runs below.
         for block in first_user["content"]:
             if isinstance(block, dict):
                 block.pop("cache_control", None)
 
-    tool_indices = [
-        i for i, m in enumerate(messages)
-        if m.get("role") == "tool"
-    ]
-    if len(tool_indices) <= keep_active:
-        _mark_task_message(first_user)
-        return
+    def has_text(message: Optional[Dict[str, Any]]) -> bool:
+        if not isinstance(message, dict) or message.get("role") not in {"user", "tool"}:
+            return False
+        content = message.get("content")
+        if message["role"] == "tool":
+            return bool((logical_tool_result_text(content) or "").strip())
+        if isinstance(content, str):
+            return bool(content.strip())
+        return isinstance(content, list) and any(
+            isinstance(block, dict) and block.get("type") == "text" and str(block.get("text") or "").strip()
+            for block in content)
 
-    seal_candidate_idx = next((i for i in reversed(tool_indices[:len(tool_indices) - keep_active])
-                               if (logical_tool_result_text(messages[i].get("content")) or "").strip()), None)
-    if seal_candidate_idx is None:
-        _mark_task_message(first_user)
-        return
-
-    prefix_text_len = sum(
-        len(extract_plain_text_from_content(m.get("content", "")))
-        for m in messages[: seal_candidate_idx + 1]
-    )
-    prefix_tokens = prefix_text_len // 4  # rough 4-chars-per-token estimate
-
-    if prefix_tokens < min_prefix_tokens:
-        # Not yet a worthwhile rolling boundary: the task message stays the anchor.
-        _mark_task_message(first_user)
-        return
-
-    candidate = messages[seal_candidate_idx]
-    # An empty output remains exact; provider-only padding belongs to the send copy.
-    plain_text = logical_tool_result_text(candidate.get("content"))
-    candidate["content"] = [
-        {
-            "type": "text",
-            "text": plain_text,
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
-
-def _mark_task_message(message: Optional[Dict[str, Any]]) -> None:
-    """Anchor the prefix on the task message's last non-empty text block.
-
-    Anthropic rejects a marker on an empty text block, so a task message with
-    no text at all is left unmarked rather than padded: the same rule the
-    rolling tool seal enforces on empty tool output."""
-    if not isinstance(message, dict):
-        return
-    content = message.get("content")
-    if isinstance(content, str):
-        if not content.strip():
-            return
-        content = [{"type": "text", "text": content}]
-        message["content"] = content
-    if not isinstance(content, list):
-        return
-    for block in reversed(content):
-        if (
-            isinstance(block, dict)
-            and block.get("type") == "text"
-            and str(block.get("text") or "").strip()
-        ):
-            block["cache_control"] = {"type": "ephemeral"}
-            return
+    index = next((i for i in range(len(messages) - 1, -1, -1) if has_text(messages[i])), None)
+    boundary = messages[index] if index is not None else None
+    if boundary is not None and boundary is not first_user and sum(
+            len(extract_plain_text_from_content(m.get("content", ""))) for m in messages[:index + 1]
+    ) // 4 < min_prefix_tokens:  # rough 4-chars-per-token estimate
+        boundary = first_user  # not yet a worthwhile rolling boundary: the task message anchors
+    if has_text(boundary):
+        boundary["cache_control"] = {"type": "ephemeral"}
 
 
 def tool_schema_tokens(tools: Optional[List[Dict[str, Any]]]) -> int:
@@ -563,6 +530,7 @@ def _route_calibration_ratio(
     route_fp: str,
     model: str,
     estimate_tokens: Optional[int] = None,
+    *, view_kind: str = "",
 ) -> float:
     """Fresh comparable-input exact-route/model witness, never an orphan maximum.
 
@@ -574,7 +542,8 @@ def _route_calibration_ratio(
         )
 
         root = drive_root if drive_root is not None else canonical_evidence_root()
-        return float(resolve_main_token_density(root, route_fp, model, estimate_tokens=estimate_tokens)[0])
+        return float(resolve_main_token_density(root, route_fp, model, estimate_tokens=estimate_tokens,
+                                               view_kind=view_kind)[0])
     except Exception:
         log.debug("Fresh route token calibration unavailable", exc_info=True)
         return 1.0
@@ -629,7 +598,7 @@ def measure_main_fit(
     raw_input = int(estimate_context_prompt_tokens(messages, tools, provider=plan.provider, reasoning_effort=reasoning_effort))
     density, basis = ((float(anchor.density), "fresh_route_usage") if anchor is not None else
                       resolve_main_token_density(canonical_evidence_root(), plan.route_fp, plan.model,
-                                                 estimate_tokens=raw_input))
+                                                 estimate_tokens=raw_input, view_kind=plan.view_kind))
     estimated_input = int(math.ceil(raw_input * density))
     ceiling = int(plan.output_reserve_tokens or 0)
     nano = profile.endswith("_nano")
@@ -651,6 +620,7 @@ def measure_main_fit(
     margin = reclaim_low_water_margin(target, capacity) if deficit > 0 else 0
     goal = deficit + margin
     measurement = MainFitMeasurement(
+        view_kind=plan.view_kind,
         route_fp=str(plan.route_fp or ""),
         round_id=str(round_id or ""),
         profile=profile,
@@ -869,6 +839,10 @@ def build_context_fit_plan(
         preferred=preferred, tool_schemas=tool_schemas, window_tokens=int(evidence.window_tokens or 0),
         known_window=known_window, output_reserve=output_reserve)
     governance = {form: _governance_blocks(env, core, mode=form) for form in ("max", "low")}
+    from ouroboros.memory_view import view_role
+
+    role = view_role({**task, "metadata": task.get("metadata") or meta})
+    view_kind = {"consciousness": "own_wake", "presence": "focus", "integrator": "owner_turn"}.get(role, role)
     # Size the cold starting view before selecting a witness, just as round one does.
     contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=1.0)
     ratio = _route_calibration_ratio(
@@ -880,6 +854,7 @@ def build_context_fit_plan(
              {"role": "user", "content": user_content}, *json.loads(core.supplementary_messages_json)],
             list(select_tool_schemas(tool_schemas or [], context_mode=initial_mode).schemas),
             provider=str(route.get("provider") or "")),
+        view_kind=view_kind,
     )
     if ratio != 1.0:
         contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio)
@@ -970,6 +945,7 @@ def build_context_fit_plan(
         sort_keys=True,
     )
     return ContextFitPlan(
+        view_kind=view_kind,
         core_sha256=hashlib.sha256(core_payload.encode("utf-8")).hexdigest(),
         preferred_mode=preferred,
         initial_mode=initial_mode,
@@ -993,4 +969,23 @@ def build_context_fit_plan(
         } if route["provider"] == "claudexor" else {},
         evidence_source=str(getattr(evidence, "source", "") or ""),
         core=core,
+    )
+
+
+def _physical_context_for_fit(disposition: Any) -> PhysicalAttemptContext:
+    from ouroboros.usage_accounting import PhysicalAttemptContext
+
+    measurement = disposition.measurement
+    return PhysicalAttemptContext(
+        view_kind=measurement.view_kind,
+        profile=measurement.profile,
+        rendered_mode=measurement.rendered_mode,
+        measurement_basis=measurement.measurement_basis,
+        route_fp=measurement.route_fp,
+        round_id=measurement.round_id,
+        target_total_tokens=measurement.target_total_tokens,
+        capacity_total_tokens=measurement.capacity_total_tokens,
+        context_target_miss=disposition.action == "send_target_miss",
+        automatic_pass_used=disposition.automatic_pass_used,
+        measurement_density=measurement.measurement_density,
     )

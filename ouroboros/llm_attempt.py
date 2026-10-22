@@ -14,16 +14,21 @@ candidate-attached facts rather than provider prose.
 from __future__ import annotations
 
 import copy
+import contextlib
+import contextvars
 import hashlib
 import inspect
 import json
 import math
+import re
 import threading
 from dataclasses import asdict
 from typing import Any, Dict, List, Optional, Set
 
 from ouroboros.anthropic_native_custody import is_replayed_native_content
-from ouroboros.context_budget import CONTEXT_OVERFLOW_CODES, HOST_CONTEXT_KIND_KEY, HOST_TEXT_SHA_KEY
+from ouroboros.context_budget import (
+    CONTEXT_OVERFLOW_CODES, HOST_CONTEXT_KIND_KEY, HOST_TEXT_SHA_KEY, context_overflow_message,
+)
 from ouroboros.request_wire_contract import physical_candidate_bytes as _canonical_candidate_bytes
 from ouroboros.request_wire_recovery import prepare_wire_payload_for_send
 from ouroboros.transport_custody import ProviderNotDispatched, is_loopback_base_url
@@ -52,6 +57,23 @@ _CACHE_TTL_SECONDS = {"5m": 300, "1h": 3600}
 
 
 PROVIDER_POLICY_REFUSAL = "provider_policy_refusal"
+
+# The caller owns the allowance; this scope carries its write-ahead claim to
+# every physical lane, without another counter or any accounting authority.
+_SINGLE_SEND = contextvars.ContextVar("single_physical_send", default=None)
+
+
+@contextlib.contextmanager
+def single_physical_send(claim):
+    token = _SINGLE_SEND.set(claim)
+    try:
+        yield
+    finally:
+        _SINGLE_SEND.reset(token)
+
+
+def single_physical_send_active() -> bool:
+    return _SINGLE_SEND.get() is not None
 
 
 class PhysicalDispatchInterrupted(PhysicalAttemptPreconditionFailed):
@@ -88,13 +110,10 @@ def require_physical_dispatch_window() -> Optional[float]:
     confirmed handoff only this exact attempt may proceed through later SDK
     checks. Stop and execution deadlines remain effective; packet timing is opaque.
     """
-    from ouroboros.model_wait import current_model_wait, dispatch_deadline_remaining_sec
-    from ouroboros.owner_pause import RAIL_OWNER_PAUSE, scope_fence, model_handed_off
+    from ouroboros.model_wait import current_model_wait, dispatch_control_reason, dispatch_deadline_remaining_sec
+    from ouroboros.owner_pause import model_handed_off
 
-    owner = current_model_wait()
-    reason = owner.control_reason(strict_current=not model_handed_off()) if owner is not None else None
-    if not reason and not model_handed_off() and scope_fence():
-        reason = RAIL_OWNER_PAUSE
+    reason = dispatch_control_reason(current_model_wait(), handed_off=model_handed_off())
     if reason:
         raise _PhysicalSendNotStarted(reason)
     remaining = dispatch_deadline_remaining_sec()
@@ -180,6 +199,18 @@ def _is_structured_context_overflow_exception(exc: BaseException) -> bool:
 
 def _is_structured_context_overflow_body(error: Any) -> bool:
     return bool(_structured_error_values(error) & CONTEXT_OVERFLOW_CODES)
+
+
+def _is_http_status(exc: BaseException, code: int) -> bool:
+    """Read a status attribute or SDK status token, never an arbitrary number."""
+    sc = getattr(exc, "status_code", None)
+    if sc is not None:
+        try:
+            return int(sc) == int(code)
+        except (TypeError, ValueError):
+            pass
+    text = str(exc).strip().lower()
+    return bool(re.search(rf"(?:^|error code:?\s*|status(?:[ _]code)?:?\s*|http[\s:]*){int(code)}\b", text))
 
 
 def cache_ttl_seconds(applied_ttl: Any) -> Optional[int]:
@@ -401,6 +432,16 @@ def processing_refusal(target: Dict[str, Any], payload: Dict[str, Any],
         normalized.body = copy.deepcopy(body)
         return normalized
     return error
+
+
+def reasoning_strip_retry_allowed(exc: BaseException) -> bool:
+    """A 400 may omit replay unless an existing refusal/overflow path owns it."""
+    if getattr(exc, "stream_incomplete", False) or isinstance(exc, ProcessingNotStarted):
+        return False
+    if _is_structured_context_overflow_exception(exc) or _is_provider_policy_refusal(exc):
+        return False
+    # The loop's size recovery owns textual overflow too, including aggregated errors.
+    return not context_overflow_message(str(exc)) and _is_http_status(exc, 400)
 
 
 def effort_request_facts(target: Dict[str, Any], payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -746,6 +787,9 @@ def _deadline_checked_send(send: Any, before_dispatch: Any):
         except PhysicalDispatchInterrupted as exc:
             exc.candidate_manifest_ref = manifest
             raise
+        claim = _SINGLE_SEND.get()
+        if claim is not None:
+            claim(reservation)  # after admission; durable before mark_dispatched/send
         return manifest
 
     def dispatch():
@@ -826,13 +870,14 @@ class _PayloadCachePolicyMixin:
         "default" so pricing bills the extended-tier write multiplier.
 
         The owner's global TTL (``config.resolve_prompt_cache_ttl``, owner decision
-        2026-08-08 Q2=A) has its single WIRE authority here — the one place that decides
+        2026-08-08 Q2=A) has its single API WIRE authority here — the one place that decides
         what every marker on this family actually ships as. It is not the only READER:
         ``review_helpers.cached_prompt_blocks(ttl=None)`` projects the same setting into
-        the block it owns so a non-normalizing route still carries the owner's tier; on
-        this family the finalizer would stamp that block to the same value anyway, so the
-        two readers cannot diverge on the wire (``config.resolve_prompt_cache_ttl`` names
-        both). When the setting names an explicit tier
+        the block it owns so a non-normalizing route still carries the owner's tier, and
+        ``effort_evidence.session_prompt_cache_ttl_request`` negotiates ``promptCacheTtl``
+        for native Claudexor sessions; on this family the finalizer would stamp that block
+        to the same value anyway, so the readers cannot diverge on the wire
+        (``config.resolve_prompt_cache_ttl`` names all). When the setting names an explicit tier
         ('5m'/'1h') it is stamped onto EVERY existing breakpoint of this family —
         including caller-declared review/safety prefixes, which is what makes it an
         HONEST override rather than a floor — before the promotion rule runs, so

@@ -269,14 +269,15 @@ def create(root: Any, *, tier: Optional[str] = None) -> pathlib.Path:
 
 
 def retier(root: Any) -> Optional[str]:
-    """Bring the header to today's probed tier (the boot re-probe); returns the former tier when it changed."""
+    """Bring the header to today's probed tier (the boot re-probe); returns the former tier when it changed.
+    The file leaves WAL under the former tier first: the new one is published only on a DELETE file."""
     root = pathlib.Path(root)
     wanted, current = probed_tier(root), header_tier(root)
     if current is None or current == wanted:
         return None
     with store.process_lock(path(root)), store.name_lock(root, IMPORT_LOCK_NAME, timeout_sec=WAIT_SEC, stale_sec=600.0):
-        store.close_connections(path(root))
         try:
+            store.prepare_handoff(path(root), current, wait_sec=WAIT_SEC, seam=False)  # closes this process's handles
             with contextlib.closing(store.connect(path(root), current, wait_sec=WAIT_SEC)) as conn:
                 conn.execute(f"PRAGMA application_id = {_APPLICATION_ID[wanted]}")
                 conn.execute("BEGIN IMMEDIATE")
@@ -407,10 +408,11 @@ def stream_row(stream: str, columns: Dict[str, Any]) -> bool:
 
 
 def _row(record: sqlite3.Row) -> Row:
-    return Row(record["stream"], record["seq"], decode(record["body"]), record["dispatch"], record["length"])
+    from ouroboros.place_arrivals import project_source
+    return Row(record["stream"], record["seq"], project_source(record), record["dispatch"], record["length"])
 
 
-_SELECT = "SELECT stream, seq, body, dispatch, length FROM dialogue"
+_SELECT = "SELECT stream, seq, body, dispatch, dispatch_input, length FROM dialogue"
 
 
 # --- the one writer seam ---------------------------------------------------------------------

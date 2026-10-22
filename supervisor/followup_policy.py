@@ -28,7 +28,7 @@ from contextlib import ExitStack, contextmanager
 STOP_SOURCES = frozenset({"http_single", "http_cascade", "http_graceful",
                           "owner", "owner_stop", "agent_tool", "owner_restart"})
 HOST_FIELDS = ("followup_origin", "followup_relation", "followup_hold",
-               "followup_released", "followup_restart_seen", "followup_wait")
+               "followup_released", "followup_wait")
 _CONTROL_DEPTH = threading.local()
 
 
@@ -151,7 +151,8 @@ def policy_view(root, data, record):
     controls, wait, busy = {}, "", False
     released = record.get("followup_released") or {}
     try:
-        if (pathlib.Path(root) / "state/owner_restart_no_resume.flag").exists():
+        from ouroboros.delegate_recovery import owner_restart_in_progress, pending_owner_restart
+        if owner_restart_in_progress(root) or pending_owner_restart(root):
             wait = "owner_restart_in_progress"
         origin = origin_of(record)
         origin_ids = set(origin.values()) - {""}
@@ -469,7 +470,8 @@ def task_binding(root, record):
     return copy.deepcopy(binding)
 
 
-def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, task_id, reason):
+def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, task_id, reason,
+                     writer_kind="consciousness", writer_metadata=None):
     """Release precisely a durable, observed generation; never enable other holds."""
     from supervisor import queue_schedules as store
     with control_guard(root, current):
@@ -503,6 +505,9 @@ def restore_followup(root, data, current, *, expected_hold_id, resolved, actor, 
             if relation_kind(current) != "unknown":
                 raise store.ScheduleRefused("relationship_immutable", "only an unknown relationship can be resolved")
             after["followup_origin"], after["followup_relation"] = resolved
+        from ouroboros.consciousness_authority import stamp_schedule_writer
+        stamp_schedule_writer(after, writer_kind, writer_metadata,
+                              started_root=relation_kind(after) == "independent")
         after["followup_released"] = {**(after.get("followup_released") or {}), **hold.get("controls", {})}
         after.pop("followup_hold", None)
         after["followup_wait"] = policy_view(root, data, after)["wait"]
@@ -529,9 +534,7 @@ def record_restart(root, *, new=False):
     with store.schedule_transaction(root):
         data = store.load_schedule_store(root)
         # Each boot retry while the marker exists may tighten the generation.
-        # No release is allowed during that interval. Reusing a pending bit
-        # could confuse a previous crash with a later manual Restart.
-        control = {"control_id": uuid.uuid4().hex, "pending": True, "scope": "interrupted_work"}
+        control = {"control_id": uuid.uuid4().hex}
         audit = dict(drive_root=pathlib.Path(root), operation_id=control["control_id"], actor="owner:restart",
                      task_id="", action="record_restart", schedule_id="*", reason="manual_restart")
         if not store._audit_schedule_mutation(phase="intent", result="intended", **audit):

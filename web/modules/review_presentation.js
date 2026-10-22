@@ -159,6 +159,7 @@ function normalizeSkillAttempt(attempt, defaults = {}, ordinal = 0) {
     if (!attempt || typeof attempt !== 'object') return null;
     const skill = text(attempt.skill || defaults.skill);
     const jobId = text(attempt.job_id || attempt.jobId);
+    const recordId = text(attempt.record_id || attempt.recordId);
     const id = attemptIdentity(attempt, [
         text(attempt.content_hash), text(attempt.review_round),
         text(attempt.snapshot_attempt), String(ordinal + 1),
@@ -206,7 +207,7 @@ function normalizeSkillAttempt(attempt, defaults = {}, ordinal = 0) {
         executions: normalizedExecutions(attempt.executions, attempt.execution),
         execution: attempt.execution && typeof attempt.execution === 'object' ? attempt.execution : null,
         lifecycleOnly,
-        detailRef: skill && jobId ? { surface: 'skill', skill, jobId } : null,
+        detailRef: skill && jobId ? { surface: 'skill', skill, jobId, ...(recordId ? { recordId } : {}) } : null,
         detailText: '',
     };
 }
@@ -1359,6 +1360,7 @@ export function renderReviewsSection(groupsInput, disclosure = {}) {
             const skillRef = attempt.detailRef?.surface === 'skill' ? attempt.detailRef : null;
             const detailAttrs = skillRef
                 ? ` data-skill-review-skill="${escapeHtmlAttr(skillRef.skill)}" data-skill-review-job="${escapeHtmlAttr(skillRef.jobId)}"`
+                    + (skillRef.recordId ? ` data-skill-review-record="${escapeHtmlAttr(skillRef.recordId)}"` : '')
                 : '';
             const source = attempt.detailRef?.surface === 'task_acceptance' ? attempt.detailRef : null;
             const fullSource = source ? (source.url

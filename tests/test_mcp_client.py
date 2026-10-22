@@ -460,7 +460,8 @@ def test_stdio_transport_passes_exact_argv_without_env_or_cwd(monkeypatch, stdio
 
         async def list_tools(self):
             return SimpleNamespace(
-                tools=[SimpleNamespace(name="ping", description="Ping", inputSchema={})]
+                tools=[SimpleNamespace(name="ping", description="Ping", inputSchema={},
+                                       annotations={"readOnlyHint": True})]
             )
 
         async def call_tool(self, name, arguments):
@@ -487,7 +488,12 @@ def test_stdio_transport_passes_exact_argv_without_env_or_cwd(monkeypatch, stdio
         mcp_client._call_tool_async(cfg, "ping", {"value": "hello"}, timeout_sec=2)
     )
 
-    assert tools == [{"name": "ping", "description": "Ping", "input_schema": {}}]
+    assert tools == [{"name": "ping", "description": "Ping", "input_schema": {},
+                      "metadata": {"annotations": {"readOnlyHint": True}}}]
+    from ouroboros.tool_effects import effect_of
+    fact = effect_of(mcp_client.make_tool_name("local", "ping"))
+    assert fact.annotations == {"readOnlyHint": True}
+    assert fact.effect == "write" and not fact.declared
     assert result == ToolResult(
         status="ok",
         code="OK",

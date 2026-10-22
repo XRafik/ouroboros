@@ -9,7 +9,7 @@
     "id": "test_degraded_outcomes_render_with_typed_severity",
     "path": "web/modules/log_events.js",
     "kind": "contains",
-    "value": "const presentation = taskPresentation(terminal || outcome === 'error' ? outcome : 'working');"
+    "value": "const presentation = taskPresentation(terminal || outcome === 'error' ? outcome : 'working',"
   },
   {
     "id": "test_degraded_outcomes_render_with_typed_severity",
@@ -237,7 +237,7 @@
     "id": "test_live_card_recovery_keeps_step_failures_non_terminal",
     "path": "web/modules/chat.js",
     "kind": "contains",
-    "value": "const presentation = taskPresentation(phase || 'done');"
+    "value": "const presentation = taskPresentation(phase || 'done',"
   },
   {
     "id": "test_live_card_recovery_keeps_step_failures_non_terminal",

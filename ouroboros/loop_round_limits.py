@@ -119,9 +119,10 @@ def _drain_incoming_messages(
     def ack_saved(entry: Dict[str, Any]) -> None:
         if not acknowledge_transcript_entry(drive_root, task_id, entry) or event_queue is None:
             return
-        if entry.get("relay") or entry.get("quiz_delivery"):
+        if entry.get("relay") or entry.get("quiz_delivery") or entry.get("card_delivery"):
             event_queue.put_nowait({"type": "owner_message_injected", "task_id": task_id,
-                                   "relay_ack": entry.get("relay"), "quiz_ack": entry.get("quiz_delivery")})
+                                   "relay_ack": entry.get("relay"), "quiz_ack": entry.get("quiz_delivery"),
+                                   "card_ack": entry.get("card_delivery")})
 
     def ack_content(entry: Dict[str, Any]) -> None:
         if defer_content_ack and owner_ctx is not None:
@@ -216,6 +217,8 @@ def _drain_incoming_messages(
                 # owner's messages supersede a reviewed answer). The typed provenance
                 # and the sender id ride the row, the injected event and the ack.
                 provenance = str(entry.get("provenance") or "ancestor_task")
+                if provenance == "place_event":
+                    controls["place_event"] = True  # accepted context, never owner authority
                 if provenance not in CONTEXT_ONLY_TASK_PROVENANCES:
                     _loop()._record_owner_directive(
                         owner_ctx, content=dmsg, msg_id=str(entry.get("msg_id") or ""),
@@ -268,6 +271,11 @@ def _drain_incoming_messages(
                     str(getattr(owner_ctx, "budget_drive_root", "") or "") or drive_root,
                     entry.get("late_answer"), dmsg,
                 )
+            elif entry.get("card_press") is not None:  # a press on a finished author's card: its card frame
+                from ouroboros.gateway.card_decision import card_press_model_text
+
+                model_msg = card_press_model_text(str(getattr(owner_ctx, "budget_drive_root", "") or "") or drive_root,
+                                                  entry.get("card_press"), dmsg)
             owner_content = _owner_content({**entry, "text": model_msg}, drive_root, task_id)
             _loop()._record_owner_directive(
                 owner_ctx,

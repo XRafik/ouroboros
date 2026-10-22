@@ -35,7 +35,7 @@ import httpx
 
 from ouroboros.gateways.claudexor_maintenance import ClaudexorMaintenanceGateway
 from ouroboros.gateways import claudexor_metadata as metadata
-from ouroboros.effort_evidence import validated_effort_resolution
+from ouroboros.effort_evidence import validated_effort_resolution, validated_prompt_cache_ttl
 from ouroboros.observability import timed_phase
 
 from ouroboros.config import (
@@ -139,12 +139,10 @@ class ClaudexorUnavailable(RuntimeError):
 
 
 # Cross-repo contract (B1): the engine's window-exhausted RunFailure codes. A
-# newer engine (rotation PR-A) reports a spent credential POOL under its own
-# code. A spent subscription window always heals on a timer (the engine always
-# dates it); a pool heals on a timer only when the engine DATED it (`resetsAt`),
-# an undated pool (every enabled account refused the model, every account
-# disabled) is structural. `_window_exhausted_refusal` is the one reader; the
-# ORIGINAL code is preserved either way. Any other code stays a generic
+# spent window always heals on a timer (the engine dates it); a pool maps only
+# when dated (`resetsAt`): an undated pool (every enabled account refused the
+# model, or every account is disabled) is structural. `_window_exhausted_refusal`
+# is the one reader; original codes stay intact. Any other code stays a generic
 # ClaudexorUnavailable: fail-open, old engines emitting code:null included.
 WINDOW_EXHAUSTED_CODES = ("subscription_window_exhausted", "credential_pool_exhausted")
 
@@ -816,7 +814,7 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
         return [row for row in (rows or []) if isinstance(row, dict)]
 
     def quota_state(self, *, view: Optional[str] = None, model: Optional[str] = None,
-                    request_kind: Optional[str] = None) -> Dict[str, Any]:
+                    request_kind: Optional[str] = None, timeout_sec: Optional[float] = None) -> Dict[str, Any]:
         """GET one quota epoch; pass resource or freshness selectors to the engine.
 
         Old engines may ignore/refuse a selector; claudexor_observations owns fallback.
@@ -824,7 +822,7 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
         query = {key: value for key, value in (
             ("view", view), ("model", model), ("requestKind", request_kind),
         ) if value is not None}
-        body = self._request("GET", "/v2/quota" + (f"?{urlencode(query)}" if query else ""))
+        body = self._request("GET", "/v2/quota" + (f"?{urlencode(query)}" if query else ""), timeout_sec=timeout_sec)
         return body if isinstance(body, dict) else {}
 
     def refresh_quota(self, *, target: Optional[Dict[str, str]] = None,
@@ -1182,14 +1180,14 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
     # -- account surfaces (D30: read/translate only; the daemon owns ALL auth
     # logic — profiles, login jobs, device-code custody, verification) ---------
 
-    def credential_profiles(self) -> Dict[str, Any]:
+    def credential_profiles(self, *, timeout_sec: Optional[float] = None) -> Dict[str, Any]:
         """GET /v2/credential-profiles — profiles + per-harness native rows.
 
         The daemon's payload already distinguishes the two verification
         truths the UI must show honestly (Q2-а): ``verification_source``
         ``local_store`` (material present, liveness UNPROVEN) vs ``vendor``
         (the vendor answered a request with this credential)."""
-        body = self._request("GET", "/v2/credential-profiles")
+        body = self._request("GET", "/v2/credential-profiles", timeout_sec=timeout_sec)
         return body if isinstance(body, dict) else {}
 
     def create_credential_profile(self, harness_id: str, profile_id: str,
@@ -1552,13 +1550,14 @@ def final_attempt_facts(detail: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     if not isinstance(run_dir, str) or not run_dir.strip():
         return {}
     import yaml  # type: ignore
+    from ouroboros.delegate_custody_usage import held_run_names
 
     try:
         record = yaml.safe_load(
             (pathlib.Path(run_dir) / "final" / "telemetry.yaml").read_text(encoding="utf-8"))
     except (OSError, ValueError, RuntimeError, yaml.YAMLError):
         return {}
-    if not isinstance(record, dict) or record.get("run_id") != run_id:
+    if not isinstance(record, dict) or str(record.get("run_id") or "") not in held_run_names(detail, run_id):
         return {}
     final_id, attempts = record.get("final_attempt_id"), record.get("attempts")
     if not isinstance(final_id, str) or not final_id.strip() or not isinstance(attempts, list):
@@ -1576,6 +1575,8 @@ def final_attempt_facts(detail: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     }
     if "effort_resolution" in row:
         facts["effort_resolution"] = validated_effort_resolution(row["effort_resolution"])
+    if "prompt_cache_ttl" in row:
+        facts["prompt_cache_ttl"] = validated_prompt_cache_ttl(row["prompt_cache_ttl"])
     return facts
 
 

@@ -31,6 +31,7 @@ from dataclasses import asdict
 from typing import Any
 
 from ouroboros.artifacts import read_actor_source_bytes, store_actor_source_bytes
+from ouroboros.transcript_prefix import OBSERVER_STATE_ATTRS as _SEND_OBSERVER_KEYS  # a resumed task keeps the send observer's state
 from ouroboros.observability import without_finalization_timing
 from ouroboros.owner_mailbox import OwnerMailboxPeek
 from ouroboros.task_results import _TRULY_TERMINAL_STATUSES, load_task_result
@@ -154,6 +155,7 @@ def _wait_bound_fields(ctx: Any) -> dict:
             "wait_max_minutes": int(getattr(ctx, "_owner_wait_max_minutes", 0) or 0)}
 
 
+
 def continuation_state(ctx: Any, messages: list, trace: dict, usage: dict,
                        round_idx: int, tool_schemas: list, seen: set) -> dict:
     """The loop's exact continuation values, never Python handles.
@@ -188,7 +190,7 @@ def continuation_state(ctx: Any, messages: list, trace: dict, usage: dict,
         # Exposure facts gate automatic compaction; a resumed task keeps them.
         "context_observations": {key: getattr(ctx, key) for key in (
             "_last_context_observation", "_inspected_context_view", "_pending_compaction",
-            "_historical_author_inputs", "_pending_owner_dialogue",
+            "_historical_author_inputs", "_pending_owner_dialogue", *_SEND_OBSERVER_KEYS,
         ) if getattr(ctx, key, None) is not None},
         "round_idx": round_idx, "tool_schemas": tool_schemas,
         "seen": sorted(seen), "owner_directives": getattr(ctx, "_owner_directives", []),
@@ -309,6 +311,22 @@ def saved_sleep_checkpoint(root: Any, task_id: str, attempt: int | None = None) 
     return wait, state
 
 
+def governing_continuation(task: dict) -> str:
+    """Name the ONE carrier the loop resumes: owner wait, then exact pause, then saved work.
+
+    The loop loads the first present carrier and never falls back when it fails,
+    so admission validates that carrier alone. A later carrier legitimately
+    retains the earlier saved-work locator; a valid newer one never reads it, and
+    an invalid one never falls back to it. Falsy wait/pause fields are absent;
+    working recovery is selected by presence, even with an unusable locator.
+    """
+    if task.get("_owner_wait_resume"):
+        return "owner_wait"
+    if task.get("_budget_pause_resume"):
+        return "exact_pause"
+    return "working" if "_working_recovery" in task else ""
+
+
 def load_owner_wait(ctx: Any, handoff: dict | None = None) -> dict:
     """Resolve a selected handoff; a stale snapshot cannot revive a spent wait."""
     handoff = handoff or getattr(ctx, "owner_wait_resume", None)
@@ -350,12 +368,8 @@ def restore_owner_wait_allowed(root: Any, task: dict, *, strict: bool = False, e
     if not isinstance(handoff, dict):
         return False
     root = pathlib.Path(root)
-    try:  # Panic never returns work; the owner's Restart returns only what its acknowledged transaction names
-        if (root / "state" / "panic_stop.flag").read_text(encoding="utf-8").strip() == "panic":
-            return False
-    except FileNotFoundError:
-        pass
-    except OSError:
+    from ouroboros.delegate_recovery import owner_restart_in_progress
+    if owner_restart_in_progress(root):
         return False
     _ack_direct_exec_successor(root)
     task_id = str(task.get("id") or "")
@@ -629,7 +643,7 @@ def consume_warm_resume(ctx: Any) -> bool:
         fence = read_fence(root_drive, root_task_id)
         stamp = {"consumed_at": utc_now_iso(), "consumed_by": task_id,
                  "task_attempt": int(getattr(ctx, "task_attempt", 1) or 1)}
-        if fence_closed(fence):
+        if fence_closed(fence) or ((fence.get("resume_grant") or {}).get("tree_only") and task_id != root_task_id):
             selected = dict(fence.get("selected_members") or {})
             mine = selected.get(task_id)
             if not isinstance(mine, dict):
@@ -969,7 +983,7 @@ def restore_continuation_state(tools: Any, state: dict, messages: list, trace: d
     for key in ("_nanny_metered_progress", "_nanny_delegate_baseline"):
         setattr(ctx, key, (state.get("nanny_activity") or {}).get(key, {}))
     for key, value in (state.get("context_observations") or {}).items():
-        if key in {"_last_context_observation", "_inspected_context_view", "_pending_compaction", "_historical_author_inputs", "_pending_owner_dialogue"}:
+        if key in {"_last_context_observation", "_inspected_context_view", "_pending_compaction", "_historical_author_inputs", "_pending_owner_dialogue", *_SEND_OBSERVER_KEYS}:
             setattr(ctx, key, value)
     messages[:] = state["messages"]
     trace.update(state["trace"])

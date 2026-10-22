@@ -43,12 +43,13 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
    stack. Only fields keep a hairline, because an editable box must read as editable;
    the composer's field floats instead, and focus gives it the field's ring. On a dark
    room a shadow barely shows, so each neutral height is also a lighter surface: a white
-   veil over whatever lies under it (room, object, capsule), so a capsule reads one step
-   lighter on the room and on a voice alike; what floats over moving content is glass. The Shade is the one exception: it
+   veil over whatever lies under it (room, object, capsule). Room capsules use the neutral veil. Inside the dark
+   Ouroboros voice, trays and capsules use opaque lighter steps of that voice, with opaque readable ink. What floats
+   over moving content is glass. The Shade is the one exception: it
    continues its bar's ink and hangs on the float shadow, so the bar and its Shade read as
    one surface unfolding.
 3. **Colour says who and what.** Each voice colours its own objects: the owner blue,
-   Ouroboros rose (its answers and its work cards alike), System amber (yellow on dark), a
+   Ouroboros rose (its answers and its work cards alike), System amber (gold on dark), a
    Project fuchsia. A role keeps its hue family in both themes and the theme gives it its
    material: on white a pale
    tint of the hue, on a dark room a deep opaque colour of it, because a tint of the same
@@ -56,7 +57,8 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
    they fill a dark surface, so there they never fill: they are the rail, the name and the
    word's ink on a neutral body (System, the owner's turn, money, a warning), and a state's
    green or red draws the same way on dark: a row whose light body is tinted keeps a neutral
-   body there and its words take the hue (`--status-warn-word` / `-error-word`). Each theme has
+   body there and its words take the hue (`--status-warn-word` / `-error-word`); status words retain their hue over
+   the room's neutral or voice-local backing. Each theme has
    one ink polarity, dark text on every light surface and light text on every dark one,
    never both in one room. A state is a tone with its own ink, or a status mark and a word. Hue says identity and fill strength importance, so a
    mark that only identifies stays quieter than the name it marks. Crimson is the one
@@ -73,8 +75,9 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
    on a dark room are a neutral body with their hue's ink, principle 3). A
    *quiet* control (a link, a filter, an icon, a navigation row) has no body and never
    stands. A state changes colour, never height: hover deepens the fill, a press
-   deepens it again, a chosen or switched-on capsule takes its tone and keeps standing;
-   what cannot be pressed now loses its shadow. No outlines. Shape follows content: a
+   deepens it again, a chosen or switched-on capsule takes its tone and keeps standing.
+   Inactive controls lose their shadow. A settled answer is a record: in dark its chosen option keeps the owner's
+   sapphire lift and an explicit `Your choice` label; other options lie flat. No outlines. Shape follows content: a
    one-line control is a capsule; a choice that carries a paragraph (an offered answer)
    is a card with the object radius, standing like every other. A label that acts takes the
    primary ink; a setting's name or an unchosen option the secondary ink; a setting's
@@ -100,33 +103,49 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
 | Object · tray | `#ffffff` · neutral 3 % | white 5.5 % · white 4.5 % |
 | Capsule (hover) · float | `#ffffff` (`#f5f6f8`) · `#ffffff` | white 9 % (13.5 %) · `rgb(32 32 34 / .92)` |
 | Glass on controls and sheets over content | none | `blur(18px)` |
-| Owner · Ouroboros · task card | `#e9eef9` · `#fdf2f4` · `#fff8f9` | sapphire `#103364` · garnet `#5c172a` · garnet `#5c172a` |
-| System | amber 12 %, an amber rail, name `#805000` | white 5.5 %, a yellow rail and name `#f2d441` |
+| Owner · Ouroboros · task card | `#e9eef9` · `#fdf2f4` · `#fff8f9` | sapphire `#103e7f` · cherry `#76162b` · cherry `#76162b` |
+| System | amber 12 %, an amber rail, name `#805000` | white 5.5 %, a gold rail and name `#f7cb58` |
 | Ink on every surface | dark (`#20232b`) | light (`#efeff2`) |
-| Crimson word · ink on its fill · without a fill | `#bf2f40` · `#b52b3b` · `#b52b3b` | `#ff756e` · white · `#ff756e` |
+| Crimson word · ink on its fill · without a fill | `#bf2f40` · `#b52b3b` · `#b52b3b` | `#fe7d85` · white · `#fe7d85` |
 | Crimson fill, strong · soft (hover) | crimson `#c93545` 10 % (14 %), both | `#d32d43` (deeper, `#c32a3f`) · `#872236` with ink `#ffdfe1` |
 | The chosen place's left mark | `#c93545` | white, the fill's ink |
 | A warning or failure on a row whose body cannot show it | the row's tint, its words in their own ink | a neutral row, its words in the hue's ink |
-| Green, red, amber fills (hover) | the hue at 14/22, 10/16, 18/26 % | white 16/20 % (green), 9/13.5 % (red, amber), each with its hue's ink (red `#ff8882`, a step lighter than the crimson word) |
+| Green, red, amber fills (hover) | the hue at 14/22, 10/16, 18/26 % | white 16/20 % (green), 9/13.5 % (red, amber), each with its hue's ink (red `#fe9498`, a step lighter than the crimson word) |
+| Success word · its dot, track and switch | `#176b49` · `#22c55e` | leaf `#83e499` · `#2fd359` |
+| Inside the Ouroboros voice: ink · secondary · meta · disabled | the room's inks (its prose `#35272c`) | `#fcf9f9` · `#ebd9da` · `#f2e4e5` · `#e1cbcc` |
+| Inside the Ouroboros voice: capsule (hover) · tray, also the bodies of its tones, status chips and Project capsules | the room's | opaque `#8f263a` (`#9e3044`) · `#832336` |
+| Inside the Ouroboros voice: crimson and failure word, link and focus · live word · Project ink · information ink | the room's | `#ffc2c6` · `#ffb3b7` · `#f6c4fc` · `#b6d4ff` |
+| Inside the owner's voice: link, focus and quiet words | the room's | the owner's blue `#a0c6ff` |
+| Chosen answer: fill · ink · detail · lift; its `Your choice` word | the green fill · its ink · meta · flat; in the accessible name only | sapphire `#235193` · white · `#dce9fc` · rest shadow; shown |
+| Recorded answer: `You answered` word · its dot; the recommendation | meta · green; `#176b49` | the owner's blue `#a0c6ff` · `#a0c6ff`; `#ffc2c6` |
+| Controls held while an answer is sent · a message awaiting its echo | 75 % · 78 % opacity | full ink; their words carry the state |
 | Rest shadow | `0 1px 2px rgb(28 33 51 / .05), 0 6px 18px rgb(28 33 51 / .06)` | `0 1px 2px rgb(0 0 0 / .4), 0 6px 20px rgb(0 0 0 / .28)` |
 | Float shadow | `0 2px 6px rgb(28 33 51 / .06), 0 18px 44px rgb(28 33 51 / .11)` | `0 2px 8px rgb(0 0 0 / .45), 0 18px 44px rgb(0 0 0 / .5)` |
 | Press · on a solid fill under white | `brightness(.95)` · the same | `brightness(1.12)` · `brightness(.9)` |
 
 - Radii by role, both themes: capsule `999px` (every one-line control and chip) · object `18px`
   (bubbles, cards, groups, menus, answer cards) · inner `12px` (trays and rows inside an object) ·
-  sheet `24px` (the Shade's lower corners).
+  sheet `24px` (the Shade's lower corners, the composer's field).
 - Type: the system face (SF Pro on Apple), 12 / 14 / 16 / 24; weight 400 to read,
   500 for a status word, a root's title or a setting's name, 600 for labels,
   controls and a setting's value.
 - Space: 4 / 8 / 12 / 16 / 24; 14 between messages; 12 x 18 inside a bubble.
 - Motion: 120 ms for colour and shadow (`--motion-tone`); no press motion; the
-  three-dot loop only while work runs.
+  three-dot loop only while work runs. A surface that comes, goes or fades rides one
+  curve, `--ease-sheet`, for `--motion-open` (340 ms, coming in), `--motion-close`
+  (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
+  in); it moves by position, opacity and a small scale, never blur. Three folds change a
+  height: the capsule row and the reply strip on that curve, and a deck of notes between works,
+  whose height lands at once inside the reading write while its cards glide in by position and opacity. The handover between places
+  keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
+  waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
   `:root[data-theme="light"]` (`--elev-*`, `--radius-object` / `-inner` / `-sheet`,
   `--surface-object` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
   `--tone-*` with `--tone-crimson-ink`, `--tone-crimson-soft` / `-soft-ink` and `--tone-crimson-word`,
   `--place-mark`, `--status-warn-word` / `-error-word`, `--press` / `--press-solid`); the light
-  block restates its own values of the hues and tints the dark seed sets differently; the recipes are ui.css "One
+  block restates its own values of the hues and tints the dark seed sets differently, and the dark voice materials
+  follow it (one rule for the Ouroboros voice, one for the owner's) restating the roles they change; the recipes are ui.css "One
   control, three tones" and
   style.css "Airy dopamine", written once for both themes. A page maps its own
   elements onto these roles and adds no recipe.
@@ -423,7 +442,7 @@ Inside Telegram a level the finger reaches, and another level or mode pressed, t
 
 **On a phone the row folds while the owner reads back.** Scrolling back through a
 room's history folds the row of capsules away: its line collapses, the capsules
-fade, and ☰, still the row's first control, waits beside the field. Scrolling
+fade, and ☰, still the row's first control, waits beside the field on its last line, beside "+". Scrolling
 toward the latest, reaching it, focusing the field or another layout brings the row
 back; while the owner writes or works a capsule, or the field holds the focus, it
 stays. Only the owner's own scroll decides, as with Safari's bars: older history
@@ -452,6 +471,27 @@ The dictation mic has a slot between the field and Send that takes no room until
 engine is chosen. Contributed chips have a slot at the end of the capsule row that takes
 only the room the capsules leave (never a second line: the chips that do not fit fold
 into one "+N" whose list holds them) and steps aside with them.
+
+### The composer field
+
+**One object whose corner never grows.** The field is one floating object: a staged
+reply (Replies) is its first line, and the text row with "+", the words, the mic and
+Send its last. Its corner is the sheet radius, half its one-line height, and stays as
+the words grow: one line is a capsule, a paragraph a card with the same corner, never
+an oval. "+", the mic and Send ride on the words' last line, never their middle. The
+reply panel inside is concentric (the sheet radius less the field's 8 px inset) with no
+hairline of its own; the text row has no surface; the field takes the float shadow and
+the focus ring, drawn as shadows, so a border never adds to its height (owner 20.10, 1C).
+
+**A Send rises into the feed.** An accepted Send lifts a copy of the new bubble from
+where the draft stood, its words on the draft's, to the bubble's place in 340 ms on the
+iOS sheet curve: its box moves and resizes, never a scale, while the field's surface,
+corner and shadow turn into the bubble's, and its sender line grows in; the bubble
+shows as the copy lands. A bubble that moves under the flight (a phone's keyboard going
+down after a tap on Send) is followed to its place; a room that goes away (the drawer
+over it, a closed Project) ends the flight at once. Reduced motion, a hidden page or a
+bubble outside the feed's view: it simply appears (`web/modules/send_flight.js`; owner
+20.10, 2A).
 
 ### `.muted`
 
@@ -510,6 +550,8 @@ runtime; known queued, active or finalizing work keeps its own factual label. A
 durably accepted incoming message likewise proves acceptance, not that its task
 has begun or a model has read it.
 
+The Update indicator names the real stage, then the last confirmed outcome or explicit uncertainty. It opens the existing Updates panel, never a second apply flow. The owner may dismiss that result from the indicator only; the panel retains it until the next admitted attempt, with actual saved-local-work references and accessible diagnostics. A pre-admission refusal stays with the request. A busy-work refusal offers explicit retry, never a delayed automatic restart. Connection or version alone proves no successful update. Unknown remains neutral; confirmed completion uses the success triple and a failed/refused/rolled-back attempt the error triple.
+
 Status, owner action, and urgent notification are separate product concepts:
 
 - **Status** states a fact about the affected object, never implying that the
@@ -525,18 +567,26 @@ Status, owner action, and urgent notification are separate product concepts:
   task as a proxy.
 
 Activity schedule rows use the same factual status rule: `active`, `disabled`,
-`suppressed`, `consumed once · history` and `deletion pending` describe
-lifecycle state, while the adjacent Disable/Enable, Restore and Delete controls
-state the owner action. A consumed one-shot is history whether its task
-succeeded or failed; the status never implies a result. Retained rows (consumed
-and suppressed) collapse into one disclosure rather than padding the standing
-list or disappearing: history the owner can still open, read and act on. A
-suppressed skill row keeps Restore so the owner can ask for it back; a consumed
-one keeps only Delete, since Enable on a schedule that cannot fire again would
-be a lie. A deleted row still finishing work it already accepted stays in the
-standing list and says what it waits for. Where generic Restore can cancel the
-pending deletion, the button says Cancel deletion, not Enable; an exact hold
-release stays separate and preserves the deletion intent.
+`consumed once · history`, `withdrawn` and `deletion pending · work in flight`
+describe lifecycle state, while the adjacent Disable/Enable, Restore and Delete
+controls state the owner action. Lifecycle and the last run's outcome are
+separate facts: the outcome line says the settled word as stored (`completed`,
+`failed`, `cancelled`), `ran · no message` for a quiet run, or `outcome not
+observed yet` until the scheduler has read the settled result; it never says
+running, and only the host's own observation writes `previous run still open`.
+A consumed one-shot is history whether its task succeeded or failed; the status
+never implies a result. A row is headed by its name; the instruction stays
+readable and expands by touch, and a waiting row says why inline, never in a
+hover-only tooltip. Retained rows (consumed and withdrawn) collapse into one
+History & withdrawn disclosure rather than padding the standing list or
+disappearing: history the owner can still open, read and act on. A withdrawn
+row says who withdrew it, when and why, and keeps Restore through the retention
+window once no hold remains on it; Restore cancels the withdrawal and brings
+the row back enabled, even if it was paused before, but never re-arms a one-shot
+that already fired. A consumed row keeps only Delete, since Enable on a schedule
+that cannot fire again would be a lie. A withdrawn row whose accepted work is
+known to be in flight stays in the standing list and says so; an exact hold release (Restore
+hold) stays separate and preserves the withdrawal.
 
 A record of what the owner did earlier is history, not status. A skill's
 OuroborosHub submission (the version it sent and its PR link) lives in the
@@ -587,15 +637,17 @@ still-working task. A failed child keeps a compact factual `Failed` marker
 inside its parent while the root continues under its own authoritative status.
 Internal reason codes belong in details and diagnostics, not compact headlines:
 a card that shows a cause says it in the owner's words while the record keeps
-the machine code, and a cause with no sentence yet stays raw rather than
-borrowing a wrong one. The rails that end a task are such causes: the loop's
-forced finalization (round limit, deadline, grace window, context, unabsorbed
-children) and the supervisor's timeout reaper (maximum running time, deadline,
-idle silence) keep their typed codes on the record and the incident key, and the
+the machine code. In root ending summaries, episodes and Main completion rows, a typed cause
+without a sentence reads "The recorded reason has no description yet", with
+its exact code in accessible details. Authored warning prose and raw host text
+stay intact; never infer meaning from spelling. The loop's forced-finalization rails
+(round limit, deadline, grace window, context, unabsorbed children) and the
+supervisor's timeout reaper (maximum running time, deadline, idle silence)
+keep typed codes on the record and incident key, and the
 card, the reaper's grace toast, kill notice and salvage line, and the loop's own
 fallback text all say the one sentence from the shared table
 (`project_dialogue.TASK_CAUSE_PHRASES`, whose browser twin lives in
-`log_events.js`). The routing receipt under an owner message is such a surface:
+`task_reason_words.js`). The routing receipt under an owner message is such a surface:
 a refused addressing act carries the host-composed `cause` sentence
 (`project_dialogue.routing_refusal_cause`, one host table for the receipt line,
 the System row and the picker toast), a landed act carries none, and an unknown
@@ -695,7 +747,8 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **The shape says what the work does.** For projected work the server names it
   (`mark`, `ouroboros/gateway/work_status.py` `mark_of`); the client adds only the
   four facts it alone knows (Room work status).
-  - *moving* — three 4 px dots 3 px apart in the 1.4 s bounce: work runs;
+  - *moving* — three 4 px dots 3 px apart in the 1.15 s typing wave (each lifts 4 px and a little larger,
+    150 ms after the one before): work runs;
   - *still* — the same dots at 40 %: queued, or a wait that ends by itself;
   - *pause* — two 2 × 8 px bars at 70 %: paused, by the owner or by Ouroboros, until Resume;
   - *ring* — a faint 7 px ring: not confirmed (an incomplete read, a closed socket), never a guess;
@@ -720,7 +773,7 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **Words carry the meaning.** A mark is decorative (`aria-hidden`); the word
   beside it or the place's accessible name says the same fact ("Working · new
   messages", "Something here waits for you"), so colour is never the only channel.
-- **Motion.** Only *moving* loops; reduced motion stops the bounce, and the moving
+- **Motion.** Only *moving* loops; reduced motion stops the wave, and the moving
   dots then stand at full strength, apart from the still ones. A mark that changes
   shape on a live chip keeps the moving dots' width, so the word beside it never
   moves. A status sentence's own dot (`.ui-status`, Settings sentences) is drawn by
@@ -843,7 +896,9 @@ this Project" came to be drawn six ways. The rule is therefore about intents.
   (`.ui-hit-area` keeps a finger's target; under a finger the line leaves the
   head's × its column, so neither takes the other's). The whole capsule is the
   target, with one fill whose hover and press deepen the whole capsule; no
-  border, ring or hairline, and no width that depends on where it sits. Long
+  border, ring or hairline, and no width that depends on where it sits. Inside the dark
+  Ouroboros voice its fill is that voice's capsule step and its ink a lighter Project ink, so the
+  name stays readable at rest, hover and press. Long
   names: two lines in the strip, ellipsis in the capsule, never smaller type;
   accessible names stay whole.
 - A **command** is a button: it changes or confirms something, or goes to a
@@ -874,7 +929,9 @@ runtime's state, Main's Project lifecycle, or words signed by their author (a
 reminder, a skill notice). It is one short typed mark in owner words, never a
 paragraph or text written for a model. `tests/test_host_message_voice.py` keeps
 every host type stamped as a literal at its send site in one of these classes, with
-its counted producer sites.
+its counted producer sites. Room status carries connection loss; reconnecting adds
+no feed row or counter in Main or a Project (`tests/test_reconnect_feed_browser.py`).
+Only the first open after a reload onto changed code shows `Restart complete`.
 
 Language follows the same line. The install's interface language
 (`OUROBOROS_UI_LANGUAGE`, Settings → Appearance → Language) translates chrome
@@ -917,8 +974,8 @@ Main's empty-chat greeting speaks in neither voice: it is host copy in a quiet
 bubble, a history row or a model reply (`web/modules/welcome_preference.js`). It
 appears only after a successful recent history read whose own window reports
 complete coverage, over a feed with no message or task card (the typing indicator
-and the ephemeral reconnect notice are chrome, by the same rule that gives an empty
-feed its history loading state). Every later read withdraws it while in flight, so
+and the ephemeral `Restart complete` row are chrome, by the same rule that gives an
+empty feed its history loading state). Every later read withdraws it while in flight, so
 that loading state, then any failure, shows instead; only a complete answer brings
 it back, and it leaves with the first message or task card. Project rooms never
 show it.
@@ -1403,12 +1460,14 @@ Anatomy, top to bottom:
    wait — owner input or other mail woke the task, or the bound closed — reads
    `Unanswered · task continued`; an open question without any wait evidence
    reads `Unanswered`; `Unanswered · task finished` keeps the neutral dot and
-   answerability (a late answer arrives as the owner's message); `You answered` uses the ok dot;
+   answerability (a late answer arrives as the owner's message); `You answered` uses the recorded-answer word and mark
+   roles: owner blue in dark, the existing meta/ok treatment in light; unknown delivery retains its owner-action mark;
    `Replaced by a newer question` and `Question closed` use the disabled dot; an unreadable source
    reads `Status unavailable`, never an invented invitation. No answer-deadline
    countdown: task completion closes its mailbox, not the question's answerability.
    Pressing immediately shows `Sending…` and the brand-marked choice, keeping the
-   full form and focus, the head's mark neutral until the answer is confirmed; inert controls use subdued ink and submitted fields become
+   full form and focus, the head's mark neutral until the answer is confirmed; inert controls are faded in light (in
+   dark they keep full ink beside `Sending…`) and submitted fields become
    read-only. No success before canonical confirmation. `Not confirmed` means unknown,
    not failed: only then, under the answer, show Forget unconfirmed local answer
    (quiet, first), Check status and Retry same answer. Recovery first reads exact-quiz
@@ -1434,8 +1493,10 @@ Anatomy, top to bottom:
 4. **Options** — zero to six real owner actions: elevated cards (the capsule surface
    on the rest shadow with the object radius; a choice, never a field), the label in
    `--text-primary` at 600; an optional per-option detail steps down to meta ink inside
-   the card. Hover and press change the card's colour. After settlement they lie flat
-   in `--text-disabled`; the chosen option takes the ok pair, its detail the meta ink. Options are capped by the shared Python↔JS constant
+   the card. Hover and press change the card's colour. After settlement unchosen options lie flat and remain
+   readable. The chosen answer uses the chosen-answer roles: sapphire/white with its rest lift in dark, the existing
+   green/meta flat treatment in light. Its accessible name identifies it; dark also shows `Your choice`.
+   Recommendation is separate from the owner's answer. Options are capped by the shared Python↔JS constant
    (`MAX_QUIZ_OPTIONS`); with none, the free answer is the whole answer.
 5. **Free answer** — while the card is open, one always-visible frame (the field's
    hairline and focus idiom) holds the words, named `Your answer`, and at its trailing
@@ -1499,7 +1560,7 @@ Expanded ordinary cards disclose earlier Files, timeline, Reviews and children
 in collapsible sections using their original content, never duplicate cards.
 A Project portal still reaches that content through its room.
 
-**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice and the Project reference. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
+**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. A quiet scheduled run (it finished without a message) keeps its internal result and a terse `Done · no message` row in its own room; it creates no Main completion summary and sends no finish notification, while a host notice it carries stays visible. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved result-review PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 
@@ -1523,7 +1584,10 @@ the Widgets page the kept card says `kept from the chat` and its menu carries `R
 app, which only puts a request into the draft. Until the body arrives, and whenever it cannot be read, the card shows
 its plain words (the text Telegram gets) with one status line — `Loading the card…`, the failure with Retry, `This
 card is no longer available.`, `This skill is off.` — never an empty box. A press on a card's control is the owner's:
-it says `Sending…`, then `Sent ✓` or the honest failure, and a control meant once locks after it counted. A frame in
+it says `Sending…`, then `Sent ✓` (`Saved · the task reads it when it continues` until a paused task reads it) or
+the honest failure, and a control meant once locks after it counted. An app's
+frame reads the theme roles of the material it lies on (inside the dark Ouroboros voice, that voice's inks and
+surfaces), at mount and at every theme change. A frame in
 a message (an app, a skill's widget) is at least 120 px and at most 70 % of the window, with `Expand` / `Collapse`
 beyond; at most three run at once, started near the view, and a far one rests as its words with `Open`. A running
 frame has `Close`, which leaves it as its words with `Open` on this device until the owner opens it again; a frame
@@ -1588,7 +1652,8 @@ file (owner choice 1C/2A/3A/4A/5A/6A with mobile first-class).
   echo, the bubble says "Not confirmed as saved" with "Send again", which
   resends the same frame and id (the host rejoins it if it was saved after all,
   never a second message), and "Discard", which forgets this tab's copy (never
-  an upload). Nothing resends by itself. The frame is kept, with no count bound,
+  an upload). Nothing resends by itself. In dark, queued bubbles retain opaque readable ink; the queued
+  words carry the state. Light retains its existing opacity. The frame is kept, with no count bound,
   until that id's saved echo or history row settles it (a row the running host
   has not yet dispatched keeps it until the host says which): a bubble the feed
   released or rebuilt keeps its frame, and a Project room holding one is hidden,
@@ -1609,13 +1674,14 @@ file (owner choice 1C/2A/3A/4A/5A/6A with mobile first-class).
 
 A reply names the row meant; Ouroboros decides what to do, routing nothing by it. Saved rows offer Reply beside
 Copy on bubbles and in row menus, a work card in its row menu only; never on hover only. Reply stages one
-composer strip (`Replying to`, quoted author, one line, ×; Esc cancels). Send
+strip, the composer field's first line (`Replying to`, quoted author, one line, ×; Esc cancels). Send
 carries only the address; the host makes the snippet. Answerable questions use their own field.
 
 One quote component serves bubbles, strips and relays: above the text, a 2 px
 bar and tint in the quoted author's ink (the tint lies on the quote glass, so inside a
 dark voice it reads as a shade of graphite cooled or warmed by the quoted author, not as
-a second bubble), one line cut on a word; a photo leads
+a second bubble; inside the dark Ouroboros voice a quote of Ouroboros lies on that voice's
+capsule step, its author in the voice's readable word), one line cut on a word; a photo leads
 with its thumbnail. Pressing a reply quote reveals the exact row, loading its
 bounded page in this room when present, otherwise its available home. Containing
 timelines open and scroll; the line is focused and highlighted below the header.
@@ -1628,10 +1694,17 @@ down that page chain until `Scroll to latest message`. Old sources read no newer
 messages. Ouroboros quotes the message it answers only when it is not directly
 above (its own card does not count).
 
-A relay is one Ouroboros bubble in the work's room: every owner's message passed
-on, complete with where/when (six lines, then Show all; files named, captionless
-files by name), then Ouroboros's note; Telegram uses plain text. Main keeps its
-one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
+A relay is a note one work leaves another (`tell_task`), written for that work, so
+its room draws a note card, never an Ouroboros bubble (`web/modules/chat_relay_deck.js`):
+the sender's tile (Main's glyph, or the Projects glyph in Project ink) and name over
+`to this work · time`, the teller's line for the owner (`summary`; without it the
+note's first words in meta ink), and Show note, the note as written in a tray with
+Reply and Copy. Consecutive notes make one deck in the work card's material: the
+latest card in front, the edges of up to two behind, Show N notes fanning it out in
+place, Hide folding it. A relay passing the owner's words keeps its own card: every
+message passed on, complete with where/when (six lines, then Show all; files named,
+captionless files by name), above the summary. Telegram receives only a relay that
+passes his words, as plain text. Main keeps its one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
 row, long press on touch) offers Reply, Copy, Open project and a work card's
 Resume, Pause and Stop… exactly when the card does. Esc/outside press closes it
 and returns focus; selected words keep the browser's menu. On touch the row sinks a
@@ -1653,7 +1726,7 @@ the crimson ink; a work card offers none.
 A skill adds controls only where the host opens a place (the composer's "+"
 menu and capsule row, a saved reply's actions), and the host draws them: the
 skill's label verbatim, one glyph from the host set, the host's capsule or
-icon control, never the skill's markup. In "+", after Attach file, each skill
+icon control, never the skill's markup. Connector icons may supply reviewed SVG geometry, painted by the host in monochrome currentColor with a fallback glyph and an adjacent visible label. In "+", after Attach file, each skill
 has a section under its name with its items in the owner's order; the host's
 own items close the menu under Ouroboros's name: Add dictation… while no
 engine can dictate here, and Make a button with Ouroboros…, which starts a request in
@@ -2202,7 +2275,7 @@ and still be reached by a question or a finished task.
 
 **Startup & background.** Behavior owns host lifecycle choices; Appearance is client-local. Sign-in startup is opt-in and names the host computer, also in remote clients. OS registration is truth, never a saved-settings guess: another copy, OS-disabled entry and unavailable build remain visible. Automatic startup preserves Panic and saved pauses; an explicit owner start releases Panic. *Keep Ouroboros running in the background when the window is closed* is also opt-in, stored on the host. First close asks once whether to keep tasks, schedules and Telegram running; its answer sets the checkbox, dismissal quits. macOS uses Keep running/Quit; Windows uses standard OK/Cancel and explains which keeps running. Closing with background on hides only behind a live indicator, so a hidden process always has a visible way back; otherwise it quits. Windows keeps one icon even with background/notifications off: after runtime and PID-lock/automatic-start checks, before Git/bootstrap. macOS shows its menu-bar item and Dock while background is on. The menu names starting, confirmed work, errors, unconfirmed activity or no answer; it offers Open, Panic and Quit. Early Panic stops installation work, including the retained daemon, and persists the stop marker; failed stops/writes are disclosed. Quit, Cmd+Q and sign-out quit unasked. Automatic start hides only with both checkboxes on and a live indicator; opening during boot shows the window. There is no separate start-minimized setting. Linux says background is unavailable and closes to quit. Android retains automatic boot by default with Panic preservation. This card is last on Behavior; browser/Docker hosts explain it without offering unsupported controls. Unavailable controls explain why in meta ink, without a warning dot; duplicate reasons appear once after both. Changeable states (another copy, OS-disabled entry) use warning; failed reads/writes use error. Notes align with checkbox text, status dots hang beneath the checkbox.
 
-Panic sends immediately, without confirmation or an ordinary chat bubble. Acceptance clears only unchanged sent command text; unknown/refused delivery keeps it. Newer edits, reply and attachments stay. Desktop uses its independent stop bridge, also from the reconnect overlay; without that bridge the overlay hides Panic. Browser uses its captured socket, never a queue/reconnect. Missing acceptance says “Panic was not confirmed”, pointing desktop to its tray/menu bar and browser to the host computer.
+Panic sends immediately, without confirmation or an ordinary chat bubble. Acceptance clears only unchanged sent command text; unknown/refused delivery keeps it. Newer edits, reply and attachments stay. Desktop uses its independent stop bridge, also while the socket reconnects: no veil covers the app or its Panic. Browser uses its captured socket, never a queue/reconnect. Missing acceptance says “Panic was not confirmed”, pointing desktop to its tray/menu bar and browser to the host computer.
 
 **Telegram completion messages are separate from these client alerts.** The
 existing completion toggle Off suppresses every additional terminal line, failures
@@ -2272,7 +2345,8 @@ to interrupt you. Judge it by use and turn it off if it is too chatty.
 **What never notifies.** Progress, a transient failure, one tool's error and a
 reviewer's finding are not notifications; they stay in the transcript. A child
 task never notifies the owner: it escalates to its parent, and only the parent's
-own message or the root's terminal can ring. Machine partitions — the hidden
+own message or the root's terminal can ring, and a run that finished quietly
+(`quiet_effective`) does not, unless it publishes a host notice. Machine partitions — the hidden
 chat and agent-to-agent traffic — never reach a banner. A Project's room
 notifies once this client knows it; any other ordinary conversation, including
 one arriving over an external transport, is treated as the owner's exactly as
@@ -2498,9 +2572,28 @@ column comes up from under it and the card's words fade; nothing darkens. Pulled
 past fully open the card gives like a rubber band, the column's edge filling the
 gap. Released, or when the system takes the touch, it settles the rest of the way
 at the finger's speed (180–400 ms); ☰ opens it in 340 ms and × or the room's
-quarter close it in 280 ms, on the iOS sheet curve `cubic-bezier(0.32, 0.72, 0, 1)`.
-The quarter's clear scrim comes and goes with it. Reduced motion keeps the finger
-tracking and drops the rest.
+quarter close it in 280 ms, on the iOS sheet curve (`--ease-sheet`). A thumb that
+rests before it lifts is no fling. The quarter's clear scrim comes and goes with
+it. Reduced motion keeps the finger tracking and drops the rest.
+
+**Moving between places.** On a phone a place picked in the open drawer changes
+inside the room card: the drawer stays painted for one 160 ms beat while the
+leaving room's words fade out and the arriving room fades in with one breath
+(scale .97 → 1), the chosen place's pill slides from its old row to the tapped one,
+then the drawer's own close brings the card home; opening the drawer switches the
+pill on where you are (owner 20.10, 4A; `web/modules/shell_motion.js`). The stack,
+history and Back change at the tap; only the covered room's inert waits for the
+card, because it restyles the whole room. A Project room that is left keeps its
+rows until its exit has run and is the same room when reopened meanwhile. Docked,
+navigation stays instant; the Project panel comes in from the window's right edge
+once its room has painted (or after a read's 300 ms bound, with its loading row)
+and goes back there whole, only its scrim fading (owner 20.10, Q2 A). A dismissed
+toast fades where it stood while the ones that stay glide into its place. Moving
+status marks share one document phase while keeping their three-dot delay
+(`web/modules/status_mark.js`); repainting an unchanged mark does not restart it,
+and under the closed phone drawer they rest. Reduced motion keeps only short fades
+(the arriving room, the docked panel) and stops the wave. No veil covers the app
+while it reconnects: the room's bar says Reconnecting….
 
 **Haptics.** Inside Telegram, and only there (its HapticFeedback; a browser and the
 desktop app have none), a few moments are felt, one meaning each: the drawer,

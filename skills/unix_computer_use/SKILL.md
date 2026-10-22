@@ -64,6 +64,16 @@ Coordinate contract:
   the stored transform already folds the Retina scale in. On multi-display
   Macs the scale is approximate (`approx` flag) — prefer `ax_tree` marks.
 
+Input receipts:
+
+- A successful input call returns `observed_effect: true`: the input command
+  ran and reported success, on every backend. It proves dispatch, not that the
+  screen changed (macOS TCC caveat below) or that the task's goal was met; the
+  host's task result review reads it as work the task produced.
+- An input of several steps that fails after earlier steps succeeded returns
+  `ok: false` with `steps_done` and keeps the mark. A failed or timed-out first
+  step, a refusal, reads, `wait` and `remote_exec` carry none.
+
 Backend matrix (honest limitations):
 
 - macOS: `screencapture` + `cliclick` + `osascript`; `sips` for downscaling.
