@@ -831,7 +831,9 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 415 -> 410.
 # Base c15fc161 already scans 411: artifacts.copy_file_to_task_artifacts' immutable
 # digest-named attachment path (task_results/artifacts/*/*-*) shares section 7's row.
-EXPECTED_SCAN_PATHS = 411
+# This head scans 413, including retained bootstrap identity and per-target
+# payload mutation locks; the retired global claim spelling is absent.
+EXPECTED_SCAN_PATHS = 413
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
