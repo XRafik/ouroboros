@@ -197,6 +197,13 @@ def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_p
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path / "fork")
     # Before the MCP boot step, its configure path already seeds the file.
     assert any(row["function"]["name"] == "mcp_demo__ping" for row in registry.schemas())
+    # A Save after that read adds `fresh`; the step must apply the saved document,
+    # not the configured state, or its prune would delete fresh's catalog.
+    fresh = {"id": "fresh", "enabled": True, "url": "https://fresh.test/mcp"}
+    publisher({"MCP_ENABLED": True, "MCP_SERVERS": [fresh]}).refresh_server("fresh")
+    saved = settings()
+    saved["MCP_SERVERS"].append(fresh)
+    install_settings(monkeypatch, saved)
     try:
         # The step applies the saved document; a Save still holding the document
         # lock neither delays nor cancels the boot prune and listing.
@@ -206,11 +213,12 @@ def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_p
         else:
             server_boot.mcp_startup()
         assert entered.wait(5) and not orphan.exists()
-        assert mcp_catalog.catalog_path("demo").exists()
+        assert mcp_catalog.catalog_path("demo").exists() and mcp_catalog.catalog_path("fresh").exists()
         # A blocked network listing must not hold the Settings ordering lock.
         with owner_settings.settings_document_mutation():
-            assert manager.server_ids() == ["demo"]
-        assert any(row["function"]["name"] == "mcp_demo__ping" for row in registry.schemas())
+            assert manager.server_ids() == ["demo", "fresh"]
+        rows = {row["function"]["name"] for row in registry.schemas()}
+        assert {"mcp_demo__ping", "mcp_fresh__ping"} <= rows
     finally:
         release.set()
         assert finished.wait(5)
