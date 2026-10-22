@@ -532,9 +532,10 @@ def test_trace_sources_apply_root_resource_and_presence_resource_admission(tmp_p
     assert "protected projection bytes" not in json.dumps(blob_blocked)
 
     import ouroboros.presence_authority as presence
-    from ouroboros.presence_authority import build_presence_capability_ceiling, presence_ceiling_payload
-    from ouroboros.presence_capabilities import PresenceProfileResolution, PresenceSelection, PresenceToolTarget
-    from ouroboros.presence_runtime import ResolvedPresenceRuntime
+    from ouroboros.presence_authority import presence_ceiling_payload
+    from tests.frozen_presence_authority import build_presence_capability_ceiling
+    from tests.frozen_presence_capabilities import PresenceProfileResolution, PresenceSelection, PresenceToolTarget
+    from tests.frozen_presence_runtime import ResolvedPresenceRuntime
 
     resolution = PresenceProfileResolution(
         active=(PresenceSelection("1" * 64, PresenceToolTarget("builtin", "query_records")),),
