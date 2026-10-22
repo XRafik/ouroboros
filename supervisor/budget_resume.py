@@ -133,6 +133,40 @@ def _owner_pause_blockers(blockers: Any) -> List[Dict[str, Any]]:
     return [b for b in (blockers or []) if isinstance(b, dict) and not review_finishing(b)]
 
 
+def _update_admission_refusal(q: Any, task: Optional[Dict[str, Any]], result_root: pathlib.Path,
+                              task_id: str) -> Optional[Dict[str, Any]]:
+    from supervisor import workers
+
+    closed_fn = getattr(q, "repo_writer_admission_closed", workers.repo_writer_admission_closed)
+    reason = str(closed_fn() or "") if callable(closed_fn) else ""
+    if not reason:
+        return None
+    allowed_fn = getattr(q, "repo_writer_task_allowed", workers.repo_writer_task_allowed)
+    if isinstance(task, dict) and callable(allowed_fn) and allowed_fn(task):
+        return None
+    chat_id = (task or {}).get("chat_id") if isinstance(task, dict) else None
+    if chat_id is None:
+        try:
+            chat_id = (load_task_result(result_root, task_id, strict=False) or {}).get("chat_id")
+        except Exception:
+            chat_id = None
+    send = getattr(q, "send_with_budget", getattr(workers, "send_with_budget", None))
+    if chat_id is not None and callable(send):
+        try:
+            from ouroboros.task_finalization import host_operation_reply_kwargs
+
+            send(
+                int(chat_id),
+                "🔒 An update is in progress; press Resume after the restart.",
+                **host_operation_reply_kwargs(None, "", ""),
+                role="system",
+                system_type="managed_update_notice",
+            )
+        except Exception:
+            pass
+    return {"ok": False, "error": "update_in_progress", "reason": reason, "action": "resume_after_restart"}
+
+
 def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Optional[Dict[str, Any]]:
     """The owner's Resume of a tree whose ROOT parked WARM under its Pause; None when not one.
 
@@ -188,6 +222,8 @@ def resume_warm_owner_pause_root(task_id: str, *, selected_by: str = "") -> Opti
     fence_id = str(fence.get("fence_id") or "")
     if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
+    if refusal := _update_admission_refusal(q, task, result_root, task_id):
+        return refusal
     try:
         # Cascade Stop belongs to the logical root; SINGLE Stop to the physical attempt.
         if any(cancel_pending(result_root, tid, strict=True) for tid in {root_task_id, task_id}):
@@ -379,6 +415,8 @@ def _grant_exact_resume(task: Dict[str, Any], pause: Dict[str, Any], *, selected
         return refusal
     if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
+    if refusal := _update_admission_refusal(q, task, result_root, task_id):
+        return refusal
     try:
         result_row = load_task_result(result_root, task_id, strict=True) or {}
     except Exception:
@@ -891,6 +929,8 @@ def _late_phase_refusal(q: Any, root: pathlib.Path, task_id: str, row: Dict[str,
 
     if owner_restart_in_progress(q.DRIVE_ROOT):
         return {"ok": False, "error": "restart_no_resume", "action": "wait_or_cancel"}
+    if refusal := _update_admission_refusal(q, row, root, task_id):
+        return refusal
     try:
         if has_active_intent(root, task_id, strict=True):
             return {"ok": False, "error": "cancel_intent_active"}

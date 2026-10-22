@@ -710,6 +710,20 @@ def owner_pause_resume_notice(ctx: Any, checkpoint: dict, outcome: str, *, cold:
         "not reset; prior tool results remain recorded; do not repeat completed effects.")}
 
 
+def _admit_direct_continuation_wake(task_id: str, wait: dict, root: pathlib.Path) -> bool:
+    """Clear park mark under the repo-writer gate lock; re-park if admission is closed."""
+    from supervisor import workers
+    from supervisor.active_activity import get_direct_activity_registry
+
+    registry = get_direct_activity_registry()
+    with workers._repo_writer_gate_lock:
+        registry.clear_parked(task_id)
+        if workers.repo_writer_admission_closed():
+            registry.mark_parked(task_id, wait, drive_root=root)
+            return False
+        return True
+
+
 def direct_owner_wait(ctx: Any, checkpoint: dict) -> str:
     """Retain a registered chat actor's stack; it holds no pooled capacity.
 
@@ -720,6 +734,7 @@ def direct_owner_wait(ctx: Any, checkpoint: dict) -> str:
     so Stop, the task deadline and the absolute ceiling keep precedence.
     """
     from ouroboros.deadline_utils import parse_deadline_ts, utc_now
+    from supervisor.active_activity import get_direct_activity_registry
 
     control = ctx.model_wait_context
     root = pathlib.Path(ctx.budget_drive_root or ctx.drive_root)
@@ -727,30 +742,64 @@ def direct_owner_wait(ctx: Any, checkpoint: dict) -> str:
     while ctx.pending_events and getattr(ctx, "event_queue", None) is not None:
         ctx.event_queue.put(dict(ctx.pending_events[0]))
         del ctx.pending_events[0]
-    wait = set_owner_wait(root, ctx.task_id, {**checkpoint, "state": "waiting"})
+    wait = set_owner_wait(root, ctx.task_id, {**checkpoint, "state": "waiting", "is_direct_chat": True})
+    get_direct_activity_registry().mark_parked(ctx.task_id, wait, drive_root=root)
     peek = OwnerMailboxPeek()
     deadline = parse_deadline_ts((checkpoint or {}).get("wait_deadline_at"))  # None = unbounded
     outcome = "unknown"
     warm_pause = checkpoint.get("reason") == REASON_OWNER_PAUSE_WARM
-    while not control.control_reason():
-        woke = _sleep_wake(ctx, checkpoint)
-        if woke:
-            outcome = woke
-            break
-        if warm_pause:
-            woke = _owner_pause_wake(ctx, checkpoint)
+    control_reason = ""
+    try:
+        while True:
+            control_reason = str(control.control_reason() or "")
+            if control_reason:
+                if control_reason not in {"finalize_requested", "finalize_now"}:
+                    break
+                if _admit_direct_continuation_wake(ctx.task_id, wait, root):
+                    break
+                time.sleep(0.05)
+                continue
+            woke = _sleep_wake(ctx, checkpoint)
             if woke:
-                outcome = woke
-                break
-        elif woke is None and peek.pending(
-                pathlib.Path(ctx.drive_root), ctx.task_id,
-                set(getattr(ctx, "_loop_mailbox_seen_ids", set())), ctx.task_attempt or 1):
-            break
-        if deadline is not None and utc_now() >= deadline:
-            outcome = "timeout"
-            break
-        time.sleep(1.0)
-    control_reason = control.control_reason()
+                if _admit_direct_continuation_wake(ctx.task_id, wait, root):
+                    outcome = woke
+                    break
+                time.sleep(0.05)
+                continue
+            if warm_pause:
+                woke = _owner_pause_wake(ctx, checkpoint)
+                if woke:
+                    if (woke.startswith("control:")
+                            and woke not in {"control:owner_resume", "control:owner_pause",
+                                             "control:finalize_requested", "control:finalize_now"}):
+                        outcome = woke
+                        break
+                    if _admit_direct_continuation_wake(ctx.task_id, wait, root):
+                        outcome = woke
+                        break
+                    time.sleep(0.05)
+                    continue
+            elif woke is None and peek.pending(
+                    pathlib.Path(ctx.drive_root), ctx.task_id,
+                    set(getattr(ctx, "_loop_mailbox_seen_ids", set())), ctx.task_attempt or 1):
+                if _admit_direct_continuation_wake(ctx.task_id, wait, root):
+                    break
+                time.sleep(0.05)
+                continue
+            if deadline is not None and utc_now() >= deadline:
+                if _admit_direct_continuation_wake(ctx.task_id, wait, root):
+                    outcome = "timeout"
+                    break
+                time.sleep(0.05)
+                continue
+            time.sleep(1.0)
+    finally:
+        get_direct_activity_registry().clear_parked(ctx.task_id)
+    if not control_reason:
+        control_reason = str(control.control_reason() or "")
+        if control_reason in {"finalize_requested", "finalize_now"} and not _admit_direct_continuation_wake(
+                ctx.task_id, wait, root):
+            control_reason = ""
     outcome = (f"control:{control_reason}" if control_reason else outcome if warm_pause else
                _fresh_wake(ctx, str(checkpoint.get("quiz_id") or ""), outcome))
     set_owner_wait(root, ctx.task_id,
@@ -1107,7 +1156,7 @@ def resume_native_loop(tools: Any, state: dict, messages: list, trace: dict,
 
 
 def prepare_owner_wait_handoffs(root: Any, running: dict, transaction_id: str, *,
-                                include_sleep: bool = True) -> set[str]:
+                                include_sleep: bool = True, direct: Any = None) -> set[str]:
     """Prepare returning waits; owner-Pause keeps its own retention.
 
     Planned restarts and updates may return a sleeper to its existing wait.
@@ -1115,8 +1164,20 @@ def prepare_owner_wait_handoffs(root: Any, running: dict, transaction_id: str, *
     """
     selected = set()
     reasons = {"owner", "review", "sleep"} if include_sleep else {"owner", "review"}
-    for task_id, meta in running.items():
-        task = meta.get("task") or {}
+    if direct is None:
+        try:
+            from supervisor.workers import direct_chat_turns
+
+            direct = direct_chat_turns()
+        except Exception:
+            direct = ()
+    candidates = [
+        *((str(task_id or ""), (meta or {}).get("task") or {}) for task_id, meta in (running or {}).items()),
+        *((str((task or {}).get("id") or ""), task if isinstance(task, dict) else {}) for task in (direct or ())),
+    ]
+    for task_id, task in candidates:
+        if not task_id or task_id in selected:
+            continue
         try:
             row = load_task_result(root, task_id, strict=True) or {}
         except (OSError, ValueError, TypeError, RuntimeError):
