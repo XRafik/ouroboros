@@ -53,10 +53,21 @@ def collect_change(ctx, reference):
     from ouroboros.tools.review_change_custody import recorded_change_panel, collect_recorded_commit_actor, settle_collected_attempt
 
     root, attempt, record = resolve_reference(ctx, reference)
+    if (record.get("brief") or {}).get("dispute_input") is None:
+        from ouroboros.review_history import _gap
+        from ouroboros.review_ledger import revise_record
+
+        inputs = copy.deepcopy(attempt.review_input) or {"previous_records": [], "gaps": [
+            _gap("paid wave has no saved dispute-input binding", record_id=record["record_id"])]}
+        def retain_input(current):
+            if (current.get("brief") or {}).get("dispute_input") is None:
+                current["brief"] = {**(current.get("brief") or {}), "dispute_input": inputs}
+            return current
+        record = revise_record(root, record["record_id"], retain_input) or record
     ctx._left_review_wait = copy.deepcopy(record.get("waiting") or {})
+    from ouroboros.review_waiting import select_helpers
+    select_helpers(ctx)  # Synchronous collectors also restore the saved selection.
     if record.get("state") == "settled":
-        from ouroboros.review_waiting import select_helpers
-        select_helpers(ctx)
         ctx._left_review_wait = None
         return review_result(record, reused=True)
     collector = copy.copy(ctx)

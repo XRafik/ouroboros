@@ -1250,6 +1250,11 @@ def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict
     seats actually read. ``revision``/``ts`` are ``revise_record``'s."""
     settled = {**prior, **fresh, **{key: prior[key] for key in PROVENANCE_FIELDS if key in prior},
                **({} if "preflight_execution" in prior else {"preflight_execution": {"status": "unobserved"}})}
+    if (prior.get("brief") or {}).get("dispute_input") is None:
+        from ouroboros.review_history import _gap
+        # Missing dispatch provenance cannot be filled from today's history.
+        settled["brief"] = {**(prior.get("brief") or {}), "dispute_input": {"previous_records": [], "gaps": [
+            _gap("paid wave has no saved dispute-input binding", record_id=prior.get("record_id"))]}}
     before = {str(row.get("seat_id") or ""): row for row in prior.get("rows") or []}
     incoming = {str(row.get("seat_id") or ""): row for row in fresh.get("rows") or []}
     rows = []

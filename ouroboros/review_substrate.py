@@ -379,6 +379,13 @@ class ReviewCoordinator:
         except Exception:
             prompt_projection = {}
         response_ref: Dict[str, Any] = {}
+        if prompt_ref is None and operation_id:
+            from ouroboros.observability import read_call_payload
+            try:
+                prompt_ref = read_call_payload(self._custody_drive_root(), task_id=request.task_id or "review",
+                                               call_id=f"{operation_id}_prompt")[2]
+            except (OSError, ValueError):
+                pass  # No retained assignment: disclose only the synthetic failure prompt.
         if prompt_ref is None:
             prompt_ref = {}
             try:

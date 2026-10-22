@@ -180,3 +180,24 @@ def test_async_fanout_shares_the_latch_and_physical_bound(tmp_path, monkeypatch)
         assert len(sent) == 3 and all(item is wave for item in waves)
     finally:
         release.set()
+
+
+@pytest.mark.parametrize("retained", [True, False])
+def test_pending_error_projection_uses_the_original_prompt_when_retained(tmp_path, retained):
+    from ouroboros.observability import persist_call, read_call_payload
+    from ouroboros.review_records import ReviewRequest, ReviewSlot
+    from ouroboros.review_substrate import ReviewCoordinator
+
+    request, slot = ReviewRequest(surface="plan_review", task_id="author", goal="review"), ReviewSlot("seat", "model")
+    if retained:
+        original = persist_call(tmp_path, task_id="author", call_id="paid_prompt", call_type="review_prompt",
+                                payload={"original": "assignment"})
+    actor = ReviewCoordinator(llm=object(), drive_root=tmp_path)._error_actor(
+        request, slot, "still running", operation_id="paid", operation_state="in_flight")
+    assert actor.operation_id == "paid" and actor.late_result_pending
+    if retained:
+        assert actor.prompt_ref["manifest_ref"] == original["manifest_ref"]
+        assert read_call_payload(tmp_path, task_id="author", call_id="paid_prompt")[1] == {"original": "assignment"}
+    else:
+        assert actor.prompt_ref["call_id"] != "paid_prompt"
+        assert read_call_payload(tmp_path, task_id="author", call_id=actor.prompt_ref["call_id"])[0]["synthetic"]
