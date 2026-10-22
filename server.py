@@ -1235,7 +1235,7 @@ async def lifespan(app):
         ("review_jobs", lambda: live and server_boot.reconcile_review_jobs(lifespan_drive_root)),
         ("extensions", _extensions),
         ("ui_translation", lambda: live and _start_ui_translation(lifespan_drive_root, _supervisor_stop)),  # after the skills registered their tables
-        ("mcp", lambda: server_boot.mcp_startup(settings)),
+        ("mcp", server_boot.mcp_startup),
         ("extension_reconcile", lambda: live and server_boot.on_loop(_event_loop, _start_extension_reconcile())),
         ("store", lambda: live and server_boot.wait_store_published(lifespan_drive_root, body_stop)),
         ("supervisor", lambda: server_boot.wait_supervisor_outcome(_supervisor_ready, lambda: _supervisor_error, body_stop)),

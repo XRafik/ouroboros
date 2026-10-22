@@ -24,9 +24,9 @@ test('schema-2 scheduling snapshot feeds the existing coordinator card and chip'
     const chip = executorChip(event);
     assert.equal(chip.coordinatorProvenance, 'chosen by the delegator (cognition)');
     assert.match(chip.title, /this subagent itself runs on claudexor::codex=cognitive-model \(bills as subscription\)/);
-    const html = executorIdentityMarkup(chip, { agentModel: event.model });
-    assert.match(html, /Coordinator: claudexor::codex=cognitive-model \(chosen by the delegator \(cognition\)\)/);
-    assert.doesNotMatch(html, /saved-account|processing_preference/);
+    assert.equal(formatCoordinatorProvenance(event), 'chosen by the delegator (cognition)');
+    assert.doesNotMatch(chip.title, /saved-account|processing_preference/);
+    assert.doesNotMatch(executorIdentityMarkup(chip, { model: event.model }), /Coordinator|delegator/);
 });
 
 test('recorded fallback and inherited choices stay distinct even with the same model', () => {
@@ -40,11 +40,7 @@ test('recorded fallback and inherited choices stay distinct even with the same m
     assert.equal(formatCoordinatorProvenance({ model: snapshot.model }), '');
 });
 
-test('chosen row names are escaped through the existing card renderer', () => {
+test('chosen row names reach the renderer verbatim; the Coordinator row escapes them (effort_chip tests)', () => {
     const route = { ...snapshot, selected_supervisor_snapshot: { selected_subagent_id: '<chosen&row>' } };
-    const html = executorIdentityMarkup({ harness: 'codex', label: 'Codex' }, {
-        agentModel: snapshot.model, snapshot: { parent_cognitive_route: route },
-    });
-    assert.match(html, /chosen by the delegator \(&lt;chosen&amp;row&gt;\)/);
-    assert.doesNotMatch(html, /<chosen&row>/);
+    assert.equal(formatCoordinatorProvenance({ parent_cognitive_route: route }), 'chosen by the delegator (<chosen&row>)');
 });

@@ -1421,7 +1421,7 @@ export function renderReviewsSection(groupsInput, disclosure = {}) {
     const hydrateHtml = hydrateStatus === 'loading'
         ? '<div class="skill-review-loading" data-review-hydrate-status role="status" aria-live="polite"><span>Loading review details…</span></div>'
         : (hydrateStatus === 'error'
-            ? '<div class="skill-review-error" data-review-hydrate-status role="alert"><span>Review details failed to refresh — shown data may be incomplete. </span><button type="button" class="skill-review-retry" data-review-hydrate-retry>Retry</button></div>'
+            ? '<div class="skill-review-error" data-review-hydrate-status role="alert"><span>Review details failed to refresh — shown data may be incomplete. </span><button type="button" class="btn btn-default btn-sm" data-review-hydrate-retry>Retry</button></div>'
             : '');
     // The status node sits OUTSIDE the collapsible groups container: a failed
     // refresh stays visible on a collapsed section and the keyed node survives

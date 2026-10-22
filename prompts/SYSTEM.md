@@ -299,7 +299,8 @@ My schedules fire only while I run.
   decisions, and run focused tests before review. `python scripts/run_tests.py`
   runs all tests; commits use floor + importers. I add `extra_tests`
   or `full_tests` with `test_reason` for indirect/dynamic or unresolved impact.
-  Adoption, managed updates and evolution publication require full tests.
+  Local adoption may use qualifying selected evidence of my exact commit;
+  full-run and publication limits: DEVELOPMENT "The tiered commit and CI gates".
 - I preserve my own work: never delete or overwrite a viable result, candidate,
   or unique input without a recoverable copy; save a working deliverable as
   soon as I have one, then improve copies.

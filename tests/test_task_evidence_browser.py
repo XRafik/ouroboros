@@ -194,13 +194,13 @@ def test_pause_notice_translation_and_historical_wake_status(direct_server_with_
                 page.screenshot(path=str(diagnostic_directory(root.parent, "task-evidence") / f"main-wait-{wait_state}-{quiz_state}.png"), full_page=True)
             page.locator('[data-nav-page="dashboard"]').click()
             page.locator('[data-dashboard-tab="evolution"]').click()
-            pill = page.locator("#evo-bg-pill")
+            sentence = page.locator("#evo-consciousness")
             for next_status, label in (("wake_paused", "приостановлено"), ("wake_outcome_unknown", "исход неизвестен")):
                 status = next_status
-                page.locator("#evo-refresh").click()
-                expect(pill).to_have_text(f"Consciousness {label}")
-                expect(pill).to_have_class("evo-runtime-pill offline")  # goes on by itself: the plain pill
-                expect(page.locator("#evo-runtime-detail")).to_contain_text(details[status])
+                page.evaluate("() => window.dispatchEvent(new CustomEvent('ouro:dashboard-subtab-shown', {detail: {tab: 'evolution'}}))")
+                expect(sentence).to_have_text(f"Consciousness {label}")
+                expect(sentence).to_have_attribute("data-tone", "neutral")  # goes on by itself: never the owner's amber
+                expect(page.locator("#evo-consciousness-detail")).to_contain_text(details[status])
                 page.screenshot(path=str(diagnostic_directory(root.parent, "task-evidence") / f"evolution-{status}.png"), full_page=True)
         finally:
             browser.close()

@@ -28,10 +28,10 @@ for (const row of cases) {
             assert.equal(coordinatorRouteClause(frame), clause);
             assert.ok(chip.title.includes(clause));
             assert.equal(chip.coordinatorProvenance || '', provenance);
-            const html = executorIdentityMarkup(chip, { agentModel: frame.model, coordinatorProvenance: chip.coordinatorProvenance });
-            assert.ok(html.includes(clause));
-            assert.ok(html.includes('Coordinator:'));
-            if (absent) assert.ok(!html.includes("parent's fallback") && !html.includes('inherited') && !html.includes('chosen by the delegator'));
+            // The chip line carries the executor only; the coordinator and its recorded provenance are a
+            // details row (chat_activity.renderLiveCardMeta), so an absent record shows no provenance at all.
+            assert.doesNotMatch(executorIdentityMarkup(chip, { model: 'exec-model' }), /Coordinator|inherited|fallback|delegator/);
+            if (absent) assert.equal(chip.coordinatorProvenance || '', '');
         });
     }
 }

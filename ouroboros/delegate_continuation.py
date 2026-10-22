@@ -455,9 +455,20 @@ def start_binding(ctx: Any, drive: Any, token: str, *, gateway: Any, actor: Dict
         inherit_source_obligations(entry, source_binding)
         record.update(capture_id=invocation_id, snapshot_task_id=entry.snapshot_task_id or entry.task_id)
     caller = coordination_context if bool(actor.get("compiled_work_order")) else text
+    request = {"continueFrom": token, **({"continueCarrier": preference} if preference else {})}
+    if authority.access == "readonly" and entry.access != "readonly":
+        from ouroboros.workspace_preflight import _route_row, route_grants_auxiliary_roots
+
+        # Omission inherits the writer's live execution and auxiliary grants. Replace
+        # the whole object with the ordinary read-only shape; scope still names the
+        # current source, not the writer's private, possibly unapplied snapshot.
+        execution = {"isolation": "envelope", "delegated": False}
+        if route_grants_auxiliary_roots(_route_row(gateway, route.route_id)):
+            execution["auxiliaryWritableRoots"] = []
+        request["execution"] = execution
     return ContinuationStart(
         facts=facts, prompt=continuation_prompt(facts, caller),
-        request={"continueFrom": token, **({"continueCarrier": preference} if preference else {})},
+        request=request,
         custody=record, snapshot=adopted), None
 
 

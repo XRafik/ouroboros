@@ -139,8 +139,8 @@ const SUBSTRATE_NOTE = {
 // chip says Working, or every settled run ok — is the bare name: it names the
 // selected helper and never proves its session computes now. `title` is the
 // detail sentence (counts, model and its source, spend, substrate, access);
-// executorIdentityMarkup also prints it as text on the expanded card, because a
-// hover title alone is invisible on touch, to AT and in copies. `hasEvidence`,
+// the expanded card prints it in its Executor details row, because a hover
+// title alone is invisible on touch, to AT and in copies. `hasEvidence`,
 // `observation`, `sourceTs` and the revision feed keepStickyExecutorChip.
 export function executorChip(evt) {
     const coordinatorProvenance = formatCoordinatorProvenance(evt);
@@ -1106,11 +1106,14 @@ export function taskTerminalSummary(evt = {}) {
 }
 
 // Requested route, usable solve route and provider-reported name are distinct.
-export function modelExecutionLabel(fact) {
-    if (!fact || typeof fact !== 'object') return '';
+// `model` is set only when a usable solve response observed it; an unobserved
+// execution keeps its sentence and names no model as the one that ran.
+export function modelExecutionView(fact) {
+    if (!fact || typeof fact !== 'object') return null;
     const requested = compactModel(fact.requested_model || '');
     if (fact.source !== 'usable_solve_response') {
-        return requested ? `Requested ${requested} · execution not observed` : 'Execution not observed';
+        return { observed: false, model: '', label: '',
+            value: requested ? `Requested ${requested} · execution not observed` : 'Execution not observed' };
     }
     const used = String(fact.used_model || '');
     const reported = String(fact.reported_model || '');
@@ -1118,10 +1121,15 @@ export function modelExecutionLabel(fact) {
         || fact.requested_use_local !== fact.used_local;
     const initial = requested && requestDiffers
         ? ` (initial request: ${requested}${fact.requested_use_local ? ' · local' : ''})` : '';
-    return [`Last solve response: ${compactModel(reported || used)}${initial}`,
-        fact.used_local === true ? 'local' : '', fact.provider || '',
-        reported && reported !== used ? `route: ${used}` : ''].filter(Boolean).join(' · ');
+    const model = compactModel(reported || used);
+    return { observed: true, model, label: 'Last solve response',
+        value: [`${model}${initial}`, fact.used_local === true ? 'local' : '', fact.provider || '',
+            reported && reported !== used ? `route: ${used}` : ''].filter(Boolean).join(' · ') };
+}
 
+export function modelExecutionLabel(fact) {
+    const view = modelExecutionView(fact);
+    return !view ? '' : view.label ? `${view.label}: ${view.value}` : view.value;
 }
 
 // The turn's origin label rides every projected frame of the turn (progress,

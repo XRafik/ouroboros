@@ -200,7 +200,7 @@ def self_change_tool_entries() -> list:
                 "restart, after the running generation's readers have stopped."),
             "parameters": {"type": "object", "properties": {
                 "reason": {"type": "string"},
-                "adopt_commit": {"type": "string", "description": "Exact reviewed candidate commit SHA to adopt at this restart; it needs a full green test run of that commit on record (commit it with full_tests=true)."},
+                "adopt_commit": {"type": "string", "description": "Exact reviewed candidate commit SHA to adopt at this restart; it needs that commit's passing post-commit run on record: selected over the whole candidate delta, or full (verifier, cutover or broad changes, Cyber Pro's unreviewed commits). Only full evidence permits this adoption's automatic branch/tag push."},
             }, "required": ["reason"]},
         }, _request_restart),
     ]

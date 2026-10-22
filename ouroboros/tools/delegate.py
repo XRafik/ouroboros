@@ -35,6 +35,7 @@ from ouroboros.subagent_work_order import (  # noqa: F401 - compatibility re-exp
     session_design_navigation,
     session_host_references,
 )
+from ouroboros.subagent_work_order import session_service_directories
 from ouroboros.delegate_source_coverage import (
     add_terminal_source_verification,  # noqa: F401  (leaf reads it through _delegate() at call time)
     prepare_work_order_start_binding,
@@ -242,8 +243,17 @@ def _presence_delegate_read_refusal(ctx: ToolContext) -> Optional[ToolResult]:
 def _start_request(ctx: ToolContext, route: "DelegationRoute", authority: "DelegatedRunShape",
                    root: str, text: str, seconds: int, instructions: str, execution_root: str = "",
                    *, directory_options: Optional[Dict[str, Any]] = None,
-                   continuation: Optional[Dict[str, Any]] = None, ephemeral: bool = False) -> Dict[str, Any]:
-    """Build one run envelope; retries use its retained bytes without rebuilding."""
+                   continuation: Optional[Dict[str, Any]] = None, ephemeral: bool = False,
+                   service_roots: Tuple[str, ...] = ()) -> Dict[str, Any]:
+    """The POST body for one delegated run, built from the derived SHAPE (its ONE author:
+    the shape decides the mode and the delegated marker; nothing here re-derives them).
+
+    ``seconds`` and ``instructions`` arrive PRE-BUILT: a transport retry must present a
+    byte-identical body for the engine's replay match, so the caller decides whether to
+    recompute or replay them (the retry path replays the stored canonical body verbatim).
+    ``continuation`` carries the engine's ``continueFrom`` (+ ``continueCarrier``) keys;
+    ``service_roots`` the negotiated ``auxiliaryWritableRoots`` grant (``session_service_directories``).
+    """
     target = route.resolved_target()  # ABI-4: one typed read; strings only at the wire
     request: Dict[str, Any] = {
         "prompt": text,
@@ -270,6 +280,8 @@ def _start_request(ctx: ToolContext, route: "DelegationRoute", authority: "Deleg
                                 **({"workspaceRoot": execution_root} if execution_root else {})}
     if directory_options:
         request.setdefault("execution", {}).update(directory_options)
+    if service_roots and request.get("execution"):  # a grant only ever extends an existing live execution
+        request["execution"]["auxiliaryWritableRoots"] = list(service_roots)
     # credentialProfileId is the account pin (D-U5), reviewer-slot wire contract; strict
     # (D-U6). In the stored canonical body, so a retry_of replay stays byte-identical. A
     # level the model slug encodes is the route's identity: no different effort rides beside it.
@@ -283,6 +295,16 @@ def _start_request(ctx: ToolContext, route: "DelegationRoute", authority: "Deleg
         request["maxSeconds"] = seconds
     request.update(continuation or {})
     return request
+
+
+def _prompt_cache_ttl_request(request, route, gateway, drive, continuation_token):
+    """The prompt-cache lifetime this start negotiates; a continuation carries the one its run had."""
+    from ouroboros.delegate_custody_current import run as current_custody_run
+    from ouroboros.effort_evidence import session_prompt_cache_ttl_request
+
+    return session_prompt_cache_ttl_request(
+        request, route_id=route.route_id, gateway=gateway,
+        continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
 
 
 def _processing_start_request(request, actor, gateway, route):
@@ -539,14 +561,15 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                 target_root, authority_source = record_auth["target_root"], "readonly"
             execution_root = (root if directory_options.get("isolation") == "live" else "") if directory_options else delegated_execution_workspace_root(gateway, authority, root)
             scope_root = (readonly_root or target_root) if execution_root or directory_options or (snapshot and authority.mode == "plan") else root
+            service = session_service_directories(ctx, gateway, route, authority, snapshot=snapshot, payload=authority_source == "skill_payload", execution_root=execution_root or root)
             if snapshot is not None:
                 binding_fingerprint = execution_binding_fingerprint(
                     execution_root or root, target_root)
-                instructions = apply_execution_binding(
-                    instructions, execution_root or root, target_root, binding_fingerprint)
+                instructions = apply_execution_binding(instructions, execution_root or root, target_root, binding_fingerprint,
+                                                       evidence_root="" if authority_source == "skill_payload" else None, granted_scratch=service.scratch)
             elif directory_options and directory_options.get("isolation") == "envelope":
                 binding_fingerprint = execution_binding_fingerprint("", target_root, "directory_copy")
-                instructions += directory_copy_binding_instruction(target_root, binding_fingerprint)
+                instructions += directory_copy_binding_instruction(target_root, binding_fingerprint, investigation=authority.investigation)
             project_id, owned_project_id, project_persistent, ephemeral = resolve_registration(
                 gateway, scope_root, execution_root, authority.access, minted=bool(readonly_root) or registered_checkout(scope_root))
             if directory_options:
@@ -554,19 +577,15 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
             if authority.access == "full":
                 gateway.ensure_full_access(scope_root)
             seconds = bound.seconds
-            instructions += session_host_references(ctx, target_root=record_auth["target_root"], source_root=root)
+            instructions += session_host_references(ctx, target_root=record_auth["target_root"], source_root=root, private_copy=snapshot is not None, payload_skill=payload_skill, service=service)
             request_body = _start_request(ctx, route, authority, scope_root, continuation.prompt or text,
-                                          seconds, instructions, execution_root, continuation=continuation.request, ephemeral=ephemeral,
+                                          seconds, instructions, execution_root, continuation=continuation.request, ephemeral=ephemeral, service_roots=service.roots,
                                           **({"directory_options": directory_options} if directory_options else {}))
             request_body, processing_info = _processing_start_request(request_body, actor, gateway, route)
             continuation = bind_start(gateway, request_body, route, invocation_id, continuation, authority,
                                       ceiling_authority, actor_facts, target_root, root if snapshot else "")
             project_persistent = project_persistent or bool(continuation.custody.get("thread_id"))
-            from ouroboros.delegate_custody_current import run as current_custody_run
-            from ouroboros.effort_evidence import session_prompt_cache_ttl_request
-            ttl_info = session_prompt_cache_ttl_request(
-                request_body, route_id=route.route_id, gateway=gateway,
-                continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
+            ttl_info = _prompt_cache_ttl_request(request_body, route, gateway, drive, continuation_token)
             history_facts["access"] = request_body["access"]
             key = custody.idempotency_key(getattr(ctx, "task_id", ""), route.route_id,
                                           access, authority.mode, authority.isolation,

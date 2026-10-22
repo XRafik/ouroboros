@@ -930,9 +930,9 @@ def _build(tmp: pathlib.Path, tier: str, records: Sequence[Dict[str, Any]], prov
     last_seq = max((int(row["seq"]) for row in records), default=0)
     conn = _connect(tmp, tier, create=True)
     try:
-        conn.executescript(_SCHEMA)
+        # BEGIN belongs inside executescript, which first commits any pending transaction.
+        conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
         conn.execute(f"PRAGMA application_id = {_APPLICATION_ID[tier]}")
-        conn.execute("BEGIN IMMEDIATE")
         buckets: Dict[Tuple[str, str], Bucket] = {}
         for attempt_id, row in sorted(last.items(), key=lambda item: int(item[1]["seq"])):
             materialized = durable_literals(row)

@@ -1,4 +1,4 @@
-/** Dependency-free JSDoc mirror of `ouroboros.gateway.contracts`; the interface-language envelopes (`UiI18n*`) sit in ./ui_i18n_types.js, the model-route previews in ./model_route_types.js, the Dashboard storage envelopes (`Storage*`) in ./storage_types.js, the MCP import preview in ./mcp_import_types.js, the replaceable-client envelopes (`ServedUiState`, setup bootstrap, `/api/contract`, chat history rows, journey request bodies) in ./client_contract_types.js, the product-management envelopes (skills, marketplaces, accounts, local model, MCP, update status) in ./management_contract_types.js, the owner-decision ingress in ./decision_types.js. */
+/** Dependency-free JSDoc mirror of `ouroboros.gateway.contracts`; the interface-language envelopes (`UiI18n*`) sit in ./ui_i18n_types.js, the model-route previews in ./model_route_types.js, the Dashboard storage envelopes (`Storage*`) in ./storage_types.js, the Dashboard Evolution history (`Evolution*`) in ./evolution_types.js, the MCP import preview in ./mcp_import_types.js, the replaceable-client envelopes (`ServedUiState`, setup bootstrap, `/api/contract`, chat history rows, journey request bodies) in ./client_contract_types.js, the product-management envelopes (skills, marketplaces, accounts, local model, MCP, update status) in ./management_contract_types.js, the owner-decision ingress in ./decision_types.js. */
 /**
  * @typedef {Object} CostPresentation
  * @property {'own'|'root_tree'} scope
@@ -93,13 +93,8 @@
 /** @typedef {import('./task_activity_types.js').ActiveDirectTurn} ActiveDirectTurn */
 /** @typedef {import('./task_activity_types.js').ActiveChatActivity} ActiveChatActivity */
 /** @typedef {import('./task_activity_types.js').ToolVerificationFact} ToolVerificationFact */
-/**
- * @typedef {Object} EvolutionDataResponse
- * @property {Object[]} points
- * @property {Object[]=} checkpoints
- * @property {string} generated_at
- * @property {boolean} cached
- */
+/** @typedef {import('./evolution_types.js').EvolutionRefresh} EvolutionRefresh */
+/** @typedef {import('./evolution_types.js').EvolutionDataResponse} EvolutionDataResponse */
 /**
  * @typedef {Object} HealthResponse
  * @property {"ok"} status
@@ -1540,7 +1535,7 @@ export const MAX_QUIZ_OPTIONS = 6;
 // Mirror task_decision._COMMENT_MAX: ingress refuses longer comments, never
 // truncates; cards must offer only comments the ingress can deliver verbatim.
 export const MAX_DECISION_COMMENT = 2000;
-export const GATEWAY_CONTRACT_VERSION = '7.7.1';
+export const GATEWAY_CONTRACT_VERSION = '7.8.0';
 /** @typedef {import('./client_contract_types.js').ChatHistoryPosition} ChatHistoryPosition */
 /** @typedef {import('./client_contract_types.js').ChatHistoryResponse} ChatHistoryResponse */
 

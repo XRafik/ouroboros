@@ -941,11 +941,29 @@ class GitLogResponse(TypedDict):
     sha: str
 
 
-class EvolutionDataResponse(TypedDict):
+class EvolutionRefresh(TypedDict):  # the background re-measurement behind GET /api/evolution-data
+    state: Literal["idle", "running", "failed"]
+    started_at: str
+    finished_at: str
+    error: str  # "" unless failed; the saved copy stays
+    unmeasured: int  # versions of the saved copy whose commit could not be read (retried by force)
+    unmeasured_error: str  # the first such reason, "" when every version was measured
+
+
+class EvolutionDataResponse(TypedDict):  # answered at once from the saved copy (ouroboros/evolution_history.py)
+    # {tag, aliases, version, date, commit, level, milestone, code_lines, bible_bytes, system_bytes (None = not measured),
+    #  release: {source: readme|tag|"", title, kind, heading, body}}, oldest first
+    versions: list[Dict[str, Any]]
+    saved_at: str  # "" = no saved copy yet
+    refresh: EvolutionRefresh
+    # identity / scratchpad: {at_versions: [characters | None per version], first_at, latest: {at, chars} | None}
+    install: Dict[str, Any]
+    # Published before the version history above and kept for older clients: one point per tag name {tag, date, code_lines, bible_kb,
+    # system_kb, identity_kb, scratchpad_kb, memory_kb}; unmeasured values and the three memory fields are null.
     points: list[Dict[str, Any]]
+    cached: bool  # true when the answer comes from a saved copy (always, once one exists)
     checkpoints: NotRequired[list[Dict[str, Any]]]
     generated_at: str
-    cached: bool
 
 
 class UploadResponse(TypedDict):
@@ -1480,6 +1498,7 @@ __all__ = [
     "UiContribution", "UiContributionsResponse", "UiPreferencesResponse", "DesktopAutostartResponse",
     "GitLogResponse",
     "EvolutionDataResponse",
+    "EvolutionRefresh",
     "ScheduledTasksResponse", "ScheduleUpsertResponse", "ScheduleDeleteResponse", "ScheduleActionResponse",
     "UploadResponse",
     "ExtensionsIndexResponse", "ExtensionLiveSnapshot", "WidgetTab",
