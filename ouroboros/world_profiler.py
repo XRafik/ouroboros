@@ -2,16 +2,19 @@
 startup, and the rest, which is mine.
 
 ``generate_world_profile`` writes a fresh file. ``refresh_world_profile`` rewrites only the
-fenced measured block in place and never touches the text outside it; a legacy first-boot
-profile is fenced once. ``with_measured_block`` keeps the host's block when the mind
-publishes the file through ``update_world``. The measured facts are a probe at startup,
-not a census of the environment: what lives here is the mind's to record.
+fenced measured block in place, under the same per-file publication lock ``update_world``
+takes, and never touches the text outside it: a stock first-boot profile is fenced once
+(its pre-image journaled), anything else is kept byte for byte with the block inserted
+after the title. ``with_measured_block`` keeps the host's block when the mind publishes
+the file. The measured facts are a probe at startup, not a census of the environment:
+what lives here is the mind's to record.
 """
 import os
 import platform
 import re
 import shutil
 from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 
 from ouroboros.platform_layer import (
@@ -24,11 +27,19 @@ from ouroboros.platform_layer import (
 
 MEASURED_START = "<!-- measured -->"
 MEASURED_END = "<!-- /measured -->"
-# The context section budget for the loaded map (a warning, never a trim).
-WORLD_SECTION_BUDGET_CHARS = 16_000
-_FENCE_RE = re.compile(re.escape(MEASURED_START) + r".*?" + re.escape(MEASURED_END), re.S)
+# Markers count only on their own lines, so a sentence of the mind's that mentions them is not a fence.
+_FENCE_RE = re.compile(r"^" + re.escape(MEASURED_START) + r"[ \t\r]*$.*?^" + re.escape(MEASURED_END) + r"[ \t\r]*$",
+                       re.S | re.M)
 _LEGACY_FOOTER = "*(Generated automatically on first boot)*"
 _LEGACY_MEASURED_HEAD = "## System"
+# Every non-blank line a stock first-boot profile could carry between its title and footer;
+# any other line there is the mind's and makes the file lossless-insert territory.
+_STOCK_LINE_STARTS = (
+    "## System", "- **OS**:", "- **CPU**:", "- **RAM**:", "- **User**:", "- **Current Directory**:",
+    "## Available Tools", "The following binaries are available in my PATH:", "`",
+    "## File System Rules", "- `", "I should generally confine my writes", "I live inside",
+    "This is where I currently exist", _LEGACY_FOOTER,
+)
 TITLE = "# WORLD.md — My map of my world"
 _INTRO = (
     "The measured block below is the host's and refreshes at every startup; everything outside it is "
@@ -92,9 +103,11 @@ def _tools_found() -> list[str]:
 
 
 def measured_block(repo_dir: str = "", data_dir: str = "") -> str:
-    """The host's fenced block: system facts, a probe of common binaries and the roots in use."""
+    """The host's fenced block: system facts, a probe of common binaries and the roots in use.
+
+    The stamp is a date, so an unchanged host rewrites nothing between restarts of one day."""
     repo_dir, data_dir = _resolved_roots(repo_dir, data_dir)
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     user = os.environ.get("USER") or os.environ.get("USERNAME") or "unknown"
     return f"""{MEASURED_START}
 ## System (measured at startup, {stamp})
@@ -119,63 +132,100 @@ def _fresh_profile(block: str) -> str:
     return f"{TITLE}\n\n{_INTRO}\n\n{block}\n\n{_OWN_SEED}"
 
 
-def _splice(text: str, block: str) -> str:
-    """Replace the measured block in ``text`` and keep everything else byte for byte.
-
-    A legacy first-boot profile (no fence) is fenced once: its generated span becomes the
-    block, any text the mind added after the old footer stays. Unrecognized text keeps its
-    first title line and gets the block right after it: nothing is ever dropped.
-    """
-    if _FENCE_RE.search(text):
-        return _FENCE_RE.sub(lambda _m: block, text, count=1)
-    head_at = text.find(_LEGACY_MEASURED_HEAD)
-    foot_at = text.find(_LEGACY_FOOTER)
-    if text.startswith("# WORLD.md") and 0 <= head_at < foot_at:
-        tail = text[foot_at + len(_LEGACY_FOOTER):].strip()
-        return f"{TITLE}\n\n{_INTRO}\n\n{block}\n\n{tail or _OWN_SEED.rstrip()}\n"
-    first_line, newline, rest = text.partition("\n")
+def _insert_after_title(text: str, block: str) -> str:
+    """Keep ``text`` whole and add the block right after its title line (or on top)."""
+    first_line, _newline, rest = text.partition("\n")
     if first_line.startswith("# "):
-        return f"{first_line}\n\n{block}\n\n{rest.lstrip()}"
+        body = rest.lstrip("\r\n")
+        return f"{first_line}\n\n{block}\n\n{body}"
     return f"{block}\n\n{text}"
 
 
-def with_measured_block(content: str, old: str) -> str:
+def _is_stock_legacy_profile(text: str) -> bool:
+    """A first-boot profile whose generated span holds nothing the mind wrote."""
+    head_at, foot_at = text.find(_LEGACY_MEASURED_HEAD), text.find(_LEGACY_FOOTER)
+    if not text.startswith("# WORLD.md") or not (0 <= head_at < foot_at):
+        return False
+    span_lines = text[:foot_at + len(_LEGACY_FOOTER)].splitlines()[1:]  # after the title line
+    for line in span_lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith(_STOCK_LINE_STARTS):
+            return False
+    return True
+
+
+def _splice(text: str, block: str) -> str:
+    """Replace the measured block in ``text`` and keep everything else byte for byte.
+
+    A stock first-boot profile (no fence, only generated lines before its footer) becomes
+    the new head and block, keeping any text after the footer. Any other unfenced text —
+    a legacy profile the mind edited, or a file that is only the mind's — is kept whole
+    with the block inserted after its title: nothing is ever dropped.
+    """
+    if _FENCE_RE.search(text):
+        return _FENCE_RE.sub(lambda _m: block, text, count=1)
+    if _is_stock_legacy_profile(text):
+        tail = text[text.find(_LEGACY_FOOTER) + len(_LEGACY_FOOTER):].strip("\r\n")
+        return f"{TITLE}\n\n{_INTRO}\n\n{block}\n\n{tail or _OWN_SEED.rstrip()}\n"
+    return _insert_after_title(text, block)
+
+
+def with_measured_block(content: str, old: str, repo_dir: str = "", data_dir: str = "") -> str:
     """The mind's publication of the file, with the host's measured block kept or restored."""
     kept = _FENCE_RE.search(old)
-    block = kept.group(0) if kept else measured_block()
+    block = kept.group(0) if kept else measured_block(repo_dir, data_dir)
     if _FENCE_RE.search(content):
         return _FENCE_RE.sub(lambda _m: block, content, count=1)
-    first_line, _newline, rest = content.partition("\n")
-    if first_line.startswith("# "):
-        return f"{first_line}\n\n{block}\n\n{rest.lstrip()}"
-    return f"{block}\n\n{content}"
+    return _insert_after_title(content, block)
+
+
+def measured_block_was_edited(content: str, old: str) -> bool:
+    """True when the mind's publication carried a measured block that differs from the host's."""
+    sent, kept = _FENCE_RE.search(content), _FENCE_RE.search(old)
+    return bool(sent and kept and sent.group(0) != kept.group(0))
 
 
 def generate_world_profile(output_path: str, repo_dir: str = "", data_dir: str = ""):
     """Write a fresh WORLD.md: title, the measured block and an empty map for the mind."""
-    content = _fresh_profile(measured_block(repo_dir, data_dir))
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    from ouroboros.utils import write_bytes_atomic
+
+    write_bytes_atomic(Path(output_path), _fresh_profile(measured_block(repo_dir, data_dir)).encode("utf-8"))
 
 
 def refresh_world_profile(output_path: str, repo_dir: str = "", data_dir: str = "") -> bool:
     """Rewrite only the measured block of an existing WORLD.md (generate a missing one).
 
-    Returns True when the file changed."""
-    from ouroboros.utils import write_bytes_atomic
+    Measurements happen before the lock; read, splice and replace happen under the
+    publication lock ``update_world`` takes, so a publication landing meanwhile is kept.
+    The first fencing of a legacy profile journals its pre-image. Returns True when the
+    file changed."""
+    from ouroboros.memory_publication import _publication_lock
+    from ouroboros.utils import append_jsonl, utc_now_iso, write_bytes_atomic
 
     path = Path(output_path)
-    if not path.exists():
-        generate_world_profile(output_path, repo_dir, data_dir)
+    block = measured_block(repo_dir, data_dir)
+    with _publication_lock(path):
+        if not path.exists():
+            write_bytes_atomic(path, _fresh_profile(block).encode("utf-8"))
+            return True
+        # No newline translation: the text around the block is the mind's, byte for byte.
+        raw = path.read_bytes()
+        text = raw.decode("utf-8")
+        spliced = _splice(text, block)
+        if spliced == text:
+            return False
+        new_raw = spliced.encode("utf-8")
+        if not _FENCE_RE.search(text):
+            append_jsonl(path.with_name("world_journal.jsonl"), {
+                "ts": utc_now_iso(), "task_id": "startup", "source_type": "legacy_wrap",
+                "focus": {"role": "host"}, "route": "world_profiler.refresh_world_profile",
+                "old_len": len(text), "new_len": len(spliced),
+                "old_sha256": sha256(raw).hexdigest(), "new_sha256": sha256(new_raw).hexdigest(),
+                "old_content": text, "new_content": spliced,
+                "old_preview": text[:500], "new_preview": spliced[:500],
+            })
+        write_bytes_atomic(path, new_raw)
         return True
-    # No newline translation: the text around the block is the mind's, byte for byte.
-    with path.open("r", encoding="utf-8", newline="") as fh:
-        text = fh.read()
-    spliced = _splice(text, measured_block(repo_dir, data_dir))
-    if spliced == text:
-        return False
-    write_bytes_atomic(path, spliced.encode("utf-8"))
-    return True
 
 
 if __name__ == "__main__":

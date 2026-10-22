@@ -3,6 +3,7 @@ mind publishes the rest through ``update_world`` on the canonical root, and the 
 presents the file as mine, not as a disposable profile."""
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 
@@ -111,6 +112,7 @@ def test_delegate_start_discloses_that_a_run_sees_no_owner_sessions():
 
     schema = next(entry.schema for entry in get_tools() if entry.name == "delegate_start")
     assert "engine-scoped native state" in schema["description"] and "no courier" in schema["description"]
+    assert "owner's own sessions" in schema["description"]
 
 
 def test_write_tools_redirect_the_map_to_update_world():
@@ -157,13 +159,139 @@ def test_update_world_publishes_on_the_canonical_root_with_revision_and_the_host
     assert rows and rows[-1]["new_content"] == text and rows[-1]["task_id"] == "t1"
 
 
-def test_update_world_warns_above_the_context_budget_without_refusing(tmp_path):
+def test_update_world_warns_above_the_context_budget_without_refusing(tmp_path, monkeypatch):
+    from ouroboros.context_budget import WORLD_SECTION_BUDGET_CHARS
     from ouroboros.tools.control_runtime import _update_world
 
+    _fake_measured(monkeypatch, "host")  # a missing file takes the host's block, never a live probe here
     canonical = tmp_path / "canonical"
     (canonical / "memory").mkdir(parents=True)
     ctx = _world_ctx(canonical, canonical)
-    big = f"{wprof.TITLE}\n\n{_measured('host')}\n\n" + "x" * (wprof.WORLD_SECTION_BUDGET_CHARS + 10)
+    big = f"{wprof.TITLE}\n\n{_measured('host')}\n\n" + "x" * (WORLD_SECTION_BUDGET_CHARS + 10)
     result = _update_world(ctx, big)
     assert result.startswith("OK:") and "WORLD_SIZE_NOTICE" in result
     assert _update_world(ctx, "   ").startswith("⚠️ REJECTED")
+    # Edits inside the measured block are dropped, and the result says so.
+    revision = hashlib.sha256((canonical / "memory" / "WORLD.md").read_bytes()).hexdigest()
+    edited = _update_world(ctx, f"{wprof.TITLE}\n\n{_measured('forged')}\n\n- note\n", expected_revision=revision)
+    assert edited.startswith("OK:") and "edits inside it were not applied" in edited
+    assert "forged" not in (canonical / "memory" / "WORLD.md").read_text(encoding="utf-8")
+
+
+def test_refresh_keeps_a_legacy_profile_the_mind_edited_and_journals_the_pre_image(tmp_path, monkeypatch):
+    _fake_measured(monkeypatch, "now")
+    path = tmp_path / "WORLD.md"
+    legacy = ("# WORLD.md — Environment Profile\n\n## Channels\n- Claude chat X: socket /tmp/x\n\n## System\n"
+              "- **OS**: old\n\n*(Generated automatically on first boot)*\n")
+    path.write_text(legacy, encoding="utf-8")
+
+    assert wprof.refresh_world_profile(str(path)) is True
+    text = path.read_text(encoding="utf-8")
+    # Nothing the mind wrote inside the old generated span is dropped; the block is added.
+    assert "- Claude chat X: socket /tmp/x" in text and "- **OS**: old" in text
+    assert text.count(wprof.MEASURED_START) == 1 and text.startswith("# WORLD.md")
+    rows = [json.loads(line) for line in (tmp_path / "world_journal.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["source_type"] == "legacy_wrap" and rows[-1]["old_content"] == legacy
+
+
+def test_insertion_keeps_an_indented_first_line(tmp_path, monkeypatch):
+    _fake_measured(monkeypatch, "now")
+    path = tmp_path / "WORLD.md"
+    path.write_text("# Mine\n\n    code line\n", encoding="utf-8")
+    assert wprof.refresh_world_profile(str(path)) is True
+    assert "\n\n    code line\n" in path.read_text(encoding="utf-8")
+
+
+def test_a_publication_during_measurement_survives_the_refresh(tmp_path, monkeypatch):
+    from ouroboros.memory_publication import publish_memory_file
+
+    path = tmp_path / "WORLD.md"
+    path.write_text(f"{wprof.TITLE}\n\n{_measured('first')}\n\n- old note\n", encoding="utf-8")
+
+    def measure(repo_dir="", data_dir=""):
+        # A focus publishes while the host is still measuring: the refresh must splice what it reads under the lock.
+        revision = hashlib.sha256(path.read_bytes()).hexdigest()
+        published = publish_memory_file(path, revision, lambda old: old + "- late note\n",
+                                        journal=tmp_path / "world_journal.jsonl",
+                                        author={"task_id": "t", "focus": {}, "route": "r"}, source_type="task")
+        assert published.ok
+        return _measured("second")
+
+    monkeypatch.setattr(wprof, "measured_block", measure)
+    assert wprof.refresh_world_profile(str(path)) is True
+    text = path.read_text(encoding="utf-8")
+    assert "- late note" in text and "- old note" in text and "measured at startup, second" in text
+
+
+def test_update_world_mirrors_the_fork_copy_and_names_the_map_on_a_stale_revision(tmp_path):
+    from ouroboros.tools.control_runtime import _update_world
+
+    canonical, drive = tmp_path / "canonical", tmp_path / "fork"
+    for root in (canonical, drive):
+        (root / "memory").mkdir(parents=True)
+    initial = f"{wprof.TITLE}\n\n{_measured('host')}\n\n- old\n"
+    (canonical / "memory" / "WORLD.md").write_text(initial, encoding="utf-8")
+    (drive / "memory" / "WORLD.md").write_text(initial, encoding="utf-8")
+    ctx = _world_ctx(canonical, drive)
+    revision = hashlib.sha256(initial.encode()).hexdigest()
+
+    assert _update_world(ctx, f"{wprof.TITLE}\n\n- new\n", expected_revision=revision).startswith("OK")
+    canonical_text = (canonical / "memory" / "WORLD.md").read_text(encoding="utf-8")
+    assert "- new" in canonical_text
+    assert (drive / "memory" / "WORLD.md").read_text(encoding="utf-8") == canonical_text
+    stale = _update_world(ctx, f"{wprof.TITLE}\n\n- newer\n", expected_revision="0" * 64)
+    assert "revision_conflict" in stale and str(canonical / "memory" / "WORLD.md") in stale
+
+
+def test_world_read_returns_the_revision_of_the_same_bytes(tmp_path):
+    from ouroboros.tools.control_runtime import _update_world
+    from ouroboros.tools.core_file_tools import _read_file
+
+    (tmp_path / "memory").mkdir()
+    raw = f"{wprof.TITLE}\n\n{_measured('host')}\n\n- note\n".encode()
+    (tmp_path / "memory" / "WORLD.md").write_bytes(raw)
+    ctx = _world_ctx(tmp_path, tmp_path)
+    result = _read_file(ctx, "memory/WORLD.md", root="runtime_data")
+    revision = hashlib.sha256(raw).hexdigest()
+    assert result.startswith(f"revision={revision}\n")
+    assert _update_world(ctx, f"{wprof.TITLE}\n\n- changed\n", revision).startswith("OK")
+
+
+def test_measured_block_falls_back_to_username(monkeypatch):
+    monkeypatch.delenv("USER", raising=False)
+    monkeypatch.setenv("USERNAME", "winuser")
+    monkeypatch.setattr(wprof, "_tools_found", lambda: [])
+    monkeypatch.setattr(wprof, "get_cpu_info", lambda: "c")
+    monkeypatch.setattr(wprof, "get_system_memory", lambda: "m")
+    assert "- **User**: winuser" in wprof.measured_block("/r", "/d")
+
+
+def test_startup_verification_refreshes_the_measured_block_in_place(tmp_path, monkeypatch):
+    from ouroboros import agent_startup_checks as checks_module
+
+    class _Env:
+        def __init__(self, root):
+            self.repo_dir = self.drive_root = root
+
+        def drive_path(self, name):
+            path = self.repo_dir / name
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+    env = _Env(tmp_path)
+    for name in ("check_uncommitted_changes", "check_version_sync", "check_budget", "check_extension_health",
+                 "check_stray_server_processes", "check_review_continuations"):
+        monkeypatch.setattr(checks_module, name, lambda _env: ({"status": "ok"}, 0))
+    monkeypatch.setattr(checks_module, "_reconcile_review_attempts_on_startup",
+                        lambda _env: {"reconciled": [], "expired": []})
+    monkeypatch.setattr(checks_module, "runtime_setting", lambda key, default="": "model-x")
+    _fake_measured(monkeypatch, "fresh")
+    memory_dir = env.drive_path("memory")
+    (memory_dir / "identity.md").write_text("who I am", encoding="utf-8")
+    (memory_dir / "scratchpad.md").write_text("", encoding="utf-8")
+    world = memory_dir / "WORLD.md"
+    world.write_text(f"{wprof.TITLE}\n\n{_measured('stale')}\n\n- my note\n", encoding="utf-8")
+
+    checks_module.verify_system_state(env, "a" * 40)
+    text = world.read_text(encoding="utf-8")
+    assert "measured at startup, fresh" in text and "stale" not in text and "- my note" in text

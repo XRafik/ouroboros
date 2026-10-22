@@ -362,6 +362,8 @@ def _golden() -> dict[str, dict]:
 # unavailable. Keep the historical corpus intact and assert the new observed
 # outcome explicitly rather than manufacture old evidence (04-AGENCY S1/S3).
 CURRENT_PRODUCER_CONTRACTS = {
+    # The world map's size notice rides a successful update_world result: a warning, not a failure.
+    "WORLD_SIZE_NOTICE": (False, "ok"),
     # D1 per-target mutation custody: the existing INTEGRATE_ family reports a
     # busy target as a substrate refusal; no historical answer is fabricated.
     "INTEGRATE_DELEGATED_TARGET_BUSY": (True, "integration_blocked"),

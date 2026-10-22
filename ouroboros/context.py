@@ -16,8 +16,8 @@ from ouroboros.desktop_autostart import runtime_facts as desktop_runtime_facts
 from ouroboros.context_budget import (
     LARGE_CONTEXT_SECTION_CHARS,
     SCRATCHPAD_SECTION_BUDGET_CHARS,
+    WORLD_SECTION_BUDGET_CHARS,
 )
-from ouroboros.world_profiler import WORLD_SECTION_BUDGET_CHARS
 from ouroboros.context_fit import (
     ContextCore as _ContextCore,
 )

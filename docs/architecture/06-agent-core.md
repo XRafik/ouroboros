@@ -280,7 +280,7 @@ Undisclosed cash adds zero only to known totals. `TOTAL_BUDGET` cannot fence und
 
 #### Nanny, transport and custody
 
-**The nanny model.** An `agent_session` nanny supervises unlimited bounded, nonrecursive leaves with host verification. Each start has its own invocation; no concurrency or quota-derived team cap. The task owns lineage, authority, deadline, money, review, cancellation and descendants. `requested_depth` is root depth; `depth_remaining` narrows it. Opaque targets/access; login: `gateway/claudexor_accounts.py`. A leaf lives in engine-scoped native state: its discovery may omit the owner's own sessions, and it is no courier to them (`delegate_start` says so; the owner's other agents are reached from the host, as the mind's world map records).
+**The nanny model.** An `agent_session` nanny supervises unlimited bounded, nonrecursive leaves with host verification. Each start has its own invocation; no concurrency or quota-derived team cap. The task owns lineage, authority, deadline, money, review, cancellation and descendants. `requested_depth` is root depth; `depth_remaining` narrows it. Opaque targets/access; login: `gateway/claudexor_accounts.py`. A leaf's native state is engine-scoped: it may not see the owner's sessions and is no courier to them.
 
 **Transport.** `gateways/claudexor.py` owns descriptor, handshake and `CLAUDEXOR_MIN_VERSION`; `trust_env=False` excludes proxies. Starts use `ensure_owned_gateway` and reviewed engine/Node pins, never PATH. Releases attach only; admitted recovery alone replays unresolved START. Unconfirmed acceptance has no stop-time guarantee. `OUROBOROS_CLAUDEXOR_BIN` overrides the binary; contributor `OUROBOROS_CLAUDEXOR_ATTACH_HOME` attaches without spawning/operator-home fallback. Stops: §9.
 
