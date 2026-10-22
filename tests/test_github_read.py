@@ -252,6 +252,32 @@ def test_full_pr_list_enrichment_preserves_raw_head_and_base(gh):
 
 
 @pytest.mark.parametrize("detail", ["concise", "full"])
+@pytest.mark.parametrize("null_field", [None, "headRefOid", "headRefName", "headRepositoryOwner", "baseRefName", "all"])
+def test_pr_list_overlays_only_nonnull_graphql_head_and_base_facts(gh, detail, null_field):
+    node = {"id": "PR_node7", "commits": {"totalCount": 4}, "reviewDecision": "APPROVED",
+            "headRefName": "new-feature", "headRefOid": "d" * 40,
+            "headRepositoryOwner": {"login": "new-dev"}, "baseRefName": "new-base"}
+    nullable = ("headRefOid", "headRefName", "headRepositoryOwner", "baseRefName")
+    for key in nullable if null_field == "all" else (null_field,):
+        if key is not None:
+            node[key] = None
+    gh.answer = lambda p, argv, kw: json.dumps({"data": {"nodes": [node]}}) if p.route == "graphql" else _rest([_pr(7, state="closed")])
+    _line, payload = _payload(gh.read(method="list", kind="pr", state="closed", detail=detail))
+    assert gh.routes()[0].startswith("repos/{owner}/{repo}/pulls?state=closed&") and len(gh.calls) == 2
+    item = payload["items"][0]
+    sha = SHA if null_field in ("headRefOid", "all") else "d" * 40
+    ref = "feat/7" if null_field in ("headRefName", "all") else "new-feature"
+    owner = "dev" if null_field in ("headRepositoryOwner", "all") else "new-dev"
+    base = "main" if null_field in ("baseRefName", "all") else "new-base"
+    if detail == "full":
+        assert item["head"] == {"sha": sha, "ref": ref, "label": f"{owner}:{ref}"}
+        assert item["base"]["ref"] == base
+    else:
+        assert (item["head_sha"], item["head"], item["base"]) == (sha, f"{owner}:{ref}", base)
+    assert item["commits"] == 4 and item["review_decision"] == "APPROVED"
+
+
+@pytest.mark.parametrize("detail", ["concise", "full"])
 @pytest.mark.parametrize("nested", ["comments", "replies"])
 def test_nested_cuts_are_disclosed_in_both_detail_modes(gh, detail, nested):
     def answer(p, argv, kw):

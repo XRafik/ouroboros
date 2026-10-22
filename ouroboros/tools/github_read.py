@@ -584,11 +584,20 @@ def _pr_items(read: _Read, rows: list) -> Tuple[Optional[list], str]:
     for row in rows:
         node = facts[row["node_id"]]
         enriched = {**row, "commits": node["commits"]["totalCount"]}
+        head = dict(row.get("head") or {})
+        for field, key in (("headRefName", "ref"), ("headRefOid", "sha")):
+            if node.get(field) is not None:
+                head[key] = node[field]
+        owner = (node.get("headRepositoryOwner") or {}).get("login")
+        if head.get("ref") is not None and (owner is not None or node.get("headRefName") is not None):
+            if owner is None:
+                owner = str(head.get("label") or "").rpartition(":")[0]
+            head["label"] = f"{owner}:{head['ref']}" if owner else head["ref"]
+        if head:
+            enriched["head"] = head
+        if node.get("baseRefName") is not None:
+            enriched["base"] = {**(row.get("base") or {}), "ref": node["baseRefName"]}
         if "headRefName" in node:
-            owner = (node.get("headRepositoryOwner") or {}).get("login")
-            enriched["head"] = {**(row.get("head") or {}), "ref": node["headRefName"], "sha": node.get("headRefOid"),
-                                "label": f"{owner}:{node['headRefName']}" if owner else node["headRefName"]}
-            enriched["base"] = {**(row.get("base") or {}), "ref": node.get("baseRefName")}
             enriched.update(draft=node.get("isDraft"), merged_at=node.get("mergedAt"))
         item = enriched if read.detail == "full" else _pr_shape(read, enriched, full_body=False)
         item["review_decision"] = node.get("reviewDecision")
