@@ -91,7 +91,6 @@ def fit_memory_view(snapshot: mv.MemoryViewSnapshot, allowances: Mapping[str, Op
     taken = set(old)
     measure = measure or (lambda level: view_tokens(mv.render_story(snapshot, level)) + view_tokens(mv.render_room(snapshot, level)))
     current = measure(kept)
-    measured_count = len(taken)
     bounds = [b for b in (allowances.get("margin"), allowances.get("budget")) if b is not None]
     bound = min(bounds) if bounds else None
     target = min(bound if bound is not None else current, current - saving) if saving else bound
@@ -102,22 +101,16 @@ def fit_memory_view(snapshot: mv.MemoryViewSnapshot, allowances: Mapping[str, Op
                                   for s in LADDER if any(step == s for step, _ in selected)),
                              by_budget=kept.by_budget + (len(selected - old) if budget else 0))
 
-    owner = {i["address"]: i for i in (snapshot.room or {}).get("lane1", ())}
+    uncovered = uncovered_owner_rows(snapshot, elements)
+    last = {(step, ident) for step, ident, *_ in uncovered}
     added = []
     for step, ident, whole, short in elements:
         if target is not None and current <= target:
             current = measure(level(taken))  # aggregate boundaries and the receipt are part of the budget
-            measured_count = len(taken)
             if current <= target:
                 break
-        if (step, ident) in taken or target is None or current <= target:
+        if (step, ident) in taken or target is None or current <= target or (step, ident) in last:
             continue
-        if step == "F7" and not owner[ident].get("carried"):
-            if measured_count != len(taken):
-                current, measured_count = measure(level(taken)), len(taken)
-            physical = allowances.get("physical")
-            if physical is None or current <= physical:
-                continue
         delta = max(0, whole - short)
         taken.add((step, ident))
         added.append((step, ident, delta))
@@ -130,7 +123,24 @@ def fit_memory_view(snapshot: mv.MemoryViewSnapshot, allowances: Mapping[str, Op
             actual = measure(level(trial))
             if actual <= target:
                 taken, current = trial, actual
+    # People's words last: uncovered owner rows become addresses, oldest first, only while the view does not fit.
+    physical = allowances.get("physical")
+    for step, ident, whole, short in uncovered:
+        if physical is None or current <= physical:
+            break
+        if (step, ident) not in taken:
+            taken.add((step, ident))
+            current -= max(0, whole - short)
+            if current <= physical:
+                current = measure(level(taken))
     return level(taken)
+
+
+def uncovered_owner_rows(snapshot: mv.MemoryViewSnapshot, elements=None) -> List[Tuple[str, str, int, int]]:
+    """Owner rows no page or note carries yet, oldest first; governing and unanswered rows have no address."""
+    owner = {i["address"]: i for i in (snapshot.room or {}).get("lane1", ())}
+    return [e for e in (degradable_elements(snapshot) if elements is None else elements)
+            if e[0] == "F7" and not owner[e[1]].get("carried")]
 
 
 def kept_level(snapshot: mv.MemoryViewSnapshot, facts: Mapping[str, Any]) -> mv.FloorLevel:
@@ -342,10 +352,13 @@ def render_view_for_mode(snapshot: mv.MemoryViewSnapshot, *, mode: str, owner_mo
         mv.render_room(snapshot, level, floor_note=receipt(level)))
     level = fit_memory_view(snapshot, allowances, kept=kept or mv.FULL_VIEW, saving=saving, measure=measure)
     note = receipt(level)
-    actual = view_tokens(mv.render_story(snapshot, level)) + view_tokens(mv.render_room(snapshot, level))
-    if allowances["margin"] is not None and actual > allowances["margin"]:
-        note += ("\nStart room is smaller than requested: uncovered owner words remain in view; "
-                 "only physical pressure can turn their oldest rows into named addresses.")
+    size = lambda shown: view_tokens(mv.render_story(snapshot, shown)) + view_tokens(mv.render_room(snapshot, shown))
+    if allowances["margin"] is not None and size(level) > allowances["margin"]:
+        held = [f"F7:{ident}" for step, ident, *_ in uncovered_owner_rows(snapshot) if ident not in dict(level.addressed).get(step, ())]
+        owners = held and size(level_with(snapshot, level, held, owner_note=True)) <= allowances["margin"]
+        note += "\nStart room is smaller than requested: " + (
+            "uncovered owner words remain in view; only physical pressure can turn their oldest rows into named addresses."
+            if owners else "what my memory shows even in its shortest forms exceeds it.")
     return (mv.render_story(snapshot, level), mv.render_room(snapshot, level, floor_note=note),
             view_facts(snapshot, level, window_tokens=window, mode=mode, allowances=allowances, target_tokens=target,
                        lowered_from=lowered_from))

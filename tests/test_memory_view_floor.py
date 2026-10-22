@@ -61,6 +61,36 @@ def test_governing_unanswered_and_uncovered_owner_rows_have_distinct_protection(
     assert "Start room is smaller" in text
 
 
+def test_pages_go_before_uncovered_owner_rows_and_the_oldest_rows_go_only_when_pages_are_exhausted():
+    rows = [{**syn.spoken(i, "human", 5_000), "owner_side": True} for i in range(2)]
+    story = syn.pages(2, 12_000)
+    snapshot = syn.snapshot(story=story, room_facts=syn.room("1", lane1=rows))
+    pages_cut = tokens(snapshot, mv.FloorLevel((("F5", tuple(p["id"] for p in story)),)))
+    level = mf.fit_memory_view(snapshot, frame(0, pages_cut))
+    assert dict(level.addressed) == {"F5": tuple(p["id"] for p in story)}
+    assert all(r["line"] in mv.render_room(snapshot, level) for r in rows)
+    oldest = mf.fit_memory_view(snapshot, frame(0, pages_cut - 1))
+    assert dict(oldest.addressed)["F7"] == (rows[0]["address"],) and rows[1]["line"] in mv.render_room(snapshot, oldest)
+    both = mf.fit_memory_view(snapshot, frame(0, 0))
+    assert dict(both.addressed)["F7"] == tuple(r["address"] for r in rows)
+
+
+@pytest.mark.parametrize("lane1, owners", [
+    ([{**syn.spoken(i, "human", 8_000), "owner_side": True} for i in range(3)], True),
+    ([syn.spoken(i, "ouroboros", 1_000) for i in range(400)], False),
+])
+def test_the_start_room_notice_names_owner_words_only_when_they_keep_the_view_above_it(lane1, owners):
+    snapshot = syn.snapshot(room_facts=syn.room("1", lane1=lane1))
+    _, text, facts = mf.render_view_for_mode(snapshot, mode="max", owner_mode="max", window_tokens=200_000,
+        known_window=True, output_reserve=65_536, ratio=1, non_memory_tokens=104_464)
+    floor = facts["floor"]
+    assert (floor["allowance_tokens"], floor["physical_allowance_tokens"]) == (5_000, 30_000)
+    assert "Start room is smaller than requested" in text
+    assert ("uncovered owner words remain in view" in text) is owners
+    assert ("shortest forms" in text) is not owners
+    assert (dict(floor["steps"]).get("F2") == 400) is not owners and "F7" not in dict(floor["steps"])
+
+
 def test_other_rooms_have_range_directory_and_bounded_aggregate():
     rooms = [syn.live_room(i, notes=1, words=3, word_chars=2_000) for i in range(164)]
     snapshot = syn.snapshot(live=rooms)
