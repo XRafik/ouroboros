@@ -10,7 +10,7 @@ from ouroboros import review_execution as rx
 from ouroboros.review_session_usage import session_usage_facts
 from tests._review_session_route_shared import (
     FakeGateway, _agent_request, _agent_slot, _terminal_detail,
-    _owned_gateway_uses_each_test_transport, fake_route,  # noqa: F401
+    _owned_gateway_uses_each_test_transport, fake_route as fake_route,  # noqa: F401
 )
 from tests.test_session_input_events import (
     SPLIT, collect, entry, events, persist_review, _synthetic_root_lineage,  # noqa: F401
