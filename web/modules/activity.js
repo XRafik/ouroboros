@@ -16,6 +16,7 @@ import {
     ACTION_HURRY,
     ACTION_RESUME,
     TASK_CONTROL_TRIGGER_LABEL,
+    heldWorkFacts,
     hurryTaskAction,
     isRootTaskRow,
     openTaskControlMenu,
@@ -321,7 +322,12 @@ export function initActivity({ mount, ws, openDashboardTab = null } = {}) {
             const kindLabel = view.word;
             const outcome = ownId && ownOutcomePhase(activities.find((entry) => entry?.activity_id === ownId),
                 projected?.activity === 'working' && projected.transition === 'none' ? '' : kindLabel);
-            const meta = `${outcome ? phaseSlot(outcome) : esc(kindLabel)}${view?.secondary ? ` · ${esc(view.secondary)}` : ''}${q.type ? ` · ${esc(q.type)}` : ''}${rt}`;
+            // The projection owns the state; the current wait's recorded blockers
+            // keep its specific cause readable after the Continue toast expires.
+            const waiting = t._budget_pause_hold;
+            const heldFacts = projected?.confirmed !== false && projected?.because?.[0]?.code === 'earlier_work_unconfirmed'
+                && waiting?.reason === 'continuation_writer_unsettled' && !waiting.selected ? heldWorkFacts(waiting.blockers) : '';
+            const meta = `${outcome ? phaseSlot(outcome) : esc(kindLabel)}${view?.secondary ? ` · ${esc(view.secondary)}` : ''}${heldFacts ? ` · ${esc(heldFacts)}` : ''}${q.type ? ` · ${esc(q.type)}` : ''}${rt}`;
             const hold = t.project_admission_hold;
             const projectWait = hold?.label ? ` · ${esc(hold.label)}: ${esc(hold.detail || hold.reason)}` : '';
             // The held cause is what the owner reads before Resume: it wraps, never ellipsized.
