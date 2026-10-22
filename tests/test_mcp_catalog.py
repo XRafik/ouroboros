@@ -171,10 +171,10 @@ def test_identity_change_ignores_file_until_server_event_prunes(change, monkeypa
     assert not path.exists()
 
 
-@pytest.mark.parametrize("stale_boot", [False, True])
-def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_path, stale_boot):
+@pytest.mark.parametrize("save_in_progress", [False, True])
+def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_path, save_in_progress):
     from ouroboros.gateway import owner_settings
-    early = {"MCP_ENABLED": True, "MCP_SERVERS": []} if stale_boot else settings()
+    monkeypatch.setenv("OUROBOROS_SETTINGS_DOCUMENT_LOCK_TIMEOUT_SEC", "1")
     writer = publisher()
     writer.refresh_server("demo")
     orphan = mcp_catalog.catalog_path("gone")
@@ -197,18 +197,14 @@ def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_p
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path / "fork")
     # Before the MCP boot step, its configure path already seeds the file.
     assert any(row["function"]["name"] == "mcp_demo__ping" for row in registry.schemas())
-    read_settings, prune = config.load_settings, mcp_catalog.prune_catalogs
-    def ordered_read():
-        assert owner_settings._settings_document_lock.locked()
-        return read_settings()
-    def ordered_prune(configs):
-        assert owner_settings._settings_document_lock.locked()
-        return prune(configs)
     try:
-        with monkeypatch.context() as startup:
-            startup.setattr(config, "load_settings", ordered_read)
-            startup.setattr(mcp_catalog, "prune_catalogs", ordered_prune)
-            server_boot.mcp_startup(early)
+        # The step applies the saved document; a Save still holding the document
+        # lock neither delays nor cancels the boot prune and listing.
+        if save_in_progress:
+            with owner_settings.settings_document_mutation():
+                server_boot.mcp_startup()
+        else:
+            server_boot.mcp_startup()
         assert entered.wait(5) and not orphan.exists()
         assert mcp_catalog.catalog_path("demo").exists()
         # A blocked network listing must not hold the Settings ordering lock.
