@@ -72,9 +72,8 @@
     --user-sender: #a0c6ff;
     --user-text: #efeff2;
     /* System / owner-control voice (system bubble + sender), tokenized so it tracks one source (C7.2): in dark a
-       neutral body with a gold rail and name, since gold goes olive as a dark fill; in light an amber tint. */
+       neutral body with a gold name, since gold goes olive as a dark fill; in light an amber tint. */
     --system-bubble-bg: rgba(255, 255, 255, 0.055);
-    --system-border: #f7cb58;
     --system-sender: #f7cb58;
     --system-text: #efeff2;
     /* Assistant / agent voice: the assistant bubble's sender + body tints,
@@ -409,7 +408,6 @@
     --user-bubble-from: rgba(80, 120, 190, 0.14);
     --user-bubble-to: rgba(55, 85, 155, 0.12);
     --system-bubble-bg: rgba(245, 158, 11, 0.12);
-    --system-border: rgba(245, 158, 11, 0.45);
     --accent: #c93545;
     --focus-accent-ring: var(--accent-10);
     --amber: #f59e0b;
@@ -500,6 +498,8 @@
     --text-disabled: var(--user-sender);
     --text-muted: var(--text-disabled);
 }
+/* Code stays on the room's neutral material inside either voice. */
+.md-code-block { --tone-quiet-hover: var(--bg-hover); }
 
 .ouro-ui { font-family: var(--font-sans); color-scheme: var(--native-color-scheme); }
 .muted { color: var(--text-meta); }
@@ -982,6 +982,15 @@ textarea.ui-control { resize: vertical; }
 :root[data-theme]:where(.ouro-ui) :is(.btn, .theme-choice):not(:disabled):active { transform: none; filter: var(--press); }
 :root[data-theme]:where(.ouro-ui) .btn-primary { --press: var(--press-solid); }
 :root[data-theme]:where(.ouro-ui) .btn-ghost:not(:disabled):active { box-shadow: none; }
+/* A capsule over content uses the same geometry, focus and disabled state, on glass. */
+:root[data-theme]:where(.ouro-ui) .btn-float {
+    background: var(--surface-float); color: var(--text-primary); box-shadow: var(--elev-float);
+    -webkit-backdrop-filter: var(--glass); backdrop-filter: var(--glass);
+}
+@media (hover: hover) {
+    :root[data-theme]:where(.ouro-ui) .btn-float:not(:disabled):hover { filter: var(--press); }
+}
+:root[data-theme]:where(.ouro-ui) .btn-float:not(:disabled):active { filter: var(--press) var(--press); }
 :root[data-theme]:where(.ouro-ui) .btn:disabled { box-shadow: none; }
 /* The Appearance choice is one control in both documents (the SPA and the served setup page load only this sheet
    in common): neutral capsules, the chosen one in the soft crimson, all standing. */

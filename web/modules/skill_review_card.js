@@ -105,7 +105,7 @@ function renderDetailState(full, entry, render, onDomWrite = writeDirectly) {
         } else if (entry.state === 'error') {
             full.innerHTML = `<div class="skill-review-error" role="status" aria-live="polite">Review details unavailable (${escapeHtmlAttr(entry.error)}). `
                 + (entry.retryable
-                    ? '<button type="button" class="skill-review-retry" data-skill-review-retry>Retry</button>'
+                    ? '<button type="button" class="btn btn-default btn-sm" data-skill-review-retry>Retry</button>'
                     : '')
                 + '</div><div class="skill-review-cost-unavailable">Cost unavailable</div>';
         }
