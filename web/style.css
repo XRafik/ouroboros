@@ -95,8 +95,9 @@ html[data-layout="stack"] .shell-icon-control {
     display: none;
 }
 
-/* The sidebar is three zones (docs/DESIGN.md "Shell"): a pinned head (Main Chat), the Projects list as the ONE
-   scroller, and the tools, the version and the update right after it; free room stays under the last row. Row
+/* The sidebar's zones (docs/DESIGN.md "Shell"): a pinned head (Main Chat), the Projects list as the ONE scroller, the
+   tools right after it, and the foot (the version and the update) at the bottom edge; free room lies between the
+   tools and the foot, never between the list and the tools. Row
    heights follow the pointer: a finger gets the touch minimum, a mouse a quieter row, and a short window with a
    mouse compacts the rows first. A window too short even for that falls back to the whole column scrolling with
    the head sticky. */
@@ -148,8 +149,10 @@ html[data-layout="stack"] .shell-icon-control {
     background: var(--surface-side);
 }
 
+/* The tools follow the Projects; the box takes the column's free room, so its last row, the version and the update,
+   rests on the bottom edge (owner 22.10) whether the list is collapsed, short or scrolling. */
 .sidebar-foot {
-    flex: 0 0 auto;
+    flex: 1 0 auto;
     display: flex;
     flex-direction: column;
     gap: var(--space-1);
@@ -157,6 +160,7 @@ html[data-layout="stack"] .shell-icon-control {
 }
 
 .sidebar-foot-meta {
+    margin-top: auto;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -1092,12 +1096,20 @@ html[data-layout="docked"] .app-page-header[data-empty] {
     display: none;
 }
 /* In the macOS desktop window the band under the transparent title bar is the window's handle
-   (launcher_window_chrome.py: a plain press there moves the window, a press on a control stays the page's). A
-   header with nothing to show (Widgets) keeps that band as a plain strip, so the page starts below it. */
+   (launcher_window_chrome.py: a plain press there moves the window, a press on a control stays the page's). The band
+   is the window's, not a row of the page: a header with nothing to show lies over the top of its page as that handle
+   (clear of the scrollbar, as a room's strip is), the page's first row starts below the band, and scrolled content
+   passes under it with crisp edges, as a room's feed does. */
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] {
     display: block;
+    position: absolute;
+    inset: 0 6px auto 0;
+    z-index: 2;
     height: var(--window-chrome-top);
     padding: 0;
+}
+:root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] ~ .widgets-scroll {
+    padding-top: calc(var(--space-4) + var(--window-chrome-top));
 }
 
 .app-page-toolbar,

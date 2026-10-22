@@ -32,6 +32,15 @@ export function isStackLayout(options) {
     return currentLayout(options) === 'stack';
 }
 
+/** A pinch is magnifying the page: the visual viewport is narrower than the layout one. A keyboard only takes height,
+ * and a page zoom moves both together, so neither counts. While it holds, the room keeps its size and the finger pans
+ * the magnified page (DESIGN "Touch and containment"). */
+export function pinchMagnified(w = win()) {
+    const vv = w?.visualViewport;
+    const layoutWidth = Number(w?.innerWidth) || 0;
+    return Boolean(vv && layoutWidth && Number(vv.width) < layoutWidth - 1);
+}
+
 /** Hear the switch move; returns the disposer. The handler gets the new layout name. */
 export function onLayoutChange(handler, { w = win() } = {}) {
     const listener = (event) => handler(event?.detail?.layout || currentLayout({ w }));

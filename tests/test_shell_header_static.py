@@ -94,10 +94,16 @@ def test_the_status_word_clips_past_its_line_so_descenders_stay_whole():
     assert "padding-block: 0.15em" in badge and "margin-block: -0.15em" in badge
 
 
-def test_the_desktop_title_band_keeps_an_empty_header_as_a_plain_strip():
+def test_the_desktop_title_band_over_an_empty_header_is_the_windows_handle_not_a_row():
+    # Owner 22.10: the empty strip an empty header kept for the band cut the Widgets board. The band is the window's:
+    # the empty header lies over the top of its page as the window's handle (out of the flow, above the content, clear
+    # of the scrollbar), and the page's scroll body starts at the top edge with its first row padded below the band.
     css = _read("web/style.css")
     band = _rule(css, ':root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] {')
-    assert "display: block" in band and "height: var(--window-chrome-top)" in band and "padding: 0" in band
+    assert "position: absolute" in band and "inset: 0 6px auto 0" in band and "z-index: 2" in band, band
+    assert "height: var(--window-chrome-top)" in band and "padding: 0" in band, band
+    board = _rule(css, ':root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] ~ .widgets-scroll {')
+    assert "padding-top: calc(var(--space-4) + var(--window-chrome-top))" in board, board
     # Outside the desktop window an empty header still takes no room.
     assert "display: none" in _rule(css, 'html[data-layout="docked"] .app-page-header[data-empty] {')
 

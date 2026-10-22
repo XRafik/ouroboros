@@ -35,7 +35,7 @@ import { initStorage } from './modules/storage.js';
 import { SHELL_ICONS } from './modules/page_icons.js';
 import { renderNavRows, renderProjectsHeader } from './modules/pages.js';
 import { renderPageHeader } from './modules/page_header.js';
-import { isStackLayout, onLayoutChange } from './modules/layout.js';
+import { isStackLayout, onLayoutChange, pinchMagnified } from './modules/layout.js';
 import { createLayerStack } from './modules/layers.js';
 import { afterMotion, reducedMotion } from './modules/motion.js';
 import { createShellMotion } from './modules/shell_motion.js';
@@ -1521,6 +1521,8 @@ if (hashPage && hashPage !== state.activePage) showPage(hashPage);
     const updateVvh = () => {
         const h = viewportHeight();
         if (isStackLayout()) {
+            // A pinch only magnifies: the room keeps the height it had, or it would shrink with the visual viewport.
+            if (pinchMagnified()) return;
             vvhStyle.textContent = ':root{--vvh:' + Math.max(320, Math.ceil(h)) + 'px}';
             if (!focusedKeyboardEditable()) {
                 applyKeyboardState(false);

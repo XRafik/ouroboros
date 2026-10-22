@@ -2523,10 +2523,11 @@ window jump, a layout switch) is laid out at once.
 the navigation rows, names the titles and feeds the shell gate, so a new page is
 a registry row and its module, checked at phone widths with no further work. The column
 has a pinned head (Main Chat), one collection (Projects, the column's only
-scroller) and the tools right after it (Files, Skills, Widgets, Dashboard,
-Settings, then the version and the update), which reach the bottom edge only
-when the Projects do not fit: free room stays under the last row, never between
-them. Main's row carries its room's status mark at the Project rows' x. A Project's
+scroller), the tools right after it (Files, Skills, Widgets, Dashboard,
+Settings), and its foot, the version and the update, on the bottom edge above
+the safe area (owner 22.10). Free room lies between the tools and the foot,
+never between the list and the tools (owner 18.10); a wrapping update grows the
+foot upward. Main's row carries its room's status mark at the Project rows' x. A Project's
 menu opens from its ⋯ (a fine pointer), a right-click, Shift+F10 or a long press; it
 first says the row's state as its mark and words, then offers Pin or Unpin; pinning
 neither opens nor reads it. Pinned Projects lead the one list, and one `--space-2` of air before the next
@@ -2540,7 +2541,8 @@ other row hides whatever it is doing, the open one included, and the header keep
 its mark and unread count for them. The choice is remembered on the device; a row
 that hides while it or its menu holds focus closes its menu and hands focus to the
 header. No label is set in capitals. A short window first compacts rows (fine pointer only), then lets the
-whole column scroll with Main pinned; a tool never becomes an unlabelled icon. One
+whole column scroll with Main pinned and the foot as its last row, never laid
+over a row; a tool never becomes an unlabelled icon. One
 place is chosen at a time, and pressing a place opens it, never closes it.
 
 **The drawer.** In the stack layout the room is a card the drawer pushes aside.
@@ -2632,7 +2634,9 @@ location take that place and its actions the end, on Main's line, so the bar has
 two ends as Main's does; tabs or a location that do not fit scroll inside it (a
 location rests at the folder you are in, no folder wider than the bar's start),
 and in the macOS window its empty parts still move the window. A header with nothing to show draws
-no bar (Widgets keeps the plain band). A Project shows its name. In the stack
+no bar. The band under the macOS title bar belongs to the window, never to a page: no page reserves
+a row for it, its first row starts below it, and scrolled content passes under it with crisp edges,
+as a room's feed does, while a plain press in the empty band still moves the window. A Project shows its name. In the stack
 layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
 ⋯, with the page's tabs, or Files' location and its actions, under it
 (`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
@@ -2663,7 +2667,9 @@ link inside a sentence takes too so the sentence keeps its lines. Nothing that
 acts is hidden until hover there (a Project row's menu is reached by its long press).
 No page scrolls sideways at any width; only code, tables, tab strips and a bar's
 Files location scroll sideways, inside themselves, with a fade where content
-hides. Text wraps before it widens a column.
+hides. Text wraps before it widens a column. A pinch only magnifies: while it holds,
+the room keeps its size and a sideways finger pans the magnified page instead
+of moving the drawer.
 
 **Telegram.** Inside the Telegram Mini App the page tells Telegram it is ready,
 fills the screen, turns off Telegram's swipe-down so lists scroll, shows

@@ -178,8 +178,9 @@ def test_skills_and_widgets_use_inner_scroll_regions():
 
 def test_sidebar_is_three_zones_with_the_projects_list_as_the_one_scroller():
     """The sidebar is a pinned head (Main Chat), the Projects list as the ONE scroller (no inner cap, no outer
-    scroll wrapper) and the tools right after it: the Projects zone is as tall as its rows and shrinks to scroll
-    them, so free room stays under the last row, never between the zones (docs/DESIGN.md "Shell").
+    scroll wrapper), the tools right after it and the foot (the version and the update) on the bottom edge: the
+    Projects zone is as tall as its rows and shrinks to scroll them, so free room lies between the tools and the foot,
+    never between the list and the tools (docs/DESIGN.md "Shell").
     A too-short window falls back to the whole column scrolling with the head sticky."""
     css = _read("web/style.css")
     html = _read("web/index.html")
@@ -202,6 +203,11 @@ def test_sidebar_is_three_zones_with_the_projects_list_as_the_one_scroller():
     assert legacy == ["#primary-sidebar > .sidebar-scroll { display: contents; }"], legacy
     head = css.split(".sidebar-head {", 1)[1].split("}", 1)[0]
     assert "position: sticky" in head and "top: 0" in head
+    # The foot (the version and the update) rests on the bottom edge whatever the list does (owner 22.10): the tools'
+    # box takes the free room and its last row is pushed down, so the free room lies between the tools and the foot.
+    foot = css.split("\n.sidebar-foot {", 1)[1].split("}", 1)[0]
+    meta = css.split("\n.sidebar-foot-meta {", 1)[1].split("}", 1)[0]
+    assert "flex: 1 0 auto" in foot and "margin-top: auto" in meta, (foot, meta)
     assert html.index('class="sidebar-head"') < html.index('id="nav-projects"') < html.index('class="sidebar-foot"')
     # The zones are filled from the page registry: Main into the head, the tools into the foot (pages.js).
     pages_js = _read("web/modules/pages.js")
