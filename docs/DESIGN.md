@@ -1184,9 +1184,8 @@ reader; composer files stay.
 
 An initial read shows one disabled `Loading saved history…` pill at the feed edge,
 not a second loading sentence in the header. Task activity remains separate.
-Persistent history notices are wrapping text in the room's header chrome: the
-Project status bar without an opaque strip, Main's floating header on its own
-reading backing (§5).
+Failure and approximate-restoration notices are wrapping text in the room's header
+chrome: the Project status bar, or Main's floating note on its float-sheet backing (§5).
 
 Main and every Project open at their newest message, regardless of age or other
 rooms' traffic. Returning in the same session does too, including Main after
@@ -1224,9 +1223,11 @@ output leaves it in place; only a newer line moves a card timeline to its end.
 New replies remain below in the same live conversation without moving the passage.
 
 When loaded fragments are disconnected or their coverage is uncertain (reading
-far back releases the newest pages from memory while replies keep arriving), the
-same readable note stays in Main and Project header chrome: `Some saved history
-is not loaded. Shown messages may have gaps.` A failed read says so distinctly.
+far back releases the newest pages from memory while replies keep arriving), a
+toast above the composer announces once per document opening `Some saved history is not loaded.
+Shown messages may have gaps.`, and the same readable explanation stays at the
+in-feed `Load more history` edge, including beside a read failure or approximate position (owner 21.10).
+The notice can be closed; hover and focus pause its six-second dismissal. A failed read stays in header chrome.
 Bytes written after a read found a source empty count as missing until a later
 read delivers them from its start. Mixed task cards keep one node and use this
 general note: dates, common row IDs and an exhausted cursor cannot establish a
@@ -2576,12 +2577,11 @@ quarter close it in 280 ms, on the iOS sheet curve (`--ease-sheet`). A thumb tha
 rests before it lifts is no fling. The quarter's clear scrim comes and goes with
 it. Reduced motion keeps the finger tracking and drops the rest.
 
-**Moving between places.** On a phone a place picked in the open drawer changes
-inside the room card: the drawer stays painted for one 160 ms beat while the
-leaving room's words fade out and the arriving room fades in with one breath
-(scale .97 → 1), the chosen place's pill slides from its old row to the tapped one,
-then the drawer's own close brings the card home; opening the drawer switches the
-pill on where you are (owner 20.10, 4A; `web/modules/shell_motion.js`). The stack,
+**Moving between places.** On a phone a place picked in the open drawer selects
+its row at once (no travelling pill or hold) and changes inside the room card as
+the drawer closes: the leaving room's words fade out and the arriving room fades
+in with one breath (scale .97 → 1) while the drawer's own close brings the card
+home (owner 20.10, 4A; 21.10; `web/modules/shell_motion.js`). The stack,
 history and Back change at the tap; only the covered room's inert waits for the
 card, because it restyles the whole room. A Project room that is left keeps its
 rows until its exit has run and is the same room when reopened meanwhile. Docked,
@@ -2632,7 +2632,10 @@ content column is too narrow, including while the sidebar is resized; the toolba
 own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's
 width. While a mode it holds is on (Evolve, Consciousness), ⋯ takes its tone,
-with no corner dot. A history note hangs under the bar, never inside it; a page
+with no corner dot. In Main and Project, the bar has no continuous backing strip:
+the title and status share one floating capsule (`--chip-float`, non-shrinking
+mark and caret with inline inset), and each command is its own floating capsule
+(owner 21.10). A failure or approximation note hangs under the bar; a page
 has no caption line, its sidebar row and its tabs name it.
 
 **Doors and containers.** An object whose only job is to take you somewhere is a
