@@ -41,7 +41,8 @@ def _failed_actor():
 
 def _rows(root):
     path = root / "logs" / "events.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    return [row for line in path.read_text().splitlines()
+            if (row := json.loads(line)).get("type") == "review_model_error"] if path.exists() else []
 
 
 def _run(root, monkeypatch, actor, *, surface="multi_model_review", ctx=None):
@@ -76,7 +77,10 @@ def test_a_run_failure_has_cause_identity_and_one_live_frame(tmp_path, monkeypat
     assert row["prompt_ref"] == {"call_id": "prompt-1"} and row["response_ref"] == {"call_id": "response-1"}
     frames = []
     supervisor = SimpleNamespace(DRIVE_ROOT=tmp_path, RUNNING={}, bridge=SimpleNamespace(push_log=frames.append))
-    envelope = ctx.event_queue.get_nowait()
+    envelopes = []
+    while not ctx.event_queue.empty():
+        envelopes.append(ctx.event_queue.get_nowait())
+    [envelope] = [row for row in envelopes if row.get("data", {}).get("type") == "review_model_error"]
     assert envelope["type"] == "log_event"
     _handle_log_event(envelope, supervisor)
     assert len(frames) == 1 and frames[0]["error"] == row["error"]
@@ -152,7 +156,7 @@ def test_the_manual_collector_reuses_the_logged_run_failure(tmp_path, monkeypatc
     envelope = parse_model_response("requested-model", {**actor, **review_operation_fields(actor)}, None)
     _critical, _advisory, errored, raw = _collect_review_findings(ctx, [envelope])
     assert errored and raw[0]["error_event_logged"] is True
-    assert len(_rows(tmp_path)) == len(frames) == 1
+    assert len(_rows(tmp_path)) == len([row for row in frames if row.get("type") == "review_model_error"]) == 1
     assert ctx.pending_events == [] and ctx.event_queue.empty()
 
 
