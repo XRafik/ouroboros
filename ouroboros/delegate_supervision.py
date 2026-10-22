@@ -1212,6 +1212,8 @@ def supervised_wait(
             state = _load_state(ctx, run_id)
             retained = retained_runs.pop(run_id, None)
             if run_id not in live_inputs:
+                if owns_transport and gateway is None and retained is None:
+                    gateway = _loop_gateway()
                 live_inputs[run_id] = _leaf_live_input(ctx, run_id, gateway) if retained is None else "unknown"
             live_input = live_inputs[run_id]
             if hold_until - time.time() < _HOLD_MARK_SEC / 2:
@@ -1270,10 +1272,14 @@ def supervised_wait(
                 and float(checkpoint.get("due_at_unix") or 0) <= time.time()
             )
             meaningful = str(payload.get("status") or "") not in _QUIET_STATUSES
+            collecting = (payload.get("status") == "observation_pending"
+                          and payload.get("reason") == "collection_in_progress")
             try:
                 from ouroboros.store import acquisition_budget
                 with acquisition_budget(0):
-                    terminal = [] if meaningful or wakes else model_sleep.terminal_readiness(ctx, {"runs": [str(run_id)]})
+                    # A terminal observation does not finish the collector's owned delivery.
+                    terminal = [] if meaningful or wakes or collecting else model_sleep.terminal_readiness(
+                        ctx, {"runs": [str(run_id)]})
             except Exception:
                 terminal = []  # An unreadable custody source cannot hide observed controls or answers.
             if terminal and not meaningful and not wakes:

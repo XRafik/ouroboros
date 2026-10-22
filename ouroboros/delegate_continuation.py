@@ -126,7 +126,7 @@ def _task_line(ctx: Any, drive: Any, state: Dict[str, Any], entry: Any) -> str:
     return "owner_continue" if recorded_continuation(drive, entry.root_task_id or entry.task_id, reader) else ""
 
 
-def still_continuable(drive: Any, entry: Any, live_task_ids=None) -> bool:
+def still_continuable(drive: Any, entry: Any, live_task_ids=None, *, recoverable_handles=()) -> bool:
     """Retain a registration until its owner line and every root's Continue offer end.
 
     Each root of the recorded Continue chain (the original root and every
@@ -134,12 +134,15 @@ def still_continuable(drive: Any, entry: Any, live_task_ids=None) -> bool:
     the offer is read at every settled member the walk reaches, not only at the
     run's own root; child tasks never carry an offer.
 
-    The sweep supplies its authoritative live/reserved census. Addressed result
+    The sweep supplies its live census and exact reserved handles. Addressed result
     reads validate retry and Continue edges; missing/changed evidence keeps the
     registration. This observation grants no continuation or execution authority.
     """
     if entry.review_owned or not entry.run_id:
         return False
+    if ((entry.task_id, entry.run_id, entry.invocation_id) in recoverable_handles
+            or (entry.task_id, entry.run_id, "") in recoverable_handles):
+        return True
     if live_task_ids is None or not entry.task_id:
         return True
     from types import SimpleNamespace

@@ -657,7 +657,7 @@ def test_the_bootstrap_consumer_reads_the_native_start_result(tmp_path, monkeypa
     from ouroboros.subagent_bootstrap import _pre_start_leaf
 
     def _leaf(result):
-        monkeypatch.setattr(runtime, "delegate_start_entry", lambda *_a, **_k: result)
+        monkeypatch.setattr(runtime, "exact_start", lambda *_a, **_k: result)
         ctx = SimpleNamespace(task_id="t-boot", drive_root=tmp_path,
                               budget_drive_root=str(tmp_path), task_metadata={},
                               _configured_actor_bootstrap={"selected_subagent_id": "s"})
