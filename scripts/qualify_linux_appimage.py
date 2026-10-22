@@ -2,8 +2,9 @@
 """Native GTK qualification of one real AppImage in the clean X11 CI container.
 
 Run through safe_test, inside a network-disabled, non-root disposable container.
-No provider or task is configured. Close Setup unsaved; the real MainApi bridge
-is exercised by a recorded HTML instrumentation suffix in the disposable repo.
+Only an inert loopback provider is configured through the real onboarding API;
+every generation request is recorded, refused and fails qualification. The real
+MainApi bridge is exercised by a recorded HTML suffix in the disposable repo.
 The AppImage bytes are never edited. A local comment-only fixture commit then
 exercises the production cold source-launcher handoff. No update feed is used.
 """
@@ -21,12 +22,141 @@ import sys
 import threading
 import time
 import urllib.request
+import urllib.error
 import uuid
 
 
 DESKTOP_KEYS = runpy.run_path(str(Path(__file__).resolve().parents[1] / 'ouroboros/desktop_media.py'))['LINUX_DESKTOP_KEYS']
 
 HOST_GRAPHICS = ('libGL.so.1', 'libEGL.so.1', 'libGLESv2.so.2', 'libGLdispatch.so.0', 'libgbm.so.1', 'libdrm.so.2')
+
+
+def setup_payload(base_url):
+    """The real wizard contract, without credentials, subscriptions or installs."""
+    return {'OPENAI_COMPATIBLE_BASE_URL': base_url,
+            'OUROBOROS_MODEL': 'openai-compatible::native-qualification-inert',
+            'OUROBOROS_REVIEW_ENFORCEMENT': 'advisory',
+            'OUROBOROS_RUNTIME_MODE': 'advanced',
+            'subscriptionsConnected': False, 'skipSubscriptionPresets': True,
+            'starter_skills': []}
+
+
+def fixture_receiver(evidence, nonce):
+    """One loopback listener for bridge evidence and a NON-generating provider."""
+    received, unexpected = [], []
+
+    class Receiver(BaseHTTPRequestHandler):
+        def answer(self, status, body):
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def do_GET(self):
+            self.answer(200 if self.path == '/v1/models' else 404,
+                        {'object': 'list', 'data': [{'id': 'native-qualification-inert', 'object': 'model'}]}
+                        if self.path == '/v1/models' else {'error': 'fixture route not supported'})
+
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers.get('Content-Length', 0))).decode()
+            if self.path == '/bridge':
+                data = json.loads(raw)
+                if data.get('nonce') != nonce:
+                    self.answer(403, {'error': 'wrong witness nonce'})
+                    return
+                received.append(data)
+                self.answer(200, {'ok': True})
+                return
+            attempt = {'method': 'POST', 'path': self.path, 'body': raw, 'refused': True}
+            unexpected.append(attempt)
+            with (evidence / 'unexpected-generation.jsonl').open('a') as stream:
+                stream.write(json.dumps(attempt) + '\n')
+            self.answer(503, {'error': 'native qualification never generates'})
+
+        def log_message(self, *args):
+            pass
+
+    receiver = ThreadingHTTPServer(('127.0.0.1', 0), Receiver)
+    threading.Thread(target=receiver.serve_forever, daemon=True).start()
+    return receiver, received, unexpected
+
+
+def complete_setup(port, base_url, evidence):
+    payload = setup_payload(base_url)
+    (evidence / 'setup-payload.json').write_text(json.dumps(payload, indent=2))
+    request = urllib.request.Request(f'http://127.0.0.1:{port}/api/onboarding/complete',
+                                     data=json.dumps(payload).encode(),
+                                     headers={'Content-Type': 'application/json'})
+    try:
+        response = urllib.request.urlopen(request, timeout=60)
+    except urllib.error.HTTPError as error:
+        response = error
+    with response:
+        raw = response.read().decode()
+        (evidence / 'setup-response.json').write_text(json.dumps({'status': response.status, 'body': raw}, indent=2))
+        assert response.status == 200, raw
+        result = json.loads(raw)
+        assert result.get('ok') is True and result.get('restart_required') is False, result
+    with urllib.request.urlopen(f'http://127.0.0.1:{port}/api/onboarding', timeout=10) as response:
+        (evidence / 'setup-readiness.json').write_text(json.dumps({'status': response.status}))
+        assert response.status == 204, 'Completed fixture must be structurally configured'
+
+
+def install_witness(page, receiver_port, nonce, evidence):
+    original = page.read_text()
+    # Keep the original UI. In particular, never dismiss its blocking overlay.
+    suffix = """<script>
+    (() => {
+        function visible(node) {
+            if (!node || !node.innerText.trim()) return false;
+            const box = node.getBoundingClientRect(), style = getComputedStyle(node);
+            return box.width > 0 && box.height > 0 && box.bottom > 0 && box.right > 0 &&
+                box.top < innerHeight && box.left < innerWidth &&
+                style.display !== 'none' && style.visibility === 'visible' && Number(style.opacity) > 0;
+        }
+        function ready() {
+            return document.readyState === 'complete' && !document.querySelector('#onboarding-overlay') &&
+                visible(document.querySelector('#primary-sidebar')) &&
+                document.querySelector('#primary-sidebar').innerText.includes('Main Chat') &&
+                visible(document.querySelector('#content'));
+        }
+        let busy = false;
+        const witness = setInterval(async () => {
+            if (busy || !window.pywebview?.api?.shell_info || !ready()) return;
+            busy = true;
+            try {
+                await document.fonts.ready;
+                await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                const info = await window.pywebview.api.shell_info();
+                if (!ready()) return;
+                await fetch('http://127.0.0.1:PORT/bridge', {method:'POST',
+                    body:JSON.stringify({nonce:'NONCE', info, title:document.title, href:location.href,
+                        overlay_absent:true, main_visible:true, text:document.body.innerText.slice(0,2000)})});
+                clearInterval(witness);
+            } finally { busy = false; }
+        }, 200);
+    })();
+    </script>""".replace('PORT', str(receiver_port)).replace('NONCE', nonce)
+    page.write_text(original + suffix)
+    (evidence / 'bridge-instrumentation.html').write_text(suffix)
+    return original
+
+
+def assert_bridge(proof, source, revision, port):
+    assert proof['info']['source_launcher'] is source, proof
+    assert proof['info']['source_revision'] == revision, proof
+    assert proof.get('href') == f'http://127.0.0.1:{port}/', proof
+    assert proof.get('overlay_absent') is True and proof.get('main_visible') is True, proof
+
+
+def refresh_fixture_endpoint(settings_path, base_url, evidence):
+    """Only the ephemeral endpoint changes between cold launches; no setup replay."""
+    saved = json.loads(settings_path.read_text())
+    before = saved['OPENAI_COMPATIBLE_BASE_URL']
+    saved['OPENAI_COMPATIBLE_BASE_URL'] = base_url
+    settings_path.write_text(json.dumps(saved, indent=2))
+    (evidence / 'fixture-endpoint-refresh.json').write_text(json.dumps({'before': before, 'after': base_url}))
 
 
 def run(*args, **kwargs):
@@ -165,25 +295,21 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
     port_file = state / 'data/state/server_port'
     pid_file = state / 'app/ouroboros.pid'
     port_file.unlink(missing_ok=True)
-    received = []
     nonce = uuid.uuid4().hex
-
-    class Receiver(BaseHTTPRequestHandler):
-        def do_POST(self):
-            data = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
-            if data.get('nonce') == nonce:
-                received.append(data)
-            self.send_response(200)
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-        def log_message(self, *args):
-            pass
-
-    receiver = ThreadingHTTPServer(('127.0.0.1', 0), Receiver)
-    threading.Thread(target=receiver.serve_forever, daemon=True).start()
+    receiver, received, unexpected = fixture_receiver(evidence, nonce)
+    base_url = f'http://127.0.0.1:{receiver.server_port}/v1'
+    page = state / 'app/repo/web/index.html'
+    settings_path = state / 'data/settings.json'
+    configured = settings_path.exists()
+    original = None
     process = None
     tracked = set()
     try:
+        if configured:
+            refresh_fixture_endpoint(settings_path, base_url, evidence)
+            if native:
+                # Configured launches skip Setup; Main can load before health is read.
+                original = install_witness(page, receiver.server_port, nonce, evidence)
         with (evidence / 'stdout.log').open('w') as log:
             process = subprocess.Popen(command or [str(appimage)], env=env, stdout=log, stderr=subprocess.STDOUT)
             launcher_pid = wait_for(lambda: int(pid_file.read_text()), 'launcher pid', process=process)
@@ -194,32 +320,16 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
                 wm_class = 'Launcher.py' if source else 'Ouroboros.bin'
-                setup = wait_for(lambda: find_window('Ouroboros — Setup', evidence, launcher_pid, wm_class),
-                                 'Setup', process=process)
-                (evidence / 'setup-identity.json').write_text(json.dumps(setup, indent=2))
-                (evidence / 'setup-title.txt').write_text(setup['title'], encoding='utf-8')
-                # Only add a bridge witness; retain the shipped page and its actual UI.
-                page = state / 'app/repo/web/index.html'
-                original = page.read_text()
-                suffix = """<script>
-                const witness = setInterval(async () => {
-                    if (!window.pywebview?.api?.shell_info) return;
-                    if (document.readyState !== 'complete' ||
-                        !document.querySelector('#primary-sidebar')?.innerText.includes('Main Chat') ||
-                        !document.querySelector('#content')?.innerText.trim()) return;
-                    clearInterval(witness);
-                    await document.fonts.ready;
-                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-                    const info = await window.pywebview.api.shell_info();
-                    await fetch('http://127.0.0.1:PORT/bridge', {method:'POST',
-                        body:JSON.stringify({nonce:'NONCE', info, title:document.title,
-                                             text:document.body.innerText.slice(0,2000)})});
-                }, 200);
-                </script>""".replace('PORT', str(receiver.server_port)).replace('NONCE', nonce)
-                page.write_text(original + suffix)
-                (evidence / 'bridge-instrumentation.html').write_text(suffix)
-                # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
-                run('wmctrl', '-ic', hex(setup['id']))
+                if not configured:
+                    setup = wait_for(lambda: find_window('Ouroboros — Setup', evidence, launcher_pid, wm_class),
+                                     'Setup', process=process)
+                    (evidence / 'setup-identity.json').write_text(json.dumps(setup, indent=2))
+                    (evidence / 'setup-title.txt').write_text(setup['title'], encoding='utf-8')
+                    run('import', '-window', str(setup['id']), str(evidence / 'setup-window.png'))
+                    original = install_witness(page, receiver.server_port, nonce, evidence)
+                    complete_setup(port, base_url, evidence)
+                    # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
+                    run('wmctrl', '-ic', hex(setup['id']))
                 version = (state / 'app/repo/VERSION').read_text().strip()
                 identity = wait_for(lambda: find_window(f'Ouroboros v{version}', evidence, launcher_pid, wm_class),
                                     'Main window', process=process)
@@ -227,8 +337,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 window = str(identity['id'])
                 proof = wait_for(lambda: received[0] if received else None, 'real MainApi shell_info roundtrip', process=process)
                 (evidence / 'bridge.json').write_text(json.dumps(proof, indent=2))
-                assert proof['info']['source_launcher'] is source, proof
-                assert proof['info']['source_revision'] == run('git', '-C', str(state / 'app/repo'), 'rev-parse', 'HEAD')
+                assert_bridge(proof, source, run('git', '-C', str(state / 'app/repo'), 'rev-parse', 'HEAD'), port)
                 geometry = run('xwininfo', '-id', window)
                 assert 'IsViewable' in geometry
                 (evidence / 'window.txt').write_text(geometry + '\n' + run('xprop', '-id', window))
@@ -248,7 +357,6 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     assert 'python-standalone' in os.readlink(f'/proc/{launcher_pid}/exe')
                     assert 'Loading managed source launcher through' in (state / 'data/logs/launcher.log').read_text()
                 tracked = descendants(process.pid)
-                page.write_text(original)
                 run('wmctrl', '-ic', hex(identity['id']))
             else:
                 records = process_evidence(process.pid, evidence)
@@ -264,6 +372,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
             assert process.wait(timeout=45) == 0
             wait_for(lambda: not pid_file.exists(), 'PID lock cleanup', timeout=10)
             wait_for(lambda: not any(alive(pid) for pid in tracked), 'helper/server cleanup', timeout=15)
+            assert not unexpected, f'Unexpected generation requests refused: {unexpected}'
             (evidence / 'result.json').write_text(json.dumps({'status': 'mechanical_checks_passed', 'tracked_pids': sorted(tracked)}))
     finally:
         if process is not None and process.poll() is None:
@@ -292,6 +401,9 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 pass
         receiver.shutdown()
         receiver.server_close()
+        (evidence / 'generation-summary.json').write_text(json.dumps({'unexpected_count': len(unexpected), 'all_refused': True}))
+        if original is not None:
+            page.write_text(original)
         logs = state / 'data/logs'
         if logs.exists():
             shutil.copytree(logs, evidence / 'logs', dirs_exist_ok=True)
