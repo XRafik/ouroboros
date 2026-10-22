@@ -863,9 +863,10 @@ def build_context_fit_plan(
         preferred=preferred, tool_schemas=tool_schemas, window_tokens=window_record.total_equivalent,
         known_window=known_window, output_reserve=output_reserve, window_record=window_record)
     governance = {form: _governance_blocks(env, core, mode=form) for form in ("max", "low")}
-    from ouroboros.memory_view import view_role
+    from ouroboros.memory_view import start_room, view_role
 
-    role = view_role({**task, "metadata": task.get("metadata") or meta})
+    view_task = {**task, "metadata": task.get("metadata") or meta}
+    role = view_role(view_task)
     view_kind = {"consciousness": "own_wake", "presence": "focus", "integrator": "owner_turn"}.get(role, role)
     # Select the route/view density from the whole capture before making one floor decision.
     from ouroboros.memory_view import render_story, render_room, snapshot_from_json
@@ -878,7 +879,7 @@ def build_context_fit_plan(
             list(select_tool_schemas(tool_schemas or [], context_mode=preferred).schemas),
             provider=str(route.get("provider") or "")), view_kind=view_kind)
     contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio,
-        work_room_levels=context_budget.start_room_levels(role, str(task.get("type") or "chat")))
+        work_room_levels=start_room(view_task, role))
     def _projection(mode: str) -> ContextFitProjection:
         system_content, memory_facts = contents[mode]
         system_content_json = json.dumps(system_content, ensure_ascii=False, sort_keys=True)

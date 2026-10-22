@@ -121,13 +121,14 @@ def test_owner_memory_selection_requires_and_retains_the_minds_account(tmp_path,
 def test_core_without_memory_still_reserves_two_eighths_for_a_root(monkeypatch):
     core = cf.ContextCore("c" * 160_000, "", "", "", "", "", '"Assignment"', False)
     monkeypatch.setattr(cf, "_route_calibration_ratio", lambda *_a, **_kw: 1.0)
-    def start(kind):
-        return cf.build_context_fit_plan(None, core, {"id": "core001", "type": kind}, preferred_mode="low",
+    def start(task):
+        return cf.build_context_fit_plan(None, core, {"id": "core001", **task}, preferred_mode="low",
             route_resolver=lambda *_a, **_kw: ({"provider": "test", "model": "test"},
                 ce.CapabilityEvidence(128_000, "confirmed", "metadata", "core-route")))
-    assert start("chat").initial_mode == "low"
-    with pytest.raises(cf.MinimumViewUnfit, match="Core, assignment, resident control tools and work room"):
-        start("task")
+    assert start({"type": "task", "_is_direct_chat": True}).initial_mode == "low"  # a direct chat turn
+    for root in ({"type": "task"}, {"type": "evolution"}):
+        with pytest.raises(cf.MinimumViewUnfit, match="Core, assignment, resident control tools and work room"):
+            start(root)
 
 
 @pytest.mark.parametrize("refused", [True, False])

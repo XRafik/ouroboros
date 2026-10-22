@@ -172,6 +172,16 @@ def view_role(task: Mapping[str, Any]) -> str:
     return "integrator"
 
 
+def start_room(task: Mapping[str, Any], role: str) -> int:
+    """The role's start work room from the task's own facts, read at its top level or under ``metadata``."""
+    from ouroboros.consciousness_authority import WAKE_CAUSE_FOCUS, wake_cause
+    from ouroboros.context_budget import start_room_levels
+
+    meta = _mapping(task.get("metadata"))
+    return start_room_levels(role, focus_wake=wake_cause({**task, **meta}) == WAKE_CAUSE_FOCUS,
+                             direct_chat=bool(task.get("_is_direct_chat") or meta.get("_is_direct_chat")))
+
+
 def _explicit_problem(explicit: Any) -> str:
     if not isinstance(explicit, Mapping):
         return "memory_view is an object of ViewSpec fields"
@@ -232,9 +242,7 @@ def view_spec_for_task(task: Mapping[str, Any], drive_root: Any, *, ctx: Any = N
     a wake, which has no chat of its own, gets Main, and reads it as the Main turn does.
     """
     role = view_role(task)
-    from ouroboros.context_budget import start_room_levels
-
-    spec = dataclasses.replace(ROLE_DEFAULTS[role], work_room_levels=start_room_levels(role, str(task.get("type") or "chat")))
+    spec = dataclasses.replace(ROLE_DEFAULTS[role], work_room_levels=start_room(task, role))
     explicit = task.get("memory_view")
     if explicit is not None:
         problem = _explicit_problem(explicit)

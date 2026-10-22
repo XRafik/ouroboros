@@ -17,10 +17,10 @@ def frame(bound, physical=10**9):
 
 
 def test_role_budget_is_one_frame_and_reply_is_charged_once():
-    for role, kind, levels in (("integrator", "task", 2), ("consciousness", "chat", 2),
-                               ("integrator", "chat", 1), ("child", "task", 1)):
+    for role, facts, levels in (("integrator", {}, 2), ("consciousness", {"direct_chat": True}, 2),
+                                ("integrator", {"direct_chat": True}, 1), ("child", {}, 1)):
         actual = mf.floor_allowances(window_tokens=200_000, output_reserve_tokens=65_536,
-            non_memory_tokens=10_000, work_room_levels=cb.start_room_levels(role, kind))
+            non_memory_tokens=10_000, work_room_levels=cb.start_room_levels(role, **facts))
         assert actual["margin"] == 200_000 - 65_536 - 10_000 - levels * 25_000
         assert actual["physical"] == 200_000 - 65_536 - 10_000
     # Input-only limits use total-equivalent for physical arithmetic and the stated I for B/8.
@@ -91,11 +91,11 @@ def test_giveback_restores_small_earlier_elements_but_never_kept_choices():
 
 def test_capture_protects_governing_words_and_does_not_recapture_for_fitting(tmp_path):
     shared.world(tmp_path)
-    task = {"id": "turn0001", "chat_id": 1, "type": "task",
+    task = {"id": "turn0001", "chat_id": 1, "type": "task", "_is_direct_chat": True,
             "governing_owner_words": [{"text": "next please", "ref": "chat 1 / m1"}]}
     spec = mv.view_spec_for_task(task, tmp_path)
     snapshot = mv.capture_memory_view(tmp_path, task, spec)
-    assert snapshot.active and snapshot.spec.work_room_levels == 2
+    assert snapshot.active and snapshot.spec.work_room_levels == 1
     assert any(i.get("owner_side") and i.get("immune") for i in snapshot.room["lane1"])
     assert mv.snapshot_from_json(mv.snapshot_json(snapshot)) == snapshot
     before = mv.snapshot_json(snapshot)

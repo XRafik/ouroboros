@@ -88,9 +88,14 @@ RECLAIM_LOW_WATER_DIVISOR = 8
 #: An unknown reclaim target: the step takes everything its category can give (the refusal passes).
 WHOLE_CATEGORY = 2**31 - 1
 
-def start_room_levels(role: str, task_type: str = "chat") -> int:
-    """Roots and wakes leave two eighths; chat turns and helpers leave one."""
-    return 2 if role == "consciousness" or (role == "integrator" and task_type == "task") else 1
+def start_room_levels(role: str, *, focus_wake: bool = False, direct_chat: bool = False) -> int:
+    """Roots and wakes leave two eighths; direct chat turns, other Presence turns and helpers leave one.
+
+    Decided from task facts, never the task type (``memory_view.start_room`` reads them).
+    """
+    if role == "consciousness" or (role == "presence" and focus_wake):
+        return 2
+    return 2 if role == "integrator" and not direct_chat else 1
 
 
 def context_mode_limits(mode: str, owner_mode: str, output_reserve_tokens: int) -> Tuple[Optional[int], int]:
