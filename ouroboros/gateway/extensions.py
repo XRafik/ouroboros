@@ -270,7 +270,6 @@ def _build_extensions_index(drive_root, repo_path):
         return datetime.fromtimestamp(min(stamps), tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
     from ouroboros.extension_health import read_extension_health
-    from ouroboros.gateway.presence_settings import presence_runtime_card_projection
     from ouroboros.skill_review_runner import skill_review_ui_projection
     from ouroboros.tools.github import github_token_from_env_or_settings
     # Request-invariant: resolve the github-token state ONCE for the whole index, not
@@ -373,9 +372,6 @@ def _build_extensions_index(drive_root, repo_path):
                 else grant_status_for_skill(drive_root, s)
             ),
         })
-        presence_runtime = presence_runtime_card_projection(drive_root, s)
-        if presence_runtime is not None:
-            entry["presence_runtime"] = presence_runtime
         # Durable OuroborosHub publication receipt (state-plane, survives bucket
         # moves). Collision rows above deliberately never read state, so these
         # fields are absent there. published=null when no valid record exists;
@@ -992,14 +988,6 @@ async def api_skill_reconcile(request: Request) -> JSONResponse:
     _broadcast_extension_lifecycle(
         request, skill_name, state.get("action"), state.get("reason"),
     )
-    # Reconcile can flip grants/load state: refresh schedule readiness off the
-    # event loop because the schedule resync waits for a lock.
-    try:
-        from supervisor.queue import resync_skill_schedules
-
-        await asyncio.to_thread(resync_skill_schedules, drive_root)
-    except Exception:
-        log.debug("api_skill_reconcile schedule sync failed", exc_info=True)
     return JSONResponse(extension_reconcile_receipt(skill_name, state))
 
 

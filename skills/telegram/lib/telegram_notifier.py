@@ -235,6 +235,8 @@ def _announce_summary(row: Dict[str, Any], *, notify_all: bool) -> bool:
     """The existing toggle controls every extra finish notice, never ordinary replies."""
     if str(row.get("summary_kind") or "") != _ROOT_SUMMARY_KIND:
         return False
+    if row.get("quiet_effective") is True:
+        return False
     try:
         chat_id = int(row.get("chat_id") or 0)
     except (TypeError, ValueError):

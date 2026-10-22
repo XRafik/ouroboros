@@ -28,6 +28,7 @@ import { initSkills } from './modules/skills.js';
 import { initWidgets } from './modules/widgets.js';
 import { initUpdates } from './modules/updates.js';
 import { initActivity } from './modules/activity.js';
+import { initConsciousnessDashboard } from './modules/consciousness_dashboard.js';
 import { initUpdateStatus } from './modules/update_status.js';
 import { initDashboard } from './modules/dashboard.js';
 import { initStorage } from './modules/storage.js';
@@ -193,7 +194,7 @@ async function openSettingsTab(tabName) {
 }
 
 async function openDashboardTab(tabName) {
-    await showPage('dashboard');
+    if (!await showPage('dashboard')) return false;
     if (dashboardControls && typeof dashboardControls.activateTab === 'function') {
         dashboardControls.activateTab(tabName);
     }
@@ -1372,11 +1373,12 @@ initLogs({ ...ctx, mount: document.getElementById('dashboard-panel-logs') });
 const disposeEvolution = initEvolution({ ...ctx, mount: document.getElementById('dashboard-panel-evolution') });
 initUpdates({ ...ctx, mount: document.getElementById('dashboard-panel-updates') });
 initActivity({ ...ctx, mount: document.getElementById('dashboard-panel-activity') });
+initConsciousnessDashboard({ ...ctx, mount: document.getElementById('dashboard-panel-consciousness') });
 initCosts({ ...ctx, mount: document.getElementById('dashboard-panel-costs') });
 const disposeStorage = initStorage({ ...ctx, mount: document.getElementById('dashboard-panel-storage') });
 initSkills(ctx);
 initWidgets(ctx);
-initUpdateStatus(ctx);
+const updateStatus = initUpdateStatus(ctx);
 
 initOnboardingOverlay();
 
@@ -1387,6 +1389,7 @@ telegramHost.bind();
 window.addEventListener('pagehide', (event) => {
     if (event.persisted) return;
     disposeEvolution();
+    updateStatus.dispose();
     disposeStorage?.destroy();
     disposeScrollFades.forEach((dispose) => dispose());
     telegramHost.dispose();

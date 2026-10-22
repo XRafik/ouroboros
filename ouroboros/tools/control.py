@@ -176,7 +176,7 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("finish_task", {"name": "finish_task",
             "description": "Select the complete answer and request completion of your current task. "
                 "Use finish after considering the observed work, or stop with a rationale naming unfinished work. "
-                "Select exactly one of answer or a host-offered answer_sha256. On a consciousness wake's own turn, silent=true finishes with no owner-facing line (no answer needed; any answer stays internal), refused while your human awaits a reply. This grants no success, cancels no children, and retains all configured review and owner controls.",
+                "Select exactly one of answer or a host-offered answer_sha256. On a consciousness wake's own turn or a schedule-born root without a Presence binding, silent=true finishes with no owner-facing line (no answer needed; any answer stays internal), refused while your human awaits a reply. The run records no message unless a host notice is owed. This grants no success, cancels no children, and retains all configured review and owner controls.",
             "parameters": {"type": "object", "properties": {
                 "action": {"type": "string", "enum": ["finish", "stop"]}, "answer": {"type": "string", "description": "The complete answer, including a short correction; a root's owner reads it as your reply, a child's parent as your report."},
                 "answer_sha256": {"type": "string", "description": "Exact offered retained or whole held response hash."},
@@ -184,7 +184,7 @@ def get_tools() -> List[ToolEntry]:
                     "effective_criteria": {"type": "string"}, "material_tool_indices": {"type": "array", "items": {"type": "integer"}},
                 }, "required": ["owner_source_sha256"]},
                 "pending_review": {"type": "string", "enum": ["wait", "finish"], "default": "wait"},
-                "silent": {"type": "boolean", "default": False, "description": "Only a consciousness wake's own turn: end with no owner-facing line; the durable result records wake_silent."},
+                "silent": {"type": "boolean", "default": False, "description": "A consciousness wake or a schedule-born root without a Presence binding may finish without a message when no human reply is owed; any answer stays in the durable result as internal text (wake_silent)."},
             }, "required": ["action"]}}, _finish_task),
         ToolEntry("set_tool_timeout", {
             "name": "set_tool_timeout",
@@ -347,6 +347,7 @@ def get_tools() -> List[ToolEntry]:
                            "Project rooms included — identity is the same continuous file in every room.",
             "parameters": {"type": "object", "properties": {
                 "content": {"type": "string", "description": "Full identity content (prefer evolving over rewriting from scratch)"},
+                "expected_revision": {"type": "string", "description": "Required for an existing identity: source_revision (SHA-256 of bytes) from read_file. A stale revision refuses with the current revision."},
             }, "required": ["content"]},
         }, _update_identity),
         ToolEntry("toggle_evolution", {

@@ -372,13 +372,13 @@ data: {"seq":12,"type":"task_result","task_id":"…","data":{…}}
 - A v2 deadline emits `cursor_checkpoint`; changed lineage/view emits `cursor_replay` and may replay stored events. Diagnostics/checkpoints can reuse `seq`; replayed stored events can get a new `seq`. Process their cursor and diagnostic information even when that sequence was seen. Deduplicate stored v2 events by nonempty `event_id`; replace `task_result` snapshots with the latest snapshot. Do not assume v2 delivery is timestamp-sorted or `seq` identifies the same stored event across replay.
 
 **Schedules** start ordinary tasks later or repeatedly:
-- **List:** `GET /api/schedules` (`ScheduledTasksResponse`). Each row's `status` is `active`, `disabled`, `suppressed`, `consumed`, `held`, `waiting` or `delete_pending`. An unreadable table answers 503, never an empty list.
+- **List:** `GET /api/schedules` (`ScheduledTasksResponse`). Each row's `status` is `active`, `disabled`, `consumed`, `held`, `waiting` or `delete_pending` (a withdrawn row). Rows also carry `display_name`, `kind` (`note` or `task`), `timezone`, `destination`, `waiting_detail` and, once the schedule has run, the last run's `outcome` (`state`, `quiet`, `notice`, `ended_at`, `line`; `state` is `pending_observation` until the settled result is read). `previous_run_open` appears while the host sees the previous run still open; a withdrawn row carries `withdrawal` (`at`, `by`, `reason`, `work_in_flight`: true, false or null when unknown, `restorable`). An unreadable table answers 503, never an empty list.
 - **Create or edit:** `POST /api/schedules` (`ScheduleUpsertRequest`). An existing `id` edits that schedule; without an `id` a repeat creates another one. `ok` is true only when the audit record landed (`schedule.audit` is `recorded`). A 409 means nothing was written: the schedule table or its audit could not be used safely.
-- **Disable, delete, restore:** `POST /api/schedules/{id}/action` (`ScheduleActionRequest`: `action` and a required `reason`); `DELETE /api/schedules/{id}` also deletes. A refusal is also 200, with `ok: false`: `changed` is the durable fact and `status` says what happened. An action governs future runs only; `running_or_queued` reports a run it already admitted (`null` when unknown).
+- **Disable, delete, restore:** `POST /api/schedules/{id}/action` (`ScheduleActionRequest`: `action` and a required `reason`); `DELETE /api/schedules/{id}` also deletes. Delete withdraws (`status: withdrawn`): the row stays, disabled and restorable, until it is removed after the retention window once its work has settled; Restore cancels the withdrawal once no hold remains on it (`withdrawal.restorable`), and posting the same `id` edits the withdrawn row without restoring it. A refusal is also 200, with `ok: false`: `changed` is the durable fact and `status` says what happened. An action governs future runs only; `running_or_queued` reports a run it already admitted (`null` when unknown).
 
 **Downloading a result file:**
-- **Where:** `GET /api/tasks/{id}/artifacts/{name}` (optionally `relpath`, `archive` or `source`).
-- **Partial downloads:** byte ranges are supported. A `206` response is a byte slice, possibly an incomplete JSON document even when the original file was JSON, so do not parse it as a complete one.
+- **Where:** `GET /api/tasks/{id}/artifacts/{name}` (optionally one of `relpath`, `archive`, `source` or `wrap_up`).
+- **Partial downloads:** `206` is a byte slice, not whole JSON. Wrap up's copy is regenerated per request; never join its ranges across requests.
 - **Checking the bytes:** the `x-ouroboros-artifact-sha256` header gives the checksum when the core verified the bytes.
 - **Changed after recording:** `409 artifact_identity_changed` means the file changed after it was recorded.
 
@@ -413,7 +413,7 @@ data: {"seq":12,"type":"task_result","task_id":"…","data":{…}}
 
 `stop_policy` is `immediate` (also the omitted/empty default) or `finalize_then_cancel`. A graceful request cannot soften a previously recorded immediate Stop. Task detail has `cancel_state:"pending"` while cancellation is owed, otherwise the field is absent; there is no public `cancel_state:"settled"`.
 
-**Partial work.** There is no single `status:"partial"` lifecycle. Read `result`, artifacts and `outcome_axes` separately: the axes distinguish lifecycle, execution, objective, artifacts and review. Graceful wrap-up can produce best-effort output, immediate cancellation salvage, and natural completion wins a race with Stop. Cancellation does not delete recorded results/artifact evidence, but capture can fail or be missing. Artifact states include `pending`, `finalizing`, `ready`, `ready_with_changes`, `ready_no_changes`, `failed`, `missing`, and an inapplicable axis can say `not_applicable`. Read the actual file list rather than treating cancellation as no output.
+**Partial work.** No `status:"partial"` exists; read `result`, artifacts and `outcome_axes` separately. Graceful wrap-up can produce best-effort output, immediate cancellation salvage, and natural completion wins a race with Stop. Wrap up's `delegate_terminal_reconciliation.owner_stop_children` keeps child/run material and readers on any exit; detail `wrap_up_document` names its on-read Markdown; terminal execution is not final accounting; engine continuity grants no session transfer. Cancellation keeps recorded evidence; capture can fail or be missing. Artifact states: `pending`, `finalizing`, `ready`, `ready_with_changes`, `ready_no_changes`, `failed`, `missing`, `not_applicable`; read the file list.
 
 **Pause, continue, resume, hurry:**
 - **Pause:** `POST /api/tasks/{id}/pause` takes `{request_id}` and may declare who pressed: an interface sends `actor: "owner"` for the owner's own press, and a caller acting for Ouroboros sends `actor: "ouroboros"` with a `reason`, one sentence of at most 400 characters that the owner reads under the work's name. The declaration only names the Pause's author and grants no power; an `actor` the core does not know declares nobody, and a Pause that declared nobody is never shown as the owner's. Any other field answers 400. `202` with `latch_pending` means the pause is recorded and still taking hold; repeat the same `request_id`.
@@ -504,7 +504,7 @@ Files produced by tasks are covered in §6.
 - **Review:** `POST /api/skills/{skill}/review` answers 200 with the review's outcome (`SkillReviewResponse`). A review already running for the same revision answers `status: "pending"` with its `job_id`. `GET /api/skills/{skill}/review-history/{job_id}` renders a finished review.
 - **Attest a review:** `POST /api/owner/skills/{skill}/attest-review` records the owner's verdict: 200 with `ok: true` (possibly pending above), otherwise 409.
 - **Delete:** `POST /api/skills/{skill}/delete` removes an external or self-authored skill and its state; a repeat answers 404.
-- **Presence runtime:** `POST /api/owner/skills/{skill}/presence-runtime` changes a presence profile's runtime choice, compare-and-set on `expected_state_fingerprint`.
+- **Places:** `GET /api/places` returns place records and installed connector declarations; `POST /api/places` connects one connector. `POST /api/places/{place_id}` atomically edits owner-authored state, wakes, notes, confirmed accounts, folder and model; optional `expected_revision` detects concurrent edits. `DELETE /api/places/{place_id}` disconnects it while keeping room history. The detailed record and connector ingress are described in CREATING_SKILLS, “Places and focus transport ingress”.
 - **Publication check:** `POST /api/skills/{skill}/publish-preflight` is read-only; every status answers the same shape, and `state: "hard_block"` is a refusal. An optional body `{destination: {source_id, mode}}` (`SkillPublishPreflightRequest`; mode `origin`, `entry` or `new_entry`) picks where it would go; the answer's `repository` is that destination (default: where the skill came from, else the hub). Missing publication prerequisites may answer `409` before the skill is looked up; read `reason_code`, not an assumed `404` for an unknown name.
 - **Reconcile:** `POST /api/skills/{skill}/reconcile` brings one extension's live state in line with its saved state.
 
@@ -518,7 +518,7 @@ A refused action answers `SkillActionRefusal`: `error`, the `status_code` it was
 - `GET /api/extensions/{skill}/module/{entry}` serves reviewed module code (never cached, any origin may load it).
 - `POST /api/widgets/fault` (`WidgetFaultRequest`, `WidgetFaultResponse`) keeps one fault a running module widget's card shows as a `widget_fault` row of `GET /api/logs/events`: the card's `skill`, `tab_id` and `revision`, `where` (`board` or `message`) and the frame's `kind`, `message` (at most 500 characters), `source` (200) and `line`. The row has no task and is the page's report, not a verified execution. At most 10 rows per widget and 100 together are written per minute; past that the answer is `logged: false` and the widget's next row carries `suppressed_count`. `400` another shape, `413` a body past 8 KiB, `503` not written. A client may skip reporting.
 
-**Contributions (controls and speech engines):** `GET /api/ui/contributions`
+**Contributions (controls, speech engines and places):** `GET /api/ui/contributions`
 (`UiContributionsResponse`, `Cache-Control: no-store`) returns `contributions`,
 `offers.stt`, `icons`, `problems` (skill → warning strings), `preferences` and
 `voice`. The same fields appear beside `skills`/`live` in `GET /api/extensions`;
@@ -533,8 +533,17 @@ plus either `placement` or `provides`. Placement entries carry `action` and chip
 carry `source: {url, refresh_s}`. For `skill.request`, `action.url` and `route_url`
 name the host-computed absolute route; providers use `route_url`. Optional
 provider fields are `runtime`, `destination`, `languages`, `formats`,
-`install_size`, `max_bytes` and `max_seconds`. `icons` is the validator's icon
-catalog. `offers.stt` lists non-live built-in providers as
+`install_size`, `max_bytes` and `max_seconds`. Place providers require an extension
+with the `presence` permission, `id`, `label`, and `destination: vendor:<Name>`;
+`scope` defaults to `account` (or `conversation`), `wakes` lists typed wake facts,
+`source` uses the chip contract, `settings` names a section, and `read_only: provider`
+indicates provider support. Their `tools` list carries full names and declared
+`effect`, `target`, `conversation`, `thread` facts. No speech-engine runtime/route
+is required. `icon_spec` is `{kind:"host", name}` or `{kind:"svg", svg}` with
+sanitized geometry, else `{}` for the fallback; the `icon` declaration remains
+a host name or `ui/icon.svg`. SVG assets carry sandbox CSP. Installed and Browse
+rows expose `connects` (boolean) and `icon` (the same spec); absent catalog fields
+remain compatible. `icons` is the host glyph catalog. `offers.stt` lists non-live built-in providers as
 `{skill, skill_label, id, label, destination, install_size, enabled: false, installed}`;
 `installed: false` names a built-in this install has not installed (clients send the
 owner to the Skills page's Browse, where the built-in source installs it).
@@ -674,7 +683,7 @@ Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, mainten
   - `running_sha`: the commit this core started from; `current_sha`: the checkout's;
   - `available` and `safe_to_apply`;
   - `update_tx`: the update transaction in progress (`{active: false}` when none);
-  - `update_progress`: this process's in-memory progress (`{}` when none);
+  - `update_progress`: the last admitted update attempt (`{}` only when absent; unreadable state is `outcome:unknown`). `operation_id` and `generation` identify it; `current_generation`, `stage`, `active`, `result`, `outcome` and `concluded_by` separate progress from conclusion. `base_sha`, `target_sha`, `keep_branch` and `stash_note` retain exact source/local-work facts when known. `outcome` is applied/not_applied/rolled_back/failed/unknown, empty while unresolved. It is observation, never recovery authority; a pre-admission refusal remains its HTTP answer;
   - `letter`: the written description of the update, when there is one;
   - `check_ok`: null on status.
 - `POST /api/update/check` fetches first, may write the update letter and broadcasts `update_progress_changed`.
@@ -685,9 +694,9 @@ Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, mainten
 - **Replacement not applied:** 409 `reason: replace_not_applied`, `abandoned: true` means Git refused the first tree-changing command because its index lock was held. The transaction is disarmed without rollback; `rescue` and `keep_branch` disclose retained preparation artifacts. The lock is untouched. Diagnose it before another deliberate attempt; age alone never authorizes removal. Other partial or unknown failures keep fenced recovery and their error.
 - **What `200` means:** inspect `status`, not HTTP success alone. `ok` with `restarting:true` means a restart was requested, not adoption. `assisted_started` means a supervised task owns resolution. `manual` returns a plan without applying or restarting. `restart_required` means the restart that finishes the apply could not be requested (a store-less replace has not moved the checkout yet); show its error and offer the ordinary restart control.
 - **Watching it:**
-  - `update_progress_changed` frames mean "read the status again" (progress is kept in memory only).
+  - `update_progress_changed` frames mean "read the status again"; stages are live; the saved last admitted attempt and conclusion survive restart. `retention_unconfirmed:true` reports a failed or refused save without changing the update result; a never-saved attempt cannot be recovered after process loss. An update check does not erase saved results. The indicator may hide a dismissed terminal attempt locally; the panel retains it until the next attempt.
   - After reconnecting, confirm the executing generation (`running_sha`) against the landed transaction/`merge_commit` identity reported by the update, not blindly against the preflight's official `target_sha`. Preserving local commits can create a distinct two-parent merge. Until the landed identity and completed startup are known, adoption remains unconfirmed.
-  - A core whose startup check fails can roll back and restart again.
+  - A core whose startup check fails can roll back and restart again. An assisted-resolution rollback completed in the same generation may have no retained conclusion and display an unconfirmed outcome.
   - `update_status_ready` arrives after a fresh start.
 - **Retrying:** there is no idempotency key. A non-manual request can answer 409 while an update is active or its expected base/target no longer matches; `manual` may return another plan. When an outcome is unknown, read status and transaction facts before deciding—never infer failure or resend from a dropped connection.
 
