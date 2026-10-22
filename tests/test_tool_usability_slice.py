@@ -187,7 +187,6 @@ def test_read_file_on_an_admitted_directory_returns_the_listing_call(tmp_path):
     text = core_file_tools._read_file(ctx, "src")
     assert text.startswith("⚠️ NOT_FOUND: active_workspace:src is a directory, not a file.")
     assert f'list_files(root="active_workspace", path={json.dumps(str(ctx.repo_dir / "src"))})' in text
-    assert f'list_files(root="active_workspace", path={json.dumps(str(ctx.repo_dir / "src"))}, depth=3, include="*.py")' in text
     assert LegacyTextResultAdapter.from_text("read_file", text).code == "LEGACY_WARNING"
     assert ctx.last_read_view is None
 

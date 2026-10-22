@@ -888,7 +888,7 @@ def _read_file(
             if normalized == "skill_payload" else "")
         return _publish_tool_result(ctx, ToolResult(status="ok", code="LEGACY_WARNING", text=(
             f"⚠️ NOT_FOUND: {_root_display_path(normalized, opened)} is a directory, not a file. List it:\n"
-            f"  {call})\n  {call}, depth=3, include=\"*.py\")  # bounded tree of matching files")))
+            f"  {call})")))
     if normalized in {"active_workspace", "system_repo", "runtime_data"}:
         reader, display_path = ((_data_read, _root_display_path(normalized, path)) if normalized == "runtime_data" else
                                 (_repo_read, f"{target} (project room)" if binding.source == "project_room"
