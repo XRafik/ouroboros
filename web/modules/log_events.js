@@ -4,7 +4,7 @@ import { TASK_CAUSE_PHRASES, taskReasonPhrase, describedCause, reasonCodesNote }
 export { taskReasonPhrase, reasonCodesNote } from './task_reason_words.js';
 import { taskCheckpointLabel, taskCheckpointIdentity, checkpointHasProgressRow } from './task_checkpoints.js';
 export { taskCheckpointLabel } from './task_checkpoints.js';
-import { harnessPresentation } from './harness_presentation.js';
+import { coordinatorRouteClause, formatCoordinatorProvenance, harnessPresentation } from './harness_presentation.js';
 import { acceptanceIncidentClauses } from './acceptance_incident_presentation.js';
 import { fmt, tr } from './i18n.js';
 import { historyRetentionView } from './history_retention.js';
@@ -143,6 +143,7 @@ const SUBSTRATE_NOTE = {
 // title alone is invisible on touch, to AT and in copies. `hasEvidence`,
 // `observation`, `sourceTs` and the revision feed keepStickyExecutorChip.
 export function executorChip(evt) {
+    const coordinatorProvenance = formatCoordinatorProvenance(evt);
     const raw = evt?.executor_observation;
     const observation = raw && raw.task_id === String(evt?.subagent_task_id || evt?.task_id || '')
         && raw.run_id && raw.attempt_id && raw.harness_id && Number.isInteger(raw.revision)
@@ -161,6 +162,7 @@ export function executorChip(evt) {
             sourceTs: Date.parse(evt?.ts || evt?.timestamp || '') || 0,
             label: `${name} · last update`,
             title: `Latest observed activity: ${name}, ${model ? `model ${model} (${observation.model_source})` : 'model unconfirmed'}, run ${observation.run_id}, attempt ${observation.attempt_id}, revision ${observation.revision}. This is progress, not a terminal execution receipt.`,
+            ...(coordinatorProvenance ? { coordinatorProvenance } : {}),
         };
     }
     const route = String(evt?.executor_route || '').trim();
@@ -170,7 +172,10 @@ export function executorChip(evt) {
     const harness = route.split('=')[0].trim().toLowerCase();
     if (!harness) return null;
     const name = harnessPresentation(harness).label;
-    const base = { harness, label: name, sourceTs: Date.parse(evt?.ts || evt?.timestamp || '') || 0 };
+    const base = {
+        harness, label: name, sourceTs: Date.parse(evt?.ts || evt?.timestamp || '') || 0,
+        ...(coordinatorProvenance ? { coordinatorProvenance } : {}),
+    };
     const chip = (hasEvidence, phrase, title) => ({ ...base, hasEvidence, label: phrase ? `${name} · ${phrase}` : name, title });
     // LAYERED TRUTH: identity (mark + product name) comes from the
     // harness_presentation SSOT; the route is a DISPATCH decision; whether a
@@ -200,7 +205,7 @@ export function executorChip(evt) {
         // either way, and under the pre-start charter the leaf usually IS running
         // by now: an evidence-grade negative ("no run yet") would be false for most
         // of the live phase. The bare name states the assignment the frame carries.
-        return chip(false, '', `Dispatched to ${name} — run evidence arrives with the terminal receipt; this subagent itself runs on the API`);
+        return chip(false, '', `Dispatched to ${name} — run evidence arrives with the terminal receipt; ${coordinatorRouteClause(evt)}`);
     }
     const started = Number(evidence.delegated_runs_started || 0);
     const settled = Number(evidence.delegated_runs_settled || 0);

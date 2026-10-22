@@ -362,6 +362,9 @@ def _golden() -> dict[str, dict]:
 # unavailable. Keep the historical corpus intact and assert the new observed
 # outcome explicitly rather than manufacture old evidence (04-AGENCY S1/S3).
 CURRENT_PRODUCER_CONTRACTS = {
+    # D1 per-target mutation custody: the existing INTEGRATE_ family reports a
+    # busy target as a substrate refusal; no historical answer is fabricated.
+    "INTEGRATE_DELEGATED_TARGET_BUSY": (True, "integration_blocked"),
     # Q: the bare warning is legacy ok; the native error keeps a sent write unknown and says do not resend.
     "GH_WRITE_UNKNOWN": (False, "ok"),
     "native:TOOL_ERROR:GH_WRITE_UNKNOWN": (True, "error"),

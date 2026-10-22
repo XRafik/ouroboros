@@ -90,6 +90,8 @@ def _reserve_parallel_review_roster(ctx, prepared) -> None:
         return
     ctx._review_reserved_operations = operations
     ctx._review_reserved_roster = {"multi_model_review": rows}
+    from ouroboros.review_waiting import bind_roster
+    bind_roster(ctx, rows)
     from ouroboros.config import get_finalization_grace_sec
     from ouroboros.deadline_utils import owner_deadline_exhausted_for_context
 
@@ -396,7 +398,9 @@ def run_parallel_review(
             else:
                 from ouroboros.review_history_view import queue_review_history_context
                 try:
-                    with _cf.ThreadPoolExecutor(max_workers=1) as pool:
+                    from ouroboros.review_wave import review_wave_scope
+
+                    with review_wave_scope(), _cf.ThreadPoolExecutor(max_workers=1) as pool:
                         # The wave runs under a COPY of the admitting context
                         # (contextvars.copy_context, the loop_tool_execution and
                         # plan_review precedent): the usage scope the wave was

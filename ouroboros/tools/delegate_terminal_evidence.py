@@ -456,6 +456,12 @@ def resolved_terminal_payload(run_id, detail, authority, entry=None, gateway=Non
     full = _terminal_payload(run_id, detail, authority, entry=entry)
     if entry is not None:
         _delegate().add_terminal_source_verification(full, entry)
+        if entry.mode == "plan":
+            from ouroboros.delegate_plan import terminal_plan
+
+            full["plan"] = terminal_plan(entry, gateway, detail)
+        if entry.promotion:
+            full["promotion"] = dict(entry.promotion)
         if entry.superseded_by:  # its snapshot and work belong to that continuation's one capture now
             full["superseded_by"] = entry.superseded_by
     # Requested-vs-applied model, the review lane's own lexicon and rule

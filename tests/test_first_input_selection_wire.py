@@ -173,6 +173,7 @@ def _episode(tmp_path, monkeypatch, model, selection):
                           drive_path=lambda p: drive / p)
     registry = ToolRegistry(repo_dir=repo, drive_root=drive)
     registry._ctx.task_id = task["id"]
+    registry._ctx.task_attempt = task.get("_attempt") or 1
     registry._ctx.task_constraint = task["task_constraint"]
     registry._ctx.workspace_root = workspace
     registry._ctx.workspace_mode = "external"
@@ -271,7 +272,8 @@ def test_native_loop_retains_first_position_then_cooperates_over_http(tmp_path, 
         assert not model.errors, model.errors
         assert final == "Cooperation complete.", (final, usage, trace)
         assert model.script_consumed()
-        assert all(not row["is_error"] for row in trace["tool_calls"]), trace["tool_calls"]
+        errors = [row for row in trace["tool_calls"] if row["is_error"]]
+        assert not errors, errors
         assert len(model.received) == 8
         assert model.first_retained_at == 6
         bodies = [json.loads(Path(row["path"]).read_bytes()) for row in model.received]
