@@ -655,7 +655,7 @@ def pytest_runtest_protocol(item, nextitem):  # noqa: ARG001
         loops.append(asyncio.new_event_loop())
         item.stash[_PHASE_EVENT_LOOPS] = loops
         if _SAFE_TEMP_ROOT:
-            item.stash[_RETENTION_BEFORE_ITEM] = _basetemp_witness(item.config)
+            item.stash[_RETENTION_BEFORE_ITEM] = _basetemp_witness(item)
         yield
     finally:
         # The call and teardown hooks close their loops and fail that phase if a close raises;
@@ -1398,16 +1398,15 @@ _RETENTION_BEFORE_ITEM = pytest.StashKey()
 _BASETEMP_DECLARATION: list = []  # this process's, looked up once
 
 
-def _basetemp_witness(config):
-    if not _BASETEMP_DECLARATION:
-        from ouroboros.test_environment import SCRATCH_MARKER
-        factory = getattr(config, "_tmp_path_factory", None)
-        base = pathlib.Path(factory.getbasetemp()) if factory is not None else None
-        _BASETEMP_DECLARATION.append(base and next((path / SCRATCH_MARKER for path in (base, *base.parents)
-                                                    if (path / SCRATCH_MARKER).is_file()), None))
+def _basetemp_witness(item):
     try:
+        if not _BASETEMP_DECLARATION:
+            from ouroboros.test_environment import SCRATCH_MARKER
+            base = pathlib.Path(item.config._tmp_path_factory.getbasetemp())
+            _BASETEMP_DECLARATION.append(next((path / SCRATCH_MARKER for path in (base, *base.parents)
+                                               if (path / SCRATCH_MARKER).is_file()), None))
         return _BASETEMP_DECLARATION[0].stat().st_mtime_ns
-    except (AttributeError, OSError):
+    except (AttributeError, OSError):  # no basetemp or declaration: the tmp_path top check remains
         return None
 
 
@@ -1417,7 +1416,7 @@ def _fail_if_retention_was_left(item, tmp):
 
     if _RETENTION_BEFORE_ITEM not in item.stash or not isinstance(tmp, pathlib.Path):
         return
-    moved = _basetemp_witness(item.config) != item.stash[_RETENTION_BEFORE_ITEM]
+    moved = _basetemp_witness(item) != item.stash[_RETENTION_BEFORE_ITEM]
     left = retention_left_in(tmp) if moved or (tmp / RETENTION_MARKER).exists() else ""
     if left:
         pytest.fail(f"{item.nodeid} left retention in its tmp_path, which keeps the whole run root "
