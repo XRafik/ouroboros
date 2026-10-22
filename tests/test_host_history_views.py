@@ -1,4 +1,7 @@
 """Unasked host history carries addresses; retirement belongs to an applied fold."""
+import copy
+from types import SimpleNamespace
+
 import pytest
 
 from ouroboros import context_compaction as cc
@@ -27,6 +30,44 @@ def test_a_fold_cannot_retire_host_arrivals_its_checkpoint_did_not_observe():
     receipt = {"status": "applied", "selection_fingerprint": "fold", "checkpoint_ref": {"path": "exact"}}
     assert retire_host_rows_after_fold([old, late, latest], receipt, observed_messages=[old]) == [late, latest]
     assert retire_host_rows_after_fold([old, late, latest], receipt, observed_messages=[]) == [old, late, latest]
+
+
+@pytest.mark.parametrize("keep_old", [False, True])
+def test_applied_fold_preserves_selected_host_snapshots_and_reports_only_final_retained_units(tmp_path, monkeypatch, keep_old):
+    from ouroboros.loop_round_limits import _run_round_compaction
+    from ouroboros.tools.compact_context import _compact_context, record_context_view
+    from tests.test_context_view_tool import _context, _source
+
+    old, new = (bound_host_row(CONTEXT_FACTS_NAME, text) for text in (
+        "Earlier measured condition for comparison", "Current measured condition"))
+    messages = _source()
+    messages[2:2] = [old, new]
+    units = cc.context_units(messages, scope="dialogue")
+    old_unit, new_unit, tool_unit = units
+    ctx = SimpleNamespace(active_context_mode="low")
+    record_context_view(ctx, messages, [])
+    # This physical observation confirms only the current facts and tool result.
+    # An unselected old row stays raw until the host's checkpointed retirement.
+    ctx._last_context_observation["exposed_units"] = [
+        {"unit_id": unit.unit_id, "raw_sha256": unit.raw_sha256} for unit in (new_unit, tool_unit)]
+    keep = [new_unit.unit_id, *([old_unit.unit_id] if keep_old else [])]
+    response = _compact_context(ctx, working_note="I folded the tool evidence and kept the selected measurements.",
+                                keep_unit_ids=keep)
+    assert "requested" in response
+    current = copy.deepcopy(messages)
+    current[2]["cache_control"] = {"type": "ephemeral"}
+    current += [{"role": "assistant", "tool_calls": [{"id": "compact", "function": {
+        "name": "compact_context", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "compact", "content": response}]
+    result = _run_round_compaction(current, _context(tmp_path, ctx, [], monkeypatch))
+    receipt = ctx._context_view_receipt
+    assert receipt["status"] == "applied"
+    assert (current[2] in result) is keep_old
+    assert new in result and messages[-1] not in result
+    assert set(receipt["retained_unit_ids"]) == set(keep)
+    assert receipt.get("retired_host_row_ids", []) == (
+        [] if keep_old else [cc._sha256(cc._canonical_json(current[2]))])
+    assert current[-2] in result and current[-1] in result
 
 
 def test_predecessor_history_is_omitted_with_size_and_reader():

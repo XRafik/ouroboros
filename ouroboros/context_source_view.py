@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pathlib
 import json
-from collections import Counter
+from collections import Counter, defaultdict, deque
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
 
@@ -60,21 +60,38 @@ def _obsolete_host_rows(messages: Sequence[Mapping[str, Any]]) -> set[int]:
 
 
 
-def retire_host_rows_after_fold(messages: list, receipt: dict, *, observed_messages=()) -> list:
-    """Retire only superseded typed host rows inside an applied, checkpointed authored fold."""
+def retire_host_rows_after_fold(messages: list, receipt: dict, *, observed_messages=(), keep_unit_ids=()) -> list:
+    """Retire unselected superseded host rows inside an applied, checkpointed authored fold."""
     if receipt.get("status") != "applied" or not receipt.get("selection_fingerprint") or not receipt.get("checkpoint_ref"):
         return messages
     def identity(row):
         return compaction.context_reclaim_transcript_sha256(compaction._view_source_messages([row]))
-    retained = Counter(identity(row) for row in observed_messages)
-    obsolete = set()
-    for i in sorted(_obsolete_host_rows(messages)):
-        key = identity(messages[i])
-        if retained[key]:  # only the observed checkpoint owns these exact bytes; arrivals stay whole
-            retained[key] -= 1
+    units = compaction.context_units(observed_messages, scope="dialogue")
+    kept = {unit.unit_id for unit in units} if keep_unit_ids is None else set(keep_unit_ids)
+    kept |= compaction.owner_protected_unit_ids(observed_messages, units)
+    protected_positions = {i for unit in units if unit.unit_id in kept for i in range(unit.start, unit.end + 1)}
+    folded_positions = {i for unit in units if unit.unit_id in receipt.get("selected_unit_ids", ())
+                        for i in range(unit.start, unit.end + 1)}
+    observed_positions = defaultdict(deque)
+    for i, row in enumerate(observed_messages):
+        if i not in folded_positions:
+            observed_positions[identity(row)].append(i)
+    obsolete, retired_positions = set(), set()
+    superseded = _obsolete_host_rows(messages)
+    for i, row in enumerate(messages):
+        positions = observed_positions[identity(row)]
+        if not positions:
+            continue  # arrivals have no occurrence in the observed checkpoint
+        original = positions.popleft()
+        if i in superseded and original not in protected_positions:
             obsolete.add(i)
+            retired_positions.add(original)
     if not obsolete:
         return messages
+    retired_units = {unit.unit_id for unit in units
+                     if any(i in retired_positions for i in range(unit.start, unit.end + 1))}
+    receipt["retained_unit_ids"] = tuple(unit_id for unit_id in receipt.get("retained_unit_ids", ())
+                                         if unit_id not in retired_units)
     receipt["retired_host_row_ids"] = [str(messages[i].get("msg_id") or
         compaction._sha256(compaction._canonical_json(messages[i]))) for i in sorted(obsolete)]
     receipt["retired_host_rows_source"] = receipt["checkpoint_ref"]
