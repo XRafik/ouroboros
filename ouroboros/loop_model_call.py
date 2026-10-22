@@ -1477,13 +1477,13 @@ def _recover_context_overflow(ctx: _RoundModelCallContext, failed_capture: Any, 
     if fit is None:
         return None, cost, ctx.active_context_mode
     target, slack = _refusal_target(ctx, fit, failed_capture)
+    real = getattr(failed_capture, "predicted_free_tokens", None) is None  # the round's start: a provider's, not an estimate
     for steps in ((WAKE_DELIVERY_STEP,),) * bool(prepared) + REFUSAL_PASSES:
         if steps != (WAKE_DELIVERY_STEP,):
             key = (fit.measurement.round_id, "+".join(steps))  # once per round, never re-armed for a route
             if key in done:
                 continue
             done.add(key)
-            real = getattr(failed_capture, "predicted_free_tokens", None) is None  # a provider's, never an estimate
             if not _apply_refusal_pass(ctx, steps, fit, target, slack, real):
                 continue
         fit = _loop()._measure_round_main_fit(ctx, automatic_pass_used=True)
@@ -1520,9 +1520,9 @@ def _apply_refusal_pass(ctx: _RoundModelCallContext, steps: Tuple[str, ...], fit
     Each step is sized by what the earlier steps of the pass left of the target: host copies that
     already freed the room leave every body in place, and memory the floor narrowed enough addresses
     no unseen body (the gradual order the owner asked for). An unknown target lets each step take its
-    whole category. A just-chosen body that fits alone goes last, only for a provider's ``refused``
-    request the late rescue's other steps could not answer: the measured target left, or nothing
-    changed against an unknown one (owner 2A).
+    whole category. A just-chosen body that fits alone goes last, only in a round a provider's refusal
+    started (``refused``) and only for what the late rescue's other steps could not answer: the measured
+    target left, or nothing changed against an unknown one (owner 2A).
     """
     changed, remaining = False, target
     for step in steps:
