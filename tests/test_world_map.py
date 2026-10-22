@@ -37,8 +37,9 @@ def test_refresh_fences_a_legacy_first_boot_profile_once_and_keeps_later_notes(t
     _fake_measured(monkeypatch, "now")
     path = tmp_path / "WORLD.md"
     path.write_text(
-        "# WORLD.md — Environment Profile\n\nThis is where I currently exist.\n\n## System\n- **OS**: old\n\n"
-        "## Available Tools\n`git`\n\n## File System Rules\n- `/r` contains my codebase.\n\n"
+        "# WORLD.md — Environment Profile\n\nThis is where I currently exist. It defines my hardware, OS, and local "
+        "constraints.\n\n## System\n- **OS**: old\n\n## Available Tools\nThe following binaries are available in my "
+        "PATH:\n`git`\n\n## File System Rules\n- `/r` contains my codebase.\n\n"
         "*(Generated automatically on first boot)*\n\n## My notes\n- kept\n", encoding="utf-8")
 
     assert wprof.refresh_world_profile(str(path)) is True
@@ -69,13 +70,25 @@ def test_refresh_keeps_unrecognized_text_whole_and_tolerates_crlf(tmp_path, monk
 
 def test_a_stock_profile_with_one_mind_line_is_kept_whole(tmp_path, monkeypatch):
     _fake_measured(monkeypatch, "now")
-    path = tmp_path / "WORLD.md"
-    path.write_text(
-        "# WORLD.md — Environment Profile\n\n## System\n- **OS**: old\n\n## File System Rules\n"
-        "- `/r` contains my codebase.\n- `/tmp/inbox.sock` is the channel I found\n\n"
-        "*(Generated automatically on first boot)*\n", encoding="utf-8")
+    stock = ("# WORLD.md — Environment Profile\n\n## System\n- **OS**: old\n\n## Available Tools\n"
+             "The following binaries are available in my PATH:\n`git, python3`\n\n## File System Rules\n"
+             "- `/r` contains my codebase.\n- `/d` contains my memory, state, and logs.\n")
+    footer = "\n*(Generated automatically on first boot)*\n"
+    # Lines that only LOOK like generated ones are the mind's: a root-shaped bullet with other words, a
+    # lone backticked command, a bullet that reads like a tool line, a heading that extends a stock one.
+    for mind_line in ("- `/data/agents` contains my owner's other agent sessions; use their documented inbox.",
+                      "`peer-review send --socket /tmp/peer.sock --as Ouroboros`",
+                      "- `/tmp/inbox.sock` is the channel I found",
+                      "## System notes\n- the Pi answers on ssh"):
+        path = tmp_path / "WORLD.md"
+        path.write_text(stock + mind_line + "\n" + footer, encoding="utf-8")
+        assert wprof.refresh_world_profile(str(path)) is True
+        text = path.read_text(encoding="utf-8")
+        assert mind_line in text and "- **OS**: old" in text, mind_line
+    # The untouched stock profile itself is replaced.
+    path.write_text(stock + footer, encoding="utf-8")
     assert wprof.refresh_world_profile(str(path)) is True
-    assert "- `/tmp/inbox.sock` is the channel I found" in path.read_text(encoding="utf-8")
+    assert "- **OS**: old" not in path.read_text(encoding="utf-8")
 
 
 def test_the_first_fencing_replaces_nothing_when_its_pre_image_cannot_be_journaled(tmp_path, monkeypatch):

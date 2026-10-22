@@ -33,16 +33,22 @@ _FENCE_RE = re.compile(r"^" + re.escape(MEASURED_START) + r"[ \t\r]*$.*?^" + re.
                        re.S | re.M)
 _LEGACY_FOOTER = "*(Generated automatically on first boot)*"
 _LEGACY_MEASURED_HEAD = "## System"
-# Every non-blank line a stock first-boot profile could carry between its title and footer;
-# any other line there is the mind's and makes the file lossless-insert territory.
-_STOCK_LINE_STARTS = (
-    "## System", "- **OS**:", "- **CPU**:", "- **RAM**:", "- **User**:", "- **Current Directory**:",
-    "## Available Tools", "The following binaries are available in my PATH:",
-    "## File System Rules", "I should generally confine my writes", "I live inside",
-    "This is where I currently exist", _LEGACY_FOOTER,
-)
-# The two stock lines that start like ordinary Markdown (a backticked tool list, a root bullet).
-_STOCK_LINE_RES = (re.compile(r"^`[^`]*`$"), re.compile(r"^- `[^`]*` contains my "))
+# The exact lines the first-boot generators ever wrote between the title and the footer, each matched
+# whole; the backticked tool list counts only right after its introducing sentence. A file whose
+# generated span is anything else was touched by the mind and is kept whole.
+_STOCK_PATH_SENTENCE = "The following binaries are available in my PATH:"
+_STOCK_LINES = tuple(re.compile(pattern) for pattern in (
+    r"^This is where I currently exist\. It defines my hardware, OS, and local constraints\.$",
+    r"^## System$", r"^- \*\*OS\*\*: .*$", r"^- \*\*CPU\*\*: .*$", r"^- \*\*RAM\*\*: .*$",
+    r"^- \*\*User\*\*: .*$", r"^- \*\*Current Directory\*\*: .*$",
+    r"^## Available Tools$", "^" + re.escape(_STOCK_PATH_SENTENCE) + "$",
+    r"^## File System Rules$", r"^I live inside `~/Ouroboros/`\.$",
+    r"^- `[^`]*` contains my codebase\.$", r"^- `[^`]*` contains my memory, state, and logs\.$",
+    r"^I should generally confine my writes to these directories, though I have read access to the rest "
+    r"of the filesystem if needed for exploration\.$",
+    "^" + re.escape(_LEGACY_FOOTER) + "$",
+))
+_STOCK_TOOL_LINE = re.compile(r"^`[^`]*`$")
 TITLE = "# WORLD.md — My map of my world"
 _INTRO = (
     "The measured block below is the host's and refreshes at every startup; everything outside it is "
@@ -145,17 +151,21 @@ def _insert_after_title(text: str, block: str) -> str:
 
 
 def _is_stock_legacy_profile(text: str) -> bool:
-    """A first-boot profile whose generated span holds nothing the mind wrote."""
+    """A first-boot profile whose generated span is exactly what a generator wrote, line by line."""
     head_at, foot_at = text.find(_LEGACY_MEASURED_HEAD), text.find(_LEGACY_FOOTER)
     if not text.startswith("# WORLD.md") or not (0 <= head_at < foot_at):
         return False
-    span_lines = text[:foot_at + len(_LEGACY_FOOTER)].splitlines()[1:]  # after the title line
-    for line in span_lines:
+    previous = ""
+    for line in text[:foot_at + len(_LEGACY_FOOTER)].splitlines()[1:]:  # after the title line
         stripped = line.strip()
-        if not stripped or stripped.startswith(_STOCK_LINE_STARTS):
+        if not stripped:
             continue
-        if not any(pattern.match(stripped) for pattern in _STOCK_LINE_RES):
+        if _STOCK_TOOL_LINE.match(stripped):
+            if previous != _STOCK_PATH_SENTENCE:
+                return False
+        elif not any(pattern.match(stripped) for pattern in _STOCK_LINES):
             return False
+        previous = stripped
     return True
 
 
