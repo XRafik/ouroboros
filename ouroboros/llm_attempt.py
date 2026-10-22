@@ -110,13 +110,10 @@ def require_physical_dispatch_window() -> Optional[float]:
     confirmed handoff only this exact attempt may proceed through later SDK
     checks. Stop and execution deadlines remain effective; packet timing is opaque.
     """
-    from ouroboros.model_wait import current_model_wait, dispatch_deadline_remaining_sec
-    from ouroboros.owner_pause import RAIL_OWNER_PAUSE, scope_fence, model_handed_off
+    from ouroboros.model_wait import current_model_wait, dispatch_control_reason, dispatch_deadline_remaining_sec
+    from ouroboros.owner_pause import model_handed_off
 
-    owner = current_model_wait()
-    reason = owner.control_reason(strict_current=not model_handed_off()) if owner is not None else None
-    if not reason and not model_handed_off() and scope_fence():
-        reason = RAIL_OWNER_PAUSE
+    reason = dispatch_control_reason(current_model_wait(), handed_off=model_handed_off())
     if reason:
         raise _PhysicalSendNotStarted(reason)
     remaining = dispatch_deadline_remaining_sec()
