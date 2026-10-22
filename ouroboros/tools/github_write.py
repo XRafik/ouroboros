@@ -163,7 +163,7 @@ def _expectation(write: _Write, number: int) -> str:
     expect = write.args.get("expect") or {}
     if not isinstance(expect, dict):
         return write.refuse("⚠️ TOOL_ARG_ERROR: expect must be an object with head_sha, state and/or updated_at.")
-    wanted = {k: str(v) for k, v in expect.items()}
+    wanted = {k: str(v) for k, v in expect.items() if k in ("head_sha", "state", "updated_at") and v not in (None, "")}
     if not wanted:
         return ""
     res = _gh_api(write.ctx, f"repos/{{owner}}/{{repo}}/{'pulls' if 'head_sha' in wanted else 'issues'}/{number}", repo=write.repo)

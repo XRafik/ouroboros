@@ -282,16 +282,57 @@ def test_api_sends_rest_mutations_and_graphql_mutations_and_names_the_effect(gh)
     {"method": "api", "route": "repos/{owner}/{repo}/issues/7", "http_method": "PATCH"},
     {"method": "create_issue", "title": "T"},
 ])
-def test_unsupported_expect_is_typed_and_never_sent(gh, args):
-    text = gh.write(**args, expect={"state": "open"})
+@pytest.mark.parametrize("value", ["open", "", None])
+def test_unsupported_expect_is_typed_and_never_sent(gh, args, value):
+    text = gh.write(**args, expect={"state": value})
     assert "cannot check it" in text and not gh.calls
     assert gh.result.code == "TOOL_ARG_ERROR" and gh.result.meta["operation_outcome"] == "completed_no_effect"
 
 
 @pytest.mark.parametrize("method", github_write.METHODS)
-def test_unknown_expect_key_is_never_ignored(gh, method):
-    gh.write(method=method, target=7, body="x", title="T", expect={"expected_head_sha": SHA})
+@pytest.mark.parametrize("value", [SHA, "", None])
+def test_unknown_expect_key_is_never_ignored(gh, method, value):
+    gh.write(method=method, target=7, body="x", title="T", expect={"expected_head_sha": value})
     assert gh.result.code == "TOOL_ARG_ERROR" and "unknown expect key" in gh.result.text and not gh.calls
+
+
+@pytest.mark.parametrize("blank", ["", None])
+def test_blank_head_expect_checks_issue_state_before_commenting(gh, blank):
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7)) if p.method == "GET" else json.dumps(_comment(1, body="x"))
+    _line, receipt = _receipt(gh.write(method="comment", target=7, body="x", expect={"head_sha": blank, "state": "open"}))
+    assert receipt["outcome"] == "confirmed"
+    assert gh.sent() == [("GET", "repos/{owner}/{repo}/issues/7", None),
+                         ("POST", "repos/{owner}/{repo}/issues/7/comments", {"body": "x"})]
+
+
+@pytest.mark.parametrize("state", ["open", "closed"])
+def test_comment_state_expectation_still_checks_before_posting(gh, state):
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7)) if p.method == "GET" else json.dumps(_comment(1, body="x"))
+    text = gh.write(method="comment", target=7, body="x", expect={"state": state})
+    assert gh.sent()[0] == ("GET", "repos/{owner}/{repo}/issues/7", None)
+    if state == "open":
+        assert _receipt(text)[1]["outcome"] == "confirmed" and [s[0] for s in gh.sent()] == ["GET", "POST"]
+    else:
+        assert "GH_EXPECTATION_FAILED" in text and "state is 'open', expected 'closed'" in text
+        assert gh.result.meta["operation_outcome"] == "completed_no_effect" and len(gh.sent()) == 1
+
+
+@pytest.mark.parametrize("blank", ["", None])
+def test_all_blank_expect_values_need_no_precondition_read(gh, blank):
+    gh.answer = lambda p, argv, kw: json.dumps(_comment(1, body="x"))
+    _line, receipt = _receipt(gh.write(method="comment", target=7, body="x",
+                                     expect={"head_sha": blank, "state": blank, "updated_at": blank}))
+    assert receipt["outcome"] == "confirmed"
+    assert gh.sent() == [("POST", "repos/{owner}/{repo}/issues/7/comments", {"body": "x"})]
+
+
+@pytest.mark.parametrize("blank", ["", None])
+def test_update_ignores_blank_timestamp_beside_real_state_expectation(gh, blank):
+    gh.answer = lambda p, argv, kw: json.dumps(_issue(7, title="New"))
+    _line, receipt = _receipt(gh.write(method="update", target=7, title="New", expect={"state": "open", "updated_at": blank}))
+    assert receipt["outcome"] == "confirmed" and receipt["readback"]["verified"] is True
+    assert gh.sent() == [("GET", "repos/{owner}/{repo}/issues/7", None),
+                         ("PATCH", "repos/{owner}/{repo}/issues/7", {"title": "New"})]
 
 
 @pytest.mark.parametrize("current", ["open", "closed"])
