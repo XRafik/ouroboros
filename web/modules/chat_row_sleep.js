@@ -26,8 +26,8 @@ const ADDED_FRAMES = 2;     // a row added is laid out by the next frame; it sle
 const CHANGED_FRAMES = 30;  // a row that changes often (a streaming answer, a live card) stays awake while it does
 const HELD_FRAMES = 12;     // a width that held this long has stopped moving (chat_reading_position.js)
 // What changes a row's size besides its text and children: its classes, a part hidden or opened, an inline size,
-// a picture's source.
-const RESIZING = ['class', 'hidden', 'open', 'style', 'src'];
+// a picture's source, a note a deck tucks away or brings back (chat_relay_deck.js).
+const RESIZING = ['class', 'hidden', 'open', 'style', 'src', 'data-deck-tucked'];
 // What on the page's root restyles every row: the theme, the layout, the language and its direction.
 const RESTYLING = ['data-theme', 'data-layout', 'lang', 'dir'];
 const ROWS = '.chat-bubble, .chat-live-card';  // the rows that sleep; a history control or notice never does
@@ -82,6 +82,8 @@ export function createRowSleep({ feed, win = globalThis.window, onRestyle } = {}
 
     function sleep(row) {
         if (near.has(row) || !row.matches?.(ROWS) || row.querySelector?.(WINDOW_SIZED)) return;
+        // A row without a box (`display: none`, a deck's tucked note) has no size to remember: it would wake at the placeholder.
+        if (typeof row.getClientRects === 'function' && !row.getClientRects().length) return;
         // A picture or a video whose size has not arrived yet (a video's box is 300x150 until its metadata).
         const pictures = [...row.querySelectorAll('img, video')]
             .filter((media) => (media.tagName === 'VIDEO' ? media.readyState === 0 : !media.complete));

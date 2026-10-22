@@ -135,7 +135,8 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   curve, `--ease-sheet`, for `--motion-open` (340 ms, coming in), `--motion-close`
   (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
   in); it moves by position, opacity and a small scale, never blur. Three folds change a
-  height on that curve: the capsule row, the reply strip and a deck of notes between works. The handover between places
+  height: the capsule row and the reply strip on that curve, and a deck of notes between works,
+  whose height lands at once inside the reading write while its cards glide in by position and opacity. The handover between places
   keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in

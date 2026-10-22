@@ -116,6 +116,46 @@ test('a later note comes to the front; a row landing between notes splits the ru
     } finally { f.close(); }
 });
 
+test('an ordinary reconcile rewrites nothing: a focused Hide keeps its focus, a front card keeps its count node', async () => {
+    const f = fixture();
+    try {
+        const rows = [f.note('a'), f.note('b'), f.note('c')];
+        await settle();
+        const count = f.act(rows[2]).querySelector('.chat-relay-count');
+        f.decks.schedule();
+        await settle();
+        assert.equal(f.act(rows[2]).querySelector('.chat-relay-count'), count, 'an unchanged deck keeps its nodes');
+        f.act(rows[2]).click();
+        const hide = rows[0].querySelector('.chat-relay-hide');
+        hide.focus();
+        f.row('an answer lands');
+        f.decks.schedule();
+        await settle();
+        assert.equal(rows[0].querySelector('.chat-relay-hide'), hide, 'the caption stays the same node');
+        assert.equal(f.env.doc.activeElement, hide, 'and Hide keeps the focus');
+    } finally { f.close(); }
+});
+
+test('a note read on its own opens the deck it joins, so the passage stays; Hide keeps a deck shut', async () => {
+    const f = fixture();
+    try {
+        const first = f.note('a long note being read');
+        await settle();
+        f.act(first).click();
+        assert.equal(first.dataset.raw, '1');
+        const second = f.note('a second note arrives');
+        await settle();
+        assert.equal(first.dataset.deck, 'open', 'the deck it joins opens');
+        assert.equal(f.visible(first), true, 'the note being read stays on screen');
+        first.querySelector('.chat-relay-hide').click();
+        assert.equal(first.dataset.deckTucked, '1');
+        f.note('a third note');
+        await settle();
+        assert.equal(second.dataset.deck, 'closed', 'after Hide a new note keeps the deck shut');
+        assert.equal(first.dataset.raw, '1', 'its own open text stays open behind the front card');
+    } finally { f.close(); }
+});
+
 test('a note without the teller\'s line opens with its own words, in the meta ink; a summary leads otherwise', async () => {
     const f = fixture();
     try {

@@ -142,21 +142,33 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
         return top;
     }
 
-    // Everything that follows from a run and its state: who is in front, what is tucked, the edges, the labels.
+    // Everything that follows from a run and its state: who is in front, what is tucked, the edges, the labels. It is
+    // idempotent: a note whose place and state did not change keeps every node (a focused Hide, a rolling count), so
+    // the room's ordinary reconciles write nothing here.
     function paint(run, open) {
         const n = run.length;
         const deck = n > 1;
+        const span = deck && open ? range(run) : '';
+        let changed = false;
         run.forEach((bubble, i) => {
             const front = i === n - 1;
             bubble.__relayRun = run;
+            if (deck) bubble.__relayOpen = open;  // a note split off on its own keeps its deck's intent for a later join
+            const key = [n, i, deck && open ? 1 : 0, bubble.dataset.raw, i === 0 ? span : ''].join('|');
+            if (bubble.__relayPainted === key) return;
+            bubble.__relayPainted = key;
+            changed = true;
+            const tucked = deck && !open && !front;
             setData(bubble, 'deck', deck ? (open ? 'open' : 'closed') : null);
-            setData(bubble, 'deckTucked', deck && !open && !front ? '1' : null);
+            setData(bubble, 'deckTucked', tucked ? '1' : null);
             setData(bubble, 'deckEdges', deck && !open && front ? Math.min(n - 1, EDGES) : null);
             setData(bubble, 'deckFirst', deck && open && i === 0 ? '1' : null);
             const top = bubble.querySelector(':scope > .chat-relay-deck-top');
             if (deck && open && i === 0) {
+                const held = Boolean(top?.contains(document.activeElement));
                 const fresh1 = caption(run);
                 if (top) top.replaceWith(fresh1); else bubble.prepend(fresh1);
+                if (held) fresh1.querySelector('.chat-relay-hide')?.focus({ preventScroll: true });
             } else top?.remove();
             const act = actOf(bubble);
             if (!act) return;
@@ -170,6 +182,7 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
             act.removeAttribute('aria-label');
             act.setAttribute('aria-expanded', String(raw));
         });
+        return changed;
     }
 
     /* ---- presses ---------------------------------------------------------------------------------------------------- */
@@ -214,9 +227,12 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
         const { open: openMs, close } = timing();
         const shown = open ? run : [front];
         shown.forEach((bubble, i) => {
-            const at = bubble.getBoundingClientRect();
             const emerging = open && bubble !== front;
-            play(bubble, [{ transform: `translateY(${from.top - at.top}px)`, opacity: emerging ? 0 : 1 },
+            const dy = emerging ? -6 : from.top - bubble.getBoundingClientRect().top;
+            // A card never starts below where it lands: moving content would reach past the feed's end, and a write in
+            // the meantime would read the reader as having left the newest message.
+            if (dy > 0) return;
+            play(bubble, [{ transform: `translateY(${dy}px)`, opacity: emerging ? 0 : 1 },
                 { transform: 'none', opacity: 1 }], open ? openMs : close, emerging ? Math.min(i, 6) * 18 : 0);
         });
         if (open) play(run[0].querySelector(':scope > .chat-relay-deck-top'), [{ opacity: 0 }, { opacity: 1 }], openMs, 90);
@@ -256,18 +272,21 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
         const before = live?.__relayRun?.length || 0;
         let joined = null;
         onDomWrite(() => {
+            let changed = false;
             for (const run of runs()) {
                 // A deck stays open while any of its notes was open (a run joined by a removed row keeps it).
-                const open = run.length > 1 && run.some((bubble) => bubble.dataset.deck === 'open');
+                // A note being read on its own (its text open) opens the deck it joins; Hide keeps a deck shut.
+                const open = run.length > 1 && run.some((bubble) => bubble.__relayOpen
+                    || (!bubble.dataset.deck && bubble.dataset.raw === '1'));
                 const previous = run.length > 1 && live && run[run.length - 1] === live ? run[run.length - 2].__relayRun : null;
                 if (previous) joined = { run, count: previous.length };
-                paint(run, open);
+                changed = paint(run, open) || changed;
             }
-            return true;
+            return changed;
         });
         if (!live) return;
         const { open } = timing();
-        play(live, [{ transform: 'translateY(18px) scale(0.985)', opacity: 0 }, { transform: 'none', opacity: 1 }], open);
+        play(live, [{ transform: 'translateY(-8px) scale(0.985)', opacity: 0 }, { transform: 'none', opacity: 1 }], open);
         if (joined && joined.run.length > 1 && live.dataset.deck === 'closed') roll(actOf(live), joined.count || before, joined.run.length);
     }
 

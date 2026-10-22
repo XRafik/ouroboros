@@ -9719,6 +9719,10 @@ body.keyboard-open .project-panel {
     line-height: var(--line-body);
 }
 :root[data-theme="light"] .chat-relay-note[data-raw="1"] > .message { background: rgba(var(--shell-rgb), 0.72); }
+/* A quote's jump to a note keeps its ring with reduced motion too (the card's own shadow is more specific). */
+@media (prefers-reduced-motion: reduce) {
+    :root[data-theme] .chat-bubble.assistant.chat-relay-note.is-quote-target { box-shadow: 0 0 0 3px var(--accent-25); }
+}
 /* The closed deck can be pressed anywhere on its front card. */
 @media (hover: hover) {
     .chat-relay-note[data-deck="closed"][data-deck-edges] { cursor: pointer; }
