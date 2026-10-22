@@ -335,7 +335,8 @@ def _signed_session(data_dir: Path, age_sec: int) -> str:
 
 def _history_notice(page) -> str:
     """The Main feed's persistent history note ("Some saved history is not loaded ..."), if shown."""
-    return page.evaluate("""() => [...document.querySelectorAll('#page-chat .chat-history-status')]
+    return page.evaluate("""() => [...document.querySelectorAll(
+        '#page-chat .chat-history-status, #page-chat .chat-load-older.has-gaps :is(.chat-load-older-note, .chat-history-gap)')]
         .filter(node => !node.hidden).map(node => node.textContent.trim()).join(' | ')""")
 
 

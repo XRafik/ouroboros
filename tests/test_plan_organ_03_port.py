@@ -190,7 +190,7 @@ def test_a_v2_wave_still_owed_at_upgrade_reaches_the_author_as_history_without_w
     before = json.dumps(read_result(harness.drive, "task-1")["plan_review_state"], sort_keys=True)
     finished = {"text": ""}
 
-    def observe(root, request, slot, row, operation_id, *, controller_known=True, usage_ctx=None):  # the engine's run, attach-only
+    def observe(root, request, slot, row, operation_id, *, controller_known=True, usage_ctx=None):  # attach-only
         if not finished["text"]:
             return _frozen_actor(row, slot), review_operation.DEFERRED  # still running
         return ReviewActorRecord(slot_id=slot.slot_id, model=slot.model, status="ok", raw_text=finished["text"],

@@ -1,7 +1,7 @@
 // Pure chat-activity helpers shared by chat.js and dependency-free node tests:
 // live-card presentation projections (moved verbatim from chat.js) plus the
 // census snapshot hydration. The room's status word is the server's (work_status.js).
-import { META_PART_SEPARATOR, executorIdentityMarkup, executorModelText } from './harness_presentation.js';
+import { META_PART_SEPARATOR, executorIdentityMarkup, executorModelText, formatCoordinatorProvenance } from './harness_presentation.js';
 import { effortChipMarkup } from './effort_chip.js';
 import { resultFilesItemHtml } from './result_files.js';
 import { taskSourceDownloadUrl, apiFetch } from './api_client.js';
@@ -1409,6 +1409,9 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
     const chip = record.executorChip;
     const execution = modelExecutionView(record.modelExecution);
     const coordinator = compactModel(agentModel);
+    const provenance = chip ? formatCoordinatorProvenance(
+        record?.coordinatorProvenance || chip?.coordinatorProvenance || chip?.snapshot || '',
+    ) : '';
     const model = chip ? executorModelText(chip, compactModel)
         : execution && !execution.observed ? execution.value : execution?.model || coordinator;
     const updated = record.finished ? updatedTime(record) : '';
@@ -1438,7 +1441,8 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
     ]);
     const factsChanged = paintLiveFacts(record, portal ? [] : [
         ['Executor', chip?.title ? escapeHtml(chip.title) : ''],
-        [chip ? 'Coordinator' : 'Agent model', coordinator ? escapeHtml(coordinator) : ''],
+        // Provenance is a recorded fact of the schedule (chosen_by / coordinator_provenance), never inferred here.
+        [chip ? 'Coordinator' : 'Agent model', coordinator ? escapeHtml(provenance ? `${coordinator} (${provenance})` : coordinator) : ''],
         // An unobserved execution of a card without an executor is its compact model fact already.
         [execution?.label || 'Model execution', execution && (chip || execution.observed) ? escapeHtml(execution.value) : ''],
         ['Started by', record.initiator === 'consciousness' ? 'Consciousness' : ''],
