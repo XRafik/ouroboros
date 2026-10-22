@@ -296,8 +296,13 @@ def test_historical_symlink_uses_tree_entry_not_current_target(world):
     result = registry.execute("vcs_read", {"action": "file", "path": "link.txt"})
     assert result.startswith("note.txt\n\nVCS target:"), result
     (project / "second.txt").write_text("second\n", encoding="utf-8")
+    git(project, "add", "second.txt")
+    git(project, "commit", "-qm", "second")
     link.unlink()
     link.symlink_to("second.txt")
+    for spelling in ("link.txt", str(link)):  # an absolute spelling names the same tree entry
+        historical = registry.execute("vcs_read", {"action": "file", "path": spelling})
+        assert historical.startswith("note.txt\n\nVCS target:"), (spelling, historical)
     status = registry.execute("vcs_read", {"action": "status", "repository": ".", "path": "link.txt"})
     assert "link.txt" in status and "second.txt" not in status, status
     difference = registry.execute("vcs_read", {"action": "diff", "repository": ".", "path": "link.txt"})

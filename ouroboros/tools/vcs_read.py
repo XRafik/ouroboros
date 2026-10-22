@@ -107,16 +107,25 @@ def _object(repo: pathlib.Path, ref: str, kind: str) -> str:
 def _literal_path(binding: ResolvedResourceBinding, path: str) -> str:
     if not path:
         return ""
+    from ouroboros.tool_access_paths import normalize_root_relative
     from ouroboros.utils import normalized_path_text
 
     # The binding proves current physical confinement; Git needs the requested
     # tree entry, not a symlink's current target (which may have different bytes).
-    from ouroboros.tool_access_paths import normalize_root_relative
-
     repo = binding.repository_path or binding.base_path
     if not binding.target_path.is_relative_to(repo):
         raise ValueError("path escapes the selected repository")
-    relative = pathlib.PurePosixPath(normalize_root_relative(repo, normalized_path_text(path))).as_posix()
+    text = normalized_path_text(path)
+    if pathlib.Path(text).is_absolute():
+        # Resolve the folders only: the final entry names itself, as a symlink does in Git's tree.
+        entry = pathlib.Path(os.path.normpath(text))
+        try:
+            text = (entry.parent.resolve(strict=False) / entry.name).relative_to(repo.resolve(strict=False)).as_posix()
+        except ValueError:
+            pass  # outside the repository: refused below
+    else:
+        text = normalize_root_relative(repo, text)
+    relative = pathlib.PurePosixPath(text).as_posix()
     if relative.startswith("/") or ".." in pathlib.PurePosixPath(relative).parts:
         raise ValueError("path must be repository-relative")
     return "" if relative in {"", "."} else relative
