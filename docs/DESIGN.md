@@ -2646,9 +2646,9 @@ location take that place and its actions the end, on Main's line, so the bar has
 two ends as Main's does; tabs or a location that do not fit scroll inside it (a
 location rests at the folder you are in, no folder wider than the bar's start),
 and in the macOS window its empty parts still move the window. A header with nothing to show draws
-no bar. The band under the macOS title bar belongs to the window, never to a page: no page reserves
-a row for it, its first row starts below it, and scrolled content passes under it with crisp edges,
-as a room's feed does, while a plain press in the empty band still moves the window. A Project shows its name. In the stack
+no bar. The band under the macOS title bar belongs to the window, never to a page (owner 22.10): no page
+reserves a row for it, its first row starts below it, and scrolled content passes under it with crisp edges,
+as a room's feed does (owner 20.10, 21.10), while a plain press in the empty band still moves the window. A Project shows its name. In the stack
 layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
 ⋯, with the page's tabs, or Files' location and its actions, under it
 (`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
@@ -2679,8 +2679,8 @@ link inside a sentence takes too so the sentence keeps its lines. Nothing that
 acts is hidden until hover there (a Project row's menu is reached by its long press).
 No page scrolls sideways at any width; only code, tables, tab strips and a bar's
 Files location scroll sideways, inside themselves, with a fade where content
-hides. Text wraps before it widens a column. A pinch only magnifies: while it holds,
-the room keeps its size and a sideways finger pans the magnified page instead
+hides. Text wraps before it widens a column. A pinch only magnifies (owner 23.10): while it
+holds, the room keeps its size and a sideways finger pans the magnified page instead
 of moving the drawer.
 
 **Telegram.** Inside the Telegram Mini App the page tells Telegram it is ready,
