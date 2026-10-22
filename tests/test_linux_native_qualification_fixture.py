@@ -9,8 +9,12 @@ import urllib.request
 
 import pytest
 
+from tests import test_onboarding_complete_endpoint as _onboarding_endpoint
+
 
 ROOT = Path(__file__).resolve().parents[1]
+# The REAL onboarding transaction (isolated settings file) from its own suite.
+onboarding = _onboarding_endpoint.onboarding
 
 
 @pytest.fixture
@@ -147,3 +151,23 @@ def test_completion_never_accepts_unsaved_restart_pending_or_still_blocked_setup
         qualifier['complete_setup'](1234, 'http://127.0.0.1:4321/v1', tmp_path)
     assert json.loads((tmp_path / 'setup-payload.json').read_text())['starter_skills'] == []
     assert json.loads((tmp_path / 'setup-response.json').read_text())['status'] == status
+
+
+def test_native_qualification_inert_payload_completes_without_subscription_or_starter_install(onboarding, qualifier):
+    """The native fixture uses a real transaction, not a readiness bypass."""
+    from ouroboros.server_runtime import has_startup_ready_provider
+    from ouroboros.settings_setup_contract import ONBOARDING_COMPLETED_KEY
+
+    payload = qualifier['setup_payload']('http://127.0.0.1:4321/v1')
+    response = onboarding.client.post('/api/onboarding/complete', json=payload)
+    assert response.status_code == 200, response.text
+    assert response.json()['ok'] is True
+    assert response.json()['restart_required'] is False
+    saved = onboarding.saved()
+    assert saved[ONBOARDING_COMPLETED_KEY]
+    assert has_startup_ready_provider(saved)
+    assert saved['OUROBOROS_MODEL'] == payload['OUROBOROS_MODEL']
+    assert saved['OPENAI_COMPATIBLE_BASE_URL'] == payload['OPENAI_COMPATIBLE_BASE_URL']
+    assert not saved.get('OPENAI_COMPATIBLE_API_KEY')
+    assert onboarding.calls['snapshot'] == 0
+    assert onboarding.calls['starter'][0][1] == []
