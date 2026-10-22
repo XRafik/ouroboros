@@ -89,8 +89,9 @@ def test_a_startup_read_failure_binds_no_stand_in_and_every_send_rereads(data_ro
                 outcomes.append(("reserved", reservation.scope.billing_group_id, len(calls) > 1))
         return scope
 
-    host = SimpleNamespace(env=SimpleNamespace(drive_root=data_root), _emit_live_log=lambda *_a, **_k: None,
-                           _event_queue=None, _handle_task_scoped=scoped)
+    from tests._agent_entry_helpers import task_entry_agent
+
+    host = task_entry_agent(data_root, scoped)
     scope = OuroborosAgent.handle_task(host, {"id": "S", "type": "task"})
     assert scope.billing_group_id == "" and scope.billing_group_limit_usd is None  # nothing stands in
     assert outcomes == [("refused", "unreadable", 0), ("reserved", "P", True)]

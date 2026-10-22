@@ -137,6 +137,31 @@ test('native activation has one owner; external select is silent and never steal
     assert.deepEqual(changed, ['two']);
 });
 
+test('external tab selection works under a hidden or inert page without activating or focusing it', () => {
+    for (const attribute of ['hidden', 'inert']) {
+        const { doc, node, strip, tabs, changed, controller } = tabFixture();
+        const page = node('main', { [attribute]: '' });
+        page.append(strip);
+        const before = doc.activeElement;
+        assert.equal(controller.select('two'), true);
+        assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
+        assert.equal(doc.activeElement, before);
+        assert.equal(controller.select('three', { focus: true }), false);
+        strip.emit('click', { target: tabs[2] });
+        strip.emit('keydown', { target: tabs[1], key: 'ArrowRight' });
+        assert.deepEqual(changed, []);
+        assert.equal(tabs[1].getAttribute('aria-selected'), 'true');
+        for (const attr of ['hidden', 'inert', 'aria-disabled']) {
+            tabs[2].setAttribute(attr, attr === 'aria-disabled' ? 'true' : '');
+            assert.equal(controller.select('three'), false);
+            tabs[2].removeAttribute(attr);
+        }
+        tabs[2].disabled = true;
+        assert.equal(controller.select('three'), false);
+        controller.destroy();
+    }
+});
+
 test('tab keys skip disabled/hidden choices, ignore nested strips and modifiers', () => {
     const { strip, tabs, node, changed } = tabFixture();
     tabs[1].disabled = true;

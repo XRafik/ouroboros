@@ -1651,6 +1651,7 @@ export function createChatInstance({
         }
         record.updates += 1;
         const wasFinished = record.finished;
+        if (summary.terminal && typeof summary.quietEffective === 'boolean') record.quietEffective = summary.quietEffective;
         // Empty frames name nothing (#1369).
         const headline = summary.headline || record.lastHumanHeadline || '';
         const syntheticKey = summary.dedupeKey || dedupeKey || `${summary.phase || 'working'}|${headline}|${summary.body || ''}`;
@@ -1782,7 +1783,7 @@ export function createChatInstance({
         const wasFinished = record.finished;
         record.finished = true;
         record.finalizingHold = false;
-        const presentation = taskPresentation(phase || 'done');
+        const presentation = taskPresentation(phase || 'done', record.quietEffective ?? record.historicalTerminal?.quiet_effective);
         const activePhase = presentation.phase;
         setLiveCardPhase(record, activePhase, presentation.headline);
         if (record.isSubagent) record.titleEl.textContent = childTitle(record);
@@ -1807,13 +1808,12 @@ export function createChatInstance({
         }
         let changed = false;
         // Restore historical task name.
-        if (msg?.suggested_name) {
-            changed = applySuggestedName(taskId, msg.suggested_name) || changed;
-        }
+        if (msg?.suggested_name) changed = applySuggestedName(taskId, msg.suggested_name) || changed;
         const finalizing = msg?.task_phase === 'finalizing' || msg?.outcome_final === false;
         changed = noteToolMetrics(taskId, msg, rawTs, { suppressDomInsert }) || changed;
-        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         const record = getLiveCardRecord(taskId);
+        msg = { quiet_effective: record.quietEffective ?? record.historicalTerminal?.quiet_effective, ...msg };
+        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         changed = noteTaskDetails(record, msg) || changed;
         syncSettledItems(record, msg);
         changed = Boolean(record.reviewController?.updateMany(reviewGroupsFromTaskDetail(msg, taskId))) || changed;
@@ -2489,7 +2489,7 @@ export function createChatInstance({
                         originId: msg.origin_id || '',
                         chatAnnotation: msg.chat_annotation || null,
                         skillReview: msg.system_type === 'skill_review' && msg.skill && msg.job_id
-                            ? { skill: msg.skill, jobId: msg.job_id }
+                            ? { skill: msg.skill, jobId: msg.job_id, ...(msg.record_id ? { recordId: msg.record_id } : {}) }
                             : null,
                     });
                     if (msg.role === 'user') { markIngressSaved(messagesDiv, msg); replies.adopt(msg); unconfirmed.settle(msg); }

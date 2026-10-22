@@ -22,6 +22,7 @@ from ouroboros.config import runtime_setting
 from ouroboros.model_wait import current_model_wait, monotonic_now, operation_wait_scope
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -40,7 +41,7 @@ from ouroboros.review_slot_cancel import (  # noqa: F401 — re-exported seam su
 from ouroboros.review_dispatch import bind_api_review_paid_stamp, invoke_review_paid_stamp
 from ouroboros.usage_accounting import POSITIVE_PHYSICAL_ATTEMPT_STATES, BillingAuthorityUnavailable
 from ouroboros.delegate_custody_usage import (
-    observe_failed_review_send, observe_review_usage, session_usage_once,
+    observe_failed_review_send, observe_review_usage, observe_session_usage, run_names,
 )
 from ouroboros.triad_review import (
     TWO_PART_SESSION_OUTPUT_SCHEMA,
@@ -694,7 +695,7 @@ def run_delegated_review_session(
     recovering, project_id, existing_project = False, "", ""  # also bound on early recovery failures
     observed, summary = {}, {}  # a failure after start still names what it observed
     delivery_facts = invocation.source_delivery if invocation.source_delivery is not None else {}
-    continuations, stopped_summaries = [], []
+    continuations, stopped_summaries, session_usages = [], [], []
     start_attempted, start_refused = False, False  # only submit witnesses POST entry
     try:
         record = custody.invocation_record(custody_drive, retry_token) if retry_token else None
@@ -773,7 +774,7 @@ def run_delegated_review_session(
                 thread_id=thread_id, schema_asked=schema_asked,
                 shape=shape, execution=checking.get("execution"), instructions=checking.get("instructions", ""),
                 input_limit=(getattr(gateway, "ask_input_limits", lambda: {})() or {}).get(route.route_id),
-                source_root=custody_drive, delivery_facts=delivery_facts)
+                source_root=custody_drive, delivery_facts=delivery_facts, gateway=gateway)
         if not run_id:
             from ouroboros.budget_pause import dispatch_fenced
 
@@ -803,6 +804,7 @@ def run_delegated_review_session(
                     root_task_id=root_task_id, parent_task_id=parent_task_id,
                     review_source_delivery=delivery_facts,
                     work_order_source_request=delivery_facts,
+                    prompt_cache_ttl=delivery_facts.get("prompt_cache_ttl"),
                     **usage_custody, **checking.get("custody", {}),
                 )
             except BillingAuthorityUnavailable as exc:  # Outer pre-start boundary owns cleanup; nothing sent.
@@ -849,6 +851,8 @@ def run_delegated_review_session(
             entry = custody.RunCustody(
                 run_id=run_id, task_id=task_id, route_id=route.route_id, model=str(route.model or ""),
                 profile_id=str(getattr(route, "profile_id", "") or ""),
+                prompt_cache_ttl=(delivery_facts.get("prompt_cache_ttl")
+                                  if isinstance(delivery_facts.get("prompt_cache_ttl"), dict) else None),
                 project_id=project_id, project_owned=bool(project_id) and not existing_project,
                 root_task_id=root_task_id, parent_task_id=parent_task_id, **usage_custody,
                 ledger_root=str(custody_drive), idempotency_key=key, invocation_id=invocation_id or retry_token,
@@ -864,8 +868,13 @@ def run_delegated_review_session(
         poll_deadline = time.monotonic() + window
         detail = _poll_session_terminal(gateway, custody, custody_drive, entry, run_id, window)
         seen_runs = {run_id}
-        while str(custody.summary_of(detail).get("state") or "") != "succeeded":
-            stopped = custody.summary_of(detail)
+        while True:
+            summary, observed = custody.summary_of(detail), final_attempt_facts(detail, run_id)
+            if str(summary.get("state") or "") == "succeeded":
+                break
+            stopped = summary
+            stopped_usage = session_usage_facts(run_id, requested_route=str(entry.route_id),
+                observed_attempt=observed, summary=stopped)
             successor = continue_review_run(gateway, custody_drive, entry, detail, invocation,
                 remaining=poll_deadline - time.monotonic(), seen=seen_runs)
             if successor is None:
@@ -873,7 +882,9 @@ def run_delegated_review_session(
             continuations.append({"from_run_id": run_id, "run_id": successor.run_id,
                                   "resumable": stopped.get("resumable") or detail.get("resumable") or {}})
             stopped_summaries.append(stopped)
+            session_usages.append(stopped_usage)
             entry, run_id = successor, successor.run_id
+            observed, summary = {}, {}  # Prior-run facts never belong to an unobserved successor.
             turn_id = ""  # A successor is never the stopped run's thread turn.
             seen_runs.add(run_id)
             state["delegated_run_id"] = run_id
@@ -884,8 +895,6 @@ def run_delegated_review_session(
             checking["evidence"] = terminal_seat_evidence(
                 custody_drive, task_id, str(invocation.operation_id or ""), detail)
         settlement = custody.settle_run(custody_drive, gateway, entry, detail)
-        summary = custody.summary_of(detail)
-        observed = final_attempt_facts(detail, run_id)
         run_state = str(summary.get("state") or "")
         if run_state != "succeeded":
             state.pop("pending_invocation_id", None)
@@ -917,7 +926,11 @@ def run_delegated_review_session(
             # One final attempt, never the requested pool or a mixed summary route.
             "effective_route_ids": [observed["harness_id"]] if observed.get("harness_id") else [],
             "observed_attempt": observed, "model": observed.get("model", ""),
-            "usage": session_usage_facts(run_id, requested_route=str(entry.route_id), observed_attempt=observed, summary=combined_summary),
+            "usage": {**session_usage_facts(run_id, requested_route=str(entry.route_id), observed_attempt=observed,
+                                            summary=combined_summary),
+                      **({"session_usage_events": [*session_usages, session_usage_facts(run_id,
+                          requested_route=str(entry.route_id), observed_attempt=observed, summary=summary)]}
+                         if session_usages else {})},
             "spend": spend, "spend_estimated": estimated,
             # D22/D29 applied facts are verbatim telemetry, never inferred.
             "applied_profile": observed.get("profile_id", ""),
@@ -947,8 +960,14 @@ def run_delegated_review_session(
                 custody_drive, task_id, str(invocation.operation_id or ""), getattr(exc, "checking_terminal_detail", None))
         if run_id and gateway is not None:
             exc.delegated_run_started, exc.delegated_run_id = True, run_id
+            carried = getattr(exc, "checking_terminal_detail", None)
+            if isinstance(carried, dict) and run_id in run_names(carried) and custody.is_terminal(carried):
+                summary, observed = custody.summary_of(carried), final_attempt_facts(carried, run_id)
             exc.delegated_usage = session_usage_facts(run_id, requested_route=str(getattr(route, "route_id", "") or ""),
                                                       observed_attempt=observed, summary=summary)  # #1578
+            exc.delegated_usage["review_source_delivery"] = copy.deepcopy(delivery_facts)
+            if session_usages:
+                exc.delegated_usage["session_usage_events"] = [*session_usages, dict(exc.delegated_usage)]
             if continuations:
                 exc.delegated_usage["review_continuations"] = continuations
         if checking.get("evidence"):
@@ -983,6 +1002,7 @@ def _combined_session_usage(custody: Any, stopped: List[Dict[str, Any]],
     spend, estimated = custody.disclosed_spend(summary)
     combined = dict(summary)
     if stopped:
+        combined.pop("inputTokenUsage", None)  # per-run facts travel separately, not on a chain total
         spends = [custody.disclosed_spend(item) for item in [*stopped, summary]]
         spend = sum(value for value, _estimated in spends) if all(value is not None for value, _ in spends) else None
         estimated = any(flag for _value, flag in spends)
@@ -1226,7 +1246,6 @@ class AgentSessionReviewExecutor(ReviewSlotExecutor):
         self._conformance_passed = False
         self._run_id = ""
         self._session_usage: Dict[str, Any] = {}
-        self._session_usage_observed = False
         self._deltas: List[Dict[str, Any]] = []
         # Unknown starts retain the exact invocation token for the permitted retry.
         self._retry_state: Dict[str, Any] = {}
@@ -1272,19 +1291,16 @@ class AgentSessionReviewExecutor(ReviewSlotExecutor):
         try:
             self._run_session()
         except BaseException as exc:
-            self._run_id = self._run_id or str(getattr(exc, "delegated_run_id", "") or "")
+            self._run_id = str(getattr(exc, "delegated_run_id", "") or self._run_id)
             started = bool(self._run_id or getattr(exc, "delegated_run_started", False))
             if started:
                 self._session_usage = dict(getattr(exc, "delegated_usage", None) or session_usage_facts(self._run_id))
-            if started and not self._session_usage_observed and session_usage_once(self._run_id):
-                self._observe_usage({**self._session_usage, "cost": None})
-                self._session_usage_observed = True
+            if started:
+                observe_session_usage(self.usage_observer, {**self._session_usage, "cost": None})
             if not self._retry_state.get("pending_invocation_id"):
                 self._settled_failure = exc
             raise
-        if not self._session_usage_observed and session_usage_once(self._run_id):
-            self._observe_usage(self._session_usage)
-        self._session_usage_observed = True
+        observe_session_usage(self.usage_observer, self._session_usage)
         # Already-paid evidence: extraction runs on the operation's own wait, past an
         # expired SLOT deadline (#1547); calendar, Stop/Panic and ceiling still interrupt.
         with operation_wait_scope(current_model_wait()):

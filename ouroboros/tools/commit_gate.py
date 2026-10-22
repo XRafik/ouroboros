@@ -448,7 +448,7 @@ def count_paid_review_cycles(ctx: ToolContext, *, root_task_id: str) -> int:
     from ouroboros.review_state import load_state, make_repo_key
 
     tool = _current_review_tool_name(ctx)
-    if tool in ("review_change", "review_result"):  # review_change waves: canonical custody
+    if tool in ("review_change", "review_result", "review_skill"):  # review_change waves: canonical custody
         from ouroboros.tools.review_change_custody import paid_repo_key, review_state_root
 
         state = load_state(review_state_root(ctx))
@@ -460,7 +460,7 @@ def count_paid_review_cycles(ctx: ToolContext, *, root_task_id: str) -> int:
         for item in state.filter_attempts(tool_name=tool):
             if not item.paid or item.root_task_id != root:
                 continue
-            if tool == "review_result":  # a result's allowance is its root task's, wherever its material lives
+            if tool in ("review_result", "review_skill"):  # a root's allowance, wherever the material lives
                 paid += 1
                 continue
             key = item.review_budget_repo_key or owners.get(item.repo_key)

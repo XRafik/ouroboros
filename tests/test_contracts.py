@@ -1024,6 +1024,14 @@ def test_skill_manifest_scheduled_tasks_contract():
     assert manifest.scheduled_tasks == [{"name": "refresh", "cron": "0 * * * *"}]
 
 
+def test_a_schedule_suggestion_needs_no_background_permission():
+    """A suggestion installs nothing, so validation asks for no supervised_task; other checks still warn."""
+    head = ("---\nname: cron-skill\ndescription: Cron skill\nversion: 0.1.0\ntype: instruction\n"
+            "scheduled_tasks:\n  - name: refresh\n    cron: \"0 * * * *\"\n")
+    assert parse_skill_manifest_text(head + "---\nbody\n").validate() == []
+    assert parse_skill_manifest_text(head + "timeout_sec: 0\n---\nbody\n").validate() == ["timeout_sec must be positive"]
+
+
 # Removed in v5.15.x: test_skill_manifest_body_only_markdown_can_start_with_link_syntax
 # and test_skill_manifest_body_only_markdown_can_start_with_thematic_break.
 # Both pinned narrow YAML-frontmatter-vs-body-markdown edge cases that

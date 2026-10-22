@@ -76,6 +76,9 @@ TECHNICAL_REASON_CODES = frozenset({
     "orphaned_running_after_worker_restart", "interrupted_retry_lost",
     # A billing or dispatch-fence authority that could not be read, where no exact pause was saved.
     "billing_authority_unreadable", "control_authority_unreadable",
+    # A running direct turn's accounting wait outlived its idle window (``_usage_wait``): storage, not
+    # the work, ended it; Continue is its manual path, never an automatic retry.
+    "accounting_wait_expired",
 })
 # The loop's forced-finalization rails that are technical limits: an extracted
 # best-effort answer settles ``completed``, the host fallback ``failed``
