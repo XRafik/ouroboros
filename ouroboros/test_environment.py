@@ -19,6 +19,16 @@ def default_temp_parent() -> Path:
     return Path("/tmp") if sys.platform == "darwin" else Path(tempfile.gettempdir())
 
 
+def git_ancestor(path: Path):
+    """The nearest directory at or above ``path`` that Git would treat as a checkout.
+
+    safe_test refuses a disposable parent with one; delegated-session facts name the same refusal."""
+    for directory in (path, *path.parents):
+        if (directory / ".git").exists():
+            return directory
+    return None
+
+
 def settings_keys() -> set[str]:
     """Read the settings vocabulary without importing the settings runtime."""
     keys = set()
