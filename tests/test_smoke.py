@@ -203,10 +203,10 @@ def test_github_write_schema_fields(registry):
     schema = registry.get_schema_by_name("github_write")["function"]
     props = schema["parameters"]["properties"]
     assert schema["parameters"]["required"] == ["method"]
-    assert "create_issue" in props["method"]["enum"]
+    assert {"create_issue", "create_pr"} <= set(props["method"]["enum"])
     assert props["title"]["type"] == "string"
     assert props["body"]["type"] == "string"
-    assert props["body"]["default"] == ""
+    assert "default" not in props["body"]  # Omitted keeps the PR body; only an explicit "" clears it.
     assert props["labels"]["type"] == "array"
     assert "default" not in props["labels"]  # Omitted keeps labels; only an explicit [] clears them.
 
