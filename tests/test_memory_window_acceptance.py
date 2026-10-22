@@ -131,6 +131,27 @@ def test_core_without_memory_still_reserves_two_eighths_for_a_root(monkeypatch):
             start(root)
 
 
+@pytest.mark.parametrize("replies,mode", [(2_400, "low"), (400, "max"), (24, "max")])
+def test_owner_max_is_judged_on_the_completed_start_view_with_the_real_catalog(main_loop, monkeypatch, replies, mode):
+    f = main_loop
+    monkeypatch.setattr(cf, "_route_calibration_ratio", lambda *_a, **_kw: 1.0)
+    snap = syn.snapshot(role="integrator", story=syn.pages(2, 200),
+        room_facts=syn.room(lane1=[syn.spoken(i, "ouroboros", 400) for i in range(replies)], lane2=2))
+    snap = dataclasses.replace(snap, spec=dataclasses.replace(snap.spec, work_room_levels=2))
+    core = cf.ContextCore("Required core", "Constitution", "b" * 600_000, "", "Identity", "f" * 1_000,
+        '"Assignment"', False, memory_view_json=mv.snapshot_json(snap))
+    plan = cf.build_context_fit_plan(None, core, {"id": "authored-main", "type": "task"}, preferred_mode="max",
+        tool_schemas=f.registry.schemas(), route_resolver=lambda *_a, **_kw: (
+            {"provider": "openai", "model": "openai/test-model"},
+            ce.CapabilityEvidence(400_000, "confirmed", "metadata", "start-hosts")))
+    f.ctx.context_fit_plan, f.messages = plan, plan.messages_for(plan.initial_mode)
+    assert f.run([{"content": "done"}])[0] == "done"
+    sent = cf.estimate_context_prompt_tokens(f.inputs[0]["messages"], f.inputs[0]["tools"], provider="openai")
+    assert plan.initial_mode == mode
+    assert (core.architecture_md in json.dumps(f.inputs[0]["messages"])) is (mode == "max")
+    assert sent + plan.output_reserve_tokens + 2 * 400_000 // 8 <= 400_000
+
+
 @pytest.mark.parametrize("refused", [True, False])
 def test_chosen_read_then_provider_refusal_preserves_the_body_on_real_main(main_loop, refused):
     import httpx

@@ -754,25 +754,6 @@ class MinimumViewUnfit(ValueError):
     """The core, assignment, resident tools and work room cannot fit this route."""
 
 
-def _task_input_pointer(env: Any, task: Mapping[str, Any], core: ContextCore) -> Optional[str]:
-    """The exact task input as a source pointer (user content JSON), or ``None`` when it cannot be retained.
-
-    The original input stays exact in the captured core and the actor source store; only its Nano delivery
-    changes. This is neither the external-assignment compiler nor a summary.
-    """
-    try:
-        from ouroboros.artifacts import store_actor_source_bytes
-        source = store_actor_source_bytes(env.drive_root, str(task["id"]), category="context_checkpoints",
-            source_id="task_input", data=core.user_content_json.encode("utf-8"), extension="json")
-    except (OSError, ValueError, KeyError):
-        log.warning("Exact task input source could not be retained; preserving complete input", exc_info=True)
-        return None
-    return json.dumps("[Exact task input source]\nThe complete original user input is stored as JSON at this source. "
-                      "Read its full content through the given reader in ranges before substantive decisions. "
-                      "This pointer is not a summary or a change to the task.\n"
-                      + json.dumps(source, ensure_ascii=False, sort_keys=True), ensure_ascii=False)
-
-
 def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...]], user_content_json: str, *, preferred: str,
                       tool_schemas: Optional[List[Dict[str, Any]]], window_tokens: int, known_window: bool, output_reserve: int,
                       ratio: float, start: Optional[str] = None, resident: bool = False,
@@ -813,28 +794,37 @@ def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...
         while mode != "nano" and math.ceil((fixed + minimum) * ratio) + reserve > window:
             mode = "low" if mode == "max" else "nano"
             sent, fixed, reserve, window, boundary, allowances = frame(mode)
+    def work():
+        target = context_budget.context_mode_limits(mode, preferred, output_reserve)[0]
+        return math.ceil(min(boundary or window, target or window) / context_budget.RECLAIM_LOW_WATER_DIVISOR) * (
+            snapshot.spec.work_room_levels if snapshot else work_room_levels)
+
     # Max names whole books. Story is the last rung: change books before taking its pages.
+    whole_story = render_story(snapshot) if snapshot else ""
     if kept is None and mode == "max" and allowances["margin"] is not None:
-        story_size = floor.view_tokens(render_story(snapshot)) if snapshot else 0
-        if story_size > allowances["margin"] or math.ceil(fixed * ratio) + reserve > window:
+        if floor.view_tokens(whole_story) > allowances["margin"] or math.ceil(fixed * ratio) + reserve + work() > window:
             mode = "low"
             sent, fixed, reserve, window, boundary, allowances = frame(mode)
-    if kept is None and known_window:
-        target = context_budget.context_mode_limits(mode, preferred, output_reserve)[0]
-        work = math.ceil(min(boundary or window, target or window) / context_budget.RECLAIM_LOW_WATER_DIVISOR) * (
-            snapshot.spec.work_room_levels if snapshot else work_room_levels)
-        if math.ceil(fixed * ratio) + reserve + work > window:
-            raise MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
-                                  f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work} work > {window} tokens")
-    if snapshot:
-        shown = start or preferred
-        memory_saving = max(0, (saving or {}).get(shown, 0) - (original_fixed - fixed)
-                            - math.floor((original_reserve - reserve) / max(ratio, 0.01)))
-        story, room, facts = floor.render_view_for_mode(snapshot, mode=mode, owner_mode=preferred,
+    if kept is None and known_window and math.ceil(fixed * ratio) + reserve + work() > window:
+        raise MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
+                               f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work()} work > {window} tokens")
+
+    def render():
+        saved = max(0, (saving or {}).get(start or preferred, 0) - (original_fixed - fixed)
+                    - math.floor((original_reserve - reserve) / max(ratio, 0.01)))
+        return floor.render_view_for_mode(snapshot, mode=mode, owner_mode=preferred,
             window_tokens=window, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
             non_memory_tokens=fixed, lowered_from=preferred if mode != preferred else None,
             tool_names=None if tool_schemas is None else sent.chosen,
-            kept=None if kept is None else kept.get(shown), saving=memory_saving, boundary_tokens=boundary)
+            kept=None if kept is None else kept.get(start or preferred), saving=saved, boundary_tokens=boundary)
+    if snapshot:
+        story, room, facts = render()
+        # Judged on the completed start view: Max keeps whole books only beside the whole story and the work room.
+        if kept is None and mode == "max" and allowances["margin"] is not None and (
+                story != whole_story or floor.view_tokens(story) + floor.view_tokens(room) > allowances["margin"]):
+            mode = "low"
+            sent, fixed, reserve, window, boundary, allowances = frame(mode)
+            story, room, facts = render()
         if kept is None and known_window and math.ceil((fixed + floor.view_tokens(story) + floor.view_tokens(room)) * ratio) + reserve > window:
             raise MinimumViewUnfit("Protected owner words and the minimum view cannot fit the usable input")
         receipt = floor.view_receipt(snapshot, story, room, facts)
@@ -904,7 +894,9 @@ def build_context_fit_plan(
     except MinimumViewUnfit:
         # Physical rescue only: a known window that cannot hold the owner-Nano request with the whole input gets the
         # exact source pointer; an unfit pointer request still names the incompatibility (owner decision 2026-10-13, #1527).
-        pointer = _task_input_pointer(env, task, core) if preferred == "nano" else None
+        from ouroboros.context_input_selection import task_input_pointer
+
+        pointer = task_input_pointer(env, task, core.user_content_json) if preferred == "nano" else None
         if pointer is None:
             raise
         contents, initial_mode = _view_projections(core, governance, pointer, **view_args, ratio=ratio,
