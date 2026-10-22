@@ -133,13 +133,13 @@ def test_secret_literal_omissions_survive_catalog_adoption_and_failed_relisting(
     writer = publisher(value, [bad, *listing("good")])
     assert writer.refresh_server("demo")["published"]
     reader = publisher(value)
-    assert names(reader) == ["mcp_demo__good"]
-    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(reader.status_payload())
+    assert names(reader) == ["mcp_demo__bad", "mcp_demo__good"]
+    assert "MCP_SCHEMA_OPTIONAL_DROPPED" in json.dumps(reader.status_payload())
     assert secret not in mcp_catalog.catalog_path("demo").read_text()
     assert fail(writer)["ok"] is False
     reader.reload_catalogs()
-    assert names(reader) == ["mcp_demo__good"]
-    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(reader.catalog_notices())
+    assert names(reader) == ["mcp_demo__bad", "mcp_demo__good"]
+    assert "MCP_SCHEMA_OPTIONAL_DROPPED" in json.dumps(reader.catalog_notices())
     assert secret not in mcp_catalog.catalog_path("demo").read_text()
 
 
@@ -642,3 +642,24 @@ def test_dispatch_adopts_newly_published_name_before_resolving(monkeypatch, tmp_
     writer.refresh_server("demo")
     assert registry.execute_result("mcp_demo__ping", {}).status == "ok"
     assert calls == ["ping"]
+
+
+def test_old_catalog_computed_omissions_reach_model_notice():
+    secret = "synthetic-old-catalog-secret"
+    value = settings(auth_token=secret)
+    writer = publisher(value)
+    assert writer.refresh_server("demo")["published"]
+    path = mcp_catalog.catalog_path("demo")
+    envelope = json.loads(path.read_text())
+    envelope.pop("schema_omissions", None)
+    envelope["items"] = [
+        {"name": "bad", "input_schema": {"const": secret}},
+        {"name": "optional", "input_schema": {"properties": {"value": {"default": secret}}}},
+        *listing("good"),
+    ]
+    path.write_text(json.dumps(envelope))
+    reader = publisher(value)
+    assert names(reader) == ["mcp_demo__optional", "mcp_demo__good"]
+    notices = json.dumps(reader.catalog_notices())
+    assert "MCP_SCHEMA_LITERAL_SECRET: bad" in notices and "MCP_SCHEMA_OPTIONAL_DROPPED: optional" in notices
+    assert secret not in notices + json.dumps(reader.list_tools_for_registry())

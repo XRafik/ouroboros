@@ -45,41 +45,56 @@ def _literal_copy(value: Any, redact: Callable[[str], str]) -> Any:
 
 
 def filter_schema_literals(rows: list, redact: Callable[[str], str]) -> tuple[list, list[str]]:
-    """Withhold only secret-bearing descriptors; never rewrite their literal values."""
+    """Drop dispensable secret-bearing fields; withhold irreducible input contracts."""
     kept, omissions = [], []
-    for row in rows:
+    for original in rows:
+        row, dropped = deepcopy(original), []
+        name = redact(str(row.get("name") or "unnamed"))
         try:
-            wrap_schema_text(row.get("input_schema"), redact)
+            row["input_schema"] = wrap_schema_text(row.get("input_schema"), redact,
+                                                   label_annotations=False, dropped=dropped)
             metadata = row.get("metadata")
             if isinstance(metadata, dict) and "outputSchema" in metadata:
-                wrap_schema_text(metadata["outputSchema"], redact, label_annotations=False)
+                try:
+                    _literal_copy(metadata["outputSchema"], redact)
+                except SchemaLiteralSecret:
+                    del metadata["outputSchema"]
+                    dropped.append("outputSchema")
         except SchemaLiteralSecret:
-            omissions.append("MCP_SCHEMA_LITERAL_SECRET: " + redact(str(row.get("name") or "unnamed")))
+            omissions.append("MCP_SCHEMA_LITERAL_SECRET: " + name)
         else:
             kept.append(row)
+            if dropped:
+                omissions.append(f"MCP_SCHEMA_OPTIONAL_DROPPED: {name} ({', '.join(sorted(set(dropped)))})")
     return kept, omissions
 
 
-def wrap_schema_text(value: Any, redact: Callable[[str], str], *, label_annotations: bool = True) -> Any:
+def wrap_schema_text(value: Any, redact: Callable[[str], str], *, label_annotations: bool = True, dropped: list[str] | None = None) -> Any:
     """Return an independent schema copy; transform annotations, not instance data."""
     if not isinstance(value, dict):
         return _literal_copy(value, redact)
     out = {}
     for key, item in value.items():
         _literal_copy(key, redact)
-        if key in {"description", "title"} and isinstance(item, str):
+        if key in {"default", "examples"}:
+            try:
+                out[key] = _literal_copy(item, redact)
+            except SchemaLiteralSecret:
+                if dropped is not None:
+                    dropped.append(key)
+        elif key in {"description", "title"} and isinstance(item, str):
             out[key] = untrusted_text(redact(item)) if label_annotations else redact(item)
         elif key in _SCHEMA_MAPS and isinstance(item, dict):
-            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations)
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations, dropped=dropped)
                         for name, schema in item.items()}
         elif key in _SCHEMA_ARRAYS and isinstance(item, list):
-            out[key] = [wrap_schema_text(schema, redact, label_annotations=label_annotations) for schema in item]
+            out[key] = [wrap_schema_text(schema, redact, label_annotations=label_annotations, dropped=dropped) for schema in item]
         elif key in _SCHEMA_VALUES:
-            out[key] = ([wrap_schema_text(schema, redact, label_annotations=label_annotations) for schema in item]
+            out[key] = ([wrap_schema_text(schema, redact, label_annotations=label_annotations, dropped=dropped) for schema in item]
                         if key == "items" and isinstance(item, list)
-                        else wrap_schema_text(item, redact, label_annotations=label_annotations))
+                        else wrap_schema_text(item, redact, label_annotations=label_annotations, dropped=dropped))
         elif key == "dependencies" and isinstance(item, dict):
-            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations)
+            out[key] = {_literal_copy(name, redact): wrap_schema_text(schema, redact, label_annotations=label_annotations, dropped=dropped)
                         for name, schema in item.items()}
         else:
             out[key] = _literal_copy(item, redact)

@@ -144,6 +144,7 @@ def catalog_notice(runtime: Any) -> str:
             text += "; the listing is incomplete"
     if runtime.publication_error:
         text += f"; catalog publication failed: {runtime.publication_error}"
-    if envelope.get("schema_omissions"):
-        text += "; " + "; ".join(envelope["schema_omissions"])
+    if omissions := list(dict.fromkeys([*envelope.get("schema_omissions", []),
+                                       *getattr(runtime, "schema_omissions", [])])):
+        text += "; " + "; ".join(omissions)
     return text

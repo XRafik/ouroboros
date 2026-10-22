@@ -150,6 +150,7 @@ class MCPServerRuntime:
     config: MCPServerConfig
     tools: List[MCPTool] = field(default_factory=list)
     tool_name_collisions: List[Dict[str, str]] = field(default_factory=list)
+    schema_omissions: List[str] = field(default_factory=list)
     last_error: str = ""
     last_refreshed: str = ""
     last_attempted: str = ""
@@ -1105,6 +1106,7 @@ class MCPManager:
         runtime.tools, runtime.tool_name_collisions, notes = normalize_listing(
             runtime.config, items, bool(envelope and envelope["complete"]))
         notes.extend(envelope.get("schema_omissions", []) if envelope else [])
+        runtime.schema_omissions = list(dict.fromkeys(note for note in notes if note.startswith("MCP_SCHEMA_")))
         from ouroboros.tool_effects import record_mcp_annotations  # every process learns the published hints
         record_mcp_annotations(runtime.config.id, items)
         attempt = envelope["latest_attempt"] if envelope else {}

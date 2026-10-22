@@ -106,7 +106,7 @@ def test_sdk_metadata_is_json_and_independent():
     {"type": "object", "properties": {"result": {"examples": ["SECRET"]}}},
     {"type": "object", "properties": {"result": {"x-extra": {"nested": "SECRET"}}}},
 ])
-def test_output_schema_secret_literals_withhold_descriptor_without_leak(output_schema):
+def test_output_schema_secret_literals_drop_metadata_without_withholding_tool(output_schema):
     import json
 
     secret = "synthetic-output-secret"
@@ -128,11 +128,12 @@ def test_output_schema_secret_literals_withhold_descriptor_without_leak(output_s
     refreshed = manager.refresh_server("output")
     tested = manager.test_server(config)
     rows = manager.list_tools_for_registry()
-    assert [row["raw_name"] for row in rows] == ["good"]
-    assert manager.resolve_tool_name("mcp_output__bad").status != "callable"
-    assert tested["tool_count"] == 1
-    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(manager.status_payload())
-    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(tested)
+    assert [row["raw_name"] for row in rows] == ["bad", "good"]
+    assert "outputSchema" not in rows[0]["metadata"]
+    assert manager.resolve_tool_name("mcp_output__bad").status == "callable"
+    assert tested["tool_count"] == 2
+    assert "MCP_SCHEMA_OPTIONAL_DROPPED" in json.dumps(manager.status_payload())
+    assert "MCP_SCHEMA_OPTIONAL_DROPPED" in json.dumps(tested)
     assert secret not in json.dumps([refreshed, tested, rows, manager.status_payload()])
 
 
@@ -156,9 +157,7 @@ def test_output_schema_annotations_and_metadata_keys_are_redacted_without_changi
     refreshed = manager.refresh_server("output")
     tested = manager.test_server(config)
     row = manager.list_tools_for_registry()[0]
-    expected = json.loads(json.dumps(output_schema).replace(secret, "<redacted:mcp-auth-token>"))
-    assert row["metadata"]["outputSchema"] == expected
-    assert row["metadata"]["outputSchema"]["properties"]["result"]["const"] == "ordinary"
+    assert "outputSchema" not in row["metadata"]
     assert "annotation-<redacted:mcp-auth-token>" in row["metadata"]["annotations"]
     assert tested["tools"][0]["metadata"] == row["metadata"]
     assert secret not in json.dumps([refreshed, tested, row, manager.status_payload()])
@@ -244,3 +243,28 @@ def test_nested_metadata_output_schema_is_annotation_data_not_a_schema():
     assert projected["annotations"]["outputSchema"]["const"] == "<redacted>"
     assert projected["outputSchema"] == metadata["outputSchema"]
     assert metadata["annotations"]["outputSchema"]["const"] == secret
+
+
+@pytest.mark.parametrize("schema", [
+    {"enum": ["SECRET"]}, {"const": "SECRET"}, {"pattern": "SECRET"},
+    {"required": ["SECRET"]}, {"properties": {"SECRET": {"type": "string"}}}, {"$ref": "SECRET"},
+])
+def test_irreducible_input_literals_withhold_only_their_descriptor(schema):
+    from ouroboros.mcp_schema import filter_schema_literals
+    rows = [{"name": "bad", "input_schema": schema}, {"name": "good", "input_schema": {"type": "object"}}]
+    kept, notices = filter_schema_literals(rows, lambda text: text.replace("SECRET", "<redacted>"))
+    assert [row["name"] for row in kept] == ["good"]
+    assert notices == ["MCP_SCHEMA_LITERAL_SECRET: bad"]
+
+
+@pytest.mark.parametrize("keyword", ["default", "examples"])
+def test_optional_input_literals_drop_only_the_field(keyword):
+    from ouroboros.mcp_schema import filter_schema_literals
+    schema = {"properties": {"value": {"type": "string", keyword: "SECRET", "enum": ["ordinary"]}},
+              "required": ["value"]}
+    kept, notices = filter_schema_literals([{"name": "good", "input_schema": schema}],
+                                           lambda text: text.replace("SECRET", "<redacted>"))
+    assert kept[0]["input_schema"] == {"properties": {"value": {"type": "string", "enum": ["ordinary"]}},
+                                       "required": ["value"]}
+    assert keyword in notices[0] and "MCP_SCHEMA_OPTIONAL_DROPPED" in notices[0]
+    assert schema["properties"]["value"][keyword] == "SECRET"
