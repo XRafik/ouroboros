@@ -968,15 +968,14 @@ jobs:
   # a runner with executed payload code at all (it used to run first on the
   # ubuntu leg, before that leg's install smoke).
   # A review leg runs Ouroboros's own skill review on ONE cheap stochastic
-  # reviewer slot (google/gemini-3.5-flash, low effort — the test pins env;
-  # production reviewer defaults stay strong and untouched), ubuntu-only (an
+  # reviewer slot (deepseek/deepseek-v4.1-flash, low effort, isolated settings;
+  # production reviewer defaults stay untouched), ubuntu-only (an
   # LLM verdict is OS-independent), one leg per review skill so the three
   # live reviews run in parallel under the product's own review window.
-  # Paid lane: about $11 per native review, measured 2026-10-17/18 (~$33 per
-  # run for the three skills; a retry, settled or after a provider outage,
-  # adds at most two more waves each, ~$99 per run at worst). A
-  # missing secret is a hard red by owner directive — forks/mirrors without
-  # it stay red.
+  # Paid lane: one author plus up to two paid reviews per skill; the shared
+  # per-skill admission cap is in author_settings. Calls already in flight
+  # may exceed it. This is not a fixed-price run or a retry-to-green loop.
+  # A missing secret is a hard red — forks/mirrors without it stay red.
   # ──────────────────────────────────────────────────────────────────
   skill-smoke:
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
@@ -991,11 +990,8 @@ jobs:
           - {lane: review, os: ubuntu-latest, skill: duckduckgo}
           - {lane: review, os: ubuntu-latest, skill: perplexity}
     runs-on: ${{ matrix.os }}
-    # A review leg's bound sits above the test's own timeout
-    # (tests/test_skill_smoke_official.py _REVIEW_TEST_TIMEOUT_SEC: four product
-    # review windows of 2700 s, three waves and a late worker's drain, plus
-    # 900 s = 195 min) plus setup, so the test's named timeout fires first
-    # (pinned by tests/test_skill_smoke_ci_lane.py).
+    # Above the ordinary author's two paid review cycles, reasoning and tree
+    # drain (_REVIEW_TEST_TIMEOUT_SEC); the test's own bound fires before CI.
     timeout-minutes: ${{ matrix.lane == 'review' && 205 || 45 }}
     env:
       # Windows runners default stdout/subprocess decoding to cp1252; live
@@ -1011,18 +1007,24 @@ jobs:
       - uses: ./.github/actions/setup-python-env
         with:
           interpreter: shipped  # the SQLite and journal mode fresh installs run
-      # Tier 6 (review flow), one review skill per leg; the only step that
-      # names the secret, in a leg that runs nothing else. The test's own
-      # timeout marker covers up to three review waves under the product's
-      # window (one settled retry, provider outages waited out), a late
-      # worker's drain and the post-review COLD a2a dependency install (this
-      # process has its own temp data dir, so the venv is never warm here;
-      # production review→deps order).
+          install-project: ${{ matrix.lane != 'review' && 'true' || 'false' }}
+      # Tier 6: ordinary author + initial review + at most one substantive
+      # rebuttal. No retry after ambiguity. Only this step holds the key; the
+      # contained tree is reaped before enable. Cold dependencies follow review.
       - name: Run official-skill review flow smoke (LLM review, one skill)
         if: matrix.lane == 'review'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OUROBOROS_TEST_EVIDENCE_ROOT: ${{ runner.temp }}/skill-smoke-evidence
         run: python -m pytest "tests/test_skill_smoke_official.py::test_review_grants_and_enable[${{ matrix.skill }}]" -m skill_smoke --timeout-method=thread -q -s --tb=long
+      - name: Upload skill author and reviewer judgments
+        if: ${{ always() && matrix.lane == 'review' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: skill-review-${{ matrix.skill }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/skill-smoke-evidence/skill-smoke-author/*/author-evidence.json
+          if-no-files-found: error
+          retention-days: 30
       # -s (no capture): the lane logs provenance (catalog digest, skill
       # versions, resolved pip sets) that must reach the CI log on green AND
       # red runs — under default capture, session-fixture prints surface only

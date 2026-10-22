@@ -146,6 +146,7 @@ SCENARIOS = {
     "S39": ("container lifecycle: the managed image boots a released seed into a body checkout and runtime venv on volumes (parent and split layouts), keeps code, packages and data across recreation, stays stopped after Panic until an owner start, refuses a mounted repository and a second container on shared data; the immutable image admits one server per data volume and, networkless, serves onboarding, a project, a task with a child and an artifact across a restart; an Update adding a local-wheel dependency survives an offline recreation, a task imports it, and rollback restores the old lock with the package disclosed", LANE_CONTAINER),
     # #1729/#1730 in real processes: one worker frozen past the idle window is reaped by a real kill.
     "S40": ("idle retry under the owner's Pause: after a Pause and a consumed Resume (and without them) a real worker frozen past the idle window is reaped by a real kill; its new-ID retry dispatches with no spent Resume and continues the saved work; a Pause of that running retry fences its logical root, a model write served after the acceptance never lands while one before it did, one Resume reopens the tree and Stop ends it", LANE_MOCK),
+    "S41": ("live skill-smoke adapter: ordinary author, one independent rebuttal, immutable payload, true/unknown criticism red, tool-policy and identity controls", LANE_MOCK),
 }
 
 MOCK_SLUG = "openai-compatible::mock-model"

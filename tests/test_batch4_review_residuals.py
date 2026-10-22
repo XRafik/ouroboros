@@ -207,43 +207,43 @@ def _mcp_names(registry):
                   if schema["function"]["name"].startswith("mcp_"))
 
 
-def test_task_discovery_lists_every_server_when_not_paused(tmp_path, monkeypatch):
+def test_task_never_discovers_even_when_not_paused(tmp_path, monkeypatch):
     registry, events = _discovery(tmp_path, monkeypatch)
-    assert _mcp_names(registry) == ["mcp_alpha__lookup", "mcp_beta__lookup"]
-    assert events == [("transport", "alpha"), ("initialize", "alpha"),
-                      ("transport", "beta"), ("initialize", "beta")]
+    assert _mcp_names(registry) == []
+    assert events == []
 
 
-def test_pause_before_discovery_opens_no_transport_and_owes_the_listing(tmp_path, monkeypatch):
+def test_pause_and_unpaused_task_both_use_published_catalog(tmp_path, monkeypatch):
     from ouroboros import mcp_client
     from ouroboros.task_results import write_task_result
     from supervisor.owner_pause_control import request_owner_pause
 
     registry, events = _discovery(tmp_path, monkeypatch)
+    mcp_client.ensure_configured_from_settings()
+    manager = mcp_client.get_manager()
+    assert manager.refresh_all()["refreshed"]["beta"]["published"]
+    expected = ["mcp_alpha__lookup", "mcp_beta__lookup"]
+    assert len(events) == 4
+    events.clear()
     assert request_owner_pause("root", request_id="pause-before")["ok"]
-
-    assert _mcp_names(registry) == [] and events == []
-    status = {row["id"]: row for row in mcp_client.get_manager().status_payload()["servers"]}
-    assert all(not row["last_error"] and not row["last_attempted"] for row in status.values()), status
-    # Another, unpaused task in this worker process performs the owed listing.
+    assert _mcp_names(registry) == expected
+    assert events == []
     write_task_result(tmp_path, "other", "running", root_task_id="other", chat_id=0)
     registry._ctx.task_id = registry._ctx.root_task_id = "other"
-    assert _mcp_names(registry) == ["mcp_alpha__lookup", "mcp_beta__lookup"]
-    assert [kind for kind, _ in events].count("transport") == 2
-    assert _mcp_names(registry) == ["mcp_alpha__lookup", "mcp_beta__lookup"]
-    assert [kind for kind, _ in events].count("transport") == 2, "a listed catalog is not re-listed"
+    assert _mcp_names(registry) == expected
+    assert events == []
 
 
-def test_pause_between_listings_keeps_the_admitted_one_and_refuses_the_next(tmp_path, monkeypatch):
+def test_pause_without_catalog_opens_nothing_and_keeps_gap(tmp_path, monkeypatch):
+    from ouroboros import mcp_client
     from supervisor.owner_pause_control import request_owner_pause
 
-    def pause_during(server_id):
-        if server_id == "alpha":
-            assert request_owner_pause("root", request_id="pause-between")["ok"]
-
-    registry, events = _discovery(tmp_path, monkeypatch, on_initialize=pause_during)
-    assert _mcp_names(registry) == ["mcp_alpha__lookup"]
-    assert events == [("transport", "alpha"), ("initialize", "alpha")]
+    registry, events = _discovery(tmp_path, monkeypatch)
+    assert request_owner_pause("root", request_id="pause-unlisted")["ok"]
+    assert _mcp_names(registry) == [] and events == []
+    status = mcp_client.get_manager().status_payload()["servers"]
+    assert all(not row["last_attempted"] and row["listed_at"] is None for row in status)
+    assert all("not listed yet" in row["detail"] for row in mcp_client.get_manager().catalog_notices())
 
 
 def test_settings_probes_carry_no_task_authority(tmp_path, monkeypatch):
@@ -262,3 +262,9 @@ def test_settings_probes_carry_no_task_authority(tmp_path, monkeypatch):
     assert probe["ok"] is True and probe["tool_count"] == 1
     assert manager.refresh_all()["refreshed"]["beta"]["ok"] is True
     assert [kind for kind, _ in events].count("transport") == 4
+
+
+@pytest.fixture(autouse=True)
+def _private_mcp_catalog_root(tmp_path, monkeypatch):
+    from ouroboros import config
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
