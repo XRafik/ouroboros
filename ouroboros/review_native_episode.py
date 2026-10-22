@@ -307,13 +307,8 @@ def inspection_registry(root: str, drive_root: Any, task_id: str = "") -> tuple[
         # A paid review under a task keeps that task's canonical tree controls;
         # its scratch drive and reviewer label cannot supply Pause authority.
         ctx.task_id = scope.task_id
-        parent_task_id = str(scope.parent_task_id or "")
-        ctx.task_metadata = {
-            "root_task_id": scope.root_task_id or scope.task_id,
-            "parent_task_id": parent_task_id,
-            "delegation_role": "subagent" if parent_task_id else "root",
-            "budget_drive_root": str(scope.drive_root or drive_root),
-        }
+        ctx.task_metadata = {"root_task_id": scope.root_task_id or scope.task_id,
+                             "budget_drive_root": str(scope.drive_root or drive_root)}
         ctx.task_lifecycle_bound = True
     ctx.task_metadata["native_data_root"] = str(drive_root)
     registry.set_context(ctx)
