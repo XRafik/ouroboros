@@ -217,6 +217,9 @@ test('a phone lays the page out at another width and keeps the size the host hon
     assert.match(phone.content(), /^width=325, initial-scale=1.2,/);
     assert.equal(phone.props['--interface-scale'], '1.2');
     assert.equal(phone.storage.get('ouroboros.interface-size'), '120');
+    await phone.scale.set(80);
+    assert.match(phone.content(), /^width=488, initial-scale=0.79918,/, 'the screen shows all 488 px, not 487.5 of them');
+    assert.equal(phone.props['--interface-scale'], '0.79918');
     await phone.scale.set(60);
     assert.equal(phone.scale.percent, 75, 'no smaller than 75 % under a finger');
 });
@@ -225,7 +228,7 @@ test('a stored size is applied before the first layout; a host that ignores the 
     const stored = bootViewport({ width: 400, stored: 110 });
     await new Promise((done) => setTimeout(done, 20));
     assert.equal(stored.scale.percent, 110);
-    assert.match(stored.content(), /^width=364, initial-scale=1.1,/);
+    assert.match(stored.content(), /^width=364, initial-scale=1.098901,/, 'the exact ratio of the two widths');
 
     const ignored = bootViewport({ width: 390, stored: 110, honoured: false });  // a Mini App in Telegram for Android
     await new Promise((done) => setTimeout(done, 20));

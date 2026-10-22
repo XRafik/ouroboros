@@ -285,10 +285,13 @@
     const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     const notify = () => { for (const listener of listeners) { try { listener(); } catch { /* one view's fault */ } } };
     const write = (value) => {
+        // The scale is the ratio of the two widths, so the screen shows the whole layout width: 390 px at 80 % is
+        // 488 px shown at 0.79918, where 0.8 would show 487.5 px of it.
+        const scale = value === 100 ? 1 : Number((base / asked(value)).toFixed(6));
         meta.setAttribute('content', value === 100 ? original
-            : `width=${asked(value)}, initial-scale=${value / 100}, viewport-fit=cover`);
+            : `width=${asked(value)}, initial-scale=${scale}, viewport-fit=cover`);
         // The touch field guard keeps a field's text at 16 device px whatever the size (style.css).
-        document.documentElement.style.setProperty('--interface-scale', String(value / 100));
+        document.documentElement.style.setProperty('--interface-scale', String(scale));
     };
 
     /* Apply `value` %, keeping it only if the host laid the page out at the width asked for. */

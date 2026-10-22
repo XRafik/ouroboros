@@ -32,12 +32,13 @@ export function isStackLayout(options) {
     return currentLayout(options) === 'stack';
 }
 
-/** A pinch is magnifying the page: the visual viewport is narrower than the layout one. A keyboard only takes height,
- * and a page zoom moves both together, so neither counts. While it holds, the room keeps its size and the finger pans
- * the magnified page (DESIGN "Touch and containment"). */
+/** A pinch is magnifying the page: the visual viewport is narrower than the layout one, the root's client width
+ * (`innerWidth` runs a pixel past the screen at an Interface size below 100 % and counts a classic scrollbar). A
+ * keyboard only takes height, and a page zoom moves both together, so neither counts. While it holds, the room keeps its
+ * size and the finger pans the magnified page (DESIGN "Touch and containment"). */
 export function pinchMagnified(w = win()) {
     const vv = w?.visualViewport;
-    const layoutWidth = Number(w?.innerWidth) || 0;
+    const layoutWidth = Number(w?.document?.documentElement?.clientWidth) || 0;
     return Boolean(vv && layoutWidth && Number(vv.width) < layoutWidth - 1);
 }
 

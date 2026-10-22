@@ -105,7 +105,25 @@ def test_a_phone_lays_the_page_out_at_another_width(subscription_ui, monkeypatch
         facts = page.evaluate(FACTS)
         assert facts['meta'].startswith('width=325, initial-scale=1.2'), facts
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), 'nothing scrolls sideways'
+        _slide_to(page, 80)  # smaller than 90 % (owner 23.10): 488 px laid out, all of them on the screen
+        page.wait_for_function("document.documentElement.clientWidth === 488")
+        _expect_room_fills_screen(page)
+        assert page.evaluate(FACTS)['meta'].startswith('width=488, initial-scale=0.79918'), page.evaluate(FACTS)
         page.reload()
-        page.wait_for_function("innerWidth === 325")  # the stored size is the first layout after a reload
+        page.wait_for_function("document.documentElement.clientWidth === 488")  # the stored size is the first layout
+        _expect_room_fills_screen(page)
     finally:
         page.close()
+
+
+def _expect_room_fills_screen(page):
+    """The room is as tall as the screen shows; a size below 100 % once read as a pinch and kept the old height."""
+    try:
+        page.wait_for_function("Math.abs(document.getElementById('app').getBoundingClientRect().bottom"
+                               " - visualViewport.height) <= 1.5", timeout=5000)
+    except Exception:
+        pass
+    room = page.evaluate("() => ({bottom: document.getElementById('app').getBoundingClientRect().bottom,"
+                         " screen: visualViewport.height, vvh: getComputedStyle(document.documentElement)"
+                         ".getPropertyValue('--vvh')})")
+    assert abs(room['bottom'] - room['screen']) <= 1.5, room

@@ -347,7 +347,7 @@ class Background:
         self.indicator = cls(self) if cls is not None else None
         self.appearance = NativeAppearance()  # the window's caption tint follows its page (Windows)
         self.chrome = WindowChrome()  # the main window's title bar follows its document (macOS)
-        self.zoom = PageZoom(on_changed=self.chrome.zoom_changed)  # the owner's Interface size for this window
+        self.zoom = PageZoom(on_changed=lambda: self.chrome.zoom_changed())  # the owner's Interface size here
         self.notifications = native_notifier(self.open_notification, self.indicator)
         self._asking = threading.Lock()
         self._poller = None
@@ -619,7 +619,11 @@ class DesktopApi:
     def shell_info(self) -> dict:
         """Installed bundle and loaded shell are separate facts; capabilities are read from this process."""
         return {"shell_version": _SHELL_VERSION, **self._shell_facts, "persistent_storage": PERSISTENT_WEBVIEW_STORAGE,
-                "native_notifications": self._notifier_answer("status"), "interface_size": self._background.zoom.info()}
+                "native_notifications": self._notifier_answer("status"), "interface_size": self._zoom_info()}
+
+    def _zoom_info(self) -> dict:
+        zoom = getattr(self._background, "zoom", None)
+        return zoom.info() if zoom is not None else {"supported": False}
 
     def request_native_notifications(self) -> dict:
         """The system's one permission question. The page asks it only from the owner's own gesture
