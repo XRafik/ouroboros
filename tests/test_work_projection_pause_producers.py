@@ -38,6 +38,8 @@ def test_a_warm_sleep_waits_only_on_its_current_attempt_and_a_pause_still_wins(t
     [work] = _works(tmp_path)
     assert (work["activity"], work["live"], work["release"], work["turn"]) == ("waiting", False, "self", [])
     assert work["because"][0]["code"] == "sleeping"
+    # Hurry and Wrap up wake a warm sleep (model_sleep), so the sleeper keeps them beside Pause.
+    assert {"wrap_up", "hurry", "pause"} <= {control["action"] for control in work["controls"]}
     assert "resume" not in {control["action"] for control in work["controls"]}
 
     # The durable result still holds the older wait; the live worker's new observation wins.
@@ -54,6 +56,7 @@ def test_a_warm_sleep_waits_only_on_its_current_attempt_and_a_pause_still_wins(t
     assert (work["activity"], work["live"]) == ("paused", False)
     assert work["because"][0]["code"] == "paused_by_owner"
     assert "resume" in {control["action"] for control in work["controls"]}
+    assert not {"wrap_up", "hurry"} & {control["action"] for control in work["controls"]}
 
 
 def test_a_settling_pause_says_what_still_executes_and_a_stop_nobody_confirmed(tmp_path, monkeypatch):

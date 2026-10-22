@@ -231,9 +231,9 @@ def controls_for(current: Optional[Mapping[str, Any]], current_row: Optional[Map
         phase = str(current_row.get("phase") or "")
         codes = {entry.get("code") for entry in current.get("reasons") or ()}
         # A live root, managed or a direct turn, and an answered root's upkeep: the hurry, stop and Pause doors
-        # take them all; the Pause ends that upkeep at once.
-        if current["activity"] == "working" and current.get("transition") in {"none", "finalizing"} \
-                and phase in _RUNNING_PHASES:
+        # take them all; the Pause ends that upkeep at once. A warm sleep keeps both: either control wakes it.
+        if ((current["activity"] == "working" and current.get("transition") in {"none", "finalizing"})
+                or (current["activity"] == "waiting" and "sleeping" in codes)) and phase in _RUNNING_PHASES:
             controls += [{"action": "wrap_up", "target": target}, {"action": "hurry", "target": target}]
         # A Pause still settling keeps its Pause: the door coalesces a repeat, which retries an uncertain reply.
         if current.get("transition") in {"none", "finalizing", "pausing"} \
