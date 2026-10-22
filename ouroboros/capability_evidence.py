@@ -1406,7 +1406,8 @@ def observe_token_density(request: Any, usage: Optional[Dict[str, Any]], *, driv
         bound = provider != "claudexor" and bool(getattr(physical, "window_witness_bound", True))
         if main and bound and route:
             from ouroboros.context_window import record_observation
-            record_observation(drive_root_resolver(request.drive_root), route, accepted=real,
+            record_observation(drive_root_resolver(request.drive_root),
+                getattr(physical, "window_observation_fp", ""), accepted=real, kind="input",
                 reserve=int(getattr(physical, "response_reserve_tokens", 0) or 0),
                 transmitted=int(getattr(request, "max_completion_tokens", 0) or 0))
         record_token_density(

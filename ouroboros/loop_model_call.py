@@ -592,7 +592,8 @@ def _rebind_context_fit_plan(
         route, evidence = _failed_route_evidence(task)
     # Account/server changes have their own anchors and durable window observations.
     anchor, _accepted = main_input_anchor(getattr(tools._ctx, "_accumulated_usage", None), SimpleNamespace(
-        model=str(route.get("model") or model), provider=str(route.get("provider") or ""), route_fp=evidence.route_fp))
+        model=str(route.get("model") or model), provider=str(route.get("provider") or ""),
+        route_fp=route.get("window_observation_fp", evidence.route_fp)))
     ratio = anchor.density if anchor is not None else _route_calibration_ratio(
         None,  # canonical evidence root (one observation store)
         str(getattr(evidence, "route_fp", "") or ""),
@@ -602,8 +603,9 @@ def _rebind_context_fit_plan(
     )
     from ouroboros.context_window import resolve_window
     output_reserve = main_output_reserve_tokens(use_local=bool(route.get("use_local", use_local)), evidence=evidence)
-    bound = route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint"))
-    window = resolve_window(evidence, output_reserve, bound=bound)
+    scope = route.get("window_observation_fp", evidence.route_fp)
+    bound = bool(scope) and (route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint")))
+    window = resolve_window(evidence, output_reserve, bound=bound, observation_fp=scope)
     window_tokens, known_window = window.total_equivalent, window.usable is not None
     preferred = preferred_mode or getattr(plan, "preferred_mode", "")
     preferred = preferred if preferred in {"low", "max", "nano"} else "max"

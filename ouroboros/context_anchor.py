@@ -45,10 +45,11 @@ class InputAnchor:
 
 def _anchor_model_key(plan: Any) -> str:
     from ouroboros.provider_models import normalize_model_identity
+    from ouroboros.context_window import observation_scope
 
     return (f"{str(getattr(plan, 'provider', '') or '').strip().lower()}|"
             f"{normalize_model_identity(str(getattr(plan, 'model', '') or '').strip())}|"
-            f"{str(getattr(plan, 'route_fp', '') or '')}")
+            f"{observation_scope(plan)}")
 
 
 def record_input_anchor(usage: Dict[str, Any], plan: Any, *, round_idx: int, rewrite_epoch: int = 0) -> None:
@@ -66,7 +67,7 @@ def record_input_anchor(usage: Dict[str, Any], plan: Any, *, round_idx: int, rew
         return
     from ouroboros.context_window import observed_plan
     plan = observed_plan(plan, usage)
-    if plan is None:
+    if plan is None or not getattr(plan, "window_witness_bound", True):
         return
     last = usage.get("_last_round_cache_usage") or {}
     real, estimate = last.get("prompt_tokens"), usage.get("_context_raw_input_tokens")
@@ -90,10 +91,10 @@ def record_input_anchor(usage: Dict[str, Any], plan: Any, *, round_idx: int, rew
     floors[key] = max(int(floors.get(key) or 0), real)
     if getattr(plan, "route_fp", "") and getattr(plan, "window_witness_bound", True):
         from ouroboros.capability_evidence import canonical_evidence_root, record_token_density, MAIN_DENSITY_BASIS
-        from ouroboros.context_window import record_observation
+        from ouroboros.context_window import observation_scope, record_observation
         from ouroboros.provider_models import normalize_model_identity
         root = canonical_evidence_root()
-        record_observation(root, plan.route_fp, accepted=real,
+        record_observation(root, observation_scope(plan), accepted=real, kind="input",
                            reserve=int(usage.get("_context_response_reserve_tokens", plan.output_reserve_tokens) or 0),
                            transmitted=int(usage.get("_context_reply_allowance_tokens") or 0))
         record_token_density(root, normalize_model_identity(plan.model), prompt_chars=estimate * 4,
@@ -109,7 +110,7 @@ def main_input_anchor(usage: Optional[Mapping[str, Any]], plan: Any, *,
     rotation has its own route fingerprint and inherits neither anchor nor floor. ``rewrite_epoch`` is the slot's current count of
     sanctioned rewrites (``transcript_prefix.rewrite_epoch``); None treats the view as rewritten.
     """
-    if not isinstance(usage, Mapping) or plan is None:
+    if not isinstance(usage, Mapping) or plan is None or not getattr(plan, "window_witness_bound", True):
         return None, None
     key = _anchor_model_key(plan)
     floor = (usage.get(ACCEPTED_INPUTS_KEY) or {}).get(key)
@@ -128,7 +129,8 @@ def floored_window(window_tokens: Optional[int], known: bool, accepted: Optional
 
     Do not add the reply reservation: acceptance established no reply room.
     """
-    return max(int(window_tokens or 0), int(accepted or 0)), bool(known or accepted)
+    window = int(window_tokens or 0)
+    return (max(window, int(accepted or 0)) if known else window), bool(known)
 
 
 def record_refused_input(usage: Dict[str, Any], plan: Any, estimate_tokens: int) -> None:

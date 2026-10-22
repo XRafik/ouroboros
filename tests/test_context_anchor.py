@@ -149,7 +149,8 @@ def test_an_accepted_input_raises_a_known_planning_window():
     messages = plan.messages_for("max")
     above = measure_main_fit(plan, messages, [], profile="owner_max", rendered_mode="max", round_id="r",
                              accepted_input_tokens=903_762)
-    assert above.measurement.capacity_total_tokens == 903_762 and above.measurement.window_reading_tokens == 872_000
+    assert above.measurement.capacity_total_tokens == 903_762 + 65_536
+    assert above.measurement.window_reading_tokens == 872_000
     below = measure_main_fit(plan, messages, [], profile="owner_max", rendered_mode="max", round_id="r",
                              accepted_input_tokens=640_000)
     assert below.measurement.capacity_total_tokens == 872_000  # a floor under the window cancels nothing

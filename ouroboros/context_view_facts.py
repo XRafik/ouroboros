@@ -42,7 +42,9 @@ def window_fact(plan, reserve):
         return ""
     record = resolve_window(plan, int(reserve or 0), bound=getattr(plan, "window_witness_bound", True))
     if record.boundary is None:
-        return ""
+        accepted = (f"; accepted input ≥ {record.accepted:,} ({record.accepted_at.replace('T', ' ')[:16]})"
+                    if record.accepted else "")
+        return f"window unknown{accepted}"
     limit = min((limit for limit in (record.input, record.total) if limit),
                 key=lambda limit: limit.tokens - (record.reserve if limit.kind == "total" else 0))
     return f"window {limit.tokens:,} {limit.kind}: {record.source}; usable input {record.usable:,}"

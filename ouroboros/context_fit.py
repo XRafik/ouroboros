@@ -110,6 +110,7 @@ class MainFitMeasurement:
     window_reading_tokens: Optional[int] = None
     view_kind: str = ""
     window_witness_bound: bool = False
+    window_observation_fp: str = ""
 
 
 @dataclass(frozen=True)
@@ -590,14 +591,12 @@ def measure_main_fit(
     total = estimated_input + reserve
     target = (OWNER_NANO_TARGET_TOKENS if profile == "owner_nano"
               else OWNER_LOW_TARGET_TOKENS if profile == "owner_low" else None)
-    from ouroboros.context_anchor import floored_window
-
     reading = int(plan.window_tokens or 0) if is_known(plan, require_fresh=True) else None
-    current = resolve_window(plan, reserve, bound=plan.window_witness_bound)
-    reading = current.total_equivalent if current.usable is not None else (None if plan.window_record is not None else reading)
-    accepted_floor = None if current.source.startswith("refusal") else accepted_input_tokens
-    floored, known = floored_window(reading, reading is not None, accepted_floor)
-    capacity = floored if known else None
+    current = resolve_window(plan, reserve, bound=plan.window_witness_bound,
+                             accepted_input_tokens=accepted_input_tokens)
+    capacity = current.total_equivalent if current.usable is not None else None
+    if capacity is None:
+        reading = None
     target_deficit = max(0, total - target) if target is not None else None
     capacity_deficit = max(0, total - capacity) if capacity is not None else None
     deficit = max(
@@ -632,6 +631,7 @@ def measure_main_fit(
         accepted_input_tokens=accepted_input_tokens,
         window_reading_tokens=reading,
         window_witness_bound=plan.window_witness_bound,
+        window_observation_fp=current.route_fp,
     )
     action: Literal["send", "send_target_miss"] = (
         "send_target_miss" if target_deficit and target_deficit > 0 else "send")
@@ -668,6 +668,8 @@ def _context_route(task: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]
             credential_profile_id=account,
             model_route=task.get("model_route"),
         )
+    from ouroboros.context_window import route_observation_scope
+    route["window_observation_fp"] = route_observation_scope(route, settings)
     return route, settings
 
 
@@ -850,12 +852,12 @@ def build_context_fit_plan(
     # Keep the fit projection tied to the physical dispatch contract instead of
     # duplicating its output reservation.  The lazy import avoids coupling the
     # data-only fit representation to the high-level model loop.
-    from ouroboros.capability_evidence import is_known
     from ouroboros.tool_policy import select_tool_schemas
 
     output_reserve = main_output_reserve_tokens(use_local=bool(route.get("use_local")), evidence=evidence)
-    bound = route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint"))
-    window_record = resolve_window(evidence, output_reserve, bound=bound)
+    scope = route.get("window_observation_fp", evidence.route_fp)
+    bound = bool(scope) and (route.get("provider") != "claudexor" or bool((route.get("options") or {}).get("account_fingerprint")))
+    window_record = resolve_window(evidence, output_reserve, bound=bound, observation_fp=scope)
     known_window = window_record.usable is not None
     view_args = dict(
         preferred=preferred, tool_schemas=tool_schemas, window_tokens=window_record.total_equivalent,
@@ -966,4 +968,5 @@ def _physical_context_for_fit(disposition: Any) -> PhysicalAttemptContext:
         measurement_density=measurement.measurement_density,
         response_reserve_tokens=measurement.response_reserve_tokens,
         window_witness_bound=getattr(measurement, "window_witness_bound", False),
+        window_observation_fp=measurement.window_observation_fp,
     )

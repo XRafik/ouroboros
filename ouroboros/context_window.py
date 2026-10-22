@@ -28,6 +28,7 @@ class WindowRecord:
     transmitted: Optional[int] = None
     accepted: int = 0
     declared: tuple[WindowLimit, ...] = ()
+    accepted_at: str = ""
 
     @property
     def usable(self) -> Optional[int]:
@@ -73,18 +74,46 @@ def record_observation(root, route_fp: str, *, accepted: int = 0, refused: int =
             row.get("accepted", 0) > last_refusal.get("refused", 0)
             for row in rows[rows.index(last_refusal) + 1:]) if last_refusal else False
         if refused or accepted > high or supersedes:
-            rows.append({"accepted": accepted, "refused": refused, "kind": kind,
+            rows.append({"accepted": accepted, "refused": refused, "kind": "input" if accepted else kind,
                          "reserve": reserve, "transmitted": transmitted, "ts": ce.utc_now_iso()})
             ce._save(root, data)
 
 
-def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True) -> WindowRecord:
+def observation_scope(plan) -> str:
+    record = getattr(plan, "window_record", None)
+    return record.route_fp if record is not None else str(getattr(plan, "route_fp", "") or "")
+
+
+def route_observation_scope(route, settings) -> str:
+    """Main's account scope; capability acknowledgements and density keep their own keys."""
+    import hashlib
+    import json
+    from ouroboros.capability_evidence import route_fingerprint
+    from ouroboros.llm import LLMClient
+
+    if route["provider"] == "claudexor":
+        return route_fingerprint(provider=route["provider"], model=route["model"],
+            base_url=route["base_url"], options=route["options"]) if route["options"].get("account_fingerprint") else ""
+    target = (dict(route, keyless=True) if route["use_local"] else
+              LLMClient().resolve_remote_target(route["model"], settings=settings))
+    credentials = {key: target.get(key, "") for key in ("api_key", "user", "password", "scope")}
+    if not any(credentials.values()) and not target.get("keyless"):
+        return ""
+    payload = {"provider": target["provider"], "model": route["model"],
+               "base_url": target.get("base_url", ""), "credentials": credentials}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:24]
+
+
+def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True,
+                   observation_fp=None, accepted_input_tokens: int = 0) -> WindowRecord:
     from ouroboros import capability_evidence as ce
 
-    fp = str(getattr(evidence, "route_fp", "") or "")
+    fp = observation_scope(evidence) if observation_fp is None else observation_fp
     rows = ((ce._load(root or ce.canonical_evidence_root()).get("main_windows", {}).get(fp) or {})
             .get("observations", [])) if bound and fp else []
     accepted = max((row.get("accepted", 0) for row in rows), default=0)
+    accepted_at = next((row["ts"] for row in rows if accepted and row.get("accepted") == accepted), "")
+    accepted = max(accepted, int(accepted_input_tokens or 0))
     captured = getattr(evidence, "window_record", None)
     limits = ({limit.kind: limit for limit in captured.declared}
               if captured is not None and ce.is_known(evidence, require_fresh=True) else {})
@@ -94,14 +123,10 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True) -> 
                                   str(getattr(evidence, "source", None) or getattr(evidence, "evidence_source", "metadata")),
                                   str(getattr(evidence, "ts", "")))
     declared = tuple(limits.values())
-    # Acceptance raises a known planning boundary, without adding its reserved
-    # output. With no stated kind, only the total lower bound is established.
-    if accepted:
-        for kind in tuple(limits) or ("total",):
-            prior = limits.get(kind)
-            if prior is None or accepted > prior.tokens:
-                row = next(row for row in rows if row.get("accepted") == accepted)
-                limits[kind] = WindowLimit(accepted, kind, "accepted", row["ts"])
+    # Only a disproved stated limit yields to an accepted INPUT. An acceptance
+    # below a stated total proves no reply room; without a statement capacity stays unknown.
+    if any(accepted > limit.tokens for limit in limits.values()):
+        limits = {"input": WindowLimit(accepted, "input", "accepted", accepted_at)}
     for index in range(len(rows) - 1, -1, -1):
         row = rows[index]
         if row.get("refused"):
@@ -115,7 +140,7 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True) -> 
                         WindowLimit(maximum, "output", output.get("source", "metadata"),
                                     output.get("observed_at", "")) if maximum and not output.get("stale")
                         else captured.output if captured else None,
-                        reserve=reserve, accepted=accepted, declared=declared)
+                        reserve=reserve, accepted=accepted, declared=declared, accepted_at=accepted_at)
 
 
 def record_refusal(usage, plan) -> None:
@@ -129,7 +154,7 @@ def record_refusal(usage, plan) -> None:
     if not limit or not getattr(plan, "window_witness_bound", True):
         return
     input_only = any(marker in message.lower() for marker in ("prompt is too long", "maximum input", "input token count"))
-    record_observation(ce.canonical_evidence_root(), plan.route_fp, refused=limit,
+    record_observation(ce.canonical_evidence_root(), observation_scope(plan), refused=limit,
                        kind="input" if input_only else "total")
 
 
@@ -151,4 +176,6 @@ def observed_plan(plan, usage):
     fp = route_fingerprint(provider=plan.provider, model=plan.model, base_url=getattr(plan, "route_base_url", ""),
                            options={"source_id": source, "credential_profile_id": observed["credentialProfileId"],
                                     "account_fingerprint": observed["accountFingerprint"]})
-    return replace(plan, route_fp=fp, model_route=dict(observed), window_witness_bound=True)
+    record = getattr(plan, "window_record", None)
+    return replace(plan, route_fp=fp, window_record=replace(record, route_fp=fp) if record else None,
+                   model_route=dict(observed), window_witness_bound=True)
