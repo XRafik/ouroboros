@@ -224,7 +224,7 @@ test('media and document builders render upgraded DOM shapes with type-anchored 
             file_base64: 'aGVsbG8=', size_bytes: 5,
         });
         assert.match(document.innerHTML, /class="chat-file-grid"/);
-        assert.match(document.innerHTML, /class="chat-file-card"/);
+        assert.ok(document.querySelector('.chat-file-card'));
         assert.match(document.innerHTML, /PDF · 5 B/);
         const actions = Array.from({ length: 13 }, (_value, index) => ({
             label: `Link ${index}`,

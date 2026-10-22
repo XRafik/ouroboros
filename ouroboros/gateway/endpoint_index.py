@@ -278,8 +278,8 @@ HTTP_SHAPES: dict[str, Shape] = {
         "200,409:SkillReviewResponse 400:ErrorResponse", "SkillRevisionRequest",
         note=f"the owner's review verdict; 409 when refused (ok false); {_IN_LANE}"),
     "GET /api/places": Shape("200:json", note="Places and installed connector declarations; §12 Places"),
-    "POST /api/places": Shape("200:json 400:json", "json", note="connect from a declared connector"),
-    "POST /api/places/{place_id}": Shape("200:json 400,409:json", "json", note="atomic owner-authored place choices"),
+    "POST /api/places": Shape("200:json 400:json", "PlaceConnectRequest", note="connect from a declared connector"),
+    "POST /api/places/{place_id}": Shape("200:json 400,409:json", "PlaceUpdateRequest", note="atomic owner-authored place choices"),
     "DELETE /api/places/{place_id}": Shape("200:json 400:json", note="disconnect; room history stays"),
     "POST /api/skills/{skill}/publish-preflight": Shape(
         "200,400,404,409,503:SkillPublishPreflightResponse", "SkillPublishPreflightRequest",

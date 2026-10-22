@@ -130,7 +130,7 @@ export function harnessMaintenanceMarkup(entry, view = {}) {
             ${error ? `<span class="harness-maintenance-notice" data-tone="warn">${escapeHtml(error)}</span>` : ''}
             ${cause ? `<span class="harness-maintenance-cause">${escapeHtml(cause)}</span>` : ''}
             ${entry && !entry.maintainable ? `<span class="harness-maintenance-notice">${escapeHtml(entry.remedy || 'Updates are unavailable for the selected installation.')}</span>` : ''}
-            <button type="button" class="settings-disclosure" data-maintenance-details aria-expanded="${view.expanded ? 'true' : 'false'}" aria-controls="${panelId}">Details${DETAILS_CARET}</button>
+            <button type="button" class="settings-disclosure ui-hit-area" data-maintenance-details aria-expanded="${view.expanded ? 'true' : 'false'}" aria-controls="${panelId}">Details${DETAILS_CARET}</button>
         </div>
         <div class="harness-maintenance-details" id="${panelId}"${view.expanded ? '' : ' hidden'}>
             ${engineProblem ? `<p class="harness-maintenance-exact">Exact message: <code>${escapeHtml(engineProblem)}</code></p>` : ''}

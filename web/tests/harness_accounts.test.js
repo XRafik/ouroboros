@@ -25,6 +25,7 @@ import {
     refreshActionLabel,
     runtimeActionLabel,
     serviceBannerLine,
+    renderAgentsServiceBanner,
     startLogin,
     unreadFacets,
     harnessFamilyMarkup,
@@ -63,6 +64,12 @@ test('account actions stack at the app shell compact breakpoint', () => {
         grid-template-columns: minmax(0, 1fr);
         grid-template-areas: "main" "meta" "actions";`),
     'account actions must drop below status before the persistent sidebar squeezes the row');
+});
+
+test('service Diagnostics shares the touch hit area and token keyboard focus', () => {
+    assert.match(renderAgentsServiceBanner(), /class="settings-disclosure ui-hit-area"/);
+    const css = readFileSync(new URL('../style.css', import.meta.url), 'utf8');
+    assert.match(css, /\.settings-disclosure:focus-visible\s*\{\s*outline: 2px solid var\(--focus-accent-border\);\s*outline-offset: 2px;/);
 });
 
 test('managed runtime keeps one contextual Connect intent across install, repair, and update', () => {

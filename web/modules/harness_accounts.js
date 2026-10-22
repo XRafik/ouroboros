@@ -1056,7 +1056,7 @@ export function renderAgentsServiceBanner() {
     return `<div class="agents-service">
         <div id="agents-service-banner" class="agents-service-banner settings-inline-status" data-tone="muted">Checking the agent service…</div>
         <span id="agents-service-version" class="agents-service-version" hidden></span>
-        <button type="button" id="agents-service-diagnostics-toggle" class="settings-disclosure" aria-expanded="false" aria-controls="agents-service-diagnostics" hidden>Diagnostics${DISCLOSURE_CARET}</button>
+        <button type="button" id="agents-service-diagnostics-toggle" class="settings-disclosure ui-hit-area" aria-expanded="false" aria-controls="agents-service-diagnostics" hidden>Diagnostics${DISCLOSURE_CARET}</button>
         <dl id="agents-service-diagnostics" class="agents-service-diagnostics" hidden></dl>
     </div>`;
 }

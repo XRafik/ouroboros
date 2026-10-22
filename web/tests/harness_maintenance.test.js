@@ -484,7 +484,7 @@ test('the state row is concise; exact engine text, the update note and version f
     assert.match(state, /role="status">Update failed</);
     assert.doesNotMatch(state, /registry did not answer/, 'the exact engine text is not on the row');
     assert.doesNotMatch(state, /harness-maintenance-cause/, 'an operation problem has no typed cause to paraphrase');
-    assert.match(state, /<button type="button" class="settings-disclosure" data-maintenance-details aria-expanded="false" aria-controls="harness-maintenance-details-fixture">Details/);
+    assert.match(state, /<button type="button" class="settings-disclosure ui-hit-area" data-maintenance-details aria-expanded="false" aria-controls="harness-maintenance-details-fixture">Details/);
     const panel = failed.slice(failed.indexOf('harness-maintenance-details"'));
     assert.match(panel, /^harness-maintenance-details" id="harness-maintenance-details-fixture" hidden>/);
     assert.match(panel, /Exact message: <code>the registry did not answer one exact latest version for @openai\/codex \(npm exit 1\)<\/code>/);
