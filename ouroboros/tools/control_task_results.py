@@ -73,13 +73,12 @@ def _subtask_outcome_summary(data: Dict[str, Any], receipts: list | None = None)
     }
     if isinstance(data.get("execution_observation"), dict):
         summary["execution_observation"] = dict(data["execution_observation"])
-    # R5: CURRENT delegated-custody reconciliation state next to the historical
-    # axes, on the full single-child handoff surfaces only (get_task_result /
-    # wait_task — wait_tasks' batch projection is a pinned compact contract).
-    # The frozen delegated_runs_* counters are a historical snapshot (owner
-    # Q2=B); the envelope's trigger + open_run_ids are the liveness surface a
-    # parent can trust after a refresh/backfill healed the row. One bounded
-    # entry: capped lists with an exact omitted count.
+    if isinstance(data.get("swarm_receipt"), dict):
+        summary["swarm_receipt"] = data["swarm_receipt"]
+    # R5: current custody beside historical axes, on full get_task_result/wait_task
+    # only; the compact wait_tasks contract stays pinned. Frozen delegated_runs_*
+    # counters remain historical (Q2=B); the envelope's trigger/open_run_ids show
+    # current liveness, with capped lists and exact omitted counts.
     unreconciled = data.get("delegated_runs_unreconciled")
     unreconciled = (
         [str(item) for item in unreconciled] if isinstance(unreconciled, list) else []

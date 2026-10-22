@@ -115,9 +115,16 @@ def departed_binding(ctx: Any) -> Optional[Dict[str, Any]]:
 def receptive_author(binding: Optional[Dict[str, Any]]):
     """Bind (or, with ``None``, explicitly unbind) the receptive author for one wave."""
     token = _RECEPTIVE.set(binding)
+    from ouroboros.swarm_wait_facts import review_started, review_woke
+    review_started(binding)
     try:
         yield binding
+    except BaseException:
+        if binding:
+            binding["_swarm_wait_outcome"] = "unwound"
+        raise
     finally:
+        review_woke(binding, (binding or {}).get("_swarm_wait_outcome", "whole_panel_returned"))
         _RECEPTIVE.reset(token)
 
 
@@ -232,6 +239,7 @@ def author_detaches(operation: Any, pending_entries: Iterable[Any]) -> bool:
                   else ADDRESSED_EVENT if observed else "")
         if not reason:
             return False
+        binding["_swarm_wait_outcome"] = observed or reason
         for entry in pending_entries:
             if entry is not None:  # read by ``detached_actor`` of this drain
                 entry.author_left_for = reason
@@ -240,6 +248,8 @@ def author_detaches(operation: Any, pending_entries: Iterable[Any]) -> bool:
     with launch_lock(root_drive, root_task_id):
         if not author_paused(operation):
             return False
+        if _RECEPTIVE.get() is not None:
+            _RECEPTIVE.get()["_swarm_wait_outcome"] = "owner_pause"
         for entry in pending_entries:
             if entry is not None:
                 entry.author_left_for = ""  # this detach is Pause's, whatever an earlier wait left for

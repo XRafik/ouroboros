@@ -503,6 +503,8 @@ def begin(ctx: Any, *, started_at: float | None = None) -> None:
     if waiter is not None:
         waiter.sleep_started_monotonic = time.monotonic() - max(0.0, now - started)
     ctx._model_sleep_started = started
+    from ouroboros.swarm_wait_facts import sleep_started
+    sleep_started(ctx, started)
 
 
 def end(ctx: Any) -> float:
@@ -532,6 +534,8 @@ def announce_resumed(ctx: Any, outcome: Any = "") -> None:
     from ouroboros.utils import utc_now_iso
 
     reason, queue = str(outcome or ""), getattr(ctx, "event_queue", None)
+    from ouroboros.swarm_wait_facts import sleep_woke
+    sleep_woke(ctx, reason)
     task_id = str(getattr(ctx, "task_id", "") or "")
     if queue is None or not task_id or (reason.startswith("control:") and reason != "control:owner_resume"):
         return

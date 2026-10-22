@@ -640,6 +640,9 @@ class ReviewCoordinator:
                 raise OSError(f"Review producer outcome is not durable: {actor.operation_id}")
         if producer or not actor.late_result_pending:
             publish_seat_execution(request, slot, actor, self.usage_ctx)
+        else:
+            from ouroboros.subagent_metric_events import review_execution
+            review_execution(request, slot, actor, self.usage_ctx)
 
     def _persist_producer_outcome(self, request, actor, call_id, call_type, payload):
         """Stamp the completed producer beside its existing full response body."""
