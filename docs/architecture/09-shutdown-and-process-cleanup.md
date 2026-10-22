@@ -24,7 +24,7 @@ Manual Restart (`server_restart._perform_owner_restart`) refuses conflicts or an
 
 **Retention.** `restart_retention.py` keeps pauses, revokes unused grants and yields spent carriers to newer continuation custody. Warm owner Pause converts to cold; acknowledged planned/update sleep returns, manual Restart holds it. Doors replace only `saved_sleep_recovery` and `continuation_writer_unsettled`; stronger prior stops survive, even Panic. Panic gives sleeping work `panic_hold`/owner, working work `saved_work_hold{door:panic}`/resume; stored release never changes retrospectively. Source/money/time/Stop still govern; unknown dispatch is not unstarted. Cold receipts bind custody, not external survival. Resume removes the stop; history stays in the journal. Rollback loses Q9 checks; old launchers may require the removed Restart flag (PERSISTENCE).
 
-Delegated schema-2 handoffs (§6) preserve each root/nanny holder, cursor and wake independently. Orphan exclusions name handles; Stop reaches late-bound runs without replay. Migration has no effects; live v2 forbids downgrade.
+Schema-2 delegated handoffs (§6) keep each holder, cursor and wake independent; migration is effect-free; live v2 forbids downgrade.
 
 ### Panic path
 
