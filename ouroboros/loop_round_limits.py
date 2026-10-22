@@ -398,11 +398,11 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
     if addresses:
         from ouroboros.memory_floor import select_view, view_tokens
         plan = getattr(tool_ctx, "context_fit_plan", None)
-        observed_plan = proposal["observed"].get("memory_plan")
+        observed_core = proposal["observed"].get("memory_core_sha256")
         try:
-            if plan is None or observed_plan is None or plan.core_sha256 != observed_plan.core_sha256:
+            if plan is None or not observed_core or plan.core_sha256 != observed_core:
                 raise ValueError("memory snapshot changed; inspect the current view")
-            memory_plan = select_view(plan, mode, addresses)
+            memory_plan = select_view(plan, mode, addresses, owner_note=bool(proposal.get("working_note", "").strip()))
         except ValueError as exc:
             tool_ctx._pending_compaction = None
             tool_ctx._context_view_receipt = {"status": "selection_failed", "reason": str(exc)}
@@ -444,7 +444,7 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
         )
         receipt = asdict(result)
         from ouroboros.context_source_view import retire_host_rows_after_fold
-        candidate = retire_host_rows_after_fold(candidate, receipt)
+        candidate = retire_host_rows_after_fold(candidate, receipt, observed_messages=observed["messages"])
         if receipt["status"] == "no_op" and (proposal.get("review_transfers") or proposal.get("review_notes")):
             from ouroboros.review_history_view import retain_transfer_only_checkpoint
             try:
@@ -465,8 +465,14 @@ def _run_authored_context_view(messages, ctx, pending, selected_names):
                 candidate = messages
                 ctx.emit_progress("Context view kept unchanged: review source/selection custody could not be retained.")
     if memory_plan is not None and receipt["status"] in ("applied", "no_op"):
-        candidate = memory_plan.reproject_transcript(candidate, mode)
-        receipt.update(status="applied", memory_view=memory_price)
+        from ouroboros.memory_floor import owner_note_capsule
+        try:
+            note = owner_note_capsule(memory_plan, addresses, proposal.get("working_note", ""), request,
+                drive_root=ctx.drive_root or pathlib.Path(ctx.drive_logs).parent, task_id=ctx.task_id)
+            candidate = memory_plan.reproject_transcript(candidate, mode) + ([note] if note else [])
+            receipt.update(status="applied", memory_view=memory_price)
+        except ValueError as exc:
+            candidate, receipt = messages, {"status": "selection_failed", "reason": str(exc)}
     if receipt["status"] != "no_op":
         from ouroboros.artifacts import store_actor_source_bytes
         import hashlib
@@ -1068,6 +1074,8 @@ def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_t
         measure_candidate=measure_candidate,
         trace_refs_by_tool_call_id=reclaim_trace_refs(tool_ctx),
         drive_root=pathlib.Path(ctx.drive_root or ctx.drive_logs.parent), task_id=ctx.task_id,
+        usable_input=(measurement.capacity_total_tokens - measurement.response_reserve_tokens
+                      if measurement.capacity_total_tokens is not None else None),
     )
     if receipt.status == "applied":
         _publish_reclaimed_transcript(ctx, rebuilt, by=f"refusal_pass:{rung}")
@@ -1093,18 +1101,22 @@ def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None, vi
     mode = str(ctx.active_context_mode or "max")
     before = plan.projection(mode).system_content_json
     capacity = measurement.capacity_total_tokens
-    rebound = plan.reproject_for_route(
-        window_tokens=int(capacity or 0), known_window=capacity is not None,
-        ratio=measurement.measurement_density,
-        output_reserve=int(plan.output_reserve_tokens), tool_schemas=ctx.tool_schemas, start_mode=mode,
-        current_messages=ctx.messages,
-        refused_tokens=max(1, int(saving or measurement.capacity_deficit_tokens or 0)),
-    )
     if view_address:
         from ouroboros.memory_floor import select_view
         rebound = select_view(plan, mode, view_address)
-    if rebound.projection(mode).system_content_json == before:
+    else:
+        rebound = plan.reproject_for_route(
+            window_tokens=int(capacity or 0), known_window=capacity is not None,
+            ratio=measurement.measurement_density,
+            output_reserve=int(plan.output_reserve_tokens), tool_schemas=ctx.tool_schemas, start_mode=mode,
+            current_messages=ctx.messages,
+            refused_tokens=max(1, int(saving or measurement.capacity_deficit_tokens or 0)),
+        )
+    selected_mode = mode if view_address else rebound.initial_mode
+    if selected_mode == mode and rebound.projection(mode).system_content_json == before:
         return False
+    mode = selected_mode
+    ctx.active_context_mode = ctx.tools._ctx.active_context_mode = mode
     ctx.context_fit_plan = rebound
     ctx.tools._ctx.context_fit_plan = rebound
     ctx.messages[:] = rebound.reproject_transcript(ctx.messages, mode)

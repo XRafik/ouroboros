@@ -502,7 +502,12 @@ def test_history_is_named_from_each_records_own_facts_never_from_the_live_roster
     }), encoding="utf-8")
 
     delegation = _delegation_capability_fact()
-    assert delegation["subagent_last_delegation"]["selected_subagent_id"] == "cursor=grok-4.6/high"
+    assert "subagent_last_delegation" not in delegation
+    assert [row["run_id"] for row in delegation["subagents_last_executions"]] == ["run-2", "run-1"]
+    assert "identity" not in delegation["subagents_last_executions"][0]
+    reader = next(item for item in delegation["readers"] if item["arguments"]["path"].endswith("subagent_last_delegation.json"))
+    saved = json.loads((tmp_path / reader["arguments"]["path"]).read_text(encoding="utf-8"))
+    assert saved["latest_by_subagent"] == {"fast-scout": typed, "fast-scout-2": untyped}
     assert [row["selected_subagent_id"] for row in delegation["subagents_last_executions"]] == [
         "cursor=grok-4.6/high", "google/gemini-3.7-flash",
     ]

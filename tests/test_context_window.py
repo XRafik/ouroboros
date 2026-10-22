@@ -40,7 +40,12 @@ def test_refusal_expires_or_is_superseded_only_by_a_later_larger_acceptance(tmp_
     assert resolve_window(evidence, 65_536, root=tmp_path, bound=False).total.tokens == 872_000
 
 
-def test_numberless_refusal_adds_no_ceiling(tmp_path, monkeypatch):
+@pytest.mark.parametrize("message,usable", [
+    ("prompt is too long: 210000 tokens > 200000 maximum", 200_000),
+    ("The input token count (210000) exceeds the maximum number of tokens allowed (200000).", 200_000),
+    ("This model's maximum context length is 200000 tokens.", 134_464),
+])
+def test_numberless_refusal_adds_no_ceiling(tmp_path, monkeypatch, message, usable):
     from types import SimpleNamespace
     from ouroboros.context_window import record_refusal
 
@@ -49,5 +54,52 @@ def test_numberless_refusal_adds_no_ceiling(tmp_path, monkeypatch):
     evidence = ce.CapabilityEvidence(0, "unprobeable", "none", "r")
     record_refusal({"_last_llm_provider_message": "context length exceeded"}, plan)
     assert resolve_window(evidence, 65_536, root=tmp_path).usable is None
-    record_refusal({"_last_llm_provider_message": "prompt is too long: 210000 tokens > 200000 maximum"}, plan)
-    assert resolve_window(evidence, 65_536, root=tmp_path).usable == 200_000
+    record_refusal({"_last_llm_provider_message": message}, plan)
+    assert resolve_window(evidence, 65_536, root=tmp_path).usable == usable
+
+
+@pytest.mark.parametrize("main", [True, False])
+def test_settlement_binds_main_density_and_acceptance_but_auxiliary_calls_do_not(tmp_path, main):
+    from types import SimpleNamespace
+
+    request = SimpleNamespace(provider="openai", model="openai::model", prompt_tokens_bounded_estimate=100_000,
+        drive_root=tmp_path, max_completion_tokens=1234, physical_context=(SimpleNamespace(view_kind="own_wake",
+        route_fp="own-route", window_witness_bound=True, response_reserve_tokens=65_536) if main else None))
+    ce.observe_token_density(request, {"prompt_tokens": 110_000}, drive_root_resolver=lambda root: root)
+    density, source = ce.resolve_main_token_density(tmp_path, "own-route", "openai::model",
+        estimate_tokens=100_000, view_kind="own_wake")
+    assert (density, source) == ((1.1, "fresh_route_usage") if main else (1.0, "cold_estimate"))
+    assert ce.resolve_main_token_density(tmp_path, "other-route", "openai::model",
+        estimate_tokens=100_000, view_kind="own_wake") == (1.0, "cold_estimate")
+    evidence = ce.CapabilityEvidence(0, "unprobeable", "none", "own-route")
+    record = resolve_window(evidence, 65_536, root=tmp_path)
+    assert record.usable == (44_464 if main else None)
+    if main:
+        [observation] = ce._load(tmp_path)["main_windows"]["own-route"]["observations"]
+        assert observation["reserve"] == 65_536 and observation["transmitted"] == 1234
+
+
+@pytest.mark.parametrize("metadata", [0, 1_000_000])
+def test_a_plan_releases_its_refusal_ceiling_when_the_observation_expires(tmp_path, monkeypatch, metadata):
+    from datetime import datetime, timedelta, timezone
+    from ouroboros import context_fit as cf
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(ce, "utc_now_iso", lambda: now.isoformat())
+    monkeypatch.setattr(ce, "utc_now", lambda: now)
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    monkeypatch.setattr(cf, "_route_calibration_ratio", lambda *_a, **_kw: 1.0)
+    record_observation(tmp_path, "expiry-route", refused=200_000)
+    core = cf.ContextCore("Core", "", "", "", "", "", '"Assignment"', False)
+    plan = cf.build_context_fit_plan(None, core, {"type": "chat"}, preferred_mode="low",
+        route_resolver=lambda *_a, **_kw: ({"provider": "test", "model": "test"},
+            ce.CapabilityEvidence(metadata, "confirmed" if metadata else "unprobeable", "metadata", "expiry-route")))
+    def capacity():
+        return cf.measure_main_fit(plan, plan.messages_for("low"), [], profile="owner_low",
+            rendered_mode="low", round_id="expiry").measurement.capacity_total_tokens
+
+    assert capacity() == 200_000
+    now += timedelta(seconds=ce._CONFIRMED_TTL_SEC - 1)
+    assert capacity() == 200_000
+    now += timedelta(seconds=2)
+    assert capacity() == (metadata or None)

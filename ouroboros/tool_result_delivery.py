@@ -426,6 +426,8 @@ def _measured_frame(
         one[i] = chosen_contents[i]
         body_costs[i] = max(0, _tokens(measure(one)) - _tokens(baseline))
     protected = {i for i in wants if capacity is None or body_costs[i] <= capacity - reserve}
+    for i in wants.keys() - protected:
+        facts[i] = {**facts[i], "cut_reason": "chosen_body_exceeds_usable_input"}
     receipt.update(measurements=2 + (chosen is not minimum and chosen is not whole) + 2 * len(wants),
                    chosen_tokens=p_chosen, chosen_body_tokens={rows[i]["tool_call_id"]: cost for i, cost in body_costs.items()})
     chosen_chars = sum(max(0, len(chosen_contents[i]) - len(envelopes[i])) for i in wants)

@@ -207,6 +207,11 @@ def _task_result_ground_truth(row: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _result_reference(facts: Dict[str, Any]) -> Dict[str, Any]:
+    """A historical result's identity and exact reader, without its evidence body."""
+    return {key: facts[key] for key in ("task_id", "status", "title", "authority_source")}
+
+
 def _is_child_result(facts: Dict[str, Any]) -> bool:
     """A result that is NOT an owner root: it has a parent, or the subagent role.
 
@@ -301,7 +306,7 @@ def _project_routing_manifest(ctx: Any, project_id: str) -> Dict[str, Any]:
         if str(row.get("project_id") or "") == project_id
     ]
     return {
-        "final_results": [{key: row[key] for key in ("task_id", "status", "title", "authority_source")} for row in finals],
+        "final_results": [_result_reference(row) for row in finals],
         "active_roots": active[:40],
         "omissions": {**omissions, "active_roots": max(0, len(active) - 40)},
     }
@@ -418,7 +423,7 @@ def _main_routing_manifest(ctx: Any) -> Dict[str, Any]:
     return {
         "projects": projects[:40],
         "root_tasks": roots[:40],
-        "final_results": [{key: row[key] for key in ("task_id", "status", "title", "authority_source")} for row in finals],
+        "final_results": [_result_reference(row) for row in finals],
         "recent_canonical_dialogue": dialogue,
         "omissions": {
             "projects": max(0, len(projects) - 40),
@@ -476,13 +481,12 @@ def _decision_turn_metadata(ctx: Any, chat_id: int, client_message_id: str, task
     if main_manifest:
         md["main_routing_manifest"] = main_manifest
     if project_id:
-        # Ground truth for a project-room "continue" decision (Q8-A): the thread's
-        # most recent task result as a bounded typed projection. Without it the
-        # router turn has only chat memory about where prior work lives.
+        # Name the thread's latest result and its exact reader; prior workspace
+        # and outcome evidence remains in that result instead of riding inline.
         try:
             row = _latest_project_task_result(ctx, project_id)
             if row is not None:
-                md["project_last_task_result"] = _task_result_ground_truth(row)
+                md["project_last_task_result"] = _result_reference(_task_result_ground_truth(row))
         except Exception:
             log.debug("project last-task-result projection failed", exc_info=True)
         try:

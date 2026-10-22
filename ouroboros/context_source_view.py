@@ -7,6 +7,7 @@ It never writes a summary or claims that the mind understood an omitted body.
 from __future__ import annotations
 
 import pathlib
+import json
 from collections import Counter
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Sequence, Tuple
@@ -59,11 +60,19 @@ def _obsolete_host_rows(messages: Sequence[Mapping[str, Any]]) -> set[int]:
 
 
 
-def retire_host_rows_after_fold(messages: list, receipt: dict) -> list:
+def retire_host_rows_after_fold(messages: list, receipt: dict, *, observed_messages=()) -> list:
     """Retire only superseded typed host rows inside an applied, checkpointed authored fold."""
     if receipt.get("status") != "applied" or not receipt.get("selection_fingerprint") or not receipt.get("checkpoint_ref"):
         return messages
-    obsolete = _obsolete_host_rows(messages)
+    def identity(row):
+        return compaction.context_reclaim_transcript_sha256(compaction._view_source_messages([row]))
+    retained = Counter(identity(row) for row in observed_messages)
+    obsolete = set()
+    for i in sorted(_obsolete_host_rows(messages)):
+        key = identity(messages[i])
+        if retained[key]:  # only the observed checkpoint owns these exact bytes; arrivals stay whole
+            retained[key] -= 1
+            obsolete.add(i)
     if not obsolete:
         return messages
     receipt["retired_host_row_ids"] = [str(messages[i].get("msg_id") or
@@ -129,6 +138,29 @@ def _unit_facts(messages: Sequence[Mapping[str, Any]], unit: _AtomicUnit) -> str
     return "\n".join(lines)
 
 
+def chosen_read_units(messages, units, *, usable_input=None, density=1.0):
+    """Explicitly chosen bodies stay whole unless one alone exceeds known usable input."""
+    from ouroboros.tool_capabilities import requested_result_view
+
+    protected = set()
+    for unit in units:
+        rows = messages[unit.start:unit.end + 1]
+        results = {str(row.get("tool_call_id") or ""): row for row in rows if row.get("role") == "tool"}
+        for call in rows[0].get("tool_calls") or ():
+            try:
+                arguments = json.loads(call.get("function", {}).get("arguments") or "{}")
+            except (ValueError, TypeError):
+                continue
+            row = results.get(str(call.get("id") or ""))
+            if row is None or requested_result_view(arguments) is None:
+                continue
+            cost = compaction._context_tokens_for_messages([row], density) - compaction._context_tokens_for_messages(
+                [{**row, "content": ""}], density)
+            if usable_input is None or cost <= usable_input:
+                protected.add(unit.unit_id)
+    return protected
+
+
 def emergency_address_view(
     messages: list,
     request: ContextReclaimRequest,
@@ -139,6 +171,7 @@ def emergency_address_view(
     trace_refs_by_tool_call_id: Optional[Mapping[str, Any]] = None,
     drive_root: pathlib.Path,
     task_id: str,
+    usable_input: Optional[int] = None,
 ) -> Tuple[list, ContextReclaimReceipt]:
     """Model-free pass after the provider's typed refusal of this very request.
 
@@ -157,12 +190,14 @@ def emergency_address_view(
     units = compaction.context_units(messages, scope="dialogue", trace_refs_by_tool_call_id=trace_refs,
                           measurement_density=density)
     protected = compaction.owner_protected_unit_ids(messages, units)
+    protected |= chosen_read_units(messages, units, usable_input=usable_input, density=density)
     obsolete = _obsolete_host_rows(messages) if rung == "host_copies" else set()
     first_user = next((i for i, row in enumerate(messages) if row.get("role") == "user"), -1)
     obsolete = {i for i in obsolete if i != first_user and not messages[i].get("function_call")
                 and compaction._plain_text(messages[i].get("content")) is not None}
     raw = [u for u in units if compaction.unit_kind(messages, u) == "tool" and u.generation == 0
            and u.unit_id not in protected]
+    oversized = chosen_read_units(messages, raw)  # every remaining chosen body exceeded usable input
     exposed = _exposed_units(messages, raw, observation or {})
     eligible = [u for u in raw if (u.unit_id in exposed) == (rung == "bodies")] if rung != "host_copies" else []
     if not eligible and not obsolete:
@@ -223,7 +258,9 @@ def emergency_address_view(
         record, ref = compaction._capsule_message(
             combined, "\n".join(_unit_facts(messages, u) for u in group),
             [compaction._part(combined.unit_id, combined.source_text)], checkpoint_ref, request, retention="source_view",
-            label=_EMERGENCY_LABELS[rung], address={"checkpoint_ref": dict(checkpoint_ref), "units": members})
+            label=_EMERGENCY_LABELS[rung] + ("; chosen_body_exceeds_usable_input" if any(
+                u.unit_id in oversized for u in group) else ""),
+            address={"checkpoint_ref": dict(checkpoint_ref), "units": members})
         proposal = {**replacements, start: (end, [record], [ref])}
         candidate, refs = compaction._materialize_replacements(messages, proposal)
         delta = before_tokens - measure(candidate)

@@ -63,3 +63,51 @@ def test_boundary_measures_before_publish_and_keeps_arrivals(tmp_path, monkeypat
         assert ctx._context_view_receipt["memory_view"]["re_read_input_tokens_estimate"] > 0
     else:
         assert result == messages and ctx.context_fit_plan is p
+
+
+@pytest.mark.parametrize("with_memory", [False, True])
+def test_observed_memory_and_queued_selection_survive_a_json_continuation(tmp_path, monkeypatch, with_memory):
+    from ouroboros.owner_wait import continuation_state, restore_continuation_state
+
+    p, _snap = plan()
+    ctx = SimpleNamespace(task_id="memory-wait", drive_root=tmp_path, budget_drive_root=tmp_path,
+                          context_fit_plan=p if with_memory else None, active_context_mode="max")
+    messages, schemas = p.messages_for("max"), []
+    record_context_view(ctx, messages, schemas)
+    seen = json.loads(_compact_context(ctx, inspect=True))
+    assert (seen["memory_view_status"] == "observed_snapshot") is with_memory
+    if with_memory:
+        assert "requested" in _compact_context(ctx, view_address=["F5:page-000"])
+    state = json.loads(json.dumps(continuation_state(ctx, messages, {}, {}, 1, schemas, set())))
+    resumed = SimpleNamespace(task_id=ctx.task_id, drive_root=tmp_path, budget_drive_root=tmp_path,
+                              context_fit_plan=ctx.context_fit_plan)
+    restored = []
+    restore_continuation_state(SimpleNamespace(_ctx=resumed), state, restored, {}, {}, set())
+    assert restored == messages and resumed._last_context_observation == state["context_observations"]["_last_context_observation"]
+    if with_memory:
+        result = _run_round_compaction(restored, _context(tmp_path, resumed, schemas, monkeypatch))
+        assert resumed._context_view_receipt["status"] == "applied"
+        assert "Page 0." not in json.dumps(result[0]) and "Page 1." in json.dumps(result[0])
+    else:
+        assert not getattr(resumed, "_pending_compaction", None)
+        assert json.loads(_compact_context(resumed, inspect=True))["inventory"]["by_kind"]["memory"]["units"] == 0
+
+
+@pytest.mark.parametrize("changed_snapshot", [False, True])
+def test_inspection_keeps_observed_forms_and_boundary_requires_the_same_source(tmp_path, monkeypatch, changed_snapshot):
+    p, _snap = plan()
+    ctx = SimpleNamespace(context_fit_plan=p, active_context_mode="max")
+    messages, schemas = p.messages_for("max"), []
+    record_context_view(ctx, messages, schemas)
+    ctx.context_fit_plan = floor.select_view(p, "max", ["F5:page-001"])
+    shown = json.loads(_compact_context(ctx, inspect=True))
+    assert not next(row for row in shown["units"] if row.get("view_address") == "F5:page-001")["selected"]
+    assert "requested" in _compact_context(ctx, view_address=["F5:page-000"])
+    if changed_snapshot:
+        ctx.context_fit_plan = replace(ctx.context_fit_plan, core_sha256="different-source")
+    result = _run_round_compaction(messages, _context(tmp_path, ctx, schemas, monkeypatch))
+    assert ctx._context_view_receipt["status"] == ("selection_failed" if changed_snapshot else "applied")
+    if changed_snapshot:
+        assert result == messages and "snapshot changed" in ctx._context_view_receipt["reason"]
+    else:
+        assert "Page 0." not in json.dumps(result[0]) and "Page 1." not in json.dumps(result[0])

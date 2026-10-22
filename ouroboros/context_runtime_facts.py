@@ -364,12 +364,15 @@ def _delegation_capability_fact() -> Optional[Dict[str, Any]]:
         last = subagent_last_delegation() or {}
         if not slots and not last:
             return None
+        records = last.get("latest_by_subagent")
+        records = list(records.values()) if isinstance(records, dict) and records else ([last] if last else [])
         return {"note": "Historical observations, not live health; read the records for details.",
                 "reviewer_slots_last": [{"slot": str(slot), "outcome": row.get("status", "unknown"),
                     "observed": row.get("ts")} for slot, row in sorted(slots.items()) if isinstance(row, dict)],
                 "subagents_last_executions": [{"selected_subagent_id": recorded_handle(row),
-                    "outcome": row.get("outcome", "unknown"), "observed": row.get("observed_at") or row.get("ts")}
-                    for row in (last.get("latest_by_subagent") or {}).values() if isinstance(row, dict)],
+                    "outcome": row.get("outcome", "unknown"), "observed": row.get("observed_at") or row.get("ts"),
+                    **{key: row[key] for key in ("task_id", "run_id", "attempt_id") if row.get(key)}}
+                    for row in records if isinstance(row, dict)],
                 "readers": [{"tool": "read_file", "arguments": {"root": "runtime_data", "path": "state/" + name}}
                             for name in (LAST_EXECUTION_FILENAME, LAST_DELEGATION_FILENAME)]}
     except Exception:

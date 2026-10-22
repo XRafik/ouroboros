@@ -174,3 +174,16 @@ def test_the_facts_line_states_where_the_size_comes_from():
     cold = context_facts_line(ctx, money={})
     assert "cold chars/4 estimate" in cold and "predicted free ~54,464" in cold
     assert ACCEPTED_INPUTS_KEY not in usage  # the line reads facts; it records nothing
+
+
+@pytest.mark.parametrize("reserve", [None, 8_192, 65_536])
+def test_acceptance_records_the_planned_reserve_separately_from_the_wire(tmp_path, reserve):
+    from ouroboros import capability_evidence as ce
+
+    plan, usage = _plan(), {"_context_reply_allowance_tokens": 1_234}
+    if reserve is not None:
+        usage["_context_response_reserve_tokens"] = reserve
+    record_input_anchor(_settled(usage, prompt=100_000, estimate=100_000), plan, round_idx=1)
+    [row] = ce._load(tmp_path)["main_windows"][plan.route_fp]["observations"]
+    assert row["accepted"] == 100_000 and row["transmitted"] == 1_234
+    assert row["reserve"] == (plan.output_reserve_tokens if reserve is None else reserve)

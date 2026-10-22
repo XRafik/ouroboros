@@ -28,10 +28,15 @@ def record_context_view(ctx, messages, tool_schemas, *, physical_capture=_CANONI
     from ouroboros.context_compaction import context_reclaim_transcript_sha256
 
     observed = copy.deepcopy(messages)
+    plan, mode = getattr(ctx, "context_fit_plan", None), getattr(ctx, "active_context_mode", "") or "max"
+    memory = bool(getattr(getattr(plan, "core", None), "memory_view_json", ""))
     ctx._last_context_observation = {
         "revision": context_reclaim_transcript_sha256(observed),
         "messages": observed, "tool_schemas": copy.deepcopy(tool_schemas),
-        "memory_plan": getattr(ctx, "context_fit_plan", None),
+        # Continuations retain values, never the live plan. The same core can
+        # render this captured selection even after another form was chosen.
+        "memory_core_sha256": plan.core_sha256 if memory else "",
+        "memory_facts": {"floor": copy.deepcopy(plan.projection(mode).memory_facts.get("floor") or {})} if memory else {},
     }
     if physical_capture is _CANONICAL_OBSERVATION:
         return  # Existing non-Main actors retain their own observation boundary.
@@ -124,7 +129,11 @@ def _inspect(ctx, observed: dict, *, offset: int) -> str:
             row["exposed"] = (unit.unit_id, unit.raw_sha256) in exposed
         rows.append(row)
     from ouroboros.memory_floor import view_inventory
-    memory_rows = view_inventory(observed.get("memory_plan"), getattr(ctx, "active_context_mode", "") or "max")
+    plan = getattr(ctx, "context_fit_plan", None)
+    memory_available = bool(observed.get("memory_core_sha256")) and (
+        observed["memory_core_sha256"] == getattr(plan, "core_sha256", None))
+    memory_rows = view_inventory(plan if memory_available else None, getattr(ctx, "active_context_mode", "") or "max",
+                                 memory_facts=observed.get("memory_facts"))
     rows.extend(memory_rows)
     counts["memory"] = len(memory_rows)
     tokens["memory"] = sum(row["tokens"] for row in memory_rows)
@@ -133,6 +142,7 @@ def _inspect(ctx, observed: dict, *, offset: int) -> str:
         **({"review_decisions": decisions} if decisions else {}),
         "view_revision": observed["revision"],
         "restore_checkpoint": restore_checkpoint,
+        "memory_view_status": "observed_snapshot" if memory_available else "unavailable",
         "memory_re_read_price": "Changing a memory form rewrites the system prefix; later cached input may need re-reading.",
         "inventory": {"units": len(rows), "eligible": sum(row["eligible"] for row in rows),
                       "tokens": sum(tokens.values()),
@@ -227,7 +237,11 @@ def _compact_context(ctx, keep_last_n: int | None = None, *, inspect: bool = Fal
     if view_address:
         from ouroboros.memory_floor import select_view
         try:
-            select_view(observed.get("memory_plan"), getattr(ctx, "active_context_mode", "") or "max", view_address)
+            plan = getattr(ctx, "context_fit_plan", None)
+            if plan is None or observed.get("memory_core_sha256") != plan.core_sha256:
+                raise ValueError("memory snapshot changed; inspect the current view")
+            select_view(plan, getattr(ctx, "active_context_mode", "") or "max", view_address,
+                        owner_note=bool(working_note.strip()))
         except ValueError as exc:
             return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=str(exc)))
     if keep_unit_ids is None and keep_last_n is not None:

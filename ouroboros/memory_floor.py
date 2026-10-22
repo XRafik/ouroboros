@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Tuple
 
 from ouroboros import context_budget
 from ouroboros.chat_chain import parse_address
@@ -38,7 +38,8 @@ def floor_elements(snapshot: mv.MemoryViewSnapshot) -> List[Tuple[str, str, str,
         return []
     room = snapshot.room or {}
     lane1, lane2 = room.get("lane1") or [], room.get("lane2") or []
-    quiet = [r for r in snapshot.live_rooms if not r["notes"] and not r["words"]]
+    quiet = [r for r in snapshot.live_rooms if not r["notes"] and not r["words"] and (
+        not r.get("directory") or not (r["facts"].get("people") or r["facts"].get("mine") or r.get("focus")))]
     others = [r for r in snapshot.live_rooms if r not in quiet]
     mine = sorted((i for i in lane1 if i["kind"] == "ouroboros"), key=lambda i: i["pos"])
     steps = {
@@ -82,21 +83,38 @@ def floor_allowances(*, window_tokens: Optional[int], output_reserve_tokens: Opt
 
 
 def fit_memory_view(snapshot: mv.MemoryViewSnapshot, allowances: Mapping[str, Optional[int]], *,
-                    kept: mv.FloorLevel = mv.FULL_VIEW, saving: int = 0) -> mv.FloorLevel:
+                    kept: mv.FloorLevel = mv.FULL_VIEW, saving: int = 0,
+                    measure: Optional[Callable[[mv.FloorLevel], int]] = None) -> mv.FloorLevel:
     """One ordered walk, then give back new cuts that fit. Previously chosen forms stay selected."""
     elements = degradable_elements(snapshot)
     old = {(step, ident) for step, ids in kept.addressed for ident in ids}
     taken = set(old)
-    current = view_tokens(mv.render_story(snapshot, kept)) + view_tokens(mv.render_room(snapshot, kept))
+    measure = measure or (lambda level: view_tokens(mv.render_story(snapshot, level)) + view_tokens(mv.render_room(snapshot, level)))
+    current = measure(kept)
+    measured_count = len(taken)
     bounds = [b for b in (allowances.get("margin"), allowances.get("budget")) if b is not None]
     bound = min(bounds) if bounds else None
     target = min(bound if bound is not None else current, current - saving) if saving else bound
+    budget = allowances.get("budget") is not None and allowances.get("budget") == bound
+
+    def level(selected):
+        return mv.FloorLevel(tuple((s, tuple(i for step, i, *_ in elements if step == s and (s, i) in selected))
+                                  for s in LADDER if any(step == s for step, _ in selected)),
+                             by_budget=kept.by_budget + (len(selected - old) if budget else 0))
+
     owner = {i["address"]: i for i in (snapshot.room or {}).get("lane1", ())}
     added = []
     for step, ident, whole, short in elements:
+        if target is not None and current <= target:
+            current = measure(level(taken))  # aggregate boundaries and the receipt are part of the budget
+            measured_count = len(taken)
+            if current <= target:
+                break
         if (step, ident) in taken or target is None or current <= target:
             continue
         if step == "F7" and not owner[ident].get("carried"):
+            if measured_count != len(taken):
+                current, measured_count = measure(level(taken)), len(taken)
             physical = allowances.get("physical")
             if physical is None or current <= physical:
                 continue
@@ -104,15 +122,15 @@ def fit_memory_view(snapshot: mv.MemoryViewSnapshot, allowances: Mapping[str, Op
         taken.add((step, ident))
         added.append((step, ident, delta))
         current -= delta
+    current = measure(level(taken))
     # A coarse final cut can leave space for an earlier element; give it back without unfolding kept choices.
     for step, ident, delta in reversed(added):
         if target is not None and current + delta <= target:
-            taken.remove((step, ident))
-            current += delta
-    budget = allowances.get("budget") is not None and allowances.get("budget") == bound
-    return mv.FloorLevel(tuple((s, tuple(i for step, i, *_ in elements if step == s and (s, i) in taken))
-                              for s in LADDER if any(step == s for step, _ in taken)),
-                         by_budget=kept.by_budget + (len(taken - old) if budget else 0))
+            trial = taken - {(step, ident)}
+            actual = measure(level(trial))
+            if actual <= target:
+                taken, current = trial, actual
+    return level(taken)
 
 
 def kept_level(snapshot: mv.MemoryViewSnapshot, facts: Mapping[str, Any]) -> mv.FloorLevel:
@@ -130,7 +148,8 @@ def kept_level(snapshot: mv.MemoryViewSnapshot, facts: Mapping[str, Any]) -> mv.
                          by_budget=int(floor.get("by_budget") or 0))
 
 
-def level_with(snapshot: mv.MemoryViewSnapshot, kept: mv.FloorLevel, addresses: Iterable[str]) -> mv.FloorLevel:
+def level_with(snapshot: mv.MemoryViewSnapshot, kept: mv.FloorLevel, addresses: Iterable[str], *,
+               owner_note: bool = False) -> mv.FloorLevel:
     """Add exact inspected forms; core and governing words have no selectable address."""
     eligible = {f"{step}:{ident}": (step, ident) for step, ident, *_ in floor_elements(snapshot)}
     taken = {(step, ident) for step, ids in kept.addressed for ident in ids}
@@ -138,6 +157,9 @@ def level_with(snapshot: mv.MemoryViewSnapshot, kept: mv.FloorLevel, addresses: 
         if address not in eligible:
             raise ValueError(f"Unknown or protected view_address: {address}")
         step, ident = eligible[address]
+        if step == "F7" and not owner_note and not next(
+                row.get("carried") for row in snapshot.room["lane1"] if row["address"] == ident):
+            raise ValueError("Uncovered owner commitments require an authored working_note before changing their form")
         taken.add((step, ident))
         if step in ("F6", "F6a"):
             taken.update((prior, ident) for prior in ("F6r", "F6") if f"{prior}:{ident}" in eligible)
@@ -146,7 +168,7 @@ def level_with(snapshot: mv.MemoryViewSnapshot, kept: mv.FloorLevel, addresses: 
                                if any(s == step for s, _ in taken)), by_budget=kept.by_budget)
 
 
-def select_view(plan, mode: str, addresses: Iterable[str]):
+def select_view(plan, mode: str, addresses: Iterable[str], *, owner_note: bool = False):
     """Render selected forms from the captured source, preserving all other projections and the tail."""
     from ouroboros.context_fit import _governance_blocks, _system_blocks, _request_tokens
 
@@ -154,7 +176,7 @@ def select_view(plan, mode: str, addresses: Iterable[str]):
         raise ValueError("This actor has no captured memory view")
     snapshot = mv.snapshot_from_json(plan.core.memory_view_json)
     shown = plan.projection(mode)
-    level = level_with(snapshot, kept_level(snapshot, shown.memory_facts), addresses)
+    level = level_with(snapshot, kept_level(snapshot, shown.memory_facts), addresses, owner_note=owner_note)
     old = shown.memory_facts.get("floor") or {}
     switched = old.get("mode_switch") or {}
     note = floor_note(level, window_tokens=old.get("window_tokens"), mode=mode,
@@ -174,11 +196,35 @@ def select_view(plan, mode: str, addresses: Iterable[str]):
     return dataclasses.replace(plan, **{f"{mode}_projection": projection})
 
 
-def view_inventory(plan, mode: str) -> List[Dict[str, Any]]:
+def owner_note_capsule(plan, addresses, note, request, *, drive_root, task_id):
+    """Keep the mind's account of selected owner commitments with their exact captured source."""
+    from ouroboros import context_compaction as cc
+    from ouroboros.context_budget import _Selection
+
+    wanted = {address[3:] for address in addresses if address.startswith("F7:")}
+    if not wanted:
+        return None
+    snap = mv.snapshot_from_json(plan.core.memory_view_json)
+    rows = [{"role": "user", "content": row["line"]} for row in snap.room["lane1"]
+            if row["address"] in wanted and not row.get("carried")]
+    if not rows:
+        return None
+    if not note.strip():
+        raise ValueError("Uncovered owner commitments require an authored working_note")
+    request = dataclasses.replace(request, transcript_sha256=cc.context_reclaim_transcript_sha256(rows))
+    unit = cc._unit_from_slice(rows, 0, len(rows) - 1, trace_refs_by_tool_call_id={}, measurement_density=1.0)
+    selection = _Selection((unit,), request.transcript_sha256, unit.predicted_reclaim_tokens)
+    source = cc._persist_reclaim_checkpoint(rows, request, selection, drive_root=drive_root, task_id=task_id)
+    if not source:
+        raise ValueError("The exact owner-word source could not be retained")
+    return cc._capsule_message(unit, note, [cc._part(unit.unit_id, unit.source_text)], source, request)[0]
+
+
+def view_inventory(plan, mode: str, *, memory_facts=None) -> List[Dict[str, Any]]:
     if plan is None or getattr(plan, "core", None) is None or not plan.core.memory_view_json:
         return []
     snapshot = mv.snapshot_from_json(plan.core.memory_view_json)
-    level = kept_level(snapshot, plan.projection(mode).memory_facts)
+    level = kept_level(snapshot, plan.projection(mode).memory_facts if memory_facts is None else memory_facts)
     chosen = {(step, ident) for step, ids in level.addressed for ident in ids}
     return [{"view_address": f"{step}:{ident}", "kind": "memory", "tokens": whole,
              "saving_tokens": max(0, whole - short), "eligible": True, "selected": (step, ident) in chosen}
@@ -224,7 +270,7 @@ def floor_note(level: mv.FloorLevel, *, window_tokens: Optional[int], mode: str,
     lines, name = ["### Physical floor"], mode.capitalize()
     if asked:
         bounds = ([f"the window ({window_tokens} tokens)"]
-                  if sum(counts.values()) > level.by_budget else []) + (
+                  if window_tokens is not None else []) + (
             [f"the {(budget_mode or mode).capitalize()} mode budget ({target_tokens} tokens)"] if level.by_budget else [])
         subject = " and ".join(bounds)
         shown = ", ".join(text.format(counts[step]) for step, text in _SHOWN if counts.get(step))
@@ -235,7 +281,8 @@ def floor_note(level: mv.FloorLevel, *, window_tokens: Optional[int], mode: str,
                      f"Shown above only by address: {shown}. The retained sources remain readable: memory_read reads "
                      f"each.{sealing}")
     if lowered_from:
-        lines.append("Low: the books did not fit beside the story and the work room.")
+        lines.append("Low: the books did not fit beside the story and the work room." if mode == "low" else
+            f"The window cannot hold {lowered_from.capitalize()} with even the shortest view of my memory; this task runs in {name}.")
     path = memory_read_path(names) if mode == "nano" else ""
     return "\n".join(lines + [path] if path else lines)
 
@@ -280,17 +327,21 @@ def render_view_for_mode(snapshot: mv.MemoryViewSnapshot, *, mode: str, owner_mo
     and the fact name that budget in whatever mode the view is narrowed, hop after hop.
     """
     target, reserve = context_budget.context_mode_limits(mode, owner_mode, output_reserve)
-    if kept is not None and kept.by_budget:
-        target = context_budget.context_mode_limits(owner_mode, owner_mode, output_reserve)[0]
+    if kept is not None:
+        target = context_budget.context_mode_limits(owner_mode, owner_mode, output_reserve)[0] if kept.by_budget else None
     window = int(window_tokens) if known_window and window_tokens else None
     allowances = floor_allowances(window_tokens=window, output_reserve_tokens=reserve, non_memory_tokens=non_memory_tokens,
                                   target_tokens=None if kept is not None else target, calibration_ratio=ratio,
                                   work_room_levels=snapshot.spec.work_room_levels, boundary_tokens=boundary_tokens)
     if kept is not None:
         allowances = {**allowances, "margin": allowances["physical"]}
-    level = fit_memory_view(snapshot, allowances, kept=kept or mv.FULL_VIEW, saving=saving)
-    note = floor_note(level, window_tokens=window, mode=mode, target_tokens=target, lowered_from=lowered_from,
-                      tool_names=tool_names, budget_mode=owner_mode)
+    def receipt(level):
+        return floor_note(level, window_tokens=window, mode=mode, target_tokens=target, lowered_from=lowered_from,
+                          tool_names=tool_names, budget_mode=owner_mode)
+    measure = lambda level: view_tokens(mv.render_story(snapshot, level)) + view_tokens(
+        mv.render_room(snapshot, level, floor_note=receipt(level)))
+    level = fit_memory_view(snapshot, allowances, kept=kept or mv.FULL_VIEW, saving=saving, measure=measure)
+    note = receipt(level)
     actual = view_tokens(mv.render_story(snapshot, level)) + view_tokens(mv.render_room(snapshot, level))
     if allowances["margin"] is not None and actual > allowances["margin"]:
         note += ("\nStart room is smaller than requested: uncovered owner words remain in view; "

@@ -3,7 +3,7 @@
 Main measures every candidate on the conversation it belongs to. The last request a model
 accepted in this task gives the provider-reported input U and the host's raw estimate B of
 that same candidate; the next candidate is ``U + (B' - B) * U / B``. Before this task has an
-anchor, ``context_fit`` uses fresh same-model evidence only at comparable raw input size;
+anchor, ``context_fit`` uses fresh exact-route/model/view evidence only at comparable raw input size;
 otherwise it stays cold (a 97k helper must not calibrate a 900k task). The largest
 input a route accepted here is a lower bound for planning, never evidence of reply room. A size refusal clears predicted free room; only room below an accepted input
 remains a lower bound. All live in the task's usage, so a working checkpoint keeps
@@ -93,7 +93,8 @@ def record_input_anchor(usage: Dict[str, Any], plan: Any, *, round_idx: int, rew
         from ouroboros.context_window import record_observation
         from ouroboros.provider_models import normalize_model_identity
         root = canonical_evidence_root()
-        record_observation(root, plan.route_fp, accepted=real, reserve=int(plan.output_reserve_tokens or 0),
+        record_observation(root, plan.route_fp, accepted=real,
+                           reserve=int(usage.get("_context_response_reserve_tokens", plan.output_reserve_tokens) or 0),
                            transmitted=int(usage.get("_context_reply_allowance_tokens") or 0))
         record_token_density(root, normalize_model_identity(plan.model), prompt_chars=estimate * 4,
                              prompt_tokens=real, route_fp=plan.route_fp, basis=MAIN_DENSITY_BASIS,

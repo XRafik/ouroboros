@@ -128,7 +128,7 @@ def record_refusal(usage, plan) -> None:
     limit = ce._parse_ctx_limit_number(message)
     if not limit or not getattr(plan, "window_witness_bound", True):
         return
-    input_only = "prompt is too long" in message.lower() or "maximum input" in message.lower()
+    input_only = any(marker in message.lower() for marker in ("prompt is too long", "maximum input", "input token count"))
     record_observation(ce.canonical_evidence_root(), plan.route_fp, refused=limit,
                        kind="input" if input_only else "total")
 

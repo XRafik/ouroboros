@@ -359,6 +359,7 @@ EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
     RESULT_VIEW_HEAD_ARG, RESULT_VIEW_TAIL_ARG,
     "max_chars", "max_lines", "start_char", "start_line",
     "source_start_char", "source_end_char", "offset", "limit",
+    "from", "to", "start", "after_seq",  # chronicle row bounds and continuation pages
 })
 
 # Tools whose own affordance IS paging: selects the recovery WORDING of a

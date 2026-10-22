@@ -523,6 +523,9 @@ def _apply_round_route_overrides(ctx: Any, tools: ToolRegistry, messages: List[D
     primary's own (Auto stays Auto: no observed account becomes a pin); effort intent is
     untouched. Returns ``(model, use_local, effort, plan, mode)``.
     """
+    selected = getattr(tools._ctx, "_authored_memory_plan", None)
+    if selected is not None and selected.core_sha256 == getattr(context_fit_plan, "core_sha256", None):
+        context_fit_plan, tools._ctx._authored_memory_plan = selected, None
     previous = route[:2]
     model, use_local, effort = _loop()._apply_runtime_overrides(ctx, *route)
     role, ctx.active_role_override = getattr(ctx, "active_role_override", None), None
@@ -1084,35 +1087,32 @@ def _reprepare_waiting_main(ctx: _RoundModelCallContext, kwargs: dict):
 
 
 def _reproject_actual_overflow_low(ctx: _RoundModelCallContext) -> None:
-    """Size recovery lowers Max to task-local Low; Low stays Low and Nano stays Nano (never raised).
+    """Size recovery lowers Max's books; a smaller physical frame may require Nano.
 
     Only the books change: Low shows my memory from the level the refused Max view showed, never the
     Low view prepared at startup and not sent (``ContextFitPlan.reproject_for_route``, ``select_mode``)."""
     if ctx.active_context_mode != "max" or ctx.context_fit_plan is None:
         return
-    from ouroboros.capability_evidence import is_known
-    from ouroboros.context_anchor import floored_window, main_input_anchor
-
     plan = ctx.context_fit_plan
     fit = _loop()._measure_round_main_fit(ctx, automatic_pass_used=True)
-    window, known = floored_window(int(plan.window_tokens or 0), is_known(plan, require_fresh=True),
-                                   main_input_anchor(ctx.accumulated_usage, plan)[1])
+    window = fit.measurement.capacity_total_tokens
     ctx.context_fit_plan = ctx.tools._ctx.context_fit_plan = plan.reproject_for_route(
-        window_tokens=window, known_window=known,
+        window_tokens=window or 0, known_window=window is not None,
         ratio=fit.measurement.measurement_density, output_reserve=int(plan.output_reserve_tokens),
         tool_schemas=ctx.tool_schemas, start_mode="max", current_messages=ctx.messages, select_mode="low")
-    ctx.messages[:] = ctx.context_fit_plan.reproject_transcript(ctx.messages, "low")
+    mode = ctx.context_fit_plan.initial_mode
+    ctx.messages[:] = ctx.context_fit_plan.reproject_transcript(ctx.messages, mode)
     invalidate_task_cache_splits(ctx.task_id)
-    ctx.active_context_mode = "low"
+    ctx.active_context_mode = mode
     ctx.tools._ctx.messages = ctx.messages
-    ctx.tools._ctx.active_context_mode = "low"
-    _adopt_view_facts(ctx.tools._ctx, ctx.context_fit_plan, "low")
+    ctx.tools._ctx.active_context_mode = mode
+    _adopt_view_facts(ctx.tools._ctx, ctx.context_fit_plan, mode)
     _loop()._emit_checkpoint_event(ctx.event_queue, ctx.task_id, ctx.drive_logs, {
         "checkpoint_kind": "context_fit_low_retry",
         "round": ctx.round_idx,
         "route_fp": str(getattr(ctx.context_fit_plan, "route_fp", "") or ""),
         "preferred_mode": str(getattr(ctx.context_fit_plan, "preferred_mode", "") or ""),
-        "effective_mode": "low",
+        "effective_mode": mode,
         "owner_visible": True,
     })
 
@@ -1334,7 +1334,8 @@ def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
     if timeout_repeat_blocked(ctx.accumulated_usage):
         return None, None, ctx.active_context_mode
     selected = getattr(ctx.tools._ctx, "_authored_memory_plan", None)
-    if selected is not None and selected.core_sha256 == getattr(ctx.context_fit_plan, "core_sha256", None):
+    if (selected is not None and selected.core_sha256 == getattr(ctx.context_fit_plan, "core_sha256", None)
+            and selected.route_fp == getattr(ctx.context_fit_plan, "route_fp", None)):
         ctx.context_fit_plan = selected
         ctx.tools._ctx._authored_memory_plan = None
     ctx.accumulated_usage.pop("_last_llm_failure", None)
@@ -1388,10 +1389,10 @@ def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
 # typed size refusal starts two model-free passes, each earning one strictly smaller check/retry: the
 # first replaces superseded host state and bodies a usable turn already showed; the second, only after a
 # further failed check/refusal, lowers memory granularity (books too when memory falls short of the excess), then
-# addresses bodies no turn has shown (disclosed), and books leave last for what remains. Each pass runs once
+# changes books before addressing eligible unseen bodies. Chosen bodies that fit alone stay whole. Each pass runs once
 # per round whatever the route, so a configured fallback receives the view as applied and walks nothing
 # again. The fallback chain and the end of the path follow in the caller.
-REFUSAL_PASSES: Tuple[Tuple[str, ...], ...] = (("host_copies", "bodies"), ("floor", "unseen_bodies", "books"))
+REFUSAL_PASSES: Tuple[Tuple[str, ...], ...] = (("host_copies", "bodies"), ("floor", "books", "unseen_bodies"))
 WAKE_DELIVERY_STEP = "wake_delivery"  # the change applied before the passes, when there was one
 #: The round needing size recovery (``context_renewal`` reads it); a fallback's other failure cannot cancel it.
 CONTEXT_REFUSAL_ROUND_KEY = "_context_refusal_round"
@@ -1522,6 +1523,8 @@ def _apply_refusal_pass(ctx: _RoundModelCallContext, steps: Tuple[str, ...], fit
     for step in steps:
         if remaining is not None and remaining <= 0:
             break
+        if getattr(ctx.context_fit_plan, "window_record", None) is not None:
+            fit = _loop()._measure_round_main_fit(ctx, automatic_pass_used=True) or fit
         shed = _apply_refusal_step(ctx, step, fit, remaining, slack)
         if shed is not None:
             changed = True
@@ -1537,9 +1540,8 @@ def _apply_refusal_step(ctx: _RoundModelCallContext, step: str, fit: Any, target
     narrows memory by the measured excess only, never by the return-after-fold slack: memory is continuity
     (BIBLE P1), and narrowing it for slack showed this room's own rows by address. Without a target it
     narrows by the deficit against a known window, and only with neither by everything it can give. Books
-    stay when memory met the measured excess (the owner's books-last order; the plan's return-after-fold
-    goal addresses other bodies first), otherwise they become their navigation form for the rest of the
-    task; the slack falls to unseen bodies, and the books step takes only what those could not give.
+    become navigation before any eligible unseen body leaves; chosen bodies that fit alone remain whole.
+    Memory alone satisfying the whole goal leaves the books and bodies untouched.
     """
     if step in ("host_copies", "bodies", "unseen_bodies"):
         goal = None if step == "host_copies" else target
@@ -1567,6 +1569,6 @@ def _apply_refusal_step(ctx: _RoundModelCallContext, step: str, fit: Any, target
     coarsened = _coarsen_memory_view(ctx, fit, saving=excess)
     saved = shed_since_before(0) if coarsened else 0
     if target and saved >= excess:
-        return saved  # memory met the measured excess: books stay, the slack falls to unseen bodies
+        return saved  # the next step handles any remaining slack
     shed = books_to_navigation(saved)
     return shed if shed is not None else (saved if coarsened else None)

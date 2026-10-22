@@ -19,14 +19,14 @@ fails the task. What of memory is open and what is folded comes from
 ``memory_floor``'s verdict, a ``FloorLevel``.
 
 The story block depends only on the chronicle, the room labels, the helper route and the
-floor, with no capture time, task id, JSON, relative time or ordinal: in Max, or while no
-owner Low/Nano budget step reaches it (that budget weighs the whole view, the room too), the
+selected form, with no capture time, task id, JSON, relative time or ordinal: while the
+one start allowance keeps that form (the conversation answers to it too), the
 same bytes for every focus that carries a story (Main, any room's root, consciousness,
 Presence and a delegated child alike). Every unfolded record of it is whole — the old
 retelling too, no block privileged — until the physical floor or my own selection says
 otherwise: an account I wrote across rooms, once selected, stands in the story and tells the
 records it names in their place (``memory_view_account``), their count, period and exact composition still visible; the
-room page keeps their detail. Texts of records keep their words and are indented by two
+source reader keeps their detail. Texts of records keep their words and are indented by two
 spaces, so their own ``## `` lines never read as sections.
 
 Nothing here publishes a record or calls a model.
@@ -606,8 +606,8 @@ def _capture_room(store: ChronicleStore, root: pathlib.Path, spec: ViewSpec, lab
                   lineage: Mapping[str, Any], story: List[Dict[str, Any]] = ()) -> Dict[str, Any]:
     """The current room: its head and standing facts, page (retold records, pages under parts, notes), origin words, lanes.
 
-    A retold record my story already shows whole is not repeated; a page or part of this room the story tells
-    only through a selected account (``told_by``) keeps its detail here, beside the pages under my parts.
+    Retold records already whole in my story are not repeated. A selected account carries its records;
+    their detail stays at their source readers rather than reappearing in this room.
     """
     room = str(spec.room_id)
     records = store.room_records(room)

@@ -25,8 +25,6 @@ from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
 from ouroboros import context_budget
 from ouroboros.context_window import WindowRecord, resolve_window
-# Tool-result delivery (the whole-batch projection under the measured frame)
-# lives in ``tool_result_delivery``; the consolidator imports its contract here.
 from ouroboros.tool_result_delivery import project_tool_result_batch  # noqa: F401
 from ouroboros.utils import estimate_tokens
 
@@ -107,8 +105,7 @@ class MainFitMeasurement:
     anchor_input_tokens: Optional[int] = None
     anchor_round: Optional[int] = None
     anchor_rewritten: bool = False
-    # The largest input this model accepted in this task; a stated window below it is no window
-    # (``capacity_total_tokens`` is then None and ``window_reading_tokens`` keeps the stated number).
+    # The largest accepted input on this task's exact route: a planning lower bound, not reply room.
     accepted_input_tokens: Optional[int] = None
     window_reading_tokens: Optional[int] = None
     view_kind: str = ""
@@ -158,6 +155,10 @@ class ContextFitPlan:
         from dataclasses import replace
 
         contents, start, books = {}, start_mode or self.preferred_mode, ("max", "low")
+        reserve = context_budget.context_mode_limits(start, self.preferred_mode, output_reserve)[1]
+        record = resolve_window(self, reserve, bound=self.window_witness_bound) if self.window_record else None
+        if record is not None and (not known_window or record.total_equivalent != window_tokens):
+            record = None  # the caller supplied a different physical route frame
         if current_messages is None:
             retained = self.projection(start).continuation_messages_json
             if retained is not None:
@@ -187,7 +188,7 @@ class ContextFitPlan:
                     self.user_content_json, preferred=self.preferred_mode, start=start_mode, select=select_mode,
                     tool_schemas=tool_schemas,
                     window_tokens=window_tokens, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
-                    window_record=self.window_record,
+                    window_record=record,
                     resident=True, current_messages=current_messages,  # actual running tail, enable_tools included
                     kept={mode: memory_floor.kept_level(snapshot, self.projection(mode).memory_facts)
                           for mode in memory_floor.MODES},
@@ -215,7 +216,8 @@ class ContextFitPlan:
             calibrated = int(int(projection.estimated_tokens or 0) * ratio) if projection is not None else 0
             return projection and replace(projection, calibrated_tokens=calibrated, calibration_ratio=ratio)
 
-        return replace(self, initial_mode=select_mode or start, window_tokens=window_tokens,
+        return replace(self, initial_mode=start if contents else select_mode or start, window_tokens=window_tokens,
+                       window_record=record,
                        output_reserve_tokens=output_reserve,
                        max_projection=project(self.max_projection), low_projection=project(self.low_projection),
                        nano_projection=project(self.nano_projection))
@@ -564,9 +566,8 @@ def measure_main_fit(
     """Measure one sealed Main candidate against owner target T and route W.
 
     The estimate is this conversation's own: ``anchor`` (``context_anchor.main_input_anchor``) scales the raw
-    estimate by the last accepted request of this model. Without one, a fresh same-model witness
-    of comparable input size calibrates it; absent that, it stays cold. A stated window below
-    ``accepted_input_tokens`` is no window (unknown). The deficits,
+    estimate by the last accepted request on this route. Without one, a fresh exact-route/model/view witness
+    of comparable input size calibrates it; absent that, it stays cold. Acceptance raises a planning lower bound. The deficits,
     the reclaim goal (deficit + ``reclaim_low_water_margin``) and the reply allowance are facts for
     the round and recovery. A known window with no tool-result room starts the same refusal
     passes before sending (owner revision, 20 October 2026); an unknown window never does.
@@ -593,7 +594,7 @@ def measure_main_fit(
 
     reading = int(plan.window_tokens or 0) if is_known(plan, require_fresh=True) else None
     current = resolve_window(plan, reserve, bound=plan.window_witness_bound)
-    reading = current.total_equivalent if current.usable is not None else reading
+    reading = current.total_equivalent if current.usable is not None else (None if plan.window_record is not None else reading)
     accepted_floor = None if current.source.startswith("refusal") else accepted_input_tokens
     floored, known = floored_window(reading, reading is not None, accepted_floor)
     capacity = floored if known else None
@@ -756,7 +757,7 @@ def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...
                       ratio: float, start: Optional[str] = None, resident: bool = False,
                       current_messages: Optional[List[Dict[str, Any]]] = None,
                       kept: Optional[Mapping[str, Any]] = None, saving: Optional[Mapping[str, int]] = None,
-                      select: Optional[str] = None, window_record: Optional[WindowRecord] = None,
+                      select: Optional[str] = None, window_record: Optional[WindowRecord] = None, work_room_levels: int = 1,
                       ) -> Tuple[Dict[str, Tuple[List[Dict[str, Any]], Dict]], str]:
     """Select books once, walk memory once. Unsent book forms share the selected memory, not another budget."""
     from dataclasses import replace
@@ -780,11 +781,17 @@ def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...
         boundary = record.boundary if record else None
         allowances = floor.floor_allowances(window_tokens=window if known_window else None,
             output_reserve_tokens=reserve, non_memory_tokens=fixed, target_tokens=target if kept is None else None,
-            calibration_ratio=ratio, work_room_levels=snapshot.spec.work_room_levels if snapshot else 1,
+            calibration_ratio=ratio, work_room_levels=snapshot.spec.work_room_levels if snapshot else work_room_levels,
             boundary_tokens=boundary)
         return sent, fixed, reserve, window, boundary, allowances
 
     sent, fixed, reserve, window, boundary, allowances = frame(mode)
+    original_fixed, original_reserve = fixed, reserve
+    if kept is not None and known_window:
+        minimum = floor.minimal_view_tokens(snapshot, window_tokens=window) if snapshot else 0
+        while mode != "nano" and math.ceil((fixed + minimum) * ratio) + reserve > window:
+            mode = "low" if mode == "max" else "nano"
+            sent, fixed, reserve, window, boundary, allowances = frame(mode)
     # Max names whole books. Story is the last rung: change books before taking its pages.
     if kept is None and mode == "max" and allowances["margin"] is not None:
         story_size = floor.view_tokens(render_story(snapshot)) if snapshot else 0
@@ -792,18 +799,21 @@ def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...
             mode = "low"
             sent, fixed, reserve, window, boundary, allowances = frame(mode)
     if kept is None and known_window:
-        work = math.ceil((boundary or window) / context_budget.RECLAIM_LOW_WATER_DIVISOR) * (
-            snapshot.spec.work_room_levels if snapshot else 1)
+        target = context_budget.context_mode_limits(mode, preferred, output_reserve)[0]
+        work = math.ceil(min(boundary or window, target or window) / context_budget.RECLAIM_LOW_WATER_DIVISOR) * (
+            snapshot.spec.work_room_levels if snapshot else work_room_levels)
         if math.ceil(fixed * ratio) + reserve + work > window:
             raise MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
                                   f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work} work > {window} tokens")
     if snapshot:
         shown = start or preferred
+        memory_saving = max(0, (saving or {}).get(shown, 0) - (original_fixed - fixed)
+                            - math.floor((original_reserve - reserve) / max(ratio, 0.01)))
         story, room, facts = floor.render_view_for_mode(snapshot, mode=mode, owner_mode=preferred,
             window_tokens=window, known_window=known_window, output_reserve=output_reserve, ratio=ratio,
             non_memory_tokens=fixed, lowered_from=preferred if mode != preferred else None,
             tool_names=None if tool_schemas is None else sent.chosen,
-            kept=None if kept is None else kept.get(shown), saving=(saving or {}).get(shown, 0), boundary_tokens=boundary)
+            kept=None if kept is None else kept.get(shown), saving=memory_saving, boundary_tokens=boundary)
         if kept is None and known_window and math.ceil((fixed + floor.view_tokens(story) + floor.view_tokens(room)) * ratio) + reserve > window:
             raise MinimumViewUnfit("Protected owner words and the minimum view cannot fit the usable input")
         receipt = floor.view_receipt(snapshot, story, room, facts)
@@ -865,54 +875,14 @@ def build_context_fit_plan(
             *json.loads(core.supplementary_messages_json)],
             list(select_tool_schemas(tool_schemas or [], context_mode=preferred).schemas),
             provider=str(route.get("provider") or "")), view_kind=view_kind)
-    contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio)
-    input_source = None
-
-    from ouroboros.context_budget import context_mode_limits
-
-    # The task-input pointer is decided on the calibrated Nano request: the schemas it sends and its reply floor.
-    nano_sent_tokens = tool_schema_tokens(list(select_tool_schemas(tool_schemas or [], context_mode="nano").schemas))
-    nano_reserve = context_mode_limits("nano", preferred, output_reserve)[1]
-    window = window_record.total_equivalent if known_window else 0
-
-    def nano_total(tokens: int) -> int:
-        return math.ceil((tokens + nano_sent_tokens) * ratio) + nano_reserve
-
+    contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio,
+        work_room_levels=context_budget.start_room_levels(role, str(task.get("type") or "chat")))
     def _projection(mode: str) -> ContextFitProjection:
-        nonlocal input_source
-
         system_content, memory_facts = contents[mode]
         system_content_json = json.dumps(system_content, ensure_ascii=False, sort_keys=True)
         estimated = _request_tokens(system_content, core.user_content_json,
                                     supplementary_messages_json=core.supplementary_messages_json)
         user_projection = None
-        # Physical rescue only: the owner's words are delivered whole unless a known fresh window cannot hold
-        # this request and the pointer request fits it. The Nano target never hides them, and neither does
-        # an unknown window (owner decision 2026-10-13, #1527).
-        if preferred == "nano" and mode == "nano" and window and nano_total(estimated) > window:
-            # The original owner input stays exact in the captured core and
-            # existing source store. Only its initial Nano delivery changes;
-            # this is neither the external-assignment compiler nor a summary.
-            try:
-                from ouroboros.artifacts import store_actor_source_bytes
-                if input_source is None:
-                    input_source = store_actor_source_bytes(env.drive_root, str(task["id"]),
-                        category="context_checkpoints", source_id="task_input",
-                        data=core.user_content_json.encode("utf-8"), extension="json")
-                source_content = (
-                    "[Exact task input source]\nThe complete original user input is stored as JSON at this source. "
-                    "Read its full content through the given reader in ranges before substantive decisions. "
-                    "This pointer is not a summary or a change to the task.\n"
-                    + json.dumps(input_source, ensure_ascii=False, sort_keys=True)
-                )
-                source_estimate = estimate_context_prompt_tokens([
-                    {"role": "system", "content": json.loads(system_content_json)},
-                    {"role": "user", "content": source_content}, *json.loads(core.supplementary_messages_json)])
-                if nano_total(source_estimate) <= window:
-                    user_projection = json.dumps(source_content, ensure_ascii=False)
-                    estimated = source_estimate
-            except (OSError, ValueError, KeyError):
-                log.warning("Exact task input source could not be retained; preserving complete input", exc_info=True)
         return ContextFitProjection(
             mode=mode,
             system_content_json=system_content_json,

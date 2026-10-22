@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ouroboros import chat_chain, memory_inventory
+from ouroboros.chronicle_store import DELEGATED_FOCUS_ROLES
 
 
 def failed_work_units(root, store):
@@ -37,7 +38,9 @@ def terminal_links(root, record, cache=None):
     """Only this page writer's later typed terminal rows, as separately attributed addresses."""
     author, metadata = record.get("author", {}), record.get("metadata", {})
     task_id = str(author.get("task_id") or "")
-    if record.get("kind") != "page" or author.get("kind") != "mind" or not task_id:
+    own_writer = author.get("kind") == "mind" or (author.get("kind") == "helper" and
+        author.get("focus", {}).get("role") in DELEGATED_FOCUS_ROLES)
+    if record.get("kind") != "page" or not own_writer or not task_id:
         return []
     end = int(metadata.get("terminal_after_pos", (record.get("covers", {}).get("stream_span") or [0, 0])[-1]))
     links, room = [], record["room_id"]

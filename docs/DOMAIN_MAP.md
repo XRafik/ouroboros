@@ -10,7 +10,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 |---|---|---:|---:|
 | D01 | Agent core & main loop | 52 | 0 |
 | D02 | LLM client, routing & providers | 43 | 0 |
-| D03 | Context assembly, fit & compaction | 23 | 0 |
+| D03 | Context assembly, fit & compaction | 25 | 0 |
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
 | D06 | Review stack | 91 | 0 |
@@ -22,13 +22,13 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D12 | Settings & configuration | 22 | 0 |
 | D13 | Safety, guards & runtime mode | 11 | 0 |
 | D14 | Skills & extensions | 73 | 0 |
-| D15 | Memory, knowledge, consciousness & self-evolution | 31 | 0 |
+| D15 | Memory, knowledge, consciousness & self-evolution | 32 | 0 |
 | D16 | Observability, usage accounting & cost | 24 | 0 |
 | D17 | Projects, workspaces & task results | 47 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **845** | **0** |
+| **total** | | **848** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -314,6 +314,8 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/context_renewal.py`
 - `ouroboros/context_runtime_facts.py`
 - `ouroboros/context_source_view.py`
+- `ouroboros/context_view_facts.py`
+- `ouroboros/context_window.py`
 - `ouroboros/density_probe.py`
 - `ouroboros/main_context_authority.py`
 - `ouroboros/memory_floor.py`
@@ -944,6 +946,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/memory_journal_compaction.py`
 - `ouroboros/memory_nomination_receipts.py`
 - `ouroboros/memory_publication.py`
+- `ouroboros/memory_sealing.py`
 - `ouroboros/post_task_evolution.py`
 - `ouroboros/project_facts.py`
 - `ouroboros/reflection.py`

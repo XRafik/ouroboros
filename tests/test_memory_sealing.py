@@ -13,7 +13,7 @@ from tests._memory_inventory_shared import MIND
 from tests.test_memory_fallback import _Light, _consciousness, light_route
 
 
-def _own_rows(root):
+def _own_rows(root, status="failed"):
     store = ChronicleStore(root)
     store.ensure_activated()
     rows = chat(root, [
@@ -22,8 +22,19 @@ def _own_rows(root):
         {"chat_id": 1, "direction": "out", "ts": ts(3), "text": "OWN TWO", "task_id": "failed01"},
         {"chat_id": 1, "direction": "out", "ts": ts(4), "text": "FOREIGN ROOT", "task_id": "foreign1"},
     ])
-    write_task_result(root, "failed01", "failed", result="Failed after work")
+    write_task_result(root, "failed01", status, result="Own work result")
     return store, rows
+
+
+@pytest.mark.parametrize("status", ["failed", "cancelled", "completed", "running"])
+def test_candidates_only_cover_finished_unsealed_failures_from_their_own_task(tmp_path, status):
+    store, rows = _own_rows(tmp_path, status)
+    units = failed_work_units(tmp_path, store)
+    assert bool(units) is (status in {"failed", "cancelled"})
+    sealed = store.publish_page(room_id="1", text="I already sealed my work.",
+        covers={"rows": [sha(rows[0])], "stream_span": [0, 0]}, author={**MIND, "task_id": "failed01"})
+    assert sealed.ok
+    assert not failed_work_units(tmp_path, store)  # no re-folding a mind-authored task, even with later open rows
 
 
 @pytest.mark.parametrize("accepted", [True, False])
@@ -71,8 +82,10 @@ def test_candidate_adoption_checks_intervening_sealing_and_ordinary_drafts_still
     assert store.decide(candidate["id"], True, MIND, "Now free").ok
 
 
-def test_end_page_links_only_own_later_terminal_rows_and_to_leaves_no_holes(tmp_path):
-    ctx, store = ctx_for(tmp_path, "writer01"), ChronicleStore(tmp_path)
+@pytest.mark.parametrize("role", ["root", "child", "nanny"])
+def test_end_page_links_only_own_later_terminal_rows_and_to_leaves_no_holes(tmp_path, role):
+    ctx, store = ctx_for(tmp_path, "writer01", task_metadata={"delegation_role": "subagent"} if role == "child" else
+        {"configured_subagent": {"route": {"kind": "agent_session"}}} if role == "nanny" else {}), ChronicleStore(tmp_path)
     store.ensure_activated()
     rows = chat(tmp_path, [{"chat_id": 1, "direction": "out", "ts": ts(i), "text": f"work {i}",
                            "task_id": "writer01"} for i in range(1, 5)])
@@ -81,6 +94,7 @@ def test_end_page_links_only_own_later_terminal_rows_and_to_leaves_no_holes(tmp_
     assert first["ok"] and last["ok"]
     assert store.sealed_row_refs("1") == {sha(row) for row in rows}
     page = store.get(last["node_id"])
+    assert page["author"]["focus"]["role"] == role
     before = set(page["covers"]["rows"])
     terminal = chat(tmp_path, [
         {"chat_id": 1, "direction": "out", "ts": ts(20), "text": "Final", "task_id": "writer01", "terminal_origin": "model_final"},

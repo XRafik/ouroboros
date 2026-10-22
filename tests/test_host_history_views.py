@@ -1,4 +1,6 @@
 """Unasked host history carries addresses; retirement belongs to an applied fold."""
+import pytest
+
 from ouroboros import context_compaction as cc
 from ouroboros.context_budget import bound_host_row
 from ouroboros.context_source_view import retire_host_rows_after_fold
@@ -14,10 +16,17 @@ def test_host_retirement_requires_applied_fold_and_keeps_unlabelled_or_changed_r
     for receipt in ({}, {"status": "no_op"}, {"status": "applied", "checkpoint_ref": {"path": "x"}}):
         assert retire_host_rows_after_fold(messages, receipt) == messages
     receipt = {"status": "applied", "selection_fingerprint": "fold", "checkpoint_ref": {"path": "exact"}}
-    result = retire_host_rows_after_fold(messages, receipt)
+    result = retire_host_rows_after_fold(messages, receipt, observed_messages=messages)
     assert result == [unlabelled, changed, new]
     assert receipt["retired_host_row_ids"] == [cc._sha256(cc._canonical_json(old))] and receipt["retired_host_rows_source"] == {"path": "exact"}
     assert messages == [unlabelled, old, changed, new]
+
+
+def test_a_fold_cannot_retire_host_arrivals_its_checkpoint_did_not_observe():
+    old, late, latest = (bound_host_row(CONTEXT_FACTS_NAME, text) for text in ("old", "late", "latest"))
+    receipt = {"status": "applied", "selection_fingerprint": "fold", "checkpoint_ref": {"path": "exact"}}
+    assert retire_host_rows_after_fold([old, late, latest], receipt, observed_messages=[old]) == [late, latest]
+    assert retire_host_rows_after_fold([old, late, latest], receipt, observed_messages=[]) == [old, late, latest]
 
 
 def test_predecessor_history_is_omitted_with_size_and_reader():
@@ -30,12 +39,17 @@ def test_predecessor_history_is_omitted_with_size_and_reader():
     assert project_helper_predecessor_authority({}) == {}
 
 
-def test_delegation_fact_contains_identity_and_reader_without_execution_bodies(monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_delegation_fact_contains_identity_and_reader_without_execution_bodies(monkeypatch, legacy):
     from ouroboros.context_runtime_facts import _delegation_capability_fact
     monkeypatch.setattr("ouroboros.reviewer_slot_config.reviewer_slot_last_executions", lambda: {"r": {"status": "ok", "body": "secret body"}})
-    monkeypatch.setattr("ouroboros.subagents.subagent_last_delegation", lambda: {"latest_by_subagent": {"s": {"text": "huge history", "outcome": "done"}}})
+    record = {"text": "huge history", "outcome": "done", "task_id": "child", "run_id": "run-1"}
+    monkeypatch.setattr("ouroboros.subagents.subagent_last_delegation",
+                        lambda: record if legacy else {"latest_by_subagent": {"s": record}})
     fact = _delegation_capability_fact()
     assert fact["reviewer_slots_last"][0]["slot"] == "r"
+    assert fact["subagents_last_executions"][0]["task_id"] == "child"
+    assert fact["subagents_last_executions"][0]["run_id"] == "run-1"
     assert len(fact["readers"]) == 2 and "huge history" not in str(fact) and "secret body" not in str(fact)
     monkeypatch.setattr("ouroboros.reviewer_slot_config.reviewer_slot_last_executions", lambda: {})
     monkeypatch.setattr("ouroboros.subagents.subagent_last_delegation", lambda: {})
