@@ -521,15 +521,18 @@ def test_requested_result_view_classifies_declared_range_parameters():
     assert requested_result_view({"path": "a", "max_lines": 10}) == (None, None)
     assert requested_result_view({"task_id": "t", "source_start_char": 0, "source_end_char": 9}) == (None, None)
     assert requested_result_view({"task_id": "t", "offset": 2, "limit": 5}) == (None, None)
-    assert requested_result_view({"run_id": 7, "page": 2}) == (None, None)
+    assert requested_result_view({"run_id": 7, "page": 2}) is None
+    assert requested_result_view({"cursor": "2"}) is None
     assert requested_result_view({"run_id": 7, "tail_lines": 500}) == (None, None)
 
 
-@pytest.mark.parametrize("tool,args", [
-    ("github_read", {"method": "list", "kind": "artifact", "target": 7, "cursor": "2"}),
-    ("github_read", {"method": "get", "kind": "run", "target": 7, "include": ["log"], "tail_lines": 500}),
+@pytest.mark.parametrize("args,explicit", [
+    ({"method": "list", "kind": "artifact", "target": 7, "cursor": "2"}, False),
+    ({"method": "list", "kind": "artifact", "target": 7, "page": 2}, False),
+    ({"method": "get", "kind": "run", "target": 7, "include": ["log"], "tail_lines": 500}, True),
 ])
-def test_explicit_github_views_keep_requested_content_when_frame_has_room(tmp_path, tool, args):
+def test_github_line_windows_but_not_navigation_tokens_choose_result_form(tmp_path, args, explicit):
+    tool = "github_read"
     # The produced view exceeds the unsolicited share but fits the physical frame.
     # An otherwise identical unrequested result remains subject to that share.
     text = "chosen result\n" + "x" * 120_000 + "\nEND"
@@ -537,8 +540,8 @@ def test_explicit_github_views_keep_requested_content_when_frame_has_room(tmp_pa
         [_row("asked", tool, text, args=args)], measured_fit(window=60_000, reserve=2_000))
     plain, plain_trace = _deliver(_ctx(tmp_path, "plain"),
         [_row("plain", tool, text, args={"run_id": 7})], measured_fit(window=60_000, reserve=2_000))
-    assert asked[0]["content"] == text
-    assert "result_partial" not in asked_trace["tool_calls"][0]
+    assert (asked[0]["content"] == text) is explicit
+    assert bool(asked_trace["tool_calls"][0].get("result_partial")) is not explicit
     assert plain_trace["tool_calls"][0]["result_partial"] is True
     assert plain[0]["content"] != text
     ref = _source_ref(plain[0]["content"])
