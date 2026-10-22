@@ -539,7 +539,7 @@ def test_auto_attach_skips_a_result_that_declared_failure(tmp_path, monkeypatch)
     attached = []
     import ouroboros.tools.vision as vision
     monkeypatch.setattr(vision, "attach_local_image_to_context",
-                        lambda ctx, path: attached.append(path) or (True, "ok"))
+                        lambda ctx, path, *, stamp=None: attached.append((path, stamp)) or (True, "ok"))
     tools = SimpleNamespace(_ctx=SimpleNamespace(messages=[], drive_root=str(tmp_path)))
     body = _json.dumps({"ok": False, "error": "boom", "auto_attach_image": "/x/shot.png"})
     # The adapter types the self-reported failure; the guard reads that code.
@@ -558,7 +558,8 @@ def test_auto_attach_skips_a_result_that_declared_failure(tmp_path, monkeypatch)
              "ext_1_r_unix_computer_use_screenshot", ok_body)},
         tools,
     )
-    assert attached == ["/x/shot.png"], "a healthy payload must still attach"
+    assert [path for path, _stamp in attached] == ["/x/shot.png"], "a healthy payload must still attach"
+    assert attached[0][1] is tools._ctx
 
 
 def test_reviewed_mutator_soft_timeout_keeps_foreground_custody(tmp_path, monkeypatch):
