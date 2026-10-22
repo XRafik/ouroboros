@@ -538,14 +538,18 @@ def test_files_location_keeps_every_folder_reachable_in_the_bar(engine_ui, width
             trail.hover()
             page.mouse.wheel(-4000, 0)
             page.wait_for_function("el => el.scrollLeft <= 1", arg=trail.element_handle())
+            page.wait_for_function(f"() => ({LOCATION})().seen[0]")
             assert page.evaluate(LOCATION)['seen'][0], 'the root is reachable by a pointer'
             page.mouse.wheel(4000, 0)
             page.wait_for_function("el => el.scrollLeft >= el.scrollWidth - el.clientWidth - 1", arg=trail.element_handle())
+            # Wait for hit-tested geometry too: the wheel's visual scroll can settle after its offset.
+            page.wait_for_function(f"() => ({LOCATION})().seen.at(-1)")
             assert page.evaluate(LOCATION)['seen'][-1]
             # The keyboard: each folder in turn comes into view where it can be pressed.
             crumbs = page.locator('#page-files .app-page-lead .files-crumb')
             for index in range(crumbs.count()):
                 crumbs.nth(index).focus()
+                page.wait_for_function(f"index => ({LOCATION})().seen[index]", arg=index)
                 assert page.evaluate(LOCATION)['seen'][index], (kind, index)
     finally:
         page.close()

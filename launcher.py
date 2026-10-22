@@ -1022,7 +1022,7 @@ def _open_browser_detached(url: str, outcome: Optional[list] = None, *, new=0, a
                     EMBEDDED_PYTHON, "-I", "-S", "-c",
                     "import sys, webbrowser; sys.exit(0 if webbrowser.open(sys.argv[1], int(sys.argv[2]), sys.argv[3]=='1') else 1)",
                     url, str(new), '1' if autoraise else '0',
-                ], env=host_environment())
+                ], **merge_hidden_kwargs({"env": host_environment()}))
                 result: object = opened.returncode == 0
             else:
                 result = bool(webbrowser.open(url) if new == 0 and autoraise else webbrowser.open(url, new, autoraise))

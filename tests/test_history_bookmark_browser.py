@@ -466,6 +466,8 @@ def test_a_live_line_keeps_its_node_through_history_adoption_and_reopens_from_it
             assert anchor['lineKey'] == live_key and anchor['lineExpanded'] is True, anchor
             _screenshot(page, tmp_path, f'composed-{line_kind}-before-{browser_engine}')
             page.locator('#project-panel-close').click()
+            # A reopen during the exit keeps the same room. Exercise cold replay after it leaves.
+            page.locator(feed).wait_for(state='detached')
             _click_project(page, project)
             _idle(page, feed)
             _assert_at_newest(page, feed, 'Live line context 59')
@@ -547,6 +549,7 @@ def test_a_live_receipt_survives_equal_replay_and_a_reopened_one_takes_only_newe
             _bookmark_place(page, line, 1)
             _screenshot(page, tmp_path, f'receipt-bookmark-before-{browser_engine}')
             page.locator('#project-panel-close').click()
+            page.locator(feed).wait_for(state='detached')  # cold replay, after the room's exit
             _click_project(page, project)
             _idle(page, feed)
             _assert_at_newest(page, feed, 'Receipt context 59')
@@ -671,6 +674,7 @@ def test_a_room_kept_for_a_staged_file_reopens_at_the_newest_message_and_follows
             _bookmark_place(page, page.locator(f'{feed} [data-client-message-id="kept-room-650"]'), 80)
             _stage_file(page)
             page.locator('#project-panel-close').click()
+            page.locator('.chat-instance-panel[data-pending-work="1"]').wait_for(state='attached')
             assert page.locator('.chat-instance-panel[data-pending-work="1"]').count() == 1
             before = page.evaluate('() => window.__historyReads.length')
             _click_project(page, project)
@@ -717,6 +721,7 @@ def test_plain_reopen_voids_a_hidden_rooms_held_question_reveal(direct_server_wi
             page.evaluate(ask, project)
             page.wait_for_function('() => Boolean(window.__releaseQuestion)')
             page.locator('#project-panel-close').click()
+            page.locator('.chat-instance-panel[data-pending-work="1"]').wait_for(state='attached')
             assert page.locator('.chat-instance-panel[data-pending-work="1"]').count() == 1
             _click_project(page, project)
             _idle(page, feed)

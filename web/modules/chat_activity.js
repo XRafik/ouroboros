@@ -390,7 +390,7 @@ export function sendPanic({ ws, frame = { type: 'command', cmd: '/panic' }, onAc
     return result;
 }
 
-// A root still settling its pause (the durable row says ``pausing``): its
+// A task still settling its pause (the durable row says ``pausing``): its
 // checkpoint may not be saved yet, so a Restart can interrupt it.
 const PAUSING_PHASES = new Set(['budget_pausing', 'pausing']);
 
@@ -424,10 +424,20 @@ export function restartConfirmBody(activities) {
 async function readLiveActivities() {
     const resp = await apiFetch('/api/state', { cache: 'no-store' });
     const data = resp?.ok ? await resp.json() : null;
-    if (!Array.isArray(data?.active_chat_activities) || data.active_chat_activities_complete !== true) {
+    if (!Array.isArray(data?.active_chat_activities) || data.active_chat_activities_complete !== true
+        || data.works_complete === false) {
         throw new Error('census unavailable');
     }
-    return data.active_chat_activities;
+    // The frozen census lists roots. A parked root can still have a child
+    // saving its Pause: Restart must warn about that member too, once per id.
+    const activities = new Map(data.active_chat_activities.map((row) => [row.activity_id, row]));
+    for (const work of data.works || []) {
+        for (const [id, state] of Object.entries(work.members?.states || {})) {
+            if (state.confirmed === false) activities.set(id, { phase: 'unknown' });
+            else if (state.transition === 'pausing') activities.set(id, { phase: 'pausing' });
+        }
+    }
+    return [...activities.values()];
 }
 
 /**
