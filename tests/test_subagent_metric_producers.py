@@ -8,6 +8,9 @@ from ouroboros.review_records import ReviewActorRecord, ReviewRequest, ReviewSlo
 from ouroboros.review_seat_outcome import finalize_seat_outcome, publish_seat_execution
 from ouroboros.subagent_history import record_session_execution, record_task_execution
 from ouroboros.task_results import load_task_result, write_task_result
+from tests import test_stream_timeout_repeat as stream
+
+wire_env = stream.wire_env
 
 
 def test_api_history_selects_original_identity_and_observed_call_accounts(tmp_path):
@@ -19,7 +22,7 @@ def test_api_history_selects_original_identity_and_observed_call_accounts(tmp_pa
     task = {"id": "root", "configured_subagent": {"selected_subagent_id": "worker",
         "route": {"kind": "api_model", "target_id": "test/model", "credential_profile_id": "chosen"}}}
     call = {"llm_call_id": "call-one", "model": "test/model", "requested_profile": "chosen",
-            "usable_solve_response": True, "ts": "2026-10-22T00:01:00Z",
+            "usable_solve_response": True, "response_ref": {"call_id": "response"}, "ts": "2026-10-22T00:01:00Z",
             "observed_route": {"credentialProfileId": "served", "model": "served/model"}}
     with hold(tmp_path) as txn:
         txn.write({"attempt_id": "attempt", "kind": "external_unmetered", "state": "settled",
@@ -57,11 +60,70 @@ def test_api_duration_samples_use_ledger_stamps_not_late_receipt_time(tmp_path, 
     task = {"id": "task", "configured_subagent": {"selected_subagent_id": "worker",
         "route": {"kind": "api_model", "target_id": "test/model"}}}
     record_task_execution(task, {"llm_call_refs": [{"llm_call_id": "call", "model": "test/model",
-        "usable_solve_response": True}]}, drive_root=tmp_path)
+        "usable_solve_response": True, "response_ref": {"call_id": "response"}}]}, drive_root=tmp_path)
     row = metrics.read(tmp_path, "worker")["rows"][0]
     assert row["duration_samples"] == ({"count": 0, "sum_sec": 0} if late else {"count": 1, "sum_sec": 5})
     assert row["queue"]["fact"]["sum_sec"] == 2
     assert row["duration_basis"] == "sum_of_physical_dispatch_to_settlement_seconds"
+
+
+@pytest.mark.parametrize("received", [True, False])
+def test_real_api_error_producer_separates_received_output_from_usability(wire_env, received):
+    from ouroboros import store
+
+    prefix = stream.OUTPUT["content"] if received else []
+    client = stream.WireLLM(stream.Wire(*prefix, stream.error_frame(400, "invalid_request")))
+    usage = {}
+    reply, _ = stream.round_call(client, wire_env, usage, child=False)
+    assert reply is None and len(client.sent) == 1
+    call = usage["llm_call_refs"][0]
+    # The error producer retains positive output evidence, but currently omits
+    # the decoder's False. An omitted receipt must remain unknown downstream.
+    expected = True if received else None
+    assert call.get("model_output_received") is expected and not call.get("usable_solve_response")
+    task = {"id": stream.CHILD, "configured_subagent": {"selected_subagent_id": "worker",
+        "route": {"kind": "api_model", "target_id": stream.MODEL}}}
+    record_task_execution(task, usage, drive_root=wire_env)
+    with store.open_store(wire_env, write=False) as txn:
+        producer = txn.get_row(metrics.PRODUCERS, "call:" + call["llm_call_id"])
+    assert producer["answer_received"] is expected and producer["usable_solve_response"] is False
+    row = metrics.read(wire_env, "worker")["rows"][0]
+    assert row["answer_received"] == int(received) and row["no_answer"] == 0
+
+
+@pytest.mark.parametrize("received", [False, None])
+def test_api_history_distinguishes_proven_silence_from_absent_receipt(tmp_path, received):
+    from ouroboros import store
+
+    task = {"id": "task", "configured_subagent": {"selected_subagent_id": "worker",
+        "route": {"kind": "api_model", "target_id": "test/model"}}}
+    call = {"llm_call_id": "call", "model": "test/model", "dispatched": True, "failure_code": "provider_error"}
+    if received is not None:
+        call["model_output_received"] = received
+    record_task_execution(task, {"llm_call_refs": [call]}, drive_root=tmp_path)
+    with store.open_store(tmp_path, write=False) as txn:
+        producer = txn.get_row(metrics.PRODUCERS, "call:call")
+    assert producer["answer_received"] is received and producer["usable_solve_response"] is False
+    row = metrics.read(tmp_path, "worker")["rows"][0]
+    assert row["answer_received"] == 0 and row["no_answer"] == int(received is False)
+
+
+@pytest.mark.parametrize("failure,terminal,interrupted", [
+    ("provider_error", True, False), ("provider_outcome_unknown", False, False), ("interrupted", True, True),
+])
+def test_absent_api_receipt_fact_stays_unknown_through_pending_and_interruption(tmp_path, failure, terminal, interrupted):
+    from ouroboros import store
+
+    task = {"id": "task", "configured_subagent": {"selected_subagent_id": "worker",
+        "route": {"kind": "api_model", "target_id": "test/model"}}}
+    record_task_execution(task, {"llm_call_refs": [{"llm_call_id": "call", "model": "test/model",
+        "dispatched": True, "failure_code": failure}]}, drive_root=tmp_path)
+    with store.open_store(tmp_path, write=False) as txn:
+        producer = txn.get_row(metrics.PRODUCERS, "call:call")
+    assert producer["answer_received"] is None and producer["terminal"] is terminal
+    row = metrics.read(tmp_path, "worker")["rows"][0]
+    assert row["answer_received"] == row["no_answer"] == 0
+    assert row["pending"] == int(not terminal) and row["interrupted"] == int(interrupted)
 
 
 @pytest.mark.parametrize("text,usable", [('[]', True), ('malformed answer', False)])

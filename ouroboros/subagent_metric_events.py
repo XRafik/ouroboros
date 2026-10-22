@@ -64,12 +64,15 @@ def task_execution(root, task, usage):
         if not call_id:
             continue
         failure = call.get("failure_code")
-        received = bool(call.get("usable_solve_response"))
-        terminal = received or bool(failure and failure != "provider_outcome_unknown")
+        received = call.get("model_output_received")
+        if not isinstance(received, bool):
+            received = True if call.get("response_ref") else None
+        usable = call.get("usable_solve_response") is True
+        terminal = usable or bool(failure and failure != "provider_outcome_unknown")
         publish(root, {"row_id": snapshot.get("selected_subagent_id"), "row_identity": identity,
             "purpose": "execution", "producer_id": "call:" + call_id, "task_id": str(task.get("id") or task.get("task_id") or ""),
             "ts": call.get("ts"), "dispatched": True if received or call.get("dispatched") is True else None,
-            "terminal": terminal, "answer_received": received if terminal else None, "usable_verdict": None,
+            "terminal": terminal, "answer_received": received, "usable_solve_response": usable, "usable_verdict": None,
             "interrupted": failure == "interrupted", "duration_sec": call.get("duration_sec"),
             "queue": call.get("queue"), "quota": {"failure_code": failure, "reset_at": call.get("reset_at")}
                 if failure else None, "nanny_billing": task.get("supervisor_route"),
