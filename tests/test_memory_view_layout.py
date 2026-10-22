@@ -458,17 +458,21 @@ def test_direct_openai_and_openrouter_keep_all_stable_items_and_one_notice(tmp_p
         assert target["wire_layout"] == {"system_prefix_split": True, "moved_blocks": 1}
 
 
-def test_impossible_start_names_assignment_pressure_and_recovery_counts_resident_schemas(tmp_path, monkeypatch):
-    """The owner's Nano target keeps the assignment whole; an impossible start names its frame.
-
-    Route recovery still counts the current resident schemas without reapplying the start allowance.
-    """
+def test_the_task_input_pointer_is_a_physical_rescue_and_the_floor_counts_resident_schemas(tmp_path, monkeypatch):
+    """A11, #1527 (owner 2026-10-13, A). The owner's words reach Nano as text whatever the 85K target: the
+    pointer replaces them only when a known fresh window cannot hold the minimum Nano start (schemas it sends,
+    its reply floor and work room included) and the pointer request does fit it. An unknown window keeps the
+    words; a pointer that does not fit either, or a failed source write, names the impossible start. The
+    pointer's reader reaches the end of the exact input. Route recovery still counts the current resident
+    schemas without reapplying the start allowance."""
     import math
     from types import SimpleNamespace
 
-    from ouroboros import context, context_fit
+    from ouroboros import artifacts, context, context_fit
     from ouroboros.context_budget import NANO_MIN_HEADROOM_TOKENS, OWNER_NANO_TARGET_TOKENS
     from ouroboros.tool_policy import select_tool_schemas
+    from ouroboros.tools.core import _read_file
+    from ouroboros.tools.registry import ToolContext
 
     env, memory, _rooms = world(tmp_path)
     final = "FINAL CONSTRAINT: keep the old API alive."
@@ -497,12 +501,31 @@ def test_impossible_start_names_assignment_pressure_and_recovery_counts_resident
     for tools, ratio in ((meta, 1.0), (meta + big, 1.0), (heavy_meta, 1.0), (heavy_meta, 0.8), (meta, 1.5)):
         assert not pointer(plan(tools, ratio)), (len(tools), ratio)
     full = total(plan(heavy_meta, 1.0), heavy_meta, 1.0)
-    # Owner 7A: an impossible core/assignment/control-tools/work frame is named before any send.
+    # A known window that cannot hold the words, and holds the pointer request: the exact source replaces them.
     window = full - 30_000
+    rescued = plan(heavy_meta, 1.0, window)
+    assert pointer(rescued) and total(rescued, heavy_meta, 1.0) <= window
+    shown = json.loads(rescued.nano_projection.user_content_json)
+    assert shown.startswith("[Exact task input source]") and final not in shown
+    assert rescued.max_projection.user_content_json is None and rescued.low_projection.user_content_json is None
+    locator = json.loads(shown.split("\n", 2)[2])
+    stored = artifacts.read_actor_source_bytes(env.drive_root, task["id"], locator).decode("utf-8")
+    assert stored == core.user_content_json  # the exact original input, never a summary
+    reader = ToolContext(repo_dir=tmp_path, drive_root=env.drive_root, task_id=task["id"])
+    at = stored.rindex(final)
+    page = _read_file(reader, locator["path"], root="artifact_store", start_line=1, max_lines=1,
+                      start_char=at, max_chars=len(final))
+    assert page.endswith(final) and at > 240_000  # the reader reaches the input's last constraint
+    # Owner 7A: a window that cannot hold the pointer request either names the impossible frame before any send.
     with pytest.raises(context_fit.MinimumViewUnfit, match="Core, assignment, resident control tools and work room"):
-        plan(heavy_meta, 1.0, window)
+        plan(heavy_meta, 1.0, total(rescued, heavy_meta, 1.0) - 1)
+    # An unknown or stale window never hides the words.
     assert not pointer(plan(heavy_meta, 1.0, window, status="failed"))
     assert not pointer(plan(heavy_meta, 1.0, window, stale=True))
+    monkeypatch.setattr(artifacts, "store_actor_source_bytes", lambda *_a, **_kw: (_ for _ in ()).throw(OSError("disk")))
+    with pytest.raises(context_fit.MinimumViewUnfit):  # no exact source: the words stay and the frame is named
+        plan(heavy_meta, 1.0, window)
+    monkeypatch.undo()
 
     # The fit on a route switch counts the resident list: the same window keeps the bare view and narrows the loaded one.
     built = plan(meta, 1.0)
