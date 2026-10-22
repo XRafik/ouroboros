@@ -343,6 +343,28 @@ def canned_review_answer(kind: str) -> dict | None:
     return None
 
 
+def skill_review_clean_text() -> str:
+    """All-PASS skill-review verdict over the tree's OWN checklist items.
+
+    The item list is imported from the skill subject module (its ``SKILL_REVIEW_ITEMS``
+    is the closed list a finding may name),
+    so an upstream checklist change re-derives the canned verdict instead of
+    silently failing coverage. Lazy import: the skill-review module tree is heavy
+    and only skill scenarios pay for it.
+    """
+    from ouroboros.tools.review_skill import SKILL_REVIEW_ITEMS
+
+    return json.dumps([
+        {
+            "item": item,
+            "verdict": "PASS",
+            "severity": "advisory",
+            "reason": "Stub skill reviewer: checked and clean for the scripted E2E payload.",
+        }
+        for item in SKILL_REVIEW_ITEMS
+    ])
+
+
 def two_part_clean_text() -> str:
     """Contract B, all clean: no change findings and a full PASS coupling matrix."""
     return json.dumps({
