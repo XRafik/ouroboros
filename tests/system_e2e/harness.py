@@ -324,11 +324,9 @@ def canned_review_answer(kind: str) -> dict | None:
     if kind == "safety":
         return {"role": "assistant",
                 "content": json.dumps({"status": "SAFE", "reason": "stub"})}
-    if kind == "skill_review":
-        return {"role": "assistant", "content": skill_review_clean_text()}
     if kind == "two_part_review":
         return {"role": "assistant", "content": two_part_clean_text()}
-    if kind == "triad_review":
+    if kind in ("triad_review", "skill_review"):
         return {"role": "assistant", "content": TRIAD_CLEAN_TEXT}
     if kind == "reviewer_slot":
         return {"role": "assistant", "content": reviewer_slot_clean_text()}
@@ -343,28 +341,6 @@ def canned_review_answer(kind: str) -> dict | None:
         # accepts the bare empty array + NO_FINDINGS sentinel as a verified-clean verdict.
         return {"role": "assistant", "content": TRIAD_CLEAN_TEXT}
     return None
-
-
-def skill_review_clean_text() -> str:
-    """All-PASS skill-review verdict over the tree's OWN checklist items.
-
-    The item list is imported from the skill subject module (its ``SKILL_REVIEW_ITEMS``
-    is the closed list a finding may name),
-    so an upstream checklist change re-derives the canned verdict instead of
-    silently failing coverage. Lazy import: the skill-review module tree is heavy
-    and only skill scenarios pay for it.
-    """
-    from ouroboros.tools.review_skill import SKILL_REVIEW_ITEMS
-
-    return json.dumps([
-        {
-            "item": item,
-            "verdict": "PASS",
-            "severity": "advisory",
-            "reason": "Stub skill reviewer: checked and clean for the scripted E2E payload.",
-        }
-        for item in SKILL_REVIEW_ITEMS
-    ])
 
 
 def two_part_clean_text() -> str:
