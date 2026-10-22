@@ -55,6 +55,8 @@ DETACH_POLL_SEC = 1.0
 _DRAIN_MARK_SEC = 6 * 3600.0
 ADDRESSED_EVENT = "addressed_event"
 HELPER_EVENT = "helper_result"
+REVIEW_EVENT = "review_result"
+TIME_EVENT = "wake_at"
 # The author never waits at all (a Presence completion: its speech is never held): its drain leaves at once,
 # no mailbox notice follows, and the wave settles as an unwaited one (``owe_unwaited_review``).
 DEPARTED_EVENT = "author_departed"
@@ -66,7 +68,7 @@ PROCESS_TOKEN = uuid.uuid4().hex
 _RECEPTIVE: contextvars.ContextVar = contextvars.ContextVar("ouroboros_receptive_review_author", default=None)
 
 
-def receptive_binding(ctx: Any) -> Optional[Dict[str, Any]]:
+def receptive_binding(ctx: Any, wake_on: Any = None, *, state: Any = None) -> Optional[Dict[str, Any]]:
     """An author with a continuation owner hears mail while it waits; a script or a
     caller without that owner keeps its synchronous wait (``None``)."""
     if not (callable(getattr(ctx, "owner_wait_callback", None)) or callable(getattr(ctx, "review_wait_callback", None))):
@@ -78,8 +80,11 @@ def receptive_binding(ctx: Any) -> Optional[Dict[str, Any]]:
     from ouroboros.review_waiting import select_helpers
 
     return {"drive_root": pathlib.Path(drive_root), "task_id": task_id, "attempt": getattr(ctx, "task_attempt", None) or 1,
+            "task_attempt": getattr(ctx, "task_attempt", None) or 1,
+            "_loop_mailbox_seen_ids": frozenset(getattr(ctx, "_loop_mailbox_seen_ids", None) or ()),
+            "_sleep_interaction_seen": copy.deepcopy(getattr(ctx, "_sleep_interaction_seen", None) or {}),
             "seen": frozenset(getattr(ctx, "_loop_mailbox_seen_ids", None) or ()), "peek": OwnerMailboxPeek(),
-            "budget_drive_root": getattr(ctx, "budget_drive_root", None), **select_helpers(ctx)}
+            "budget_drive_root": getattr(ctx, "budget_drive_root", None), **(copy.deepcopy(state) if state is not None else select_helpers(ctx, wake_on))}
 
 
 def rejoin_binding(ctx: Any, record_id: str) -> Optional[Dict[str, Any]]:
@@ -218,12 +223,13 @@ def author_detaches(operation: Any, pending_entries: Iterable[Any]) -> bool:
 
     if not author_paused(operation):
         departed = bool((_RECEPTIVE.get() or {}).get("departed"))
-        from ouroboros.review_waiting import ready_helpers
+        from ouroboros.review_waiting import wake_reason
 
         binding = _RECEPTIVE.get() or {}
-        reason = DEPARTED_EVENT if departed else ADDRESSED_EVENT if author_hears_mail() else ""
-        if not reason and binding and ready_helpers(SimpleNamespace(**binding), binding):
-            reason = HELPER_EVENT
+        observed = wake_reason(SimpleNamespace(**binding), binding, entries=pending_entries) if binding and not departed else ""
+        reason = (DEPARTED_EVENT if departed else HELPER_EVENT if observed.startswith(("task:", "run:"))
+                  else TIME_EVENT if observed == "timeout" else REVIEW_EVENT if observed == REVIEW_EVENT
+                  else ADDRESSED_EVENT if observed else "")
         if not reason:
             return False
         for entry in pending_entries:
@@ -272,14 +278,14 @@ def detached_actor(slot: Any, entry: Any, error_actor: Callable[..., Any], *, us
             operation.author_detached = True
     preparing = bool(entry.pause_before_launch)
     left_for = getattr(entry, "author_left_for", "")
-    yielded = not preparing and left_for in {ADDRESSED_EVENT, HELPER_EVENT, DEPARTED_EVENT}
+    yielded = not preparing and left_for in {ADDRESSED_EVENT, HELPER_EVENT, REVIEW_EVENT, TIME_EVENT, DEPARTED_EVENT}
     unsent = yielded and not episode_armed(entry.episode)
     message = (
         "Nobody waits for this reviewer (the author's speech is never held): it finishes the same check "
         "separately and its outcome settles into the record and a late mark in the author's room. No verdict "
         "yet; nothing was committed or applied."
         if yielded and left_for == DEPARTED_EVENT else
-        ("A chosen helper finished while this reviewer was " if left_for == HELPER_EVENT else
+        ("A selected outcome or wake time was ready while this reviewer was " if left_for in {HELPER_EVENT, REVIEW_EVENT, TIME_EVENT} else
          "An addressed message reached the author while this reviewer was ")
         + ("preparing its first launch, which still sends" if unsent else "running")
         + ": the author left only its own wait and the reviewer finishes the same check separately. No verdict "
@@ -436,7 +442,7 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
     mailbox. ``None`` when no seat of this wave was left for mail."""
     # Every seat THIS call left (a seat Pause latched earlier included), once one was left for mail.
     rows = [row for row in (getattr(ctx, "_review_detached_operations", None) or []) if row.get("retry_key") == retry_key]
-    if not retry_key or not any(row.get("reason") in {ADDRESSED_EVENT, HELPER_EVENT} for row in rows):
+    if not retry_key or not any(row.get("reason") in {ADDRESSED_EVENT, HELPER_EVENT, REVIEW_EVENT, TIME_EVENT} for row in rows):
         return None
     from ouroboros.tool_access_paths import canonical_data_root
 
@@ -449,6 +455,8 @@ def watch_left_review(ctx: Any, *, surface: str, retry_key: str, reissue: str, a
     from ouroboros.review_waiting import save_wait
 
     wait.update(copy.deepcopy(getattr(ctx, "_review_wait_selection", None) or {}))
+    if (wait.get("selection") or {}).get("reviewers"):
+        wait["selection"]["record_id"] = str(record_id or "")
     wait["review_reference"] = {"record_id": str(record_id), "surface": surface, "task_id": task_id}
     wait["duty_id"] = _left_mark_id(wait)
     if record_id:
@@ -521,7 +529,7 @@ def left_review_custody_note(wait: Dict[str, Any]) -> str:
             f"applied. Re-issue {wait.get('reissue') or 'the same unchanged call'} to collect what its reviewers "
             "recorded at $0; a seat without a recorded outcome stays unknown and is never sent again. "
             f"Original reference: {json.dumps(wait.get('review_reference') or {'record_id': wait.get('record_id')})}. "
-            f"Selected helpers: {json.dumps(wait.get('selection') or {})}.")
+            f"Selected wake sources: {json.dumps(wait.get('selection') or {})}.")
 
 
 def wake_restored_left_review(ctx: Any) -> bool:

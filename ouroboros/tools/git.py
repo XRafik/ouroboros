@@ -1055,22 +1055,27 @@ _COMMIT_ROOT_REFUSAL = (
 
 def _commit_request_refusals(ctx: ToolContext, *, root: str, preflight_reviewer: str, skipped: bool,
                              continuation: bool, reviewers: Optional[List[str]], reason: str,
-                             goal: str = "", scope: str = "", review_rebuttal: str = "", collecting: bool = False) -> tuple:
+                             goal: str = "", scope: str = "", review_rebuttal: str = "", collecting: bool = False,
+                             wake_on: Any = None) -> tuple:
     """Validate before staging; a paid wave keeps its recorded panel."""
-    from ouroboros.tools.commit_gate import compose_commit_panel
-    from ouroboros.tools.review_change import ReviewChangeArgumentError
+    from ouroboros.tools.commit_gate import compose_commit_panel, bind_commit_wake
 
     if str(root or "system_repo") != "system_repo":  # no id to name
         return None, _COMMIT_ROOT_REFUSAL
+    if continuation and wake_on is not None:
+        return None, "TOOL_ARG_ERROR: wake_on belongs to a new ask; collection retains its saved selection"
     selector = "" if collecting and not (skipped or continuation) else preflight_reviewer
     error = _commit_preflight_choice_error(selector, skipped=skipped, continuation=continuation,
                                          ctx=ctx, goal=goal, scope=scope, review_rebuttal=review_rebuttal)
     if collecting and not error:
+        bind_commit_wake(ctx, None, None)
         return None, ""
     if not error:
         try:
-            return compose_commit_panel(ctx, list(reviewers or []), str(reason or "")), ""
-        except ReviewChangeArgumentError as exc:
+            panel = compose_commit_panel(ctx, list(reviewers or []), str(reason or ""))
+            bind_commit_wake(ctx, wake_on, panel)
+            return panel, ""
+        except ValueError as exc:
             error = str(exc)
     return None, f"⚠️ TOOL_ARG_ERROR: {error} Nothing was staged, reviewed or recorded."
 
@@ -1115,7 +1120,8 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str,
                        goal: str = "",
                        scope: str = "", review_reference: Optional[dict] = None,
                        author_disposition: Optional[dict] = None, root: str = "",
-                       preflight_reviewer: str = "", reviewers: Optional[List[str]] = None, reason: str = "") -> str:
+                       preflight_reviewer: str = "", reviewers: Optional[List[str]] = None, reason: str = "",
+                       wake_on: Any = None) -> str:
     """Stage, review, and commit files with unified pre-commit review."""
     from ouroboros import body_candidate  # lazy: the Git tools reach the candidate owner only when committing
     skip_advisory_pre_review = bool(skip_advisory_review or skip_advisory_pre_review)
@@ -1150,7 +1156,7 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str,
     panel, refusal = _commit_request_refusals(  # before any staging, review or record
         ctx, root=root, preflight_reviewer=preflight_reviewer, skipped=skip_advisory_pre_review,
         continuation=continuation, reviewers=reviewers, reason=reason,
-        goal=goal or commit_message, scope=scope, review_rebuttal=review_rebuttal, collecting=collecting)
+        goal=goal or commit_message, scope=scope, review_rebuttal=review_rebuttal, collecting=collecting, wake_on=wake_on)
     if refusal:
         return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=refusal))
     _commit_start = time.time()
@@ -1407,14 +1413,7 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str,
 
 
 def _run_git_network_cmd(cmd: List[str], cwd: pathlib.Path) -> str:
-    """``run_cmd``-shaped adapter for network git commands (fetch/push).
-
-    Routes through the shared bounded git runner (wall-clock ceiling, process
-    tree kill, ``GIT_TERMINAL_PROMPT=0``, low-speed abort) with the caller's
-    repository as the explicit cwd, so a dead network cannot hang the tool
-    forever. Keeps ``run_cmd``'s contract: stdout on success, ``RuntimeError``
-    with the same message shape on failure.
-    """
+    """Bounded network git, returning stdout or raising with stdout/stderr."""
     from supervisor.update_source import _git_network_bounded
 
     rc, out, err = _git_network_bounded(list(cmd[1:]), cwd=cwd)
@@ -1426,6 +1425,7 @@ def _run_git_network_cmd(cmd: List[str], cwd: pathlib.Path) -> str:
 
 
 def get_tools() -> List[ToolEntry]:
+    from ouroboros.review_waiting import wake_on_schema
     reviewed_commit_description = (
         "Commit already-changed files through the unified reviewed commit workflow: free deterministic checks, "
         "the tests preflight, then the review panel (both questions). Blocking gates on its verdict; under Advisory or "
@@ -1441,6 +1441,7 @@ def get_tools() -> List[ToolEntry]:
         "checks, the tests (see skip_tests) and the panel still run; the opposite of preflight_reviewer."
     )
     commit_properties = {
+        "wake_on": wake_on_schema(),
         **widening_properties(),
         "root": {"type": "string", "enum": ["system_repo"], "default": "system_repo", "description": "The reviewed commit lands in Ouroboros's own body only; review any other root with review_change and commit it with ordinary git."},
         "commit_message": {"type": "string"},

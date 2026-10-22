@@ -38,12 +38,12 @@ def test_own_child_detaches_reparks_and_reference_collects_original_at_zero(main
             assert a.reviewer.sent["m1"].wait(60) and a.reviewer.preparing_m2.wait(60)
             write_task_result(a.data, "own-child", "completed", parent_task_id=TASK, result="Helper finished.")
         _produce(a, finish_child)
-        return call("review_change", REVIEW, "review-1")
+        return call("review_change", {**REVIEW, "wake_on": {"tasks": ["own-child"]}}, "review-1")
 
     def yielded(messages):
         text = _tool_text(messages)
         refs.update(_payload(text))
-        assert "helper" in text.lower() and "task:own-child" in text
+        assert "[Selected results]" in text and "task:own-child" in text
         assert any(row["reason"] == "helper_result" for row in a.ctx._review_detached_operations)
         assert a.ctx._left_review_wait["seen_helpers"] == ["task:own-child"]
         assert not a.reviewer.gates["m1"].is_set()
@@ -80,7 +80,7 @@ def test_own_child_detaches_reparks_and_reference_collects_original_at_zero(main
     assert len(_notices(a, "change")) == 1 and _commit_count(a) == 1 and not a.pushes
 
 
-@pytest.mark.parametrize("mutation", [{"subject": "index"}, {"goal": "changed"}, {"reviewers": []}, {"root": "active_workspace"}])
+@pytest.mark.parametrize("mutation", [{"subject": "index"}, {"goal": "changed"}, {"reviewers": []}, {"root": "active_workspace"}, {"wake_on": {}}])
 def test_reference_mutation_refuses_before_reading_subject(author, monkeypatch, mutation):  # noqa: F811
     monkeypatch.setattr(change, "_read_subject", lambda *_a, **_k: pytest.fail("froze new bytes"))
     monkeypatch.setattr(change, "compose_panel", lambda *_a, **_k: pytest.fail("composed a new panel"))
@@ -93,7 +93,7 @@ def test_blocking_reference_resume_keeps_byte_gate(author, monkeypatch, changed)
     monkeypatch.setenv("OUROBOROS_REVIEW_ENFORCEMENT", "blocking")
     a, out = author, {}
     write_task_result(a.data, "own-child", "running", parent_task_id=TASK)
-    first = _commit(a, out)
+    first = _commit(a, out, wake_on={"tasks": ["own-child"]})
     assert a.reviewer.sent["m1"].wait(60) and a.reviewer.preparing_m2.wait(60)
     write_task_result(a.data, "own-child", "completed", parent_task_id=TASK)
     _join(first)
@@ -134,7 +134,7 @@ def test_fast_completion_subscribes_after_record_and_attempt(author, monkeypatch
 
     def run():
         with _parent(a):
-            out["text"] = change._handle_review_change(a.ctx, **REVIEW)
+            out["text"] = change._handle_review_change(a.ctx, **REVIEW, wake_on={"tasks": ["own-child"]})
     thread = _produce(a, run)
     assert a.reviewer.sent["m1"].wait(60) and a.reviewer.preparing_m2.wait(60)
     write_task_result(a.data, "own-child", "completed", parent_task_id=TASK)

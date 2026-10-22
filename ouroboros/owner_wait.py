@@ -537,12 +537,12 @@ def _sleep_wake(ctx: Any, checkpoint: dict) -> str | None:
         # A left review's park also ends at its wave's settlement, notice written or not.
         left = getattr(ctx, "_left_review_wait", None)
         binding = (checkpoint or {}).get("review_binding")
-        if binding and isinstance(left, dict) and left.get("binding") == binding and left.get("done"):
-            return str(left.get("wake_reason") or "review_settled")
         if binding and isinstance(left, dict) and left.get("binding") == binding:
-            from ouroboros.review_waiting import ready_helpers
-            if ready_helpers(ctx, left):
-                return "helper_result"
+            from ouroboros.review_waiting import wake_reason
+            reason = wake_reason(ctx, left)
+            if reason:
+                return "helper_result" if reason.startswith(("task:", "run:")) else reason
+            return str(left.get("wake_reason") or "review_settled") if left.get("done") else ""
         return "question_closed" if _question_closed(ctx, checkpoint) else None
     from ouroboros.model_sleep import wake_reason
     from ouroboros.store import acquisition_budget
@@ -856,7 +856,7 @@ def append_wake_notice(ctx: Any, checkpoint: dict, outcome: Any, messages: list)
     outcome = str(outcome or "")
     if checkpoint.get("reason") == REASON_OWNER_PAUSE_WARM:
         return  # ``park_owner_pause_warm`` writes the Resume notice itself
-    if checkpoint.get("review_binding") and outcome == "helper_result":
+    if checkpoint.get("review_binding") and (outcome in {"helper_result", "review_result", "timeout"} or outcome.startswith("run_question:")):
         from ouroboros.review_waiting import append_helper_notice
         append_helper_notice(ctx, messages)
     if checkpoint.get("review_binding") or not (
@@ -965,6 +965,11 @@ def park_for_left_review(tools: Any, limit_ctx: Any, content: Any, emit_progress
         limit_ctx.messages.append({"role": "user", "content": left_review_custody_note(wait)})
         return True
     if not wait.get("done"):
+        from ouroboros.review_waiting import wake_reason
+        if reason := wake_reason(ctx, wait):
+            append_wake_notice(ctx, {"review_binding": wait.get("binding")},
+                               "helper_result" if reason.startswith(("task:", "run:")) else reason, limit_ctx.messages)
+            return True
         wait_after_tools(ctx, limit_ctx.messages, limit_ctx.llm_trace, limit_ctx.accumulated_usage,
                          limit_ctx.round_idx, limit_ctx.tool_schemas, limit_ctx.owner_msg_seen,
                          review_binding=str(wait.get("binding") or ""))

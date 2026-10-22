@@ -90,6 +90,8 @@ def _reserve_parallel_review_roster(ctx, prepared) -> None:
         return
     ctx._review_reserved_operations = operations
     ctx._review_reserved_roster = {"multi_model_review": rows}
+    from ouroboros.review_waiting import bind_roster
+    bind_roster(ctx, rows)
     from ouroboros.config import get_finalization_grace_sec
     from ouroboros.deadline_utils import owner_deadline_exhausted_for_context
 

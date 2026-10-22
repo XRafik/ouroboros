@@ -1125,6 +1125,14 @@ def run_commit_preflight(ctx: ToolContext, reviewer: str, *, commit_message: str
     return fact
 
 
+def bind_commit_wake(ctx: ToolContext, wake_on: Any, panel: Any) -> None:
+    """Validate the wait choice independently of landing authority, before staging."""
+    from ouroboros.review_waiting import select_helpers, bind_panel
+    select_helpers(ctx, wake_on)
+    if panel is not None:
+        bind_panel(ctx, panel)
+
+
 def _return_commit_feedback(ctx: ToolContext, message: str, started: float, before: dict, after: dict,
                             *, pending: bool = False, reason: str = "author_decision_required", findings: Optional[list] = None,
                             note: str = "") -> dict:
@@ -1168,7 +1176,7 @@ def _return_commit_feedback(ctx: ToolContext, message: str, started: float, befo
                             else "or stop; informed continuation needs received feedback. ")
         left = getattr(ctx, "_left_review_wait", None) or {}
         if left.get("surface") == "commit" and left.get("retry_key") == getattr(ctx, "_current_review_retry_key", ""):
-            event = ("A chosen helper finished" if any(row.get("reason") == "helper_result" for row in
+            event = ("A selected outcome or wake time was ready" if any(row.get("reason") in {"helper_result", "review_result", "wake_at"} for row in
                      getattr(ctx, "_review_detached_operations", []) or []) else "An addressed message reached you")
             note = (event + " while the reviewers ran: this call returned and their paid "
                     "work continues separately; a [Review settled] notice follows the whole wave. " + note)
