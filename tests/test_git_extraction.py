@@ -111,14 +111,14 @@ def test_git_catalog_schema_bytes_and_handler_owners_are_stable():
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode()
-    # Reviewed commit aliases disclose strictness-keyed panels; vcs_diff keeps base/head.
+    # Both commit aliases keep contributor usability text and the target full_tests semantics.
     # Rolled for the tool usability pass (73a7f4cc... -> d04658bf...): commit_reviewed names
     # Ouroboros's own body (system_repo) and vcs_commit_reviewed leads as its older name, over one
     # shared contract text; vcs_status and vcs_diff gain the optional `repository` worktree
     # selector; each vcs_* description states what it reads or changes, and vcs_restore's `confirm`
     # says false previews. No existing parameter changed type, default or required status.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "d04658bf2cd3e5d189bbf905b73bd0d76d9d5244fb03a4942e296b18f289d8e7"
+        "1476754a8efafc35643917f72412260815b6d68f2ff51fb25ff0a0c9e58dee01"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

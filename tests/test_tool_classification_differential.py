@@ -1,14 +1,8 @@
-"""The single classifier answers exactly what the retired loop pair answered,
-except on a table of deltas the owner approved.
+"""Compare the classifier with the retired loop pair, except owner-approved deltas.
 
-The oracle is a golden snapshot of the OLD pair's answers, captured from the tree
-named in ``GOLDEN_SOURCE_SHA``, not a copy of the old parser: a copy is dead code
-that invites cleanup, a data file cannot drift silently.
-
-Both directions fail. An unapproved divergence fails because the cutover would then
-be changing behaviour nobody signed off. An APPROVED delta that no longer fires ALSO
-fails, so the table cannot rot into a permanent excuse list — once a delta is gone,
-its row goes with it.
+The oracle is the OLD pair's golden answers from ``GOLDEN_SOURCE_SHA``.
+An unapproved divergence fails; an approved delta that no longer fires also fails,
+so obsolete exceptions cannot survive silently.
 """
 
 from __future__ import annotations
@@ -474,6 +468,9 @@ CURRENT_PRODUCER_CONTRACTS = {
     # #1969: an apply that had to prepare the capture returns it for inspection;
     # nothing is applied, recorded or released, so it is its peers' answer.
     "INTEGRATE_DELEGATED_INSPECT_CAPTURE": (True, "integration_blocked"),
+    # #2070: named evidence that could not all be retained keeps its surviving copy;
+    # apply and reject record nothing and change nothing, so it is its peers' answer.
+    "INTEGRATE_DELEGATED_EVIDENCE_UNRETAINED": (True, "integration_blocked"),
     # A reject request cannot undo direct effects already in the folder.
     # The refusal belongs to this disposition, not to the earlier write.
     "INTEGRATE_DIRECTORY_ALREADY_APPLIED": (True, "integration_blocked"),

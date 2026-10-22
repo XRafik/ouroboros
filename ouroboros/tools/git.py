@@ -653,7 +653,7 @@ def _run_pre_push_tests(ctx: ToolContext, force: bool = False) -> Optional[str]:
         return run_hermetic_pytest(
             pathlib.Path(ctx.repo_dir),
             max_output=MAX_TEST_OUTPUT,
-            ctx=ctx, **commit_test_options(ctx, force=force),
+            ctx=ctx, **commit_test_options(ctx, force=force, post_commit=True),
         )
     except Exception as e:
         log.warning(f"Pre-push tests failed with exception: {e}", exc_info=True)
@@ -1367,7 +1367,7 @@ def _repo_commit_push(ctx: ToolContext, commit_message: str,
             if receipt_error:
                 return receipt_error
         if not _managed_tx and not publication_paused:
-            # Evolution publication requires full even when the author skipped preflight.
+            # Evolution always runs this gate, full outside a body candidate, even after skip_tests.
             try:
                 run_operation(ctx, _post_commit_result, ctx, commit_message, skip_tests, test_warning_ref, force=bool(evolution_claim))
             except OwnerPauseRefused as exc:

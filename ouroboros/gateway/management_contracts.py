@@ -719,6 +719,15 @@ class LocalModelTestResponse(TypedDict):
     tokens_per_sec: Any
 
 
+class McpListingAttempt(TypedDict):
+    """The latest listing attempt, independent of any retained successful listing."""
+
+    at: str
+    ok: bool
+    error: str
+    partial: bool
+
+
 class McpServerStatus(TypedDict, total=False):
     """One configured MCP server. A configuration error row has only ``id``, ``enabled``,
     ``tool_count``, ``last_error`` and ``code`` (MCP_CONFIG_ERROR or MCP_ID_AMBIGUOUS)."""
@@ -741,6 +750,10 @@ class McpServerStatus(TypedDict, total=False):
     last_error: Required[Optional[str]]
     last_refreshed: Any
     last_attempted: Any
+    listed_at: Optional[str]
+    latest_attempt: Optional[McpListingAttempt]
+    complete: bool
+    publication_error: str
     code: str
 
 
@@ -767,6 +780,8 @@ class McpRefreshResponse(TypedDict, total=False):
 
     server_id: str
     ok: bool
+    published: bool
+    publication_error: str
     tool_count: int
     configuration_warnings: List[str]
     tool_name_collisions: List[Dict[str, Any]]
@@ -996,7 +1011,7 @@ __all__ = [
     "ClaudexorProfileEnabledResponse", "ReviewPoolResponse",
     "ModelCatalogItem", "ModelCatalogResponse", "OpenAICompatibleModelsRequest", "LocalModelStartRequest",
     "LocalModelStartResponse", "LocalModelRuntimeMissingResponse", "LocalModelStatusResponse",
-    "LocalModelTestResponse", "McpServerStatus", "McpStatusResponse", "McpRefreshRequest",
+    "LocalModelTestResponse", "McpListingAttempt", "McpServerStatus", "McpStatusResponse", "McpRefreshRequest",
     "McpRefreshResponse", "McpTestRequest", "McpTestResponse",
     "UpdateProgress", "UpdateLetter", "UpdateTransactionState", "UpdateStatusResponse",
     "CommandRequest", "CommandResponse", "GitRollbackRequest", "GitRollbackResponse", "GitPromoteResponse",

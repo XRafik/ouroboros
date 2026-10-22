@@ -175,6 +175,7 @@ def test_real_sdk_to_registered_schema_preserves_complete_contract(tmp_path, mon
     from mcp.types import ToolAnnotations
     from pydantic import Field
 
+    from ouroboros import config
     from ouroboros.tools.registry import ToolRegistry
     from tests.test_mcp_headers_loopback import start_asgi
 
@@ -191,16 +192,22 @@ def test_real_sdk_to_registered_schema_preserves_complete_contract(tmp_path, mon
                 annotations=ToolAnnotations(readOnlyHint=True))(echo)
     app = server.streamable_http_app() if transport == "http" else server.sse_app()
     running = []
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(config, "SETTINGS_PATH", tmp_path / "settings.json")
     mcp_client.reset_manager_for_tests()
     try:
         port = start_asgi(app, running, "mcp-fidelity")
         manager = mcp_client.get_manager()
-        manager.reconfigure({"MCP_ENABLED": True, "MCP_SERVERS": [{
+        settings = {"MCP_ENABLED": True, "MCP_SERVERS": [{
             "id": "fidelity", "enabled": True,
             "transport": "streamable_http" if transport == "http" else "sse",
             "url": f"http://127.0.0.1:{port}/" + ("mcp" if transport == "http" else "sse"),
             "auth_token": token, "auth_header": "X-Token", "allowed_tools": ["echo"],
-        }]})
+        }]}
+        # Registry reads now adopt Settings and the published catalog.
+        config.SETTINGS_PATH.write_text(json.dumps(settings))
+        monkeypatch.setattr(config, "load_settings", lambda: settings)
+        manager.reconfigure(settings)
         listing = manager.refresh_server("fidelity")
         assert listing["ok"], listing
         registry = ToolRegistry(repo_dir=tmp_path / "repo", drive_root=tmp_path / "data")

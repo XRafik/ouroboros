@@ -173,9 +173,9 @@ Files routes: `gateway/files.py::file_browser_routes()` (envelopes/parity: §11)
 | GET | `/api/local-model/status` | |
 | POST | `/api/local-model/test` | |
 | POST | `/api/local-model/install-runtime` | |
-| GET | `/api/mcp/status` | |
-| POST | `/api/mcp/refresh` | |
-| POST | `/api/mcp/test` | |
+| GET | `/api/mcp/status` | Read-only listing facts |
+| POST | `/api/mcp/refresh` | Lists and publishes |
+| POST | `/api/mcp/test` | Draft probe, unpublished |
 | POST | `/api/mcp/import/preview` | |
 | WS | `/ws` | |
 | STATIC | `/static/*` | |
