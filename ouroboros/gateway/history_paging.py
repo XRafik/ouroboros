@@ -577,6 +577,7 @@ def history_page_coverage(page, stream_gaps):
 
 
 def delivered_history_gaps(root, page, stream_gaps):
+    """Recheck narrowed import spans; projection failures have no narrower proof."""
     import_gaps = {*_GAP_NAMES.values(), UNIMPORTABLE}
     for source in _SOURCES:
         if page["before"][source] == page["selections"][source][1]:
