@@ -559,7 +559,7 @@ def test_auto_attach_skips_a_result_that_declared_failure(tmp_path, monkeypatch)
         tools,
     )
     assert attached == ["/x/shot.png"], "a healthy payload must still attach"
-    assert stamps == [tools._ctx], "an eviction is stamped on the live slot"
+    assert len(stamps) == 1 and stamps[0] is tools._ctx, "an eviction is stamped on the live slot"
 
 
 def test_reviewed_mutator_soft_timeout_keeps_foreground_custody(tmp_path, monkeypatch):
