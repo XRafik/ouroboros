@@ -47,6 +47,7 @@ from ouroboros.utils import (
     utc_now_iso,
 )
 from ouroboros.config import runtime_setting
+from ouroboros.context_budget import _parse_ctx_limit_number  # noqa: F401 — shared overflow parser
 
 log = logging.getLogger(__name__)
 
@@ -67,23 +68,6 @@ SOURCE_USER_SETTING = "user_setting"
 SOURCE_GENERATIVE_PROBE = "generative_probe"
 SOURCE_NONE = "none"
 
-# Context-overflow rejections carry the model's limit in the human-readable message
-# (NOT the `code` field, which varies: context_length_exceeded / invalid_request_error /
-# 400 / 1261). Parse the number from the text across the known provider phrasings.
-_CTX_LIMIT_PATTERNS: Tuple[re.Pattern[str], ...] = (
-    re.compile(r"maximum context length is\s*([0-9][0-9,]*)", re.I),
-    re.compile(r"context length is\s*([0-9][0-9,]*)", re.I),
-    re.compile(r"longer than the model's context length\s*\(?\s*([0-9][0-9,]*)", re.I),
-    re.compile(r"maximum allowed length\s*\(?\s*([0-9][0-9,]*)", re.I),
-    re.compile(r"context (?:window|length)\s*(?:of|is)?\s*([0-9][0-9,]*)\s*tokens", re.I),
-    re.compile(r"maximum (?:input |prompt )?(?:length|tokens?)\s*(?:is|of)?\s*([0-9][0-9,]*)", re.I),
-    # Anthropic ("prompt is too long: 215000 tokens > 200000 maximum"; "input length and `max_tokens` exceed
-    # context limit: 190000 + 65536 > 200000") and Gemini ("... exceeds the maximum number of tokens allowed
-    # (1048576)") state the limit after the size.
-    re.compile(r"tokens\s*>\s*([0-9][0-9,]*)\s*maximum", re.I),
-    re.compile(r"context limit:\s*[0-9][0-9,]*\s*\+\s*[0-9][0-9,]*\s*>\s*([0-9][0-9,]*)", re.I),
-    re.compile(r"maximum number of tokens allowed\s*\(?\s*([0-9][0-9,]*)", re.I),
-)
 #: The refused request's whole input where the provider states it beside the limit: OpenAI ("your messages
 #: resulted in N tokens"), Anthropic ("prompt is too long: N tokens", "context limit: N + R") and Gemini
 #: ("input token count (N)").
@@ -91,6 +75,8 @@ _CTX_INPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
     re.compile(r"resulted in\s*([0-9][0-9,]*)\s*tokens", re.I),
     re.compile(r"prompt is too long:\s*([0-9][0-9,]*)\s*tokens", re.I),
     re.compile(r"context limit:\s*([0-9][0-9,]*)\s*\+", re.I),
+    re.compile(r"(?:input length|the input)\s*\(\s*([0-9][0-9,]*)\s*tokens?\b", re.I),
+    re.compile(r"([0-9][0-9,]*)\s*tokens? from the input messages", re.I),
     re.compile(r"input token count\s*\(?\s*([0-9][0-9,]*)", re.I),
 )
 #: Shares of the input where only the parts are stated: OpenAI's messages and functions (tool definitions),
@@ -98,11 +84,12 @@ _CTX_INPUT_PATTERNS: Tuple[re.Pattern[str], ...] = (
 _CTX_INPUT_PART = re.compile(r"([0-9][0-9,]*)\s*(?:of [a-z]+ input|in the (?:messages|functions))", re.I)
 #: The reply the refused request reserved ("R in the completion" / "in the output", Anthropic's "+ R").
 _CTX_REPLY_PATTERNS: Tuple[re.Pattern[str], ...] = (
+    re.compile(r"([0-9][0-9,]*)\s*tokens? for the completion", re.I),
     re.compile(r"([0-9][0-9,]*)\s*in the (?:completion|output)", re.I),
     re.compile(r"context limit:\s*[0-9][0-9,]*\s*\+\s*([0-9][0-9,]*)", re.I),
 )
 #: OpenAI's and OpenRouter's "you requested (about) N tokens" is a total: the input plus that reserved reply.
-_CTX_TOTAL_PATTERN = re.compile(r"you requested (?:about\s*)?([0-9][0-9,]*)\s*tokens", re.I)
+_CTX_TOTAL_PATTERN = re.compile(r"you requested (?:(?:about|a total of)\s*)?([0-9][0-9,]*)\s*tokens", re.I)
 
 
 def gateway_double_counted_cache(prompt_tokens: int, cached_tokens: int) -> bool:
@@ -135,18 +122,6 @@ def _parse_ctx_requested(text: str) -> Tuple[int, int, int]:
         return total - reply, reply, total
     stated = first(_CTX_INPUT_PATTERNS) or sum(int(n.replace(",", "")) for n in _CTX_INPUT_PART.findall(text))
     return stated, reply, total
-
-
-def _parse_ctx_limit_number(text: str) -> int:
-    """Extract the model's context-token limit from an overflow error message, or 0."""
-    for pat in _CTX_LIMIT_PATTERNS:
-        m = pat.search(str(text or ""))
-        if m:
-            try:
-                return int(m.group(1).replace(",", ""))
-            except (ValueError, TypeError):
-                continue
-    return 0
 
 
 def classify_generative_probe_response(
