@@ -13,14 +13,14 @@ the same thing sit together: when your diff adds a row, read its neighbours.
 |---|---|---|---|
 | × | `attach-remove` | modules/chat_attachments.js | 1 |
 | ↑ | `btn btn-default` | modules/model_roles.js | 1 |
-| ↓ | `(no class)` | modules/chat_media.js | 1 |
 | ↓ | `btn btn-default` | modules/model_roles.js | 1 |
+| ↓ | `btn btn-default btn-sm` | modules/chat_media.js | 1 |
 | ↕ | `widgets-card-drag` | modules/widgets.js | 1 |
-| ↻ | `(no class)` | modules/chat_media.js | 1 |
+| ↻ | `btn btn-default btn-sm` | modules/chat_media.js | 1 |
 | ⋮ | `skills-card-menu-trigger` | modules/skill_card_renderer.js | 1 |
 | ⋮ | `skills-card-menu-trigger` | modules/skill_sources_view.js | 1 |
 | ⋮ | `skills-card-menu-trigger` | modules/widget_card.js | 1 |
-| ×1 | `(no class)` | modules/chat_media.js | 1 |
+| ×1 | `btn btn-default btn-sm` | modules/chat_media.js | 1 |
 | Add account & connect | `btn btn-primary` | modules/harness_login_cards.js | 1 |
 | Add custom key | `btn btn-default btn-sm` | modules/settings_ui.js | 1 |
 | Add fallback | `btn btn-default` | modules/model_roles.js | 1 |
@@ -166,10 +166,10 @@ the same thing sit together: when your diff adds a row, read its neighbours.
 | Restore | `btn btn-danger btn-xs` | modules/updates.js | 1 |
 | Restore | `btn btn-xs btn-default` | modules/activity.js | 1 |
 | Restore hold | `btn btn-xs btn-default` | modules/activity.js | 1 |
+| Retry | `btn btn-default btn-sm` | modules/review_presentation.js | 1 |
+| Retry | `btn btn-default btn-sm` | modules/skill_review_card.js | 1 |
 | Retry | `btn btn-default btn-sm` | modules/widgets.js | 1 |
 | Retry | `btn btn-default btn-sm chat-card-action` | modules/chat_cards.js | 1 |
-| Retry | `skill-review-retry` | modules/review_presentation.js | 1 |
-| Retry | `skill-review-retry` | modules/skill_review_card.js | 1 |
 | Retry model discovery | `btn btn-default` | modules/onboarding_wizard.js | 1 |
 | Retry request | `btn btn-default` | modules/model_wait.js | 1 |
 | Review | `chat-header-menu-item` | modules/chat_header.js | 1 |

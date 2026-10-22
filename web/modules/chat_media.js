@@ -612,29 +612,29 @@ export function createChatMedia({
             ? `<audio preload="metadata" src="${escapeHtmlAttr(src)}"></audio>`
             : `<video preload="metadata" src="${escapeHtmlAttr(src)}" playsinline></video>`;
         const videoControls = audio ? '' : `
-            <button type="button" data-media-action="speed" aria-label="${escapeHtmlAttr(tr('media.cycle_speed', 'Cycle playback speed'))}">×1</button>
+            <button type="button" class="btn btn-default btn-sm" data-media-action="speed" aria-label="${escapeHtmlAttr(tr('media.cycle_speed', 'Cycle playback speed'))}">×1</button>
             <select class="chat-media-rate-menu" aria-label="${escapeHtmlAttr(tr('media.playback_speed', 'Playback speed'))}">
                 ${SPEEDS.map((rate) => `<option value="${rate}">×${rate}</option>`).join('')}
             </select>
-            <button type="button" data-media-action="repeat" aria-label="${escapeHtmlAttr(tr('media.repeat', 'Repeat'))}">↻</button>
-            <button type="button" data-media-action="mute" aria-label="${escapeHtmlAttr(tr('media.mute', 'Mute'))}">${MEDIA_ICONS.volume}</button>
-            <button type="button" data-media-action="fullscreen" aria-label="${escapeHtmlAttr(tr('media.enter_fullscreen', 'Enter fullscreen'))}">${MEDIA_ICONS.fullscreen}</button>`;
+            <button type="button" class="btn btn-default btn-sm" data-media-action="repeat" aria-label="${escapeHtmlAttr(tr('media.repeat', 'Repeat'))}">↻</button>
+            <button type="button" class="btn btn-default btn-sm" data-media-action="mute" aria-label="${escapeHtmlAttr(tr('media.mute', 'Mute'))}">${MEDIA_ICONS.volume}</button>
+            <button type="button" class="btn btn-default btn-sm" data-media-action="fullscreen" aria-label="${escapeHtmlAttr(tr('media.enter_fullscreen', 'Enter fullscreen'))}">${MEDIA_ICONS.fullscreen}</button>`;
         return `<div class="chat-media-player${audio ? ' is-audio' : ''}">
             ${title ? `<div class="chat-media-title">${escapeHtml(title)}</div>` : ''}
             <div class="chat-media-stage">${media}</div>
             <div class="chat-media-controls">
-                <button type="button" data-media-action="play" aria-label="${escapeHtmlAttr(tr('media.play', 'Play'))}">${MEDIA_ICONS.play}</button>
+                <button type="button" class="btn btn-default btn-sm" data-media-action="play" aria-label="${escapeHtmlAttr(tr('media.play', 'Play'))}">${MEDIA_ICONS.play}</button>
                 <input class="chat-media-progress" type="range" min="0" max="100" value="0" step="0.1" aria-label="${escapeHtmlAttr(tr('media.progress', 'Media progress'))}">
                 <span class="chat-media-time">0:00 / 0:00</span>
                 ${videoControls}
-                <button type="button" data-media-action="download" aria-label="${escapeHtmlAttr(tr('media.download_media', 'Download media'))}">↓</button>
+                <button type="button" class="btn btn-default btn-sm" data-media-action="download" aria-label="${escapeHtmlAttr(tr('media.download_media', 'Download media'))}">↓</button>
             </div>
         </div>`;
     }
 
     function photoActionsHtml() {
         return `<details class="chat-photo-actions">
-            <summary aria-label="${escapeHtmlAttr(tr('media.photo_actions', 'Photo actions'))}" aria-haspopup="menu" aria-expanded="false">•••</summary>
+            <summary class="btn btn-float btn-sm" aria-label="${escapeHtmlAttr(tr('media.photo_actions', 'Photo actions'))}" aria-haspopup="menu" aria-expanded="false">•••</summary>
             <div class="chat-photo-menu ui-popup" role="menu" aria-label="${escapeHtmlAttr(tr('media.photo_actions', 'Photo actions'))}" hidden>
                 <button type="button" role="menuitem" data-photo-action="view">${escapeHtml(tr('media.view', 'View'))}</button>
                 <button type="button" role="menuitem" data-photo-action="open">${escapeHtml(tr('media.open_in_new_tab', 'Open in new tab'))}</button>
@@ -754,7 +754,7 @@ export function createChatMedia({
             const preview = mime.startsWith('image/') && source.src
                 ? `<img class="chat-file-thumb" src="${escapeHtmlAttr(source.src)}" alt="">`
                 : '<span class="chat-file-glyph" aria-hidden="true">▤</span>';
-            content = `<button type="button" class="chat-file-card" aria-haspopup="dialog" ${source.src ? '' : 'disabled'}>
+            content = `<button type="button" class="btn btn-default chat-file-card" aria-haspopup="dialog" ${source.src ? '' : 'disabled'}>
                 ${preview}
                 <span class="chat-file-copy">
                     <span class="chat-file-name">${escapeHtml(filename)}</span>

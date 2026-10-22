@@ -4,7 +4,7 @@ One build-free SPA serves desktop, browser, Docker, Telegram, phone and Linux fa
 
 ### SPA shape and host bridges
 
-The inspectable, editable, build-free vanilla-JavaScript SPA (`web/index.html`, CSS, `web/modules/*`) uses no TypeScript/bundler. `web/app.js` owns page/Project/mobile navigation; feature modules own presentation/disposers (DEVELOPMENT "UI resources carry a disposer"). Linux fallback changes only presentation; the owner's browser is outside process custody (§1). One WebSocket serves all rooms; REST recovers durable truth (§4).
+The SPA uses inspectable, editable vanilla JavaScript (`web/index.html`, CSS, `web/modules/*`) without TypeScript/bundler. `web/app.js` owns page/Project/mobile navigation; modules own presentation/disposers (DEVELOPMENT "UI resources carry a disposer"). Linux fallback is presentational; the owner's browser is outside process custody (§1). Rooms share one WebSocket; REST recovers durable truth (§4).
 
 `MainApi` (`window.pywebview.api`, `launcher.py`) natively confirms runtime mode, reviewed-skill auto-grant and skill key grants; `launcher_background.DesktopApi` provides `panic_stop`, `request_attention`/`notify_owner`, `shell_info`, `request_native_notifications`, `show_native_notification` via `desktop_notifications.py`, and `set_native_appearance`. File/URL helpers: `download_file_to_downloads`, `open_file_with_default_app`, `open_external_url`, `save_bytes_to_downloads`. Loopback-file access requires the server's own host/port and `/api/files/download`, `/api/extensions/...` or `/api/tasks/...`. `ui_helpers.js` detects each method for older shells (§2), falls back to file helpers or copy-link/toast, and intercepts links in framed onboarding (`OnboardingHostApi`). The Telegram proxy's `X-Ouroboros-Telegram-MiniApp: 1` makes `server_web.make_index_page` include the Telegram SDK: presentation, never authentication.
 
@@ -18,7 +18,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 
 `pages.js` lists Main, Files, Skills, Widgets, Dashboard, Settings/About. `syncNavigationState()` owns page/Project/expansion/drawer; widths are owner-local. `#<page>` is read once, never written (no desktop address bar; Telegram loads `/`). Projects are panels, not routes, in the sole `<nav>`: keyed pointer/keyboard rows open/pin/rename/delete; `PROJECT_NAME_MAX` and lifecycle govern names; pins precede unread, survive collapse and `/api/state` caps; deleting rooms cannot open until registry publication. `style.css` gives Main track 2 of 2, hiding retained `#divider`, unboxing `.sidebar-scroll`; panels overlay. Below `layout.js`'s 720 px switch, Main takes track 1, sidebar becomes a drawer, Project fills content. `layers.js` owns dismissal with one same-address history entry; `host_telegram.js` binds Telegram Back; `drawer_drag.js` speeds visible controls; `shell_motion.js`/`room_retire.js`/`motion.js` move between places (DESIGN §10).
 
-- `web/ui.css` ← shared values and field/button/status/popup classes of both first-party documents; `style.css` keeps shell composition (DESIGN §8).
+- `web/ui.css` ← both documents' shared tokens, fields, buttons (`.btn`), status, popups and System body/ink; `style.css` owns shell/card geometry and System's edge-free rest shadow (DESIGN §8).
 - `theme_palette.js` ← `--chart-*` tokens into mounted Chart options, as canvas cannot inherit CSS; updates keep data and caller-authored option groups.
 - `page_header.js` / `page_icons.js` ← headers (`bindPageHeader` places tabs/path/actions), `bindTabStrip`, `renderSegmentedField` (`--segment-count`), icons; `settings_controls.bindEffortSegments` preserves empty inheritance.
 - `ui_interactions.js` ← `bindDialogFocus`, `bindMenu`, `bindPopoverPosition`, `bindEnterSubmit`; every binding returns teardown.
@@ -26,7 +26,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 - `scroll_fade.js` ← `bindScrollFade`: edge attributes from hidden content.
 - `api_client.js` / `api_types.js` / `model_route_types.js` / `decision_types.js` ← browser API calls with typed errors; mirrors of browser-facing contract shapes.
 - `ui_primitives.js` ← the one safe-field renderer, collector, tone/status and attribute-escape source; `ui_helpers.js` and `utils.js` re-export it, so author pages need no second renderer.
-- `ui_helpers.js` ← host bridge, shared row/badge helpers, keyboard menu lock, the action row under system and routing rows (`createSystemMessageActions`).
+- `ui_helpers.js` ← host bridge, row/badge helpers, keyboard menu lock, System/routing action rows (`createSystemMessageActions`).
 - `desktop_shell.js` ← the desktop app's own facts for Settings: `shell_info()`, else `/api/health`'s stamped `app_version`.
 - `skill_card_renderer.js`, `skill_presentation.js` ← skill cards and the words every Skills surface shares.
 - `client_surface.js` ← the send-time surface snapshot (raw observables, no device taxonomy) spread into each chat frame.
