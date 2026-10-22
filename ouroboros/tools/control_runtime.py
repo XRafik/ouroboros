@@ -562,10 +562,14 @@ def _update_world(ctx: ToolContext, content: str, expected_revision: str | None 
     # A forked drive's copy (what a child's read_file opens) mirrors what it just published,
     # so its next read carries the revision the canonical file now has.
     fork_copy = Memory(drive_root=Path(getattr(ctx, "drive_root"))).world_path()
-    if fork_copy != mem.world_path() and fork_copy.exists():
-        from ouroboros.utils import write_bytes_atomic
+    if fork_copy.resolve(strict=False) != mem.world_path().resolve(strict=False) and fork_copy.exists():
+        try:
+            from ouroboros.utils import write_bytes_atomic
 
-        write_bytes_atomic(fork_copy, publication.content.encode("utf-8"))
+            write_bytes_atomic(fork_copy, publication.content.encode("utf-8"))
+        except OSError:
+            # The map already landed canonically; a stale copy only costs the next read a refusal.
+            log.debug("world map fork copy not mirrored", exc_info=True)
     size = len(publication.content)
     result = f"OK: world map updated ({size} chars); revision={publication.revision}"
     if measured_block_was_edited(content, publication.old_content):

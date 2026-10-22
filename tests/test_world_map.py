@@ -59,11 +59,35 @@ def test_refresh_keeps_unrecognized_text_whole_and_tolerates_crlf(tmp_path, monk
     assert text.startswith("# Mine") and wprof.MEASURED_START in text
     assert "- note one\r\n- note two\r\n" in text
 
-    # A fenced block whose inside carries CRLF is still one block.
+    # A fenced block whose inside carries CRLF is still one block, and the separators around it stay CRLF.
     path.write_bytes(b"# Mine\r\n\r\n" + _measured("old").replace("\n", "\r\n").encode() + b"\r\n\r\n- note\r\n")
     assert wprof.refresh_world_profile(str(path)) is True
     text = path.read_bytes().decode("utf-8")
-    assert text.count(wprof.MEASURED_START) == 1 and "old" not in text and "- note\r\n" in text
+    assert text.count(wprof.MEASURED_START) == 1 and "old" not in text
+    assert text.startswith("# Mine\r\n\r\n") and text.endswith(wprof.MEASURED_END + "\r\n\r\n- note\r\n")
+
+
+def test_a_stock_profile_with_one_mind_line_is_kept_whole(tmp_path, monkeypatch):
+    _fake_measured(monkeypatch, "now")
+    path = tmp_path / "WORLD.md"
+    path.write_text(
+        "# WORLD.md — Environment Profile\n\n## System\n- **OS**: old\n\n## File System Rules\n"
+        "- `/r` contains my codebase.\n- `/tmp/inbox.sock` is the channel I found\n\n"
+        "*(Generated automatically on first boot)*\n", encoding="utf-8")
+    assert wprof.refresh_world_profile(str(path)) is True
+    assert "- `/tmp/inbox.sock` is the channel I found" in path.read_text(encoding="utf-8")
+
+
+def test_the_first_fencing_replaces_nothing_when_its_pre_image_cannot_be_journaled(tmp_path, monkeypatch):
+    _fake_measured(monkeypatch, "now")
+    import ouroboros.utils as utils_module
+
+    monkeypatch.setattr(utils_module, "append_jsonl", lambda *_a, **_k: False)
+    path = tmp_path / "WORLD.md"
+    legacy = "# WORLD.md — Environment Profile\n\n## System\n- **OS**: old\n\n*(Generated automatically on first boot)*\n"
+    path.write_text(legacy, encoding="utf-8")
+    assert wprof.refresh_world_profile(str(path)) is False
+    assert path.read_text(encoding="utf-8") == legacy
 
 
 def test_refresh_generates_a_missing_file_with_an_empty_map(tmp_path, monkeypatch):

@@ -28,7 +28,8 @@ from ouroboros.platform_layer import (
 MEASURED_START = "<!-- measured -->"
 MEASURED_END = "<!-- /measured -->"
 # Markers count only on their own lines, so a sentence of the mind's that mentions them is not a fence.
-_FENCE_RE = re.compile(r"^" + re.escape(MEASURED_START) + r"[ \t\r]*$.*?^" + re.escape(MEASURED_END) + r"[ \t\r]*$",
+# The closing marker's own line ending is not consumed, so a CRLF file keeps its separators byte for byte.
+_FENCE_RE = re.compile(r"^" + re.escape(MEASURED_START) + r"[ \t\r]*$.*?^" + re.escape(MEASURED_END) + r"[ \t]*(?=\r?$)",
                        re.S | re.M)
 _LEGACY_FOOTER = "*(Generated automatically on first boot)*"
 _LEGACY_MEASURED_HEAD = "## System"
@@ -36,10 +37,12 @@ _LEGACY_MEASURED_HEAD = "## System"
 # any other line there is the mind's and makes the file lossless-insert territory.
 _STOCK_LINE_STARTS = (
     "## System", "- **OS**:", "- **CPU**:", "- **RAM**:", "- **User**:", "- **Current Directory**:",
-    "## Available Tools", "The following binaries are available in my PATH:", "`",
-    "## File System Rules", "- `", "I should generally confine my writes", "I live inside",
+    "## Available Tools", "The following binaries are available in my PATH:",
+    "## File System Rules", "I should generally confine my writes", "I live inside",
     "This is where I currently exist", _LEGACY_FOOTER,
 )
+# The two stock lines that start like ordinary Markdown (a backticked tool list, a root bullet).
+_STOCK_LINE_RES = (re.compile(r"^`[^`]*`$"), re.compile(r"^- `[^`]*` contains my "))
 TITLE = "# WORLD.md — My map of my world"
 _INTRO = (
     "The measured block below is the host's and refreshes at every startup; everything outside it is "
@@ -149,7 +152,9 @@ def _is_stock_legacy_profile(text: str) -> bool:
     span_lines = text[:foot_at + len(_LEGACY_FOOTER)].splitlines()[1:]  # after the title line
     for line in span_lines:
         stripped = line.strip()
-        if stripped and not stripped.startswith(_STOCK_LINE_STARTS):
+        if not stripped or stripped.startswith(_STOCK_LINE_STARTS):
+            continue
+        if not any(pattern.match(stripped) for pattern in _STOCK_LINE_RES):
             return False
     return True
 
@@ -216,7 +221,8 @@ def refresh_world_profile(output_path: str, repo_dir: str = "", data_dir: str = 
             return False
         new_raw = spliced.encode("utf-8")
         if not _FENCE_RE.search(text):
-            append_jsonl(path.with_name("world_journal.jsonl"), {
+            # The first fencing keeps its pre-image: no journal row, no replacement.
+            journaled = append_jsonl(path.with_name("world_journal.jsonl"), {
                 "ts": utc_now_iso(), "task_id": "startup", "source_type": "legacy_wrap",
                 "focus": {"role": "host"}, "route": "world_profiler.refresh_world_profile",
                 "old_len": len(text), "new_len": len(spliced),
@@ -224,6 +230,8 @@ def refresh_world_profile(output_path: str, repo_dir: str = "", data_dir: str = 
                 "old_content": text, "new_content": spliced,
                 "old_preview": text[:500], "new_preview": spliced[:500],
             })
+            if journaled is False:
+                return False
         write_bytes_atomic(path, new_raw)
         return True
 
