@@ -6,6 +6,7 @@ import copy
 from typing import Any, Dict, Tuple
 
 from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
+from ouroboros._usage_response import _normalized_input_token_usage
 from ouroboros.event_usage import event_token_counts
 
 
@@ -25,11 +26,15 @@ def session_usage_facts(run_id: str, *, requested_route: str = "",
     delegated_route = str(observed.get("harness_id") or "")
     receipt = {"run_id": str(run_id or ""), "requested_route": str(requested_route or ""),
                "delegated_route": delegated_route, "observed_attempt": copy.deepcopy(observed)}
+    split = _normalized_input_token_usage(summary.get("inputTokenUsage"))
+    if split is not None:
+        receipt["usage_scope"] = "run"  # totals span attempts, not just observed_attempt
     return {
         "provider": "claudexor", "resolved_model": str(observed.get("model") or ""),
         "delegated_run_started": bool(run_id), "delegated_run_id": str(run_id or ""),
         "requested_route": receipt["requested_route"], "delegated_route": delegated_route,
         "observed_attempt": observed, "claudexor": receipt,
+        **({"input_token_usage": split} if split is not None else {}),
         **event_token_counts({"prompt_tokens": summary.get("inputTokens"),
                               "completion_tokens": summary.get("outputTokens"),
                               "cached_tokens": summary.get("cachedInputTokens")}),

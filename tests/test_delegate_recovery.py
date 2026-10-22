@@ -6,9 +6,9 @@ import pytest
 
 from tests.test_configured_session_restore import InputReached
 from tests.test_delegate_pending_recovery import _pending_handoff
-from tests.test_planned_delegate_assignment import prepared, restore  # noqa: F401
+from tests.test_planned_delegate_assignment import prepared as prepared, restore  # noqa: F401
 from tests.test_swarm_host_admission import host  # noqa: F401
-from tests._stub_delegate_engines import stub_delegate_engines  # noqa: F401
+from tests._stub_delegate_engines import stub_delegate_engines as stub_delegate_engines
 
 pytestmark = pytest.mark.serial
 

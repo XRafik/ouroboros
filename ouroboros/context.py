@@ -116,6 +116,15 @@ def build_user_content(task: Dict[str, Any]) -> Any:
         )
         text = plan_notice + str(text or "")
     image_b64 = task.get("image_base64")
+    if not image_b64 and task.get("image_source_ref"):
+        # A prestart Pause has original input, but no checkpointed transcript.
+        # Resolve and verify its durable source through the same owner as other
+        # task inputs, then use the unchanged inline-image preparation path.
+        import base64
+        from ouroboros.artifacts import read_actor_source_bytes
+
+        raw = read_actor_source_bytes(task["drive_root"], str(task["id"]), task["image_source_ref"])
+        image_b64 = base64.b64encode(raw).decode("ascii")
     attachment_image_blocks = _build_attachment_image_blocks(task)
 
     if not image_b64 and not attachment_image_blocks:

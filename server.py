@@ -586,7 +586,7 @@ def _dialogue_cutover(root: pathlib.Path) -> None:
 
     BOOT.step_started("dialogue_cutover")
     try:
-        cutover(root)
+        cutover(root, initialize_journal=True)  # the boot alone chooses an existing file's journal
     except Exception as exc:
         log.warning("Dialogue cutover did not complete; the first stored row repeats it", exc_info=True)
         BOOT.step_ended("dialogue_cutover", error=f"{type(exc).__name__}: {exc}")
@@ -1191,7 +1191,7 @@ async def lifespan(app):
         if not live:
             return
         try:
-            usage_store.migrate_from_journal(lifespan_drive_root)
+            usage_store.migrate_from_journal(lifespan_drive_root, initialize_journal=True)
         except Exception:
             log.critical("Usage store import failed at startup; money reads report it unavailable "
                          "until it succeeds", exc_info=True)

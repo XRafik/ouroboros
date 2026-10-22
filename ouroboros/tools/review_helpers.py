@@ -155,9 +155,12 @@ def emit_review_usage(
     """
     try:
         from ouroboros.event_usage import event_token_counts
+        from ouroboros._usage_response import _normalized_input_token_usage
         from ouroboros.pricing import infer_api_key_type, infer_model_category, infer_provider_from_model
 
         usage_data = dict(usage or {})
+        split = _normalized_input_token_usage(usage_data.get("input_token_usage"))
+        session = isinstance(usage_data.get("claudexor"), dict) and usage_data["claudexor"].get("run_id")
         prompt_cache_ttl = str(usage_data.get("prompt_cache_ttl") or "")
         ledger_attempt_ids = [str(value) for value in (usage_data.get("ledger_attempt_ids") or []) if value]
         routed_provider = provider or str(usage_data.get("provider") or "") or infer_provider_from_model(model)
@@ -186,11 +189,12 @@ def emit_review_usage(
             "task_id": getattr(ctx, "task_id", "") or "",
             "root_task_id": root_task_id,
             "parent_task_id": parent_task_id,
-            "model": model,
+            "model": "" if session and split is not None else model,
             "api_key_type": infer_api_key_type(model, routed_provider),
             "model_category": infer_model_category(model),
             "usage": {
                 **event_token_counts(usage_data),
+                **({"input_token_usage": split} if split is not None else {}),
                 "prompt_cache_ttl": prompt_cache_ttl,
                 "cost": cost,
                 "cost_known": cost is not None,
