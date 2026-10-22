@@ -261,7 +261,7 @@ Children coordinate through `tree_note` and `tree_read`; only the parent may use
 
 #### Delegated spend and token reads
 
-**What a delegated run costs.** Claudexor reports cash per attempt (`attemptExecution[].usageCost.cashUsd` with `cashKnowledge` exact|estimated) and in `summary.spendUsd`/`summary.spendEstimated`; `delegate_custody.disclosed_spend`, the single reader, prefers per-attempt figures, so the ledger row and the nanny's payload agree. Runs ask `authPreference: subscription` explicitly: the engine default falls back to a paid key invisibly. Four cases:
+**Delegated cash.** `delegate_custody.disclosed_spend` prefers `attemptExecution[].usageCost` cash/knowledge over `summary.spendUsd`/`spendEstimated`, keeping ledger and nanny aligned. Explicit `authPreference: subscription` prevents invisible paid-key fallback. Four cases:
 
 | disclosure | ledger | finality |
 |---|---|---|
@@ -270,9 +270,9 @@ Children coordinate through `tree_note` and `tree_read`; only the parent may use
 | estimated amount | the amount | `cost_final=false` — an estimated zero is not a proven free session |
 | undisclosed | `cost_usd: null`, increments `unknown_unmetered` | drops `cost_final` for the projection |
 
-An undisclosed spend contributes `0.0` to known `settled_usd` and `accounted_usd`: a conservative bound would fabricate a number the harness never gave (BIBLE P1), so a `TOTAL_BUDGET` fence cannot stop spend it was never told about; the honest consequence is lost finality, not a guessed charge.
+Undisclosed cash adds zero only to known totals. `TOTAL_BUDGET` cannot fence undisclosed spend: finality is lost, no bound or charge invented.
 
-**What a delegated run reads.** Harness token conventions differ, so `settle_run` records normalized `summary.inputTokenUsage` as `input_token_usage` outside row identity (settled rows never change); `record_subscription_session` drops a partial object as unknown: a repaired counter reads like a measured one. Before measurement/custody, `effort_evidence.session_prompt_cache_ttl_request` sends captured tiers advertised in `harnesses[].promptCacheTtls` as `promptCacheTtl` (Default/continuations omit it). Final-attempt `prompt_cache_ttl` separates intent and observation.
+**Native input.** `_usage_response._normalized_input_token_usage` accepts exactly total/read/write, nonnegative integers or null; ledger identity is unchanged. After accounting, `delegate_collection` appends `llm_usage`; reviewers observe runs, attach-only with recorded attribution. Read facts survive continuation/cancel failures, apart from chain totals/extraction. Filters keep `input_token_usage`. `run_id`/`usage_scope=run` mark sessions; model stays unknown, final model/account in `observed_attempt`. Replay dedupes; event loss never warrants repeat inference. Legacy/tokenless stay unknown; first-facts readers may hide later facts. `effort_evidence.session_prompt_cache_ttl_request` sends captured advertised `promptCacheTtl` tiers; Default/continuations omit it. Final-attempt TTL separates intent and observation.
 
 #### Nanny, transport and custody
 

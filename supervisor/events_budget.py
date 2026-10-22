@@ -18,6 +18,7 @@ from typing import Any, Dict, Optional
 from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
 from ouroboros.contracts.record_contract import RECORD_CONTRACT_VERSION
 from ouroboros.event_usage import event_token_counts
+from ouroboros._usage_response import _normalized_input_token_usage
 # Re-export the shared queue/money predicate and the historical hold key.
 from ouroboros.budget_pause import BUDGET_HOLD_KEY, budget_fence_selected  # noqa: F401
 from ouroboros.delegate_recovery import owner_restart_in_progress
@@ -72,6 +73,7 @@ def _handle_llm_usage(evt: Dict[str, Any], ctx: Any) -> None:
     # neither drops the event (dispatch_event would swallow it, losing the round) nor
     # claims the provider measured zero tokens.
     token_counts = event_token_counts(usage, evt)
+    input_split = _normalized_input_token_usage(usage.get("input_token_usage"))
     prompt_cache_ttl = str(usage.get("prompt_cache_ttl") or evt.get("prompt_cache_ttl") or "")
     ledger_attempt_ids = [
         str(value)
@@ -134,6 +136,7 @@ def _handle_llm_usage(evt: Dict[str, Any], ctx: Any) -> None:
         "cost": resolved_cost,
         "cost_known": cost_known,
         **token_counts,
+        **({"input_token_usage": input_split} if input_split is not None else {}),
         "prompt_cache_ttl": prompt_cache_ttl,
         "accounting_authority": "physical_attempt_ledger",
         "projection_update_status": projection_update_status,
