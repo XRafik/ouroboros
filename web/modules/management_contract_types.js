@@ -1,6 +1,6 @@
 /** Dependency-free JSDoc mirror of `ouroboros.gateway.management_contracts`: skills and extensions,
  *  the marketplaces, agent accounts (relayed Claudexor engine objects), local model, MCP, the model
- *  catalog, updates and core control. `SkillReviewResponse` and `UpdateLetter` sit in ./api_types.js. */
+ *  catalog, updates and core control. `UpdateLetter` sits in ./api_types.js. */
 
 /**
  * One `GET /api/extensions` `skills` row; a name collision gives one row per occupant (`identity_collision`).
@@ -204,6 +204,59 @@
  */
 
 /**
+ * Skill review and owner attestation outcome (`gateway/management_contracts.py::SkillReviewResponse`).
+ * @typedef {Object} SkillReviewResponse
+ * @property {string} skill
+ * @property {string} status  // clean | warnings | blockers | pending
+ * @property {string=} content_hash
+ * @property {string=} error
+ * @property {boolean=} ok  // attest only
+ * @property {number=} status_code  // attest refusal only
+ * @property {boolean=} pending  // attest: the job outlasted the answer bound; review: the wave is still open (its author left on an addressed message)
+ * @property {string=} message  // attest only, with pending
+ * @property {string[]=} reviewer_models
+ * @property {string=} review_profile
+ * @property {Object[]=} findings
+ * @property {Object[]=} raw_actor_records
+ * @property {*=} advisory_result
+ * @property {Object=} review_gate
+ * @property {boolean=} executable_review
+ * @property {*=} auto_flow
+ * @property {string[]=} auto_granted_keys
+ * @property {string[]=} requested_keys
+ * @property {string[]=} auto_granted_permissions
+ * @property {string[]=} requested_permissions
+ * @property {string=} deps_status
+ * @property {string=} deps_error
+ * @property {string=} extension_action
+ * @property {string=} extension_reason
+ * @property {string=} extension_process
+ * @property {string=} extension_server_reconcile
+ * @property {string|null=} extension_load_error
+ * @property {boolean|null=} extension_live_loaded
+ * @property {string=} record_id  // the review's ledger record
+ * @property {boolean=} reused  // a settled record of the same subject answered at $0
+ * @property {boolean=} paid
+ * @property {Object[]=} seats
+ * @property {Object=} governance
+ * @property {string=} job_id
+ * @property {string=} job_status
+ * @property {string=} group_id
+ * @property {number=} review_round
+ * @property {number=} snapshot_attempt
+ * @property {boolean=} snapshot_revised
+ * @property {string=} task_id
+ * @property {string=} root_task_id
+ * @property {string=} origin_task_id
+ * @property {string=} origin_root_task_id
+ * @property {string=} presentation_owner_task_id
+ * @property {number=} chat_id
+ * @property {string=} source
+ * @property {string=} terminal_reason
+ * @property {Object[]=} executions
+ */
+
+/**
  * A catalog row (ClawHub registry fields; OuroborosHub adds `source`, `sanitized_name`, `identity_conflict`).
  * @typedef {Object} MarketplaceSkillSummary
  * @property {string} slug
@@ -339,7 +392,12 @@
  */
 
 /**
- * Maintenance refusal: the engine's ControlProblem object.
+ * Engine or host preparation problem. POST may prepare Node/npm:
+ * 409 maintenance_restart_required asks for chat-header Restart;
+ * 409/503 maintenance_preparation_failed reports failure. Both carry
+ * context.acceptance=not_submitted, scope=this_attempt. Optional inspection failure still
+ * permits POST. After 503 acceptance=unknown, keep the same body and Idempotency-Key,
+ * even after a later preparation-only reply, then resend both.
  * @typedef {Object} ClaudexorMaintenanceProblem
  * @property {Object} error  // {code, message, retryable?, requiredActions?, context?}
  */
@@ -585,10 +643,12 @@
  */
 
 /**
- * Process-local execution observation on /api/update/status (`{}` when none); not recovery authority.
+ * The last apply attempt on /api/update/status (`{}` when none), kept across restarts; never authority.
+ * `outcome` is empty until concluded; `applied` only after a later server's startup checks; `unknown` names missing evidence.
  * @typedef {Object} UpdateProgress
  * @property {string=} operation_id
  * @property {string=} generation
+ * @property {boolean=} current_generation
  * @property {string=} stage
  * @property {string=} started_at
  * @property {string=} stage_started_at
@@ -596,6 +656,18 @@
  * @property {string=} result
  * @property {string=} error
  * @property {boolean=} restart_required
+ * @property {(''|'applied'|'not_applied'|'rolled_back'|'failed'|'unknown')=} outcome
+ * @property {string=} outcome_at
+ * @property {('executor'|'boot')=} concluded_by
+ * @property {string=} reason
+ * @property {string[]=} blockers
+ * @property {(''|'none'|'invoked')=} work_stop
+ * @property {string=} base_sha
+ * @property {string=} target_sha
+ * @property {string=} tx_attempt_id
+ * @property {string=} keep_branch
+ * @property {string=} stash_note
+ * @property {boolean=} retention_unconfirmed - Live observation could not be saved across restart.
  */
 
 /**
@@ -790,12 +862,18 @@
  * @property {string} label
  * @property {string} title
  * @property {string} icon
+ * @property {Object<string,string>=} icon_spec
  * @property {number} order
  * @property {Object=} action
  * @property {{url:string,refresh_s:number}=} source
  * @property {string=} runtime
  * @property {string=} route_url
  * @property {string=} destination
+ * @property {string=} scope
+ * @property {string[]=} wakes
+ * @property {string=} settings
+ * @property {string=} read_only
+ * @property {Object[]=} tools
  * @property {string[]=} languages
  * @property {string[]=} formats
  * @property {string=} install_size

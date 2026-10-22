@@ -48,8 +48,7 @@ def _read_source(root, entry, ref):
 def observe_run(root, entry, detail: dict) -> bool:
     """Publish exact execution/question facts, never collection, control or consumption."""
     summary = c.summary_of(detail)
-    named = summary.get("runId") or summary.get("id") or detail.get("runId")
-    if named and str(named) != entry.run_id:
+    if c.names_another_run(detail, entry.run_id):  # a run held by its job id is still this run
         raise ValueError("execution observation belongs to another run")
     state = str(summary.get("state") or "")
     seq = detail.get("lastSeq", 0)
@@ -119,7 +118,7 @@ def record_terminal_money(root, entry, detail: dict, *, failures=None) -> dict:
             from ouroboros.install_identity import require_owned_root
 
             require_owned_root(entry.ledger_root or root)  # the usage store is not behind ``open_store``'s check
-            record_subscription_session(entry.run_id, drive_root=pathlib.Path(entry.ledger_root or root),
+            attempt_id = record_subscription_session(entry.run_id, drive_root=pathlib.Path(entry.ledger_root or root),
                 route=entry.route_id, model=observed.get("model", ""), task_id=entry.task_id,
                 root_task_id=entry.root_task_id, parent_task_id=entry.parent_task_id,
                 category=entry.category, source=entry.source,
@@ -140,6 +139,8 @@ def record_terminal_money(root, entry, detail: dict, *, failures=None) -> dict:
             entry.ledger_recorded = True
             c.emit(root, c.LEDGER_RECORDED, {"run_id": entry.run_id, "task_id": entry.task_id,
                 "root_task_id": entry.root_task_id, "parent_task_id": entry.parent_task_id, "route": entry.route_id})
+            if not entry.review_owned:
+                _emit_session_usage(root, entry, summary, observed, attempt_id)
     if entry.ledger_recorded:
         failure = summary.get("failure") if isinstance(summary.get("failure"), dict) else {}
         facts = summary.get("outcomeFacts") if isinstance(summary.get("outcomeFacts"), dict) else {}
@@ -163,6 +164,36 @@ def record_terminal_money(root, entry, detail: dict, *, failures=None) -> dict:
             except Exception:
                 log.debug("Session history unavailable", exc_info=True)
     return {"settled": entry.settled, "ledger_recorded": entry.ledger_recorded, "retried": True}
+
+
+def _emit_session_usage(root, entry, summary, observed, attempt_id):
+    """Best-effort telemetry after money; a missing event never repeats inference.
+
+    The custody event already represents unknown/legacy sessions. Only a valid
+    native split adds token facts. Recollection can repeat this row; consumers
+    key it by run, while the ledger remains the sole monetary authority.
+    """
+    from ouroboros.review_session_usage import session_usage_facts
+    from ouroboros.contracts.record_contract import RECORD_CONTRACT_VERSION
+    from ouroboros.event_usage import event_token_counts
+    from ouroboros.utils import append_jsonl, utc_now_iso
+
+    facts = session_usage_facts(entry.run_id, requested_route=entry.route_id,
+                                observed_attempt=observed, summary=summary)
+    if "input_token_usage" not in facts:
+        return
+    try:
+        append_jsonl(c.event_log_path(root), {
+            "type": "llm_usage", "ts": utc_now_iso(), "record_contract_version": RECORD_CONTRACT_VERSION,
+            "task_id": entry.task_id, "root_task_id": entry.root_task_id or entry.task_id,
+            "parent_task_id": entry.parent_task_id, "delegation_role": "subagent" if entry.parent_task_id else "",
+            "source": entry.source, "category": entry.category, "provider": "claudexor", "api_key_type": "claudexor",
+            "model": "", "claudexor": facts["claudexor"], "input_token_usage": facts["input_token_usage"],
+            **event_token_counts(facts),
+            "accounting_authority": "physical_attempt_ledger", "ledger_attempt_ids": [attempt_id],
+        })
+    except Exception:
+        log.warning("Delegated usage event unavailable for %s", entry.run_id, exc_info=True)
 
 
 def _retain_output(root, entry, detail, gateway, staging_task_id="", output_authority=None):

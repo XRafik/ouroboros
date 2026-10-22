@@ -262,6 +262,7 @@ class ChatOutbound(ChatReferenceFields):
     card_row: NotRequired[Literal["timeline", "reviews"]]
     card_row_id: NotRequired[str]
     card_row_revision: NotRequired[int]  # canonical source order, independent of delivery timestamp
+    terminal_receipt: NotRequired[Literal["retained_work"]]  # a placed row typed as a terminal receipt, not progress
     late_evidence: NotRequired[Dict[str, Any]]  # late review identity/revision + exact applied source; no transcript
     # Event-time human presentation; raw task/project ids remain machine keys.
     target_label: NotRequired[str]
@@ -272,7 +273,7 @@ class ChatOutbound(ChatReferenceFields):
     terminal_time: NotRequired[Dict[str, Any]]  # host-owned occurrence, separate from publication ts
     completion_answer: NotRequired[str]  # a Project root's model-authored final answer, mirrored into Main (DESIGN)
     completion_reason: NotRequired[str]  # one recorded nonclean-outcome fact beside the answer
-    completion_notice: NotRequired[Dict[str, Any]]  # transport view: neutral, detail, phase; optional preserved salvage
+    completion_notice: NotRequired[Dict[str, Any]]  # transport view: neutral/detail/phase/salvage; Main adds cause and undescribed codes
     delivery_id: NotRequired[str]  # stable logical publication identity across transport retries
     set_at: NotRequired[str]  # a `reminder` row's provenance, live frame only (its text carries the signature): when written
     scheduled_for: NotRequired[str]  # the due point it was written for
@@ -1106,6 +1107,8 @@ class TaskDetailResponse(TypedDict, total=False):
     artifacts: List[Dict[str, Any]]  # Open result rows; a nested file carries additive ``relpath``.
     # Per result directory: {name, files, size, excluded, available} for its ``?archive=`` ZIP.
     artifact_archives: Dict[str, Dict[str, Any]]
+    # Wrap up's saved-work document {name, request_id}: ``?wrap_up=<request_id>`` writes it on read; no size/digest.
+    wrap_up_document: Dict[str, str]
     cost_breakdown: TaskCostBreakdown
     history_retention: HistoryRetentionProjection
     model_waits: Dict[str, Any]

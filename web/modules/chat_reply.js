@@ -8,9 +8,11 @@ import { tr } from './i18n.js';
 import { showToast } from './toast.js';
 import { isStoreMigrating } from './api_client.js';
 import { authorOf, createRelayQuote, createReplyQuote, normalizeReplyRef, replySnippet } from './chat_reply_quote.js';
+import { createRelayDecks } from './chat_relay_deck.js';
 import { fullText } from './text_fit.js';
 import { bindBubbleActions } from './message_actions.js';
 import { revealTimelineNode } from './chat_render_batch.js';
+import { afterMotion } from './motion.js';
 
 export const REPLY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"'
     + ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -64,6 +66,8 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     let strip = null;
     let targetTimer = 0;
     const bubbleActions = bindBubbleActions({ feed, registry: actions, onDomWrite });
+    // Notes between works: a relay row's bubble is dressed as a note card and grouped into decks (chat_relay_deck.js).
+    const decks = createRelayDecks({ feed, onDomWrite });
     let destroyed = false;
     // `held`: the reader's own live-edge intent while a reveal is pending (a reveal sets stick false itself).
     let revealGeneration = 0, revealing = 0, held = null;
@@ -124,6 +128,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             target = result.target;
         }
         if (!wanted()) return null;
+        target = decks.surface(target) || target;  // a tucked note's deck opens, so the row it lands on shows
         const header = feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
         const clearance = Math.max(HEADER_CLEARANCE,
             (header?.getBoundingClientRect().bottom || 0) - feed.getBoundingClientRect().top + 12);
@@ -143,16 +148,49 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         showToast(tr(`chat.reply.${code}`, words), 'info');
     }
 
-    function paint() {
-        strip?.remove();
+    // The strip opens and closes like the capsule row's fold (style.css): its height runs from 0 while its words fade,
+    // so the row above it rises with it instead of jumping; a reply staged over another one swaps in place. The room it
+    // takes at rest (its box and margins, --reply-room) is where the composer's reserve goes at once (chat.js). Staging
+    // focuses the field and lays the composer out, a long first frame the first time: the strip is held shut through it
+    // (`data-hold`) and opens from the frame after, so no long frame shows it half open.
+    function run(node, to) {
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(node) : null;
+        const margins = style ? (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0) : 0;
+        node.style.setProperty('--reply-h', `${node.offsetHeight}px`);
+        node.style.setProperty('--reply-room', `${node.offsetHeight + margins}px`);
+        if (to === 'open' && typeof requestAnimationFrame === 'function') {
+            node.dataset.hold = '';
+            node.dataset.motion = 'open';
+            return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))).then(() => {
+                if (!('hold' in node.dataset)) return 'cancel';
+                delete node.dataset.hold;
+                return afterMotion(node, { property: 'max-height' }).done;
+            });
+        }
+        delete node.dataset.hold;
+        node.dataset.motion = to === 'open' ? 'shut' : 'open';
+        void node.offsetHeight;  // the motion starts from this height
+        node.dataset.motion = to;
+        return afterMotion(node, { property: 'max-height' }).done;
+    }
+    function paint(animate = true) {
+        const before = strip;
         strip = staged ? createReplyQuote(staged, { composer: true, onJump: jump, onCancel: () => cancel() }) : null;
         if (strip) {
             const main = strip.querySelector('.chat-quote-main');
             main.id = `${input.id}-reply`;
-            textRow.before(strip);
             // The field announces what it answers whenever it takes focus.
             input.setAttribute('aria-describedby', main.id);
+            if (before?.isConnected && before.dataset.motion !== 'shut') { before.replaceWith(strip); return; }
+            textRow.before(strip);
+            const opened = strip;
+            // A reply the room kept comes with the room; one staged now opens.
+            if (animate) void run(opened, 'open').then(() => { if (opened.dataset.motion === 'open') delete opened.dataset.motion; });
         } else input.removeAttribute('aria-describedby');
+        if (before?.isConnected && before.dataset.motion !== 'shut') {
+            before.inert = true;  // leaving, its controls take no press
+            void run(before, 'shut').then(() => before.remove());
+        }
     }
 
     /**
@@ -233,7 +271,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
 
     try {
         const saved = storage && storageKey ? storage.getItem(storageKey) : '';
-        if (saved) { staged = normalizeReplyRef(JSON.parse(saved)); paint(); }
+        if (saved) { staged = normalizeReplyRef(JSON.parse(saved)); paint(false); }
     } catch { staged = null; }
 
     /**
@@ -279,6 +317,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     }
 
     function syncDerivedQuotes(around = null) {
+        decks.schedule();  // a landed row may join, split or end a run of notes
         if (!around) {
             return [...feed.querySelectorAll('.chat-bubble > .chat-quote[data-derived="1"]')]
                 .reduce((changed, quote) => syncDerivedQuote(quote.parentElement) || changed, false);
@@ -309,6 +348,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             }
             if (quote) sender?.after(quote);
             mountControl(bubble);
+            if (row?.relay && bubble.dataset.systemType === 'relay_entry') decks.adopt(bubble, row, Boolean(relay));
         },
         /** A row built outside addMessage (media, files, links, a question card): its address makes it a reply target. */
         stamp(bubble, row) {
@@ -356,6 +396,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             destroyed = true;
             clearTimeout(targetTimer);
             bubbleActions.destroy();
+            decks.destroy();
             keyHost?.removeEventListener('keydown', onKeydown);
             strip?.remove();
             strip = null;

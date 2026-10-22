@@ -118,15 +118,16 @@ def transcript_growth_signature(messages: List[Dict[str, Any]]) -> Tuple[int, in
 
 
 def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int = 0) -> None:
-    """Keep only the newest MAX_LIVE_IMAGE_BLOCKS image blocks in the transcript.
+    """Above the high-water mark, keep the newest MAX_LIVE_IMAGE_BLOCKS images.
 
     Single counter across ALL image sources (owner uploads, browser
     screenshots, transport injections). Evicted blocks become a text
     placeholder carrying the caption and re-view path: the dialogue HORIZON
     survives while the heavy payload drops (P1 — granularity varies, history
     never silently vanishes). ``incoming`` reserves room for imminent blocks.
+    True when blocks were evicted: the caller names that change of sent history.
     """
-    from ouroboros.context_budget import MAX_LIVE_IMAGE_BLOCKS
+    from ouroboros.context_budget import MAX_LIVE_IMAGE_BLOCKS, LIVE_IMAGE_BLOCKS_HIGH_WATER
 
     image_refs: List[tuple] = []  # (message_idx, block_idx)
     for m_idx, msg in enumerate(messages):
@@ -136,10 +137,10 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
         for b_idx, block in enumerate(content):
             if isinstance(block, dict) and str(block.get("type") or "") in ("image_url", "image"):
                 image_refs.append((m_idx, b_idx))
-    excess = len(image_refs) + max(0, int(incoming)) - MAX_LIVE_IMAGE_BLOCKS
-    if excess <= 0:
-        return
-    for m_idx, b_idx in image_refs[:excess]:
+    total = len(image_refs) + max(0, int(incoming))
+    if total <= LIVE_IMAGE_BLOCKS_HIGH_WATER:
+        return False
+    for m_idx, b_idx in image_refs[:total - MAX_LIVE_IMAGE_BLOCKS]:
         content = messages[m_idx]["content"]
         block = content[b_idx]
         caption = str(block.get("_caption") or "").strip()
@@ -153,10 +154,11 @@ def _evict_stale_image_blocks(messages: List[Dict[str, Any]], *, incoming: int =
             placeholder += f"; re-view: view_image path={source_path}"
         placeholder += "]"
         content[b_idx] = {"type": "text", "text": placeholder}
+    return True
 
 
 def _append_or_merge_user_content(
-    messages: List[Dict[str, Any]], content: Any, *, slot: Any = None, kind: str = "",
+    messages: List[Dict[str, Any]], content: Any, *, slot: Any = None, kind: str = "", stamp: Any = None,
 ) -> None:
     """Append user content without flattening multipart blocks.
 
@@ -165,17 +167,14 @@ def _append_or_merge_user_content(
     proves the tail absent; an unknown or sent tail stays intact. ``kind`` types
     the row at delivery (``context_budget.OWNER_WORDS_KIND``): a typed row is its
     own row, and nothing merges into a typed tail, so provenance never has to be
-    recovered from text.
+    recovered from text. ``stamp`` (else ``slot``) receives the eviction's origin.
     """
-    from ouroboros.transcript_prefix import unsent_in_previous_send
+    from ouroboros.transcript_prefix import sanction_rewrite, unsent_in_previous_send
 
-    if isinstance(content, list):
-        incoming_images = sum(
-            1 for b in content
-            if isinstance(b, dict) and str(b.get("type") or "") in ("image_url", "image")
-        )
-        if incoming_images:
-            _evict_stale_image_blocks(messages, incoming=incoming_images)
+    if isinstance(content, list) and any(
+            isinstance(b, dict) and b.get("type") in ("image_url", "image") for b in content):
+        if _evict_stale_image_blocks([*messages, {"content": content}]) and (stamp or slot) is not None:
+            sanction_rewrite(stamp or slot, "image_eviction")
     if kind or not (messages and unsent_in_previous_send(slot, messages[-1])
                     and set(messages[-1]) <= {"role", "content"}):
         # Typed words, unknown or sent content and any typed tail stay intact (slot-less producers too).
@@ -674,6 +673,7 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
     """
     from ouroboros.context_runtime_facts import round_clock_fact
     from ouroboros.nanny_pacing import nanny_burn_fact
+    from ouroboros.transcript_prefix import previous_cache_fact, reasoning_retirement_fact
 
     usage = ctx.accumulated_usage
     tool_ctx = getattr(getattr(ctx, "tools", None), "_ctx", None)
@@ -725,16 +725,7 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
 
     # The mind's own folds stay countable to it (17.10.2026: after 42 folds it told the owner it never folded).
     parts.append(f"own notes in view {sum(1 for row in ctx.messages if (_capsule_metadata(row)[1] or {}).get('authorship') == 'actor')}")
-    previous = usage.get("_last_round_cache_usage") or {}
-    read, total = previous.get("cached_tokens"), previous.get("prompt_tokens")
-    share = (f"{int(read):,}/{int(total):,} tokens ({100 * read / total:.1f}%)"
-             if read is not None and total is not None and total > 0 else "unknown")
-    cache = f"previous usable input cache {share}"
-    if previous:
-        cache += f" [round {previous['round']}, {previous.get('provider') or 'provider unknown'}, {previous.get('model') or 'model unknown'}]"
-        written = previous.get("cache_write_tokens")
-        cache += f"; write {int(written):,} tokens" if written is not None else "; write unknown"
-    parts.append(cache)
+    parts.append(previous_cache_fact(usage))
     cost = usage.get("cost")
     parts.append((f"own recorded cost ${float(cost):.2f}" + (" (total not final)" if usage.get("cost_final") is False else ""))
                  if cost is not None else "own cost unknown")
@@ -753,6 +744,7 @@ def context_facts_line(ctx: Any, *, money: Optional[Dict[str, Any]] = None,
     parts.append(_tool_results_fact(usage))
     if focus_fact:
         parts.append(focus_fact)
+    parts.extend(filter(None, [reasoning_retirement_fact(usage, ctx.round_idx)]))
     return f"{CONTEXT_FACTS_HEADER} " + " | ".join(parts)
 
 
@@ -958,6 +950,7 @@ def append_context_facts(ctx: Any, *, money: Optional[Dict[str, Any]] = None) ->
     obsolete snapshots. The caller remeasures including this line before sending.
     """
     from ouroboros.context_compaction import context_reclaim_transcript_sha256
+    from ouroboros.transcript_prefix import reasoning_retirement_fact
 
     usage = ctx.accumulated_usage
     plan = ctx.context_fit_plan
@@ -967,7 +960,7 @@ def append_context_facts(ctx: Any, *, money: Optional[Dict[str, Any]] = None) ->
     key = (ctx.round_idx, ctx.active_model, ctx.active_context_mode, ctx.active_effort,
            str(getattr(plan, "route_fp", "")), str(getattr(plan, "status", "")),
            bool(getattr(plan, "stale", False)), int(getattr(plan, "window_tokens", 0) or 0),
-           context_reclaim_transcript_sha256(source), focus_identity)
+           context_reclaim_transcript_sha256(source), focus_identity, reasoning_retirement_fact(usage, ctx.round_idx))
     visible = any(m.get(HOST_CONTEXT_KIND_KEY) == CONTEXT_FACTS_NAME and m.get("content") == usage.get("_context_facts_line")
                   for m in ctx.messages)
     if tuple(usage.get("_context_facts_key") or ()) == key and visible:

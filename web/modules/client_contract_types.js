@@ -131,6 +131,7 @@
  * The wizard's starting values; besides these keys it carries one key per `contract.providerFields[].stateKey`
  * (a configured secret reads as `secretPlaceholder`), `contract.budgetFields[].stateKey` and `contract.modelSlots[].stateKey`.
  * @typedef {Object} SetupInitialState
+ * @property {string} safetyModel
  * @property {string} providerProfile
  * @property {string} reviewEnforcement
  * @property {string} runtimeMode
@@ -383,7 +384,8 @@
  * Additive /api/chat/history row fields on `system_type: "skill_review"` rows:
  * the exact-job reference the producer already writes into chat.jsonl. A row
  * carrying a non-empty `job_id` lets the Chat card lazily fetch the rendered
- * review via GET /api/skills/{skill}/review-history/{job_id}; rows without it
+ * review via GET /api/skills/{skill}/review-history/{record_id or job_id} (the
+ * review record when the row names one, else the job); rows without either
  * (legacy full-text rows) keep local expansion. All fields are additive and
  * safely ignorable by renderers.
  * @typedef {Object} SkillReviewHistoryRowFields
@@ -391,6 +393,7 @@
  * @property {string=} status
  * @property {string=} content_hash
  * @property {string=} job_id
+ * @property {string=} record_id
  * @property {number=} review_round
  * @property {number=} snapshot_attempt
  */
@@ -474,6 +477,7 @@
 
 /**
  * @typedef {Object} OwnerSafetyModeRequest
+ * @property {'your_work'|'consciousness'=} kind
  * @property {'full'|'light'|'off'} mode
  */
 
@@ -704,6 +708,9 @@
  * @property {string} task_id
  * @property {string=} root_task_id
  * @property {('resumed'|'settled')=} late_phase
+ * @property {boolean=} tree_only
+ * @property {boolean=} owner_pause_released
+ * @property {boolean=} snapshot_persisted
  * @property {boolean=} exact_continuation
  * @property {string=} grant_id
  * @property {number=} grant_generation
@@ -726,6 +733,7 @@
  * @property {string} at
  * @property {'owed'|'delivered'|'forwarded'} delivery
  * @property {string} request_id
+ * @property {string=} reason_code  // 'awaiting_recipient_read' until a paused, held or queued author reads it
  */
 
 /**
@@ -846,4 +854,25 @@
  * @property {string} card_id
  * @property {boolean} pinned
  * @property {string=} pinned_at
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyRulesRequest
+ * @property {string} rules
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyRulesResponse
+ * @property {boolean} ok
+ * @property {string} rules
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyModelRequest
+ * @property {Object} settings
+ */
+
+/**
+ * @typedef {Object} OwnerSafetyModelResponse
+ * @property {boolean} ok
  */

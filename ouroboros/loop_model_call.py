@@ -5,6 +5,8 @@ split); loop.py re-exports every name."""
 
 from __future__ import annotations
 
+from ouroboros.context_fit import _physical_context_for_fit
+
 from ouroboros.config import runtime_setting
 
 import logging
@@ -21,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from ouroboros import task_pacing
 from ouroboros.context_budget import WHOLE_CATEGORY
 from ouroboros.llm import LLMClient
-from ouroboros.loop_llm_call import REBOUND_PHYSICAL_CONTEXT_KEY, REFUSED_CANDIDATE_KEY, TRANSPORT_DEATHS_KEY
+from ouroboros.loop_llm_call import REBOUND_PHYSICAL_CONTEXT_KEY, REFUSED_CANDIDATE_KEY, TIMEOUT_REPEAT_KEY, TRANSPORT_DEATHS_KEY
 from ouroboros.loop_round_limits import _coarsen_memory_view, _run_emergency_address_pass
 from ouroboros.observability import new_execution_id
 from ouroboros.tools.registry import ToolRegistry
@@ -396,6 +398,8 @@ def _run_cross_model_fallback_chain(
         _cooled(fallback_model, fallback_use_local, fallback_role)
         previous_model, previous_tag = fallback_model, ftag
     fenced = msg is None and _walk_fenced(tools._ctx, accumulated_usage)
+    if msg is None and tried and not fenced and str(accumulated_usage.get("_last_llm_error_kind") or "") != "llm_output_exhausted":
+        accumulated_usage["_acting_route_failure"] = entry_failure  # its own failure decides its salvage; the last row stays the walk's
     if deferred is None:
         deferred = getattr(tools._ctx, "_deferred_resource_refusal", None)
     owner_question = (task_type != "presence" and deferred is not None and not own_wait
@@ -592,6 +596,7 @@ def _rebind_context_fit_plan(
         str(getattr(evidence, "route_fp", "") or ""),
         str(route.get("model") or model),
         estimate_context_prompt_tokens(messages, tool_schemas, provider=str(route.get("provider") or "")),
+        view_kind=plan.view_kind,
     )
     from ouroboros.context_anchor import floored_window
 
@@ -819,21 +824,6 @@ def _measure_round_main_fit(
     return disposition
 
 
-def _physical_context_for_fit(disposition: Any) -> PhysicalAttemptContext:
-    measurement = disposition.measurement
-    return PhysicalAttemptContext(
-        profile=measurement.profile,
-        rendered_mode=measurement.rendered_mode,
-        measurement_basis=measurement.measurement_basis,
-        route_fp=measurement.route_fp,
-        round_id=measurement.round_id,
-        target_total_tokens=measurement.target_total_tokens,
-        capacity_total_tokens=measurement.capacity_total_tokens,
-        context_target_miss=disposition.action == "send_target_miss",
-        automatic_pass_used=disposition.automatic_pass_used,
-        measurement_density=measurement.measurement_density,
-    )
-
 
 def _measure_main_context_view(plan, messages, schemas, mode, effort, round_id, usage=None) -> dict:
     """Measure an authored candidate without changing Main's dispatch policy.
@@ -905,8 +895,10 @@ def _dispatch_round_model(
     from ouroboros.loop_transport import emit_model_substitution, transport_repeat_stop_requested
     from ouroboros.owner_mailbox import OwnerMailboxPeek
     from ouroboros.send_clock import main_clock_policy
+    from ouroboros.subagent_bootstrap import is_configured_api_child
     from ouroboros.loop_messages import append_context_facts
 
+    _loop()._retire_main_reasoning(ctx)
     if append_context_facts(ctx):
         disposition = _loop()._measure_round_main_fit(
             ctx, automatic_pass_used=bool(getattr(disposition, "automatic_pass_used", False)))
@@ -962,6 +954,7 @@ def _dispatch_round_model(
             model_turn_state=getattr(ctx.tools._ctx, "model_turn_state", None),
             send_clock_policy=main_clock_policy(
                 getattr(ctx.tools._ctx, "task_metadata", {}), task_type=ctx.task_type),
+            configured_api_child=is_configured_api_child(ctx.tools._ctx),
             **({"max_tokens": int(max_tokens)} if max_tokens else {}),
         )
     ctx.accumulated_usage.pop(REBOUND_PHYSICAL_CONTEXT_KEY, None)  # consumed by the call's later attempts, if any
@@ -1059,6 +1052,7 @@ def _reprepare_waiting_main(ctx: _RoundModelCallContext, kwargs: dict):
     # The physical pre-send predicate rechecks this newly adopted route before dispatch.
     from ouroboros.loop_messages import append_context_facts
 
+    _loop()._retire_main_reasoning(ctx)
     append_context_facts(ctx)
     disposition = _loop()._measure_round_main_fit(ctx, automatic_pass_used=False)
     from ouroboros.send_clock import MainSendClock
@@ -1337,7 +1331,11 @@ def _fit_route_tool_ceiling(ctx: _RoundModelCallContext) -> bool:
 
 def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
     """Measure, dispatch, and recover a provider refusal or known-window prediction of no result room."""
+    from ouroboros.loop_llm_call import timeout_repeat_blocked
+    if timeout_repeat_blocked(ctx.accumulated_usage):
+        return None, None, ctx.active_context_mode
     ctx.accumulated_usage.pop("_last_llm_failure", None)
+    ctx.accumulated_usage.pop("_acting_route_failure", None)
     from ouroboros.primary_route_observation import observe_primary_route
     observation = observe_primary_route(ctx)
     if observation:
@@ -1357,6 +1355,8 @@ def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
         disposition,
         attempt_cap=ctx.attempt_cap,
     )
+    if msg is None and TIMEOUT_REPEAT_KEY in ctx.accumulated_usage:
+        return msg, cost, ctx.active_context_mode  # its timeout repeat is spent: no image or size retry either
     from ouroboros.vision_routing import retry_refused_image_round  # the capture is read right after the send
     retried = None if msg is not None else retry_refused_image_round(ctx, _loop().last_physical_attempt_capture())
     if retried is not None:

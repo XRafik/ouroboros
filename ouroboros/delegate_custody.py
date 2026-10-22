@@ -21,6 +21,8 @@ from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS  # noqa: F401 -- deleg
 from ouroboros.delegate_custody_usage import (
     disclosed_spend,
     disclosed_tokens,  # noqa: F401 -- public custody vocabulary used by collection
+    held_run_names,
+    names_another_run,
     project_retirement_lock,
     summary_of,
 )
@@ -119,6 +121,7 @@ class RunCustody:
     profile_id: str = ""
     effort: Optional[str] = None
     processing_preference: Optional[str] = None
+    prompt_cache_ttl: Optional[Dict[str, Any]] = None
     row_effort: Optional[str] = None  # the configured row's pin ('' = Auto); None on rows without one
     project_id: str = ""
     project_owned: bool = False
@@ -492,6 +495,8 @@ def _merge_started_into(entry: RunCustody, previous: RunCustody) -> None:
             setattr(entry, attr, getattr(previous, attr))
     if previous.work_order_source_request:
         entry.work_order_source_request = dict(previous.work_order_source_request)
+    if previous.prompt_cache_ttl:
+        entry.prompt_cache_ttl = copy.deepcopy(previous.prompt_cache_ttl)
     for start, end in previous.verified_source_ranges:
         _merge_verified_source_range(entry, start, end)
     merge_source_delivery_confirmations(entry, previous)
@@ -530,6 +535,9 @@ def _apply(state: Dict[str, RunCustody], row: Dict[str, Any]) -> None:
             resource_ref=dict(ref) if isinstance(ref, dict) else {},
             work_order_source_request=(
                 dict(source_request) if isinstance(source_request, dict) else {}
+            ),
+            prompt_cache_ttl=(
+                copy.deepcopy(row["prompt_cache_ttl"]) if isinstance(row.get("prompt_cache_ttl"), dict) else None
             ),
             **{attr: str(row.get(key) or "") for attr, key in _STARTED_STR_FIELDS},
             **{key: row[key] for key in _STARTED_OPTION_FIELDS if isinstance(row.get(key), str)},
@@ -951,6 +959,8 @@ def record_started(drive_root: Any, custody: RunCustody,
         "project_owned": custody.project_owned, "project_persistent": custody.project_persistent,
         "resource_ref": custody.resource_ref or {},
         "work_order_source_request": custody.work_order_source_request or {},
+        **({"prompt_cache_ttl": copy.deepcopy(custody.prompt_cache_ttl)}
+           if isinstance(custody.prompt_cache_ttl, dict) else {}),
         **{key: getattr(custody, attr) for attr, key in _STARTED_STR_FIELDS},
         **(shape or {}),
         **{key: getattr(custody, key) for key in _STARTED_OPTION_FIELDS if getattr(custody, key) is not None},
@@ -1114,7 +1124,17 @@ def close_absent_run(drive_root: Any, gateway: Any, custody: RunCustody, reason:
 
 def settle_run(drive_root: Any, gateway: Any, custody: RunCustody, detail: Dict[str, Any]) -> Dict[str, Any]:
     """Compatibility settlement for the panel/control owners; collection separates cleanup."""
-    from ouroboros.delegate_collection import record_terminal_money
+    from ouroboros.delegate_collection import observe_run, record_terminal_money
+
+    # Cancellation already paid for this exact read-back. Preserve it before
+    # money/retirement, including a repeated settlement: the body can collect
+    # it after the engine disappears. Never fetch output or wait for capture on
+    # the stop path; an unavailable source is a gap, not a reason to delay Stop.
+    if not custody.review_owned:
+        try:
+            observe_run(drive_root, custody, detail)
+        except Exception:
+            log.warning("Terminal observation was not retained for %s", custody.run_id, exc_info=True)
 
     if custody.settled:
         return {"settled": True, "ledger_recorded": custody.ledger_recorded,
@@ -1399,10 +1419,12 @@ __all__ = [
     "disclosed_spend",
     "disposition_lock_path",
     "emit",
+    "held_run_names",
     "idempotency_key",
     "is_terminal",
     "invocation_record",
     "lookup",
+    "names_another_run",
     "new_invocation_id",
     "open_containment_faults",
     "open_runs",

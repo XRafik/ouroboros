@@ -358,7 +358,6 @@ _GITHUB_TOKEN_TOOLS = frozenset({
     "close_github_issue",
     "create_github_issue",
     "submit_skill_to_hub",
-    "generate_evolution_stats",
 })
 
 
@@ -387,7 +386,7 @@ def _builtin_tool_availability(name: str, ctx: Any = None) -> tuple[bool, str, s
             return True, "", ""
     if tool in _GITHUB_TOKEN_TOOLS:
         detail = "GITHUB_TOKEN"
-        if tool in {"submit_skill_to_hub", "generate_evolution_stats"}:
+        if tool == "submit_skill_to_hub":
             configured = bool(os.environ.get("GITHUB_TOKEN", "").strip())
         else:
             from ouroboros.tools.github import github_cli_configured
@@ -416,6 +415,9 @@ def _capability_resource_guard_result(
 
     metadata = getattr(ctx, "task_metadata", {}) if isinstance(getattr(ctx, "task_metadata", {}), dict) else {}
     if refusal := observe_argument_refusal(metadata, name, args):
+        return ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED", text=refusal)
+    from ouroboros.place_guard import dispatch_refusal
+    if refusal := dispatch_refusal(ctx, name, args, ext_tool=ext_tool, is_mcp=is_mcp):
         return ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED", text=refusal)
     if name in _disabled_tools(ctx):
         return ToolResult(
