@@ -366,7 +366,7 @@ def _call_consolidation_llm(
             from ouroboros.llm_local import local_context_limits
             _local_window, output_reserve = local_context_limits(output_reserve)
         values["max_tokens"] = output_reserve
-        scope = route.get("window_observation_fp", evidence.route_fp)
+        scope = route.get("window_observation_fp") or evidence.route_fp
         window = resolve_window(evidence, output_reserve, observation_fp=scope, bound=bool(scope))
         limit = window.usable
         binding = dict(route_fp=scope, capacity_tokens=window.total_equivalent if limit is not None else None,

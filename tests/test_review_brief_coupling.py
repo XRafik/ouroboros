@@ -532,8 +532,8 @@ def _seed_evidence(monkeypatch, tmp_path, model, *, window, status, ts, use_ack=
 
 def test_stale_evidence_arrives_marked_and_dated(monkeypatch, tmp_path):
     """An EXPIRED record the probe could not re-verify is a dated impression, not a
-    measurement, and the route's resolution says so. Layout uses the caller's
-    explicit fallback; expired metadata supplies no current capacity."""
+    measurement, and the route's resolution says so. Layout keeps the dated
+    estimate; expired metadata supplies no current capacity."""
     from ouroboros import capability_evidence as ce
     from ouroboros.reviewer_window import resolve_reviewer_window
 
@@ -546,7 +546,8 @@ def test_stale_evidence_arrives_marked_and_dated(monkeypatch, tmp_path):
     resolved = resolve_reviewer_window(model)
     assert resolved.window_tokens == 1_000_000 and resolved.status == "confirmed"
     assert resolved.stale is True, "the outage-carried record must arrive marked stale"
-    assert resolved.sizing_window(200_000) == 200_000 and resolved.window_record.usable is None
+    assert resolved.sizing_window(200_000) == 1_000_000 and resolved.window_record.usable is None
+    assert resolved.sizing_source == "confirmed"
     assert resolved.observed_at == old, "the observation time must survive the hand-off"
 
     phrase = sw.window_provenance_phrase(

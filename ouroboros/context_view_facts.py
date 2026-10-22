@@ -42,8 +42,9 @@ def window_projection(record):
     limit = record.limiting
     observed = limit.observed_at if limit else ""
     source = limit.source if limit else "unknown"
-    label = {"user_setting": "set in Settings", "owner_ack": "owner confirmation",
-             "provider_metadata": "server metadata", "local_health": "local serving window"}.get(source, source)
+    labels = {"user_setting": "set in Settings", "owner_ack": "owner confirmation",
+              "provider_metadata": "server metadata", "local_health": "local serving window"}
+    label = labels.get(source, source)
     dated = f"{label} {observed.replace('T', ' ')[:16]}".strip()
     if limit:
         text = f"window {limit.tokens:,} {limit.kind}: {dated}; usable input {record.usable:,}"
@@ -54,7 +55,8 @@ def window_projection(record):
     text += f"; reply reserve {record.reserve:,}"
     contradiction = asdict(record.contradicted_by) if record.contradicted_by else None
     if contradiction:
-        text += (f"; server metadata says {contradiction['tokens']:,} {contradiction['kind']}"
+        label = labels.get(contradiction["source"], contradiction["source"])
+        text += (f"; {label} says {contradiction['tokens']:,} {contradiction['kind']}"
                  f" ({contradiction['observed_at'].replace('T', ' ')[:16]})")
     if record.retired_ack:
         stamp = str(record.retired_ack.get("ts") or "date unknown").replace("T", " ")[:16]

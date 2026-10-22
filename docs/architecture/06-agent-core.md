@@ -522,7 +522,7 @@ Structural gates measure code size (BIBLE P3). `ouroboros/review.py::iter_gated_
 
 `usage_accounting.execute_physical_attempt` stores settled density in `capability_evidence.json`. Main uses exact route/account/view witnesses within 2× raw input size, else cold estimates; auxiliary/uncached calls never teach it. `context_anchor.py` binds acceptance to its route, preserving known windows. Review uses the densest fresh exact-model witness or `COLD_START_TOKEN_DENSITY`. `calibrated_input_token_limit` combines cap/density/margin; `review_admission.density_probe_before_size_refusal` probes a bounded slice before refusing irreducible cold packets.
 
-`reviewer_window.resolve_reviewer_window` uses shared precedence and refusal caps, preserving account scope and input/total kind. Unknown/stale API windows use the full-window layout; raw subscriptions keep the assembler budget. Neither claims capacity. `scope_window` names provenance and layout fallbacks. Window size grants no reviewer authority; failed sends supply no verdict.
+`reviewer_window.resolve_reviewer_window` shares precedence, refusal caps, account scope and input/total kind. Stale evidence still sizes layouts with provenance. Without evidence, API routes use the full-window layout, raw subscriptions the assembler budget. `scope_window` names provenance. Layout implies no capacity or reviewer authority; failed sends supply no verdict.
 
 #### The coupling question (Part 2 of the brief)
 

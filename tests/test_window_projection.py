@@ -144,3 +144,16 @@ def test_shared_window_labels_name_the_source_without_a_reader_perspective(sourc
     assert f"window 400,000 total: {label};" in projection["text"]
     assert "set by you" not in projection["text"]
     assert projection["source"] == source
+
+
+@pytest.mark.parametrize("source,label,other", [("provider_metadata", "server metadata", "local serving window"),
+                                               ("local_health", "local serving window", "server metadata")])
+@pytest.mark.parametrize("disagrees", [False, True])
+def test_window_disagreement_names_the_observation_source(tmp_path, source, label, other, disagrees):
+    stamp = "2026-10-23T01:00:00Z"
+    evidence = ce.CapabilityEvidence(250000 if disagrees else 400000, "asserted", "user_setting", "route",
+        server_window=dict(tokens=400000, kind="total", source=source, observed_at=stamp))
+    projection = window_projection(resolve_window(evidence, 4096, root=tmp_path))
+    assert (f"{label} says 400,000 total (2026-10-23 01:00)" in projection["text"]) is disagrees
+    assert f"{other} says" not in projection["text"]
+    assert bool(projection["contradiction"]) is disagrees

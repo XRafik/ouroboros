@@ -144,7 +144,7 @@ def _light_fit(binding: Mapping[str, Any]) -> Tuple[Optional[int], Callable[[str
             from ouroboros.llm_local import local_context_limits
 
             _local_window, reserve = local_context_limits(reserve)
-        scope = route.get("window_observation_fp", evidence.route_fp)
+        scope = route.get("window_observation_fp") or evidence.route_fp
         window = resolve_window(evidence, reserve, observation_fp=scope, bound=bool(scope))
     except Exception:
         log.debug("fallback writer: Light window unknown", exc_info=True)

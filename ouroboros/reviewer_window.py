@@ -113,16 +113,25 @@ class ReviewerWindow:
 
     @property
     def sizing_source(self) -> str:
-        return self.window_record.limiting.source if self.window_record and self.window_record.limiting else "layout_assumption"
+        if self.window_record and self.window_record.limiting:
+            return self.window_record.limiting.source
+        if self.window_tokens:
+            return "user_setting" if self.asserted_window_tokens else self.status
+        return "layout_assumption"
 
     def sizing_window(self, unknown_window: int = REVIEWER_FULL_WINDOW) -> int:
-        """Fresh capacity; unknown subscriptions retain the assembler's input budget."""
+        """Fresh resolved capacity, then the last evidence window, even if stale.
+
+        A stale number still estimates the route's size; its status, observation
+        time and stale flag disclose that provenance. Unknown subscriptions keep
+        the assembler's input budget.
+        """
         from ouroboros.provider_models import provider_for_model
 
         if self.window_record and self.window_record.boundary is not None:
             value = self.window_record.boundary
-        elif self.window_record is None and not self.stale and self.window_tokens:
-            value = self.window_tokens  # legacy caller's explicit layout hint
+        elif self.window_tokens:
+            value = self.window_tokens
         elif provider_for_model(self.model) == "claudexor":
             value = 0  # No made-up provider size for a raw subscription.
         else:
