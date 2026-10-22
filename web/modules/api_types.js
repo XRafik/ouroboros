@@ -456,6 +456,7 @@
  *   A host-stamped placement fact for a task-keyed System row: "timeline" = a timeline item of the task's card, "reviews" = the card's Reviews group carries the fact (the row is still attached to the card); absent = an ordinary row.
  * @property {string=} card_row_id  // the row's stable identity across live delivery, outbox replay and history
  * @property {number=} card_row_revision  // canonical source order, independent of delivery timestamp
+ * @property {"retained_work"=} terminal_receipt  // a placed row the host types as a terminal receipt (Wrap up's saved work), not progress
  * @property {Object=} late_evidence
  *   Late-review identity, reviewed revision and exact applied source_ref served by
  *   taskSourceDownloadUrl; not an original reviewer transcript or a copy of the row.
@@ -1205,6 +1206,9 @@
  * @property {Object.<string, {name:string, files:number, size:number, excluded:number, available:boolean}>=} artifact_archives
  *   Per top-level result directory, what `?archive=<dir>` would stream now (members from one
  *   confined stat each, rows left out counted); a folder offers its `.zip` only when `available`.
+ * @property {{name:string, request_id:string}=} wrap_up_document
+ *   Wrap up's saved-work document, written on read by `?wrap_up=<request_id>` on the task-file
+ *   route (`taskWrapUpDocumentUrl`); no size or digest exists before it is downloaded.
  * @property {Object.<string,Object>=} model_waits
  * @property {TaskCostBreakdown=} cost_breakdown
  * @property {{status: 'pending'|'problem'|'complete', pending_count: number, problem_count: number, promoted_ref_count: number, promoted_source_handle_count: number, problem_reasons?: Array<{reason:string,count:number}>}=} history_retention
@@ -1357,7 +1361,7 @@
  */
 /**
  * @typedef {Object} ScheduleActionResponse
- * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed (restored_not_ready: changed, not ok)
+ * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed
  * @property {boolean} changed  // the durable fact, whatever the audit did
  * @property {string} status
  * @property {string} schedule_id
@@ -1528,6 +1532,7 @@
  * @property {string=} task_id
  * @property {UpdateMergePlan=} merge_plan
  * @property {string=} error
+ * @property {string=} keep_branch
  */
 
 /**

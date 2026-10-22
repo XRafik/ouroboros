@@ -450,7 +450,6 @@ def test_turn_on_when_ready_enables_an_accepted_install(tmp_path, not_cyber, mon
     from ouroboros.skill_lifecycle_actions import reconcile_turn_on_when_ready
     from ouroboros.skill_loader import load_enabled
 
-    monkeypatch.setattr("ouroboros.skill_lifecycle_actions._sync_schedules", lambda *a: None)
     drive_root = tmp_path / "data"
     _trusted_install(drive_root)
     result = reconcile_turn_on_when_ready(drive_root, "probe", repo_path="")
@@ -463,7 +462,6 @@ def test_turn_on_when_ready_never_overrides_a_choice_or_a_missing_basis(tmp_path
     from ouroboros.skill_lifecycle_actions import reconcile_turn_on_when_ready
     from ouroboros.skill_loader import load_enabled, save_enabled
 
-    monkeypatch.setattr("ouroboros.skill_lifecycle_actions._sync_schedules", lambda *a: None)
     drive_root = tmp_path / "data"
     _trusted_install(drive_root, turn_on=False)
     assert reconcile_turn_on_when_ready(drive_root, "probe", repo_path="")["action"] == "not_requested"

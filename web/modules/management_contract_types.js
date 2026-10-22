@@ -590,10 +590,12 @@
  */
 
 /**
- * Process-local execution observation on /api/update/status (`{}` when none); not recovery authority.
+ * The last apply attempt on /api/update/status (`{}` when none), kept across restarts; never authority.
+ * `outcome` is empty until concluded; `applied` only after a later server's startup checks; `unknown` names missing evidence.
  * @typedef {Object} UpdateProgress
  * @property {string=} operation_id
  * @property {string=} generation
+ * @property {boolean=} current_generation
  * @property {string=} stage
  * @property {string=} started_at
  * @property {string=} stage_started_at
@@ -601,6 +603,18 @@
  * @property {string=} result
  * @property {string=} error
  * @property {boolean=} restart_required
+ * @property {(''|'applied'|'not_applied'|'rolled_back'|'failed'|'unknown')=} outcome
+ * @property {string=} outcome_at
+ * @property {('executor'|'boot')=} concluded_by
+ * @property {string=} reason
+ * @property {string[]=} blockers
+ * @property {(''|'none'|'invoked')=} work_stop
+ * @property {string=} base_sha
+ * @property {string=} target_sha
+ * @property {string=} tx_attempt_id
+ * @property {string=} keep_branch
+ * @property {string=} stash_note
+ * @property {boolean=} retention_unconfirmed - Live observation could not be saved across restart.
  */
 
 /**
