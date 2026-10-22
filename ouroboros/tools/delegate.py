@@ -466,7 +466,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
     except ClaudexorUnavailable as exc:
         resolution = resolve_subagent_executor("harness", route=route, unavailable_reason=exc.code)
         return _fail("delegate_start", exc.code, str(exc), executor=resolution.executor)
-
     history_facts = session_request_facts(
         request_body if recovering else {"model": route.model, "credentialProfileId": route.profile_id,
                                         "effort": route.effort, "access": authority.access},
@@ -490,7 +489,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                 "(wait for the reset, deliver partial work, or ask the parent).",
                 executor="blocked", reset_at=resolution.reset_at, route=route.route_id, definitely_unrun=True,
             )
-
         snapshot = None
         if not recovering:
             if payload_auth is not None:
@@ -511,7 +509,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                     return refusal
             if authority.access == "readonly" or authority.investigation:  # a folderless Project's staged inputs
                 from ouroboros.delegate_readonly_inputs import prepare_folderless_inputs
-
                 try:
                     readonly_root, input_instruction = prepare_folderless_inputs(ctx, invocation_id)
                 except (OSError, ValueError) as exc:
@@ -568,7 +565,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
             request_body, processing_info = _processing_start_request(request_body, actor, gateway, route)
             from ouroboros.delegate_custody_current import run as current_custody_run
             from ouroboros.effort_evidence import session_prompt_cache_ttl_request
-
             ttl_info = session_prompt_cache_ttl_request(
                 request_body, route_id=route.route_id, gateway=gateway,
                 continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
@@ -616,7 +612,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
             nonlocal start_attempted
             start_attempted = True  # The durable request is not physical submission.
             return gateway.start_run(request_body, idempotency_key=invocation_id)
-
         handle = run_operation(ctx, submit)
         run_id = str(handle.get("runId") or handle.get("jobId") or "")
         if not run_id:

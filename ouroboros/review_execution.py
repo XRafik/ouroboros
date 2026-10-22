@@ -670,8 +670,7 @@ def run_delegated_review_session(
     """All reviews share this transport: pin one subscription harness, request
     schema only if its effective adapter supports it, store the canonical body
     before POST, and replay only an explicit pending token. Bound tokens join
-    existing runs; reconciliation never replaces them. The nanny verifies
-    cancellation at ``timeout_sec`` and reads full output before ``delegate_custody`` settlement.
+    existing runs; reconciliation never replaces them. The nanny verifies cancellation at ``timeout_sec`` and reads full output before ``delegate_custody`` settlement.
     """
     from ouroboros import delegate_custody as custody
     from ouroboros.claudexor_daemon import ensure_owned_gateway
@@ -780,9 +779,7 @@ def run_delegated_review_session(
             from ouroboros.budget_pause import dispatch_fenced
 
             if dispatch_fenced(task_id):
-                # Observation-only while the owning task pauses (#1196): a
-                # fresh start AND a pending-invocation replay are both a new
-                # POST. The invocation row stays pending for the resumed task.
+                # Observation-only while the owning task pauses (#1196): a fresh start and a pending replay are both a new POST; the row stays pending.
                 raise ReviewRouteUnavailable(
                     "the owning task is entering an exact pause; no delegated "
                     "review is started or re-posted while it pauses",
@@ -826,7 +823,6 @@ def run_delegated_review_session(
                     from ouroboros.review_thread_continuity import start_review_thread_turn
                     return start_review_thread_turn(gateway, thread_id, run_request, idempotency_key=invocation_id)
                 return gateway.start_run(run_request, idempotency_key=invocation_id)
-
             try:
                 launch_source = SimpleNamespace(drive_root=custody_drive,
                     task_id=task_id, root_task_id=root_task_id)
@@ -964,8 +960,6 @@ def run_delegated_review_session(
     finally:
         if gateway is not None:
             gateway.close()
-
-
 def _require_route_headroom(gateway: Any, route: Any, shape: Any) -> None:
     """A fresh seat starts only on a route with headroom: a spent subscription window fails the slot
     typed, never a silent fallback onto metered API spend."""
