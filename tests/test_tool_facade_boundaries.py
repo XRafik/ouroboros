@@ -117,7 +117,8 @@ def test_sealed_presence_keeps_exact_selected_commit_name_and_binding(registry, 
     registry._ctx.task_contract = {"capability_ceiling": payload}
     original = deepcopy(payload)
     other = "commit_reviewed" if spelling == "vcs_commit_reviewed" else "vcs_commit_reviewed"
-    automatic = {"finish_task", "presence_finish", "presence_cancel_work"}
+    # This fixture has a sealed ceiling but no Presence-origin task metadata.
+    automatic = {"finish_task", "presence_cancel_work"}
     assert set(registry.available_tools()) == {spelling} | automatic
     assert registry.get_schema_by_name(spelling) is not None
     assert registry.get_schema_by_name(other) is None
