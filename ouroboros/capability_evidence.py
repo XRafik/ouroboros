@@ -46,7 +46,6 @@ from ouroboros.utils import (
     read_json_dict,
     utc_now_iso,
 )
-from ouroboros.config import runtime_setting
 from ouroboros.context_budget import _parse_ctx_limit_number  # noqa: F401 — shared overflow parser
 
 log = logging.getLogger(__name__)
@@ -65,7 +64,6 @@ SOURCE_PROVIDER_METADATA = "provider_metadata"
 SOURCE_LOCAL_HEALTH = "local_health"
 SOURCE_OWNER_ACK = "owner_ack"
 SOURCE_USER_SETTING = "user_setting"
-SOURCE_GENERATIVE_PROBE = "generative_probe"
 SOURCE_NONE = "none"
 
 #: The refused request's whole input where the provider states it beside the limit: OpenAI ("your messages
@@ -124,49 +122,10 @@ def _parse_ctx_requested(text: str) -> Tuple[int, int, int]:
     return stated, reply, total
 
 
-def classify_generative_probe_response(
-    status_code: Optional[int],
-    body_text: str,
-    *,
-    canaries: Optional[List[str]] = None,
-    echoed_text: str = "",
-    usage_prompt_tokens: int = 0,
-    sent_token_estimate: int = 0,
-) -> Tuple[int, str, str]:
-    """Pure (no-network) classifier for a generative context-window probe response.
-
-    Free-only policy (owner Q1): confirm a window ONLY from a FREE pre-inference
-    reject that states the limit; a genuine 200 (the model ACCEPTED — and would bill —
-    the oversized input) never auto-confirms >=1M, it routes to owner-ack.
-    Returns ``(window_tokens, status, detail)``.
-    """
-    # 4xx: pre-inference reject (free). Parse the limit NUMBER from the text.
-    if isinstance(status_code, int) and 400 <= status_code < 500:
-        n = _parse_ctx_limit_number(body_text)
-        if n > 0:
-            return n, STATUS_CONFIRMED, f"generative overflow reject: max {n} tokens"
-        # e.g. Zhipu code 1261 (no number) or a 413 size reject -> cannot size it.
-        return 0, STATUS_UNPROBEABLE, "overflow reject without a parseable limit; owner-ack required"
-    # 200: the oversized input was ACCEPTED. Under free-only this is a possibly-PAID
-    # accept and must NOT confirm >=1M (owner chose owner-ack). Truncation guard is
-    # recorded for forensics but does not change the owner-ack outcome.
-    if status_code == 200:
-        cs = canaries or []
-        echoed_ok = bool(cs) and all(c in (echoed_text or "") for c in cs)
-        usage_ok = sent_token_estimate > 0 and usage_prompt_tokens >= int(0.95 * sent_token_estimate)
-        detail = "oversized input accepted (200); free-only policy -> owner-ack"
-        if not (echoed_ok and usage_ok):
-            detail = "oversized input 200 but truncation suspected (canaries/usage); owner-ack"
-        return 0, STATUS_UNPROBEABLE, detail
-    # transport / 5xx / timeout / unknown -> transient failure (short TTL, retried).
-    return 0, STATUS_FAILED, f"generative probe transport/server error (status={status_code})"
-
 _KNOWN_STATUS = {STATUS_CONFIRMED, STATUS_ASSERTED}
 
 _CONFIRMED_TTL_SEC = 24 * 3600
 _FAILED_TTL_SEC = 10 * 60
-
-ONE_MILLION = 1_000_000
 
 
 @dataclass
@@ -229,31 +188,6 @@ def is_known(evidence: Any, *, require_fresh: bool = False) -> bool:
         str(getattr(evidence, "status", "") or "") in _KNOWN_STATUS
         and int(getattr(evidence, "window_tokens", 0) or 0) > 0
         and not (require_fresh and bool(getattr(evidence, "stale", False)))
-    )
-
-
-def confirms_at_least(
-    evidence: Any, threshold: int = ONE_MILLION, *, require_fresh: bool = False,
-) -> bool:
-    """True only when KNOWN evidence meets the threshold.
-
-    unprobeable / failed / None / below-threshold all fail closed.
-
-    ``require_fresh`` picks the caller's freshness policy EXPLICITLY, because the two
-    directions carry opposite risk and the choice must be visible at the call site:
-
-    * a gate that AUTHORIZES on the evidence (blocking scope-review authority, BIBLE
-      P3) passes ``require_fresh=True`` — an expired or outage-carried window is a
-      dated impression, not the sourced Capability Evidence the floor turns on;
-    * a gate that would DOWNGRADE the owner's own cognitive horizon on a provider blip
-      keeps the default ``False`` — this module's standing invariant is that an outage
-      must never erase a prior confirmed record (P4/P1)."""
-    # A role's ordinary sizing override is not the route-bound acknowledgement
-    # that a governance gate asks the owner to make through its dedicated path.
-    return (
-        getattr(evidence, "source", "") != SOURCE_USER_SETTING
-        and is_known(evidence, require_fresh=require_fresh)
-        and int(getattr(evidence, "window_tokens", 0) or 0) >= int(threshold)
     )
 
 
@@ -1129,56 +1063,6 @@ def _metadata_fetch_transport_failed(provider: str, model: str, use_local: bool)
         return False
 
 
-_GENERATIVE_PROBE_PROVIDERS = {"cloudru", "openai-compatible", "minimax", "openai", "openrouter"}
-_PROBE_CANARIES = ["OBOCANARYBEGIN7Q", "OBOCANARYMID7Q", "OBOCANARYEND7Q"]
-
-
-def _generative_probe_enabled() -> bool:
-    return (runtime_setting("OUROBOROS_GENERATIVE_PROBE", "1") or "").strip().lower() not in {"", "0", "false", "no", "off"}
-
-
-def _generative_probe_pad_chars() -> int:
-    try:
-        return max(200_000, int(runtime_setting("OUROBOROS_GENERATIVE_PROBE_CHARS", "5000000") or "5000000"))
-    except (ValueError, TypeError):
-        return 5_000_000
-
-
-def _generative_probe_window(
-    provider: str, model: str, base_url: str = "", api_key: Optional[str] = None,
-) -> Tuple[int, str, str]:
-    """Empirically size a route's window with ONE oversized request, free-only.
-
-    Sends a deliberately over-window input on an OpenAI-compatible route; the
-    provider rejects it PRE-inference (free) with the limit in the message. Never
-    raises — any setup/transport error returns FAILED (-> fail-closed owner-ack).
-    """
-    if not _generative_probe_enabled() or provider not in _GENERATIVE_PROBE_PROVIDERS:
-        return 0, STATUS_UNPROBEABLE, "generative probe not applicable/enabled for this route"
-    pad = _generative_probe_pad_chars()
-    chunk = "x " * (pad // 4)
-    content = f"{_PROBE_CANARIES[0]} {chunk} {_PROBE_CANARIES[1]} {chunk} {_PROBE_CANARIES[2]} Echo the three OBOCANARY tokens verbatim."
-    sent_estimate = max(1, len(content) // 4)
-    # Transport lives in the shared LLMClient seam (DEVELOPMENT.md): it owns route
-    # resolution, the per-provider token key, the hard timeout, and never-raises. This
-    # module only CLASSIFIES the raw outcome into window evidence (fail-closed).
-    try:
-        from ouroboros.llm import LLMClient
-
-        out = LLMClient().probe_oversized_context(model, content, base_url=base_url, api_key=api_key)
-    except Exception as exc:  # pragma: no cover - defensive
-        return 0, STATUS_FAILED, f"generative probe failed: {type(exc).__name__}"
-    if out.get("ok"):
-        return classify_generative_probe_response(
-            200, "", canaries=_PROBE_CANARIES, echoed_text=str(out.get("echoed_text") or ""),
-            usage_prompt_tokens=int(out.get("usage_prompt") or 0), sent_token_estimate=sent_estimate,
-        )
-    status = out.get("status_code")
-    return classify_generative_probe_response(
-        status if isinstance(status, int) else None, str(out.get("body") or ""),
-    )
-
-
 def _probe_window(
     drive_root: Any,
     *,
@@ -1189,7 +1073,6 @@ def _probe_window(
     options: Optional[Dict[str, Any]] = None,
     use_local: bool = False,
     allow_fetch: bool = True,
-    allow_generative: bool = False,
     force: bool = False,
     api_key: Optional[str] = None,
 ) -> CapabilityEvidence:
@@ -1220,12 +1103,7 @@ def _probe_window(
     if subscription and not account_bound and str((cached or {}).get("status") or "") in _KNOWN_STATUS:
         # Model-only legacy evidence cannot certify any subscription account.
         cached = None
-    # An EXPLICIT generative probe (owner toggle/save, allow_generative=True) must run even
-    # when a prior LAZY (allow_generative=False) call left a fresh UNPROBEABLE/FAILED record
-    # — otherwise the owner's empirical probe is silently short-circuited and never fires.
-    # Only a CONFIRMED cache is authoritative enough to skip the live probe on that path.
-    _skip_cache_for_generative = allow_generative and str((cached or {}).get("status") or "") != STATUS_CONFIRMED
-    if cached and not force and not _skip_cache_for_generative:
+    if cached and not force:
         age = _age_seconds(str(cached.get("ts") or ""))
         ttl = _CONFIRMED_TTL_SEC if cached.get("status") == STATUS_CONFIRMED else _FAILED_TTL_SEC
         if age <= ttl:
@@ -1253,29 +1131,9 @@ def _probe_window(
         _store_evidence(drive_root, "probes", ev.route_fp, ev.to_json())
         return ev
 
-    # Live probe.
-    window = 0
-    source, observed_at = SOURCE_NONE, ""
-    if window <= 0:
-        meta, observed_at = _provider_metadata_window(provider, model, base_url, allow_fetch=allow_fetch, api_key=api_key)
-        if meta > 0:
-            window, source = meta, SOURCE_PROVIDER_METADATA
-
-    # Generative probe: only when metadata gave nothing AND a toggle/save call-site
-    # opted in (allow_generative) — never on the lazy per-task hot path. Confirms a
-    # window empirically via a free over-window reject; a 200/numberless reject -> owner-ack.
-    if window <= 0 and allow_generative and not use_local:
-        gwin, gstatus, gdetail = _generative_probe_window(provider, model, base_url, api_key=api_key)
-        if gwin > 0:
-            window, source, observed_at = gwin, SOURCE_GENERATIVE_PROBE, utc_now_iso()
-        elif gstatus == STATUS_FAILED:
-            ev = CapabilityEvidence(0, STATUS_FAILED, SOURCE_NONE, fp, model, provider,
-                                    ts=utc_now_iso(), detail=gdetail)
-            _store_evidence(drive_root, "probes", fp, ev.to_json())
-            return ev
-
+    window, observed_at = _provider_metadata_window(provider, model, base_url, allow_fetch=allow_fetch, api_key=api_key)
     if window > 0:
-        ev = CapabilityEvidence(window, STATUS_CONFIRMED, source, fp, model, provider,
+        ev = CapabilityEvidence(window, STATUS_CONFIRMED, SOURCE_PROVIDER_METADATA, fp, model, provider,
                                 ts=observed_at, stale=_age_seconds(observed_at) > _CONFIRMED_TTL_SEC,
                                 detail="provider metadata")
         _store_evidence(drive_root, "probes", fp, ev.to_json())
