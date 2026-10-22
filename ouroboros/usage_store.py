@@ -669,7 +669,9 @@ def store_tier(root: pathlib.Path, *, wait_sec: float, migrate: bool = True) -> 
         forget(root)
     lock = _process_lock(path)
     if not lock.acquire(timeout=max(0.0, wait_sec)):
-        raise UsageLockUnavailable("usage store migration in progress", reason="contention")
+        error = UsageLockUnavailable("usage store migration in progress", reason="contention")
+        error.rollback_confirmed = True  # this caller acquired neither lock nor transaction
+        raise error
     try:
         if _identity(path) is None:
             if not migrate:
@@ -697,7 +699,9 @@ def _stored_meta(path: pathlib.Path, tier: str, wait_sec: float) -> Dict[str, An
             records = conn.execute("SELECT key, value FROM meta WHERE key IN ('import', 'export')").fetchall()
         except sqlite3.OperationalError as exc:
             if _busy(exc):
-                raise UsageLockUnavailable(f"usage store busy: {exc}", reason="contention") from exc
+                error = UsageLockUnavailable(f"usage store busy: {exc}", reason="contention")
+                error.rollback_confirmed = not conn.in_transaction
+                raise error from exc
             return {}
         except sqlite3.DatabaseError:
             return {}
@@ -802,8 +806,11 @@ def read_usage_records(root: pathlib.Path | str) -> List[Dict[str, Any]]:
 
 # ---- migration: the one-time import of the retired journal ------------------
 
-def migrate_from_journal(root: pathlib.Path | str) -> Dict[str, Any]:
+def migrate_from_journal(root: pathlib.Path | str, *, initialize_journal: bool = False) -> Dict[str, Any]:
     """Create the store from the live journal (a lifecycle job; writers quiescent).
+
+    ``initialize_journal`` is the lifespan boot's alone: it brings a completed store to this
+    runtime's journal (``store_journal``); the supervisor's revival and lazy readers keep it.
 
     Idempotent through ``meta.import.status``: a completed store is never
     re-imported (an interrupted journal rename is retried); an unfinished
@@ -831,10 +838,15 @@ def migrate_from_journal(root: pathlib.Path | str) -> Dict[str, Any]:
                     stale.unlink()  # an unfinished import never published: redone from scratch
             if _identity(path) is not None:
                 tier = _header_tier(path)
-                status = _stored_meta(path, tier, USAGE_LOCK_TIMEOUT_SEC).get("import") if tier else None
+                if initialize_journal and tier and _core.wal_file(path):
+                    _select_journal(root, path, tier)  # leave WAL this runtime must not share before reading it
+                stored = _stored_meta(path, tier, USAGE_LOCK_TIMEOUT_SEC) if tier else {}
+                status = stored.get("import")
                 if not status or status.get("status") != "completed":
                     raise UsageLedgerCorrupt(f"usage store unreadable or without a completed import: {path}")
                 report = {"status": "already_completed", **_retire_journal(root, status)}
+                if initialize_journal and not stored.get("export"):  # an exporting store stays as it is handed off
+                    report["journal_selected"] = _select_journal(root, path, tier)
             else:
                 tier = TIER_ENFORCED if kernel_file_locks_enforced(root / LOCK_REL) else TIER_NAME
                 report = _import(root, path, tier)
@@ -846,6 +858,15 @@ def migrate_from_journal(root: pathlib.Path | str) -> Dict[str, Any]:
     except Exception:
         log.warning("usage store migration report not recorded", exc_info=True)
     return report
+
+
+def _select_journal(root: pathlib.Path, path: pathlib.Path, tier: str) -> bool:
+    """``store_journal.configure_journal`` for the lifespan boot, a name-tier file under the money lock."""
+    from ouroboros.store_journal import configure_journal
+
+    with _named_lock(root, LOCK_REL.name, timeout_sec=USAGE_LOCK_TIMEOUT_SEC, stale_sec=90.0) \
+            if tier == TIER_NAME else contextlib.nullcontext():
+        return configure_journal(path, tier, wait_sec=USAGE_LOCK_TIMEOUT_SEC)
 
 
 def _import(root: pathlib.Path, path: pathlib.Path, tier: str) -> Dict[str, Any]:

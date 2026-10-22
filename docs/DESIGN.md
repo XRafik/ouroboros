@@ -134,8 +134,9 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   three-dot loop only while work runs. A surface that comes, goes or fades rides one
   curve, `--ease-sheet`, for `--motion-open` (340 ms, coming in), `--motion-close`
   (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
-  in); it moves by position, opacity and a small scale, never blur. Two folds change a
-  height on that curve: the capsule row and the reply strip. The handover between places
+  in); it moves by position, opacity and a small scale, never blur. Three folds change a
+  height: the capsule row and the reply strip on that curve, and a deck of notes between works,
+  whose height lands at once inside the reading write while its cards glide in by position and opacity. The handover between places
   keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
@@ -1693,10 +1694,17 @@ down that page chain until `Scroll to latest message`. Old sources read no newer
 messages. Ouroboros quotes the message it answers only when it is not directly
 above (its own card does not count).
 
-A relay is one Ouroboros bubble in the work's room: every owner's message passed
-on, complete with where/when (six lines, then Show all; files named, captionless
-files by name), then Ouroboros's note; Telegram uses plain text. Main keeps its
-one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
+A relay is a note one work leaves another (`tell_task`), written for that work, so
+its room draws a note card, never an Ouroboros bubble (`web/modules/chat_relay_deck.js`):
+the sender's tile (Main's glyph, or the Projects glyph in Project ink) and name over
+`to this work · time`, the teller's line for the owner (`summary`; without it the
+note's first words in meta ink), and Show note, the note as written in a tray with
+Reply and Copy. Consecutive notes make one deck in the work card's material: the
+latest card in front, the edges of up to two behind, Show N notes fanning it out in
+place, Hide folding it. A relay passing the owner's words keeps its own card: every
+message passed on, complete with where/when (six lines, then Show all; files named,
+captionless files by name), above the summary. Telegram receives only a relay that
+passes his words, as plain text. Main keeps its one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
 row, long press on touch) offers Reply, Copy, Open project and a work card's
 Resume, Pause and Stop… exactly when the card does. Esc/outside press closes it
 and returns focus; selected words keep the browser's menu. On touch the row sinks a

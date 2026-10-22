@@ -256,11 +256,14 @@ def get_tools() -> List[ToolEntry]:
             "description": "Send a note to another work, with optional exact owner quotes selected from "
                            "your held owner_quote_handles. The note is yours; quoted words remain the owner's. "
                            "The work reads it at its next checkpoint. Paused work keeps the mail without resuming. "
+                           "The owner sees it in that work's room as a note card: your summary first, the note on request. "
                            "Use forward_to_worker for messages inside your task tree. "
                            "Presence can address work of its own binding only.",
             "parameters": {"type": "object", "properties": {
                 "task_id": {"type": "string", "description": "Work to receive the message."},
                 "note": {"type": "string", "default": "", "description": "Your own words and context."},
+                "summary": {"type": "string", "default": "",
+                            "description": "One plain sentence for the owner, in the owner's language: what this note tells that work."},
                 "quote": {"type": "array", "items": {"type": "string"}, "default": [],
                           "description": "Owner row addresses held by this turn; exact words and attachments travel together."},
             }, "required": ["task_id"]},
