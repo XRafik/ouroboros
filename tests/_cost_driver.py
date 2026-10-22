@@ -226,6 +226,11 @@ def run(spec: Dict[str, Any]) -> Dict[str, Any]:
 
         _mark(result, "imported")
         _stub_external_effects(srv, result)
+        # The install root is resolved once per process, in whichever boundary's thread asks first:
+        # a race the history size tips, not history work. Resolve it before any boundary starts.
+        from ouroboros import install_identity
+
+        install_identity.canonical_root()
         events = _install_checkpoints(meter, srv, result)
         client = TestClient(_Tagger(srv.app, meter, result))
         with client:
