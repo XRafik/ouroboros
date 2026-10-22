@@ -54,7 +54,7 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
    material: on white a pale
    tint of the hue, on a dark room a deep opaque colour of it, because a tint of the same
    hue over black turns brown or ash. Yellow, amber and orange turn olive or brown whenever
-   they fill a dark surface, so there they never fill: they are the rail, the name and the
+   they fill a dark surface, so there they never fill: they are the name and the
    word's ink on a neutral body (System, the owner's turn, money, a warning), and a state's
    green or red draws the same way on dark: a row whose light body is tinted keeps a neutral
    body there and its words take the hue (`--status-warn-word` / `-error-word`); status words retain their hue over
@@ -104,7 +104,7 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
 | Capsule (hover) · float | `#ffffff` (`#f5f6f8`) · `#ffffff` | white 9 % (13.5 %) · `rgb(32 32 34 / .92)` |
 | Glass on controls and sheets over content | none | `blur(18px)` |
 | Owner · Ouroboros · task card | `#e9eef9` · `#fdf2f4` · `#fff8f9` | sapphire `#103e7f` · cherry `#76162b` · cherry `#76162b` |
-| System | amber 12 %, an amber rail, name `#805000` | white 5.5 %, a gold rail and name `#f7cb58` |
+| System, resting like every voice and without an edge | amber 12 %, name `#805000` | white 5.5 %, a gold name `#f7cb58` |
 | Ink on every surface | dark (`#20232b`) | light (`#efeff2`) |
 | Crimson word · ink on its fill · without a fill | `#bf2f40` · `#b52b3b` · `#b52b3b` | `#fe7d85` · white · `#fe7d85` |
 | Crimson fill, strong · soft (hover) | crimson `#c93545` 10 % (14 %), both | `#d32d43` (deeper, `#c32a3f`) · `#872236` with ink `#ffdfe1` |
@@ -141,7 +141,7 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
   `:root[data-theme="light"]` (`--elev-*`, `--radius-object` / `-inner` / `-sheet`,
-  `--surface-object` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
+  `--surface-object` / `-object-opaque` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
   `--tone-*` with `--tone-crimson-ink`, `--tone-crimson-soft` / `-soft-ink` and `--tone-crimson-word`,
   `--place-mark`, `--status-warn-word` / `-error-word`, `--press` / `--press-solid`); the light
   block restates its own values of the hues and tints the dark seed sets differently, and the dark voice materials
@@ -722,7 +722,7 @@ Two shapes carry a tone, and they are not interchangeable:
   *is* the status and has nothing else to carry it.
 
 Surfaces whose tone is a class suffix rather than `data-tone`
-(`.toast-*`, `.log-phase`, `.evo-runtime-pill`, `.widget-table-status`,
+(`.toast-*`, `.log-phase`, `.widget-table-status`,
 `.widget-metric` / `.widget-callout`) name the same tokens. A task card's chip
 (`.chat-live-phase`) and a settled Logs task headline keep their phase classes as
 facts and take their tone from the `data-chip-tone` attribute their painters write. A surface that
@@ -782,11 +782,11 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **Amber is the owner's attention and nothing else:** (1) the owner's move — a
   question, or what only the owner can do: sign in, a spending limit, Resume after a
   restart, crash or Panic, grant access, a skill review that must run first, local
-  changes before an update, an Evolution or Consciousness pill that needs the owner
+  changes before an update, an Evolution chip or Consciousness sentence that needs the owner
   or was stopped by the spending limit; (2) a warning worth reading — warn toasts and sentences,
   Settings and onboarding notes, warnings inside task timelines, reviews and Logs
-  events, account quota; (3) the System voice (a pale tint in the light theme, its rail
-  and name in the dark one), a voice, not a status; (4) a few data categories that are not statuses (Logs and Storage
+  events, account quota; (3) the System voice (a pale tint in the light theme, its name
+  in the dark one), a voice, not a status; (4) a few data categories that are not statuses (Logs and Storage
   categories). What goes on by itself or what someone chose — queued, waiting,
   paused, pausing, stopped, unconfirmed, work in flight, a mode, a level, a setting
   value — is never amber.
@@ -961,7 +961,7 @@ Voice does not confer task finality. The existing untyped terminal-host-notice
 contract remains a documented exception, not a pattern for new notices.
 
 Built-in chrome uses words and monochrome `currentColor` vectors, not decorative
-emoji. System keeps its amber bubble and plain label; status stays explicit in
+emoji. System keeps its resting body and amber/gold label without an edge; status stays explicit in
 words and the tone primitive. Functional icons keep state and accessible names.
 Known typed host prefixes are hidden only at display (`host_notice_text.js`);
 unlisted or ambiguous records remain literal. History, keys, exports and the
@@ -2228,14 +2228,15 @@ has migrated. Migrated today:
 - `web/cards.css` (living cards in the feed)
 - `web/style.css` regions paired by `design-system:migrated-begin` /
   `design-system:migrated-end`: harness accounts; Dashboard → Updates (status
-  card, one action row, collapsed Recovery with one restore list) and Storage;
+  card, one action row, collapsed Recovery with one restore list), Storage and
+  Evolution;
   the Skills page (Installed, Browse, Sources, the detail sheet, its dialogs);
   chat typography, foreground and status colour. Chat geometry retains local
   literals per the viewport reserve contract; shared palette channels keep
   translucent glass coherent across themes.
 - the global `.muted`, `.form-section h3` and shared `.ui-status` tone rules
 
-The remaining page-specific typography in widgets, logs and evolution is
+The remaining page-specific typography in widgets and logs is
 historical. Their adopted common controls follow the shared
 family; unrelated page rules keep their literals until their own pass. Migrate
 each selected family completely and remove its replaced recipes in the same

@@ -4,7 +4,7 @@ One build-free SPA serves desktop, browser, Docker, Telegram, phone and Linux fa
 
 ### SPA shape and host bridges
 
-The inspectable, editable, build-free vanilla-JavaScript SPA (`web/index.html`, CSS, `web/modules/*`) uses no TypeScript/bundler. `web/app.js` owns page/Project/mobile navigation; feature modules own presentation/disposers (DEVELOPMENT "UI resources carry a disposer"). Linux fallback changes only presentation; the owner's browser is outside process custody (§1). One WebSocket serves all rooms; REST recovers durable truth (§4).
+The SPA uses inspectable, editable vanilla JavaScript (`web/index.html`, CSS, `web/modules/*`) without TypeScript/bundler. `web/app.js` owns page/Project/mobile navigation; modules own presentation/disposers (DEVELOPMENT "UI resources carry a disposer"). Linux fallback is presentational; the owner's browser is outside process custody (§1). Rooms share one WebSocket; REST recovers durable truth (§4).
 
 `MainApi` (`window.pywebview.api`, `launcher.py`) natively confirms runtime mode, reviewed-skill auto-grant and skill key grants; `launcher_background.DesktopApi` provides `panic_stop`, `request_attention`/`notify_owner`, `shell_info`, `request_native_notifications`, `show_native_notification` via `desktop_notifications.py`, and `set_native_appearance`. File/URL helpers: `download_file_to_downloads`, `open_file_with_default_app`, `open_external_url`, `save_bytes_to_downloads`. Loopback-file access requires the server's own host/port and `/api/files/download`, `/api/extensions/...` or `/api/tasks/...`. `ui_helpers.js` detects each method for older shells (§2), falls back to file helpers or copy-link/toast, and intercepts links in framed onboarding (`OnboardingHostApi`). The Telegram proxy's `X-Ouroboros-Telegram-MiniApp: 1` makes `server_web.make_index_page` include the Telegram SDK: presentation, never authentication.
 
@@ -18,7 +18,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 
 `pages.js` lists Main, Files, Skills, Widgets, Dashboard, Settings/About. `syncNavigationState()` owns page/Project/expansion/drawer; widths are owner-local. `#<page>` is read once, never written (no desktop address bar; Telegram loads `/`). Projects are panels, not routes, in the sole `<nav>`: keyed pointer/keyboard rows open/pin/rename/delete; `PROJECT_NAME_MAX` and lifecycle govern names; pins precede unread, survive collapse and `/api/state` caps; deleting rooms cannot open until registry publication. `style.css` gives Main track 2 of 2, hiding retained `#divider`, unboxing `.sidebar-scroll`; panels overlay. Below `layout.js`'s 720 px switch, Main takes track 1, sidebar becomes a drawer, Project fills content. `layers.js` owns dismissal with one same-address history entry; `host_telegram.js` binds Telegram Back; `drawer_drag.js` speeds visible controls; `shell_motion.js`/`room_retire.js`/`motion.js` move between places (DESIGN §10).
 
-- `web/ui.css` ← shared values and field/button/status/popup classes of both first-party documents; `style.css` keeps shell composition (DESIGN §8).
+- `web/ui.css` ← both documents' shared tokens, fields, buttons (`.btn`), status, popups and System body/ink; `style.css` owns shell/card geometry and System's edge-free rest shadow (DESIGN §8).
 - `theme_palette.js` ← `--chart-*` tokens into mounted Chart options, as canvas cannot inherit CSS; updates keep data and caller-authored option groups.
 - `page_header.js` / `page_icons.js` ← headers (`bindPageHeader` places tabs/path/actions), `bindTabStrip`, `renderSegmentedField` (`--segment-count`), icons; `settings_controls.bindEffortSegments` preserves empty inheritance.
 - `ui_interactions.js` ← `bindDialogFocus`, `bindMenu`, `bindPopoverPosition`, `bindEnterSubmit`; every binding returns teardown.
@@ -26,7 +26,7 @@ Iframes inherit no host tokens or stored choice; `render.appearance` declares th
 - `scroll_fade.js` ← `bindScrollFade`: edge attributes from hidden content.
 - `api_client.js` / `api_types.js` / `model_route_types.js` / `decision_types.js` ← browser API calls with typed errors; mirrors of browser-facing contract shapes.
 - `ui_primitives.js` ← the one safe-field renderer, collector, tone/status and attribute-escape source; `ui_helpers.js` and `utils.js` re-export it, so author pages need no second renderer.
-- `ui_helpers.js` ← host bridge, shared row/badge helpers, keyboard menu lock, the action row under system and routing rows (`createSystemMessageActions`).
+- `ui_helpers.js` ← host bridge, row/badge helpers, keyboard menu lock, System/routing action rows (`createSystemMessageActions`).
 - `desktop_shell.js` ← the desktop app's own facts for Settings: `shell_info()`, else `/api/health`'s stamped `app_version`.
 - `skill_card_renderer.js`, `skill_presentation.js` ← skill cards and the words every Skills surface shares.
 - `client_surface.js` ← the send-time surface snapshot (raw observables, no device taxonomy) spread into each chat frame.
@@ -185,7 +185,7 @@ An out-of-process extension response streams through `extension_route_stream.py`
 
 ### Dashboard
 
-Dashboard's sub-tabs share the common tab binder; each owns its loading and refresh policy, never running expensive readers while hidden. Charting uses the bundled Chart.js (§3 Widgets page).
+Dashboard's sub-tabs share the common tab binder; each owns its loading and refresh policy, never running expensive readers while hidden.
 
 Logs merges live WebSocket frames with bounded REST backfill from the events, tools, progress and supervisor logs: chronological, deduplicated across live/reconnect overlap, bounded grouped task cards, raw record on demand, `log_events.js` presentation. A failed backfill names unavailable sources in a separate status row while live events continue; clearing the panel deletes no log. Mounted unfinished child cards refresh their holds through `/api/tasks?queue_only=1`. `project_admission_hold` (a gateway contract field) carries the host's label, reason and detail, not a phase; a missing or unreadable queue never proves recovery, and parked phases, Stop and terminal outrank it (`chat_activity.js`).
 
@@ -195,7 +195,7 @@ Costs is a projection of the physical-attempt ledger: known spend (confirmed plu
 
 Storage (`storage.js`) opens passively. **Measure** counts every owned place in a low-I/O-priority child (progress, Stop, phase-only live region). Only finished counts give the five-share bar, date, growth; free space stays fresh; failed reads keep the gauge; unknown is never zero. **Temporary space** (`storage_free.js`) previews finished tasks' folders/copies without writes, then sizes them; the shared confirmation frees selected plan items via existing retirers at retention zero, one copy per call, Stop between. Visible polling covers count, preview and deletion (not stuck ones); results: removed/kept/deleting/stuck.
 
-Evolution shows the evolution state, the consciousness alarm clock, campaign objective and progress, queue/failure/budget information and durable history; starting a campaign uses the shared input dialog, where confirmed empty input selects the backend's default autonomous objective. Light runtime mode disables self-modifying campaigns rather than offering a control the backend will refuse.
+Evolution's campaign object (state; consciousness and its allowance; Start via the shared dialog, empty = default objective, off in Light mode or without a current state; Pause when on) never waits for history: `evolution_history.py` serves the saved copy and re-measures only on new tags or Try again. Milestones are dots on one measure; the chosen version's README row reads beneath.
 
 #### Updates
 
