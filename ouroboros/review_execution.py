@@ -749,7 +749,7 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
             if shape.investigation:  # a thread advances its own clone; a run gets a copy per operation
                 checking = session_checking(gateway, custody_drive=custody_drive, task_id=task_id,
                     operation_id=str(invocation.operation_id or ""), root=root, source=invocation.checking_source,
-                    shape=shape, thread_seat=f"{surface}:{slot_id}" if use_thread else "", thread_id=thread_id)
+                    shape=shape, thread_seat=f"{surface}:{slot_id}" if use_thread else "", thread_id=thread_id, route_id=route.route_id)
             if use_thread:
                 from ouroboros.review_thread_continuity import ensure_review_thread
                 # Thread creation can bind the project even if its response is lost.

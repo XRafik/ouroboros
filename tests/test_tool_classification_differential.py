@@ -463,6 +463,9 @@ CURRENT_PRODUCER_CONTRACTS = {
     # #1969: an apply that had to prepare the capture returns it for inspection;
     # nothing is applied, recorded or released, so it is its peers' answer.
     "INTEGRATE_DELEGATED_INSPECT_CAPTURE": (True, "integration_blocked"),
+    # #2070: named evidence that could not all be retained keeps its surviving copy;
+    # apply and reject record nothing and change nothing, so it is its peers' answer.
+    "INTEGRATE_DELEGATED_EVIDENCE_UNRETAINED": (True, "integration_blocked"),
     # A reject request cannot undo direct effects already in the folder.
     # The refusal belongs to this disposition, not to the earlier write.
     "INTEGRATE_DIRECTORY_ALREADY_APPLIED": (True, "integration_blocked"),

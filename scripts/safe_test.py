@@ -39,14 +39,6 @@ import sys
 import tempfile
 
 
-def _git_ancestor(path: Path):
-    """The nearest directory at or above ``path`` that Git would treat as a checkout."""
-    for directory in (path, *path.parents):
-        if (directory / ".git").exists():
-            return directory
-    return None
-
-
 def _wait_owning(argv: list[str], repo: Path, env: dict) -> int:
     """Start stage two and wait for it; a first POSIX stop signal is passed on, never acted on here."""
     received: list[int] = []
@@ -106,7 +98,7 @@ def main() -> int:
         # snapshots or resets its own temp path then operates on the
         # operator's source. Refuse instead of accepting a false boundary.
         parser.error("--temp-parent must be outside the repository working tree")
-    ancestor = _git_ancestor(parent)
+    ancestor = environment["git_ancestor"](parent)
     if ancestor is not None:
         # The same hazard one level up: any enclosing checkout, not only this one.
         parser.error(f"--temp-parent must not be inside a Git working tree ({ancestor})")
