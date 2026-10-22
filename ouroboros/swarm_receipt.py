@@ -138,8 +138,11 @@ def publish(root, root_task_id, *, task=None):
     root = pathlib.Path(root)
     lock_path = root / "state" / ("swarm_receipt." + hashlib.sha256(root_task_id.encode()).hexdigest() + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock = acquire_exclusive_file_lock(lock_path, timeout_sec=2.0, stale_sec=30.0, owner_aware_stale=True)
+    outcome = {}
+    lock = acquire_exclusive_file_lock(lock_path, timeout_sec=float("inf"), stale_sec=30.0,
+                                       owner_aware_stale=True, outcome=outcome)
     if lock is None:
+        log.warning("swarm receipt lock unavailable for %s: %s", root_task_id, outcome)
         return None
     try:
         inputs = tree_inputs(root, root_task_id, task=task)
@@ -165,10 +168,15 @@ def publish(root, root_task_id, *, task=None):
 
 def refresh_for_task(root, task):
     """Late publications revise an existing receipt; ordinary rounds do no tree scan."""
-    from ouroboros.task_results import load_task_result
+    from ouroboros.task_results import load_task_result, validate_task_id
 
     if not root or not task:
         return
+    if not isinstance(task, dict):
+        try:
+            validate_task_id(str(task))
+        except ValueError:
+            return  # System accounting actors have no task-result receipt.
     try:
         row = task if isinstance(task, dict) else load_task_result(root, str(task), strict=True) or {}
         task_id = str(row.get("task_id") or row.get("id") or "")
@@ -176,8 +184,10 @@ def refresh_for_task(root, task):
         owner = row if task_id == root_id else load_task_result(root, root_id, strict=True) or {}
         if owner.get("swarm_receipt"):
             publish(root, root_id)
-    except Exception:
-        log.warning("swarm receipt revision unavailable", exc_info=True)
+    except Exception as exc:
+        # This hook also runs during provider exception handling; its chain may
+        # contain credentials, so retain only the local failure type.
+        log.warning("swarm receipt revision unavailable (%s)", type(exc).__name__)
 
 
 def usage_changed(root, task_ids):

@@ -40,6 +40,18 @@ def tree_inputs(root, root_id, *, task=None):
                     "start": run.get("started_ts"), "end": None, "terminal": bool(run.get("terminal_state")),
                     "collected": run.get("settled") is True, "basis": "engine_run",
                     "account": {"requested_profile": run.get("profile_id"), "observed_profile": run.get("credential_profile_id")}}
+        # Read unresolved requests in the same snapshot as assigned runs: STARTED
+        # removes the invocation from custody_open when it binds the run.
+        for key, facts in txn.set_rows("custody_open").items():
+            request = facts.get("request") or {}
+            if not key.startswith("invocation:") or not (
+                    request.get("task_id") in ids or request.get("root_task_id") == root_id):
+                continue
+            invocation_id = request["invocation_id"]
+            actors["invocation:" + invocation_id] = {"id": "invocation:" + invocation_id,
+                "invocation_id": invocation_id, "task_id": request.get("task_id"),
+                "kind": "delegated_start", "state": "pending", "terminal": False,
+                "start": None, "end": None, "cost_usd": None, "basis": "retained_start_request"}
         expected = set((owner.get("swarm_fanout_rollup") or {}).get("child_ids") or ())
         if expected - set(ids):
             gaps.append("missing_child_results")
@@ -106,7 +118,7 @@ def _wait_edges(actors, waits):
         actors[base_id] = {**parent, "start": wake}  # the next wait splits this remaining segment
         edges.append({"from": before, "to": base_id, "kind": "observed_resume", "observed": True,
                       "wait_id": wait["wait_id"], "resume_segment": after})
-        source = wait.get("woke_by", "")
+        source = wait.get("waking_actor_id") or wait.get("woke_by", "")
         if source.startswith("task:"):
             source = ":".join(source.split(":")[:2])
         if source in actors and _selected(wait.get("selection") or {}, source):

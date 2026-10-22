@@ -36,6 +36,10 @@ def test_selected_finalized_answer_or_unavailability_wakes_and_peek_never_acks(t
     state = copy.deepcopy(selected)
     ready = model_sleep.terminal_readiness(ctx, selected, review_entries=[entry])
     assert ready and ready[0]["reason"] == "review_result"
+    assert ready[0]["actor_id"] == "review:op:seat"
+    retained = {"selection": selected}
+    assert waiting.wake_reason(ctx, retained, entries=[entry]) == "review_result"
+    assert retained["waking_actor_id"] == "review:op:seat"
     assert model_sleep.terminal_readiness(ctx, selected, review_entries=[entry]) == ready
     assert selected == state and not ctx._loop_mailbox_seen_ids
     assert not model_sleep.terminal_readiness(ctx, selected, [ready[0]["id"]], review_entries=[entry])
@@ -58,6 +62,9 @@ def test_noncanonical_or_unselected_review_does_not_wake(tmp_path, case):
         pin[key] = "different"
     chosen = {"reviewers": [] if case == "unselected" else [pin]}
     assert not model_sleep.terminal_readiness(ctx, chosen, review_entries=[entry])
+    retained = {"selection": chosen, "waking_actor_id": "review:stale:seat"}
+    assert not waiting.wake_reason(ctx, retained, entries=[entry])
+    assert "waking_actor_id" not in retained
 
 
 def test_default_is_whole_wave_and_explicit_helpers_use_readable_ids(tmp_path):
@@ -69,7 +76,9 @@ def test_default_is_whole_wave_and_explicit_helpers_use_readable_ids(tmp_path):
     selected = waiting.select_helpers(ctx, {"tasks": ["child"]})
     assert waiting.wake_reason(ctx, selected) == "task:child:completed"
     ctx._left_review_wait = selected
-    assert waiting.select_helpers(ctx) == selected
+    resumed = waiting.select_helpers(ctx)
+    assert resumed == {key: value for key, value in selected.items() if key != "waking_actor_id"}
+    assert "waking_actor_id" not in resumed  # a new wait observes its own waking source
 
 
 @pytest.mark.parametrize("invalid", [{"tasks": ["all"]}, {"tasks": "child"}, {"runs": ["foreign"]},

@@ -45,6 +45,71 @@ def test_live_child_root_end_and_unknown_interval_stay_provisional():
     assert receipt.fold_tree("root", actors)["state"] == "provisional"
 
 
+@pytest.mark.parametrize("resolution", ["assigned", "refused"])
+def test_unresolved_start_keeps_receipt_provisional_until_custody_resolves(tmp_path, resolution):
+    from ouroboros import delegate_custody as custody
+
+    write_task_result(tmp_path, "root", "completed")
+    assert custody.record_start_requested(tmp_path, task_id="root", root_task_id="root",
+        invocation_id="pending-one", request={"prompt": "already submitted"})
+    pending = receipt.publish(tmp_path, "root")
+    actor = next(a for a in pending["actor_intervals"] if a["kind"] == "delegated_start")
+    assert pending["state"] == "provisional" and actor["invocation_id"] == "pending-one"
+    assert actor["terminal"] is False and actor["state"] == "pending"
+    assert actor["start"] is actor["end"] is actor["cost_usd"] is None
+    if resolution == "refused":
+        assert custody.emit(tmp_path, custody.START_FAILED,
+            {"task_id": "root", "invocation_id": "pending-one", "definite": True})
+    else:
+        run = custody.RunCustody(run_id="run-one", task_id="root", root_task_id="root", invocation_id="pending-one")
+        assert custody.record_started(tmp_path, run)
+        assigned = receipt.publish(tmp_path, "root")
+        assert assigned["state"] == "provisional"
+        assert {a["id"] for a in assigned["actor_intervals"]} == {"task:root", "run:run-one"}
+        assert custody.emit(tmp_path, custody.TERMINAL_OBSERVED, {"run_id": run.run_id, "task_id": "root",
+            "state": "succeeded", "observation_seq": 1, "source_ref": {"sha256": "a" * 64}})
+        assert receipt.publish(tmp_path, "root")["state"] == "provisional"
+        assert custody.emit(tmp_path, custody.SETTLED, {"run_id": run.run_id, "task_id": "root", "state": "succeeded"})
+    closed = receipt.publish(tmp_path, "root")
+    assert closed["state"] == "closed" and closed["revision"] > pending["revision"]
+    assert not any(a["kind"] == "delegated_start" for a in closed["actor_intervals"])
+
+
+def test_sibling_lock_waits_until_the_new_revision_is_published(tmp_path):
+    import hashlib
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
+    from ouroboros.task_store import patch_document
+
+    write_task_result(tmp_path, "root", "completed")
+    before = receipt.publish(tmp_path, "root")
+    lock_path = tmp_path / "state" / ("swarm_receipt." + hashlib.sha256(b"root").hexdigest() + ".lock")
+    lock = acquire_exclusive_file_lock(lock_path, owner_aware_stale=True)
+    assert lock is not None
+    patch_document(tmp_path, "root", lambda row: {**row, "swarm_comparison": "A late observation."})
+    entered, done = threading.Event(), threading.Event()
+
+    def sibling():
+        entered.set()
+        try:
+            return receipt.publish(tmp_path, "root")
+        finally:
+            done.set()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(sibling)
+        try:
+            assert entered.wait(10)
+            assert not done.wait(2.1), "contending publication must survive the old acquisition window"
+        finally:
+            release_exclusive_file_lock(lock_path, lock)
+        after = future.result(timeout=10)
+    assert after["revision"] > before["revision"]
+    assert after["mind_comparison"]["value"] == "A late observation."
+    assert not lock_path.exists()
+
+
 def test_cost_identity_account_context_and_mind_claim_are_separate():
     usage = [{"attempt_id": "api", "task_id": "root", "kind": "attempt", "cost_usd": None,
               "physical_context": {"capacity_total_tokens": 100, "target_total_tokens": 50}, "prompt_tokens": 43},
@@ -152,6 +217,28 @@ def test_ordinary_task_writes_do_not_scan_tree_until_receipt_exists(tmp_path, mo
     write_task_result(tmp_path, "root", "completed")
 
 
+@pytest.mark.parametrize("case", ["selected", "unselected", "pending", "additional"])
+def test_review_detach_retains_the_canonical_waking_actor(tmp_path, monkeypatch, case):
+    from ouroboros import review_pause, store, swarm_receipt_sources
+    from ouroboros.subagent_metrics import set_name
+    from tests.test_review_wake_selection import _entry, _pin
+
+    entry = _entry("pending" if case == "pending" else "responded", additional=case == "additional")
+    selected = {"reviewers": [] if case == "unselected" else [_pin()]}
+    binding = {"task_id": "root", "drive_root": tmp_path, "selection": selected}
+    monkeypatch.setattr(review_pause, "author_paused", lambda _op: False)
+    monkeypatch.setattr("ouroboros.swarm_wait_facts.utc_now_iso", lambda: "1970-01-01T00:00:10Z")
+    with review_pause.receptive_author(binding):
+        binding["_swarm_wait_started"] = 4
+        assert review_pause.author_detaches(None, [entry]) is (case == "selected")
+    with store.open_store(tmp_path, write=False) as txn:
+        waits = list(txn.set_rows(set_name("swarm_waits", "root")).values())
+    assert waits[0]["woke_by"] == ("review_result" if case == "selected" else "whole_panel_returned")
+    actors = {"task:root": actor("task:root", 0, 12), "review:op:seat": actor("review:op:seat", 4, 10)}
+    edges = swarm_receipt_sources._wait_edges(actors, waits)
+    assert any(edge["from"] == "review:op:seat" for edge in edges) is (case == "selected")
+
+
 def test_only_tree_end_initializes_the_tree_receipt(tmp_path):
     from ouroboros.task_finalization import build_swarm_efficiency
 
@@ -182,3 +269,17 @@ def test_full_task_handoff_discloses_receipt_only_when_recorded():
     measured = receipt.fold_tree("root", [actor("root", 0, 2)])
     assert json.loads(_subtask_outcome_summary({"swarm_receipt": measured}))["swarm_receipt"] == measured
     assert "swarm_receipt" not in json.loads(_subtask_outcome_summary({}))
+
+
+@pytest.mark.parametrize("task_id,expected", [("root", True), ("system:provider_test", False)])
+def test_accounting_refresh_reads_only_task_result_identities(tmp_path, monkeypatch, task_id, expected):
+    from ouroboros import swarm_receipt, task_results
+
+    reads, publishes = [], []
+    def load(root, identity, **kwargs):
+        reads.append(identity)
+        return {"task_id": identity, "swarm_receipt": {"revision": 1}}
+    monkeypatch.setattr(task_results, "load_task_result", load)
+    monkeypatch.setattr(swarm_receipt, "publish", lambda root, identity: publishes.append(identity))
+    swarm_receipt.refresh_for_task(tmp_path, task_id)
+    assert reads == publishes == ([task_id] if expected else [])

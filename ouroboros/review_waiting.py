@@ -114,7 +114,8 @@ def review_terminals(ctx, chosen, seen=(), entries=()):
         if (outcome.get("outcome_id") and outcome.get("status") and outcome["status"] != "pending" and not outcome.get("additional")
                 and outcome.get("operation_id") == operation and outcome.get("slot_id") == slot
                 and (actor or {}).get("review_wave_id") == wave and identity not in seen):
-            ready.append({"id": identity, "reason": "review_result", **pin, "outcome": copy.deepcopy(outcome)})
+            ready.append({"id": identity, "reason": "review_result", "actor_id": f"review:{operation}:{slot}",
+                          **pin, "outcome": copy.deepcopy(outcome)})
     if not ready and errors:
         raise errors[0]
     return ready
@@ -140,10 +141,15 @@ def wake_reason(ctx, state, *, entries=()):
     from ouroboros.store import acquisition_budget
 
     chosen = {"any_mail": True, **(state.get("selection") or {})}
+    observed = {}
+    state.pop("waking_actor_id", None)
     try:
         with acquisition_budget(0):
-            return model_sleep.wake_reason(ctx, chosen, seen=[*(state.get("seen_helpers") or ()),
-                                                            *(state.get("seen_outcomes") or ())], review_entries=entries)
+            reason = model_sleep.wake_reason(ctx, chosen, seen=[*(state.get("seen_helpers") or ()),
+                *(state.get("seen_outcomes") or ())], review_entries=entries, wake_fact=observed)
+        if observed.get("actor_id"):
+            state["waking_actor_id"] = observed["actor_id"]
+        return reason
     except Exception:
         log.debug("Review readiness unavailable; retaining custody", exc_info=True)
         return ""

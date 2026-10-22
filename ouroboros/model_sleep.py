@@ -289,12 +289,15 @@ def terminal_readiness(ctx: Any, chosen: Dict[str, Any], seen: Any = (), *, ordi
     return ready
 
 
-def wake_reason(ctx: Any, chosen: Dict[str, Any], *, seen: Any = (), review_entries: Any = ()) -> str:
+def wake_reason(ctx: Any, chosen: Dict[str, Any], *, seen: Any = (), review_entries: Any = (),
+                wake_fact: Dict[str, Any] | None = None) -> str:
     """Why the sleep is ready now (``""`` = not yet). Owner input is never filtered."""
     from ouroboros.deadline_utils import parse_deadline_ts, utc_now
     from ouroboros.owner_mailbox import KIND_CARD_INPUT, KIND_OWNER_TEXT, KIND_QUIZ_ANSWER, KIND_QUIZ_CLOSED, KIND_TASK_MESSAGE
     from ouroboros.owner_wait import _wait_entries
     first_error = None
+    if wake_fact is not None:
+        wake_fact.clear()
 
     def read_source(read, *args, **kwargs):
         # Sources are alternatives, not prerequisites for each other. Retain
@@ -333,6 +336,8 @@ def wake_reason(ctx: Any, chosen: Dict[str, Any], *, seen: Any = (), review_entr
             return f"run_question:{run_id}"
     ready = read_source(terminal_readiness, ctx, chosen, seen, review_entries=review_entries)
     if ready:
+        if wake_fact is not None:
+            wake_fact.update(actor_id=ready[0].get("actor_id", ready[0]["id"]))
         return ready[0]["reason"]
     for pin in chosen.get("services") or ():
         observed = _service_wake(pin)  # already returns an unknown wake on a read failure

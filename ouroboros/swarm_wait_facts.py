@@ -49,6 +49,8 @@ def sleep_woke(ctx, outcome):
 
 def review_started(binding):
     if binding:
+        binding.pop("waking_actor_id", None)
+        binding.pop("_swarm_wait_outcome", None)
         binding["_swarm_wait_id"] = uuid.uuid4().hex
         binding["_swarm_wait_started"] = utc_now_iso()
 
@@ -57,4 +59,6 @@ def review_woke(binding, outcome="whole_panel_returned"):
     if binding:
         _write(binding.get("budget_drive_root") or binding.get("drive_root"), str(binding.get("task_id") or ""),
                binding.get("_swarm_wait_id"), {"kind": "review", "selection": copy.deepcopy(binding.get("selection") or {}),
-               "started_at": binding.get("_swarm_wait_started"), "woke_at": utc_now_iso(), "woke_by": outcome})
+               "started_at": binding.get("_swarm_wait_started"), "woke_at": utc_now_iso(), "woke_by": outcome,
+               "waking_actor_id": binding.get("waking_actor_id")
+                   if outcome == "review_result" or outcome.startswith(("task:", "run:")) else None})
