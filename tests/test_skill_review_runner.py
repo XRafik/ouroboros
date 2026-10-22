@@ -1211,10 +1211,11 @@ def test_duplicate_review_points_at_the_live_job_and_persists_nothing(tmp_path, 
 
 
 def test_skill_review_response_typedef_carries_qualified_reconcile_fields():
-    api_types = (
-        pathlib.Path(__file__).resolve().parents[1] / "web" / "modules" / "api_types.js"
-    ).read_text(encoding="utf-8")
-    review_declaration = api_types.split("@typedef {Object} SkillReviewResponse", 1)[1].split(
+    modules = pathlib.Path(__file__).resolve().parents[1] / "web" / "modules"
+    api_types = (modules / "api_types.js").read_text(encoding="utf-8")
+    assert "import('./management_contract_types.js').SkillReviewResponse" in api_types
+    management_types = (modules / "management_contract_types.js").read_text(encoding="utf-8")
+    review_declaration = management_types.split("@typedef {Object} SkillReviewResponse", 1)[1].split(
         "*/", 1
     )[0]
     grant_declaration = api_types.split("@typedef {Object} SkillGrantResponse", 1)[1].split(
