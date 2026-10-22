@@ -310,6 +310,7 @@ def _reconcile_each(drive_root: Any, runs: List[RunCustody],
 
     gateway = None
     outcomes: List[Dict[str, Any]] = list(retained)
+    settlement_pending = any(not row.settled for row in runs)
     try:
         try:
             gateway = gateway_factory()
@@ -334,9 +335,10 @@ def _reconcile_each(drive_root: Any, runs: List[RunCustody],
             outcomes.append(_recover_pending_invocation(
                 drive_root, gateway, record, deliberate_terminal=deliberate_terminal,
             ))
-        # Recomputed inside: a run settled this very pass may have made its
-        # project eligible - the pre-pass gate is not the last word.
-        if registrations or runs:
+        # A newly settled run may make its project eligible. Collection of an
+        # already-settled run cannot: keep the pre-pass continuation deferral
+        # without reading all of that project's historical sharers again.
+        if registrations or settlement_pending:
             _custody().retire_settled_registrations(drive_root, gateway, live_task_ids=live_task_ids)
     finally:
         try:
