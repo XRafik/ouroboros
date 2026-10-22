@@ -157,7 +157,7 @@ def test_photo_menu_escapes_gallery_crop_downloads_and_cleans_up(subscription_ui
                 active:document.activeElement?.outerHTML.slice(0,100),time:performance.now()}),true);
     }""")
     trigger.click()
-    menu = page.locator('body > .chat-photo-menu[role="menu"]')
+    menu = page.locator('body > .chat-photo-menu[role="menu"]:not([inert])')
     setup_browser.capture(page, f"shell-photo-open-{height}")
     assert menu.is_visible(), json.dumps(page.evaluate("shellPhotoEvents"))
     assert menu.evaluate("el=>el.closest('.chat-gallery-item')===null")
@@ -174,7 +174,7 @@ def test_photo_menu_escapes_gallery_crop_downloads_and_cleans_up(subscription_ui
     assert trigger.evaluate("el=>document.activeElement===el")
     trigger.click()
     with page.expect_download() as download:
-        page.locator('body > .chat-photo-menu [data-photo-action="download"]').click()
+        menu.locator('[data-photo-action="download"]').click()
     assert download.value.suggested_filename == "image.png"
     assert download.value.failure() is None
     assert not menu.count()

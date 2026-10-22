@@ -362,6 +362,21 @@ def _golden() -> dict[str, dict]:
 # unavailable. Keep the historical corpus intact and assert the new observed
 # outcome explicitly rather than manufacture old evidence (04-AGENCY S1/S3).
 CURRENT_PRODUCER_CONTRACTS = {
+    # Q: the bare warning is legacy ok; the native error keeps a sent write unknown and says do not resend.
+    "GH_WRITE_UNKNOWN": (False, "ok"),
+    "native:TOOL_ERROR:GH_WRITE_UNKNOWN": (True, "error"),
+    # Q: the bare warning is legacy ok; the native error attests GitHub refused the write with no effect.
+    "GH_WRITE_NOT_APPLIED": (False, "ok"),
+    "native:TOOL_ERROR:GH_WRITE_NOT_APPLIED": (True, "error"),
+    # Q: a failed precondition is an error in both forms; the native refusal attests no write was sent.
+    "GH_EXPECTATION_FAILED": (True, "error"),
+    "native:TOOL_ERROR:GH_EXPECTATION_FAILED": (True, "error"),
+    # Q: the bare warning is legacy ok; the native argument refusal redirects the mutation to github_write.
+    "GH_API_READ_ONLY": (False, "ok"),
+    "native:TOOL_ARG_ERROR:GH_API_READ_ONLY": (True, "argument_error"),
+    # Q: readback differs after a confirmed write; keep completed/ok with its warning so no retry duplicates the effect.
+    "GH_WRITE_READBACK_MISMATCH": (False, "ok"),
+    "native:OK:GH_WRITE_READBACK_MISMATCH": (False, "ok"),
     # #1657: only missing logs are unavailable; status/stop retain warnings.
     "SERVICE_NOT_FOUND": (False, "ok"),
     "native:LEGACY_UNAVAILABLE:SERVICE_NOT_FOUND": (True, "unavailable"),

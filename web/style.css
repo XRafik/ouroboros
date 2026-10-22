@@ -1874,7 +1874,6 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 
 .chat-bubble.system {
     background: var(--system-bubble-bg);
-    border-left: 2px solid var(--system-border);
     align-self: flex-start;
     margin-right: 20%;
 }
@@ -2031,24 +2030,13 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     overflow-y: auto;
 }
 
+/* The failure and its Retry (the shared small capsule) are one wrapping row, like the delivery sentence's actions. */
 .skill-review-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
     color: var(--status-error-fg);
-}
-
-.skill-review-retry {
-    margin-left: 6px;
-    padding: 2px 10px;
-    border: 1px solid var(--system-border);
-    border-radius: 6px;
-    background: transparent;
-    color: var(--system-sender);
-    font: inherit;
-    font-size: var(--type-meta);
-    cursor: pointer;
-}
-
-.skill-review-retry:hover {
-    background: var(--system-bubble-bg);
 }
 
 /* A message waiting for its echo: faded on white; on dark it keeps full ink and its words below say so. */
@@ -3509,30 +3497,13 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     color: var(--text-meta);
     font: var(--type-meta)/var(--line-meta) 'SF Mono', 'Fira Code', Consolas, monospace;
 }
+/* Copy is the shared quiet capsule (.btn.btn-ghost.btn-sm), centred in the language line. A code block is the room's
+   material inside any voice, so a hovering pointer gives Copy the room's fill, not the voice's. */
 .md-code-copy {
     position: absolute;
     z-index: 1;
-    top: 5px;
+    top: 3px;
     right: var(--space-2);
-    min-height: 26px;
-    padding: 0 var(--space-2);
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-meta);
-    font: inherit;
-    font-size: var(--type-meta);
-    cursor: pointer;
-}
-.md-code-copy:hover,
-.md-code-copy:focus-visible {
-    border-color: var(--surface-border);
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-.md-code-copy:focus-visible {
-    outline: 2px solid var(--focus-accent-border);
-    outline-offset: 2px;
 }
 .md-code-copy.is-copied { color: var(--status-ok-fg); }
 
@@ -5793,47 +5764,20 @@ textarea.chat-input::placeholder { color: var(--text-muted); }
 
 /* P2: main-screen Update pill — a pointer to Dashboard -> Updates. */
 /* "An update is available" is a classification, not an alarm and not a
-   success: it is a pointer to Dashboard -> Updates and it reads NEUTRAL
-   (docs/DESIGN.md "Status and chips"). The sky blue it used to carry belonged
-   to no role in the system and was the only place that hue appeared.
-   Uncommitted local changes ARE a caveat about what an update would do, so
-   that variant keeps the warn triple. */
-.update-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin: 6px 8px;
-    padding: 5px 11px;
-    border-radius: 999px;
-    border: 1px solid var(--status-neutral-border);
-    background: var(--status-neutral-bg);
-    color: var(--status-neutral-fg);
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-}
-
-.update-pill:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-}
-
-.update-pill.has-local {
-    border-color: var(--status-warn-border);
-    background: var(--status-warn-bg);
-    color: var(--status-warn-fg);
-}
-
-/* The attempt's outcome uses the existing status triples; unknown remains neutral. */
-.update-pill[data-tone="ok"] {
-    border-color: var(--status-ok-border);
-    background: var(--status-ok-bg);
-    color: var(--status-ok-fg);
-}
-.update-pill[data-tone="error"] {
-    border-color: var(--status-error-border);
-    background: var(--status-error-bg);
-    color: var(--status-error-fg);
+   success: it is a pointer to Dashboard -> Updates, the shared neutral capsule
+   (.btn.btn-default.btn-sm, docs/DESIGN.md "Status and chips"). Uncommitted
+   local changes ARE a caveat about what an update would do, the owner's turn
+   in the amber tone; an attempt's outcome takes the green or red tone and an
+   unknown one stays neutral. A tone outranks the shared hover, so a finger's
+   lingering hover keeps it; a hovering pointer deepens it. */
+.update-pill { margin: 6px 8px; }
+:root[data-theme] .update-pill:is(.has-local, [data-tone="warn"]):not(:disabled) { background: var(--tone-amber); color: var(--status-warn-fg); }
+:root[data-theme] .update-pill[data-tone="ok"]:not(:disabled) { background: var(--tone-green); color: var(--status-ok-fg); }
+:root[data-theme] .update-pill[data-tone="error"]:not(:disabled) { background: var(--tone-red); color: var(--status-error-fg); }
+@media (hover: hover) {
+    :root[data-theme] .update-pill:is(.has-local, [data-tone="warn"]):not(:disabled):hover { background: var(--tone-amber-hover); }
+    :root[data-theme] .update-pill[data-tone="ok"]:not(:disabled):hover { background: var(--tone-green-hover); }
+    :root[data-theme] .update-pill[data-tone="error"]:not(:disabled):hover { background: var(--tone-red-hover); }
 }
 
 .settings-embedded-content {
@@ -8714,16 +8658,6 @@ body.keyboard-open .project-panel {
 
 .chat-attachments .chat-file-card { min-width: 0; }
 
-/* A long name wraps to two lines instead of widening the bubble; the dialog a
-   tap opens shows it whole (touch has no hover title). */
-.chat-attachments .chat-file-name {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    white-space: normal;
-    overflow-wrap: anywhere;
-}
-
 .chat-file-item.is-unavailable .chat-file-name { color: var(--text-meta); }
 .chat-file-card:disabled .chat-file-more { visibility: hidden; }
 
@@ -8779,21 +8713,20 @@ body.keyboard-open .project-panel {
     z-index: 2;
 }
 
+/* The shared floating capsule (.btn.btn-float) sits over the photo. */
 .chat-photo-actions summary {
     display: grid;
     width: 30px;
     height: 28px;
+    padding: 0;
     place-items: center;
-    border: 1px solid var(--ui-card-border);
-    border-radius: var(--radius-sm);
-    background: var(--ui-modal-bg);
-    color: var(--text-primary);
-    cursor: pointer;
     list-style: none;
 }
 
 .chat-photo-actions summary::-webkit-details-marker { display: none; }
 
+/* A file card is the shared neutral capsule (.btn.btn-default) in a card's shape: it carries a name and its facts, so
+   it keeps the inner radius and its words' own weights. */
 .chat-file-card {
     display: grid;
     grid-template-columns: 48px minmax(0, 1fr) auto;
@@ -8802,21 +8735,10 @@ body.keyboard-open .project-panel {
     width: 100%;
     min-width: 230px;
     padding: 9px;
-    border: 1px solid var(--ui-card-border);
-    border-radius: var(--radius);
-    background: var(--ui-card-bg);
-    color: var(--text-primary);
     font: inherit;
     text-align: left;
-    cursor: pointer;
 }
-
-.chat-file-card:hover:not(:disabled) {
-    border-color: var(--focus-accent-border);
-    background: var(--bg-hover);
-}
-
-.chat-file-card:disabled { cursor: default; opacity: 0.58; }
+:root[data-theme] .chat-file-card { border-radius: var(--radius-inner); font-weight: inherit; }
 
 .chat-file-thumb,
 .chat-file-glyph {
@@ -8839,12 +8761,17 @@ body.keyboard-open .project-panel {
 .chat-file-name,
 .chat-file-meta { display: block; }
 
+/* Either direction keeps a long name on two lines; the dialog shows it whole. */
 .chat-file-name {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     overflow: hidden;
     color: var(--text-primary);
     font-weight: 600;
     text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .chat-file-meta {
@@ -8886,10 +8813,11 @@ body.keyboard-open .project-panel {
     gap: 8px;
 }
 
-.chat-media-controls button,
+/* The player's buttons are the shared small capsule (.btn.btn-default.btn-sm); its speed list is a field and keeps the
+   field's hairline. */
 .chat-media-rate-menu {
     min-height: 32px;
-    border: 1px solid var(--ui-card-border);
+    border: 1px solid var(--surface-border);
     border-radius: var(--radius-sm);
     background: var(--surface-control);
     color: var(--text-primary);
@@ -9164,6 +9092,7 @@ body.keyboard-open .project-panel {
 .chat-media-controls button {
     flex: 0 0 auto;
     min-width: 32px;
+    min-height: 32px;
     padding: 4px 7px;
 }
 
@@ -10061,15 +9990,15 @@ body.keyboard-open .project-panel {
 /* Air is spacing, never paleness: a timestamp keeps its meta ink. */
 :root[data-theme] .msg-time { opacity: 1; }
 
-/* Voices: the owner blue, Ouroboros blush (a task card a quieter blush), each a resting object. */
+/* Voices: the owner blue, Ouroboros blush (a task card a quieter blush), System its own body and name, each a
+   resting object without an edge. */
 :root[data-theme] :is(#chat-messages, .chat-messages) { gap: 14px; }
 :root[data-theme] .chat-bubble { padding: 12px 18px 10px; border-radius: var(--radius-object); }
-:root[data-theme] .chat-bubble.user {
-    background: var(--voice-owner); border-color: transparent; box-shadow: var(--elev-rest);
+:root[data-theme] :is(.chat-bubble.user, .chat-bubble.assistant, .chat-bubble.system) {
+    border-color: transparent; box-shadow: var(--elev-rest);
 }
-:root[data-theme] .chat-bubble.assistant {
-    background: var(--voice-ouroboros); border-color: transparent; box-shadow: var(--elev-rest);
-}
+:root[data-theme] .chat-bubble.user { background: var(--voice-owner); }
+:root[data-theme] .chat-bubble.assistant { background: var(--voice-ouroboros); }
 :root[data-theme] :is(.chat-live-card, .chat-live-card[data-finished="1"]) {
     border-color: transparent;
     background: var(--voice-ouroboros-card);
