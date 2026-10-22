@@ -8,7 +8,7 @@ from ouroboros.context_fit import MinimumViewUnfit
 _TASK = {"type": "task", "text": "hi", "id": "tmain", "chat_id": 1}
 
 
-def _built(tmp_path, monkeypatch, *, books=80_000, ratio=None):
+def _built(tmp_path, monkeypatch, *, books=80_000, ratio=None, page_chars=0):
     """``(core, plan(window, **kw))`` on the shared installation; Max's books grown by ``books`` characters
     so that Max's fixed part exceeds Low's (the test repository's own books are smaller than its nav map)."""
     import dataclasses
@@ -18,6 +18,12 @@ def _built(tmp_path, monkeypatch, *, books=80_000, ratio=None):
     from tests._memory_view_context import world
 
     env, memory, _rooms = world(tmp_path)
+    if page_chars:
+        from ouroboros.chronicle_store import ChronicleStore
+        from tests.test_common_story import _page
+
+        ChronicleStore(memory.drive_root).ensure_activated()
+        _page(memory.drive_root, "1", 10, 11, text="Story. " * (page_chars // 7))
     core = context._capture_context_core(env, memory, dict(_TASK), None, None)
     core = dataclasses.replace(core, architecture_md=core.architecture_md + "\n\n" + "word " * (books // 5))
     if ratio is not None:
@@ -28,6 +34,11 @@ def _built(tmp_path, monkeypatch, *, books=80_000, ratio=None):
         return context._build_context_fit_plan(env, core, dict(_TASK), preferred_mode=preferred, tool_schemas=tool_schemas,
                                                route_resolver=lambda *_a, **_kw: ({"model": "m", "provider": "p"}, evidence))
     return core, plan
+
+
+def _on_route(plan, window):
+    return plan.reproject_for_route(window_tokens=window, known_window=True, ratio=1,
+                                   output_reserve=65_536, tool_schemas=None, start_mode=plan.initial_mode)
 
 
 
@@ -62,15 +73,43 @@ def test_larger_or_fitting_route_keeps_bytes_and_smaller_route_uses_same_snapsho
     _, build = _built(tmp_path, monkeypatch, ratio=1)
     plan = build(1_000_000)
     monkeypatch.setattr("ouroboros.memory_view.capture_memory_view", lambda *_a, **_kw: pytest.fail("recaptured memory"))
-    def on(p, window):
-        return p.reproject_for_route(window_tokens=window, known_window=True, ratio=1,
-                                    output_reserve=65_536, tool_schemas=None, start_mode=p.initial_mode)
-    assert on(plan, 900_000).max_projection.system_content_json == plan.max_projection.system_content_json
-    narrow = on(plan, 65_537)
-    assert narrow.max_projection.memory_facts["floor"]["steps"]
-    assert narrow.max_projection.memory_facts["floor"]["allowance_tokens"] == narrow.max_projection.memory_facts["floor"]["physical_allowance_tokens"]
-    assert on(narrow, 1_000_000).max_projection.system_content_json == narrow.max_projection.system_content_json
+    assert _on_route(plan, 900_000).max_projection.system_content_json == plan.max_projection.system_content_json
+    narrow = _on_route(plan, 65_537)
+    assert narrow.initial_mode == "nano"
+    shown = narrow.projection(narrow.initial_mode)
+    floor = shown.memory_facts["floor"]
+    assert floor["steps"] == {}  # The compact books and untouched memory already fit.
+    assert floor["allowance_tokens"] == floor["physical_allowance_tokens"]
+    reserve = cb.context_mode_limits(narrow.initial_mode, narrow.preferred_mode, narrow.output_reserve_tokens)[1]
+    assert shown.calibrated_tokens + reserve <= narrow.window_tokens
+    enlarged = _on_route(narrow, 1_000_000)
+    assert enlarged.initial_mode == narrow.initial_mode
+    assert enlarged.projection(enlarged.initial_mode).system_content_json == shown.system_content_json
     assert narrow.core_sha256 == plan.core_sha256
+    assert narrow.core.memory_view_json == plan.core.memory_view_json
+
+
+def test_smaller_route_addresses_memory_only_when_the_compact_request_exceeds_its_room(tmp_path, monkeypatch):
+    from ouroboros import memory_view as mv
+
+    core, build = _built(tmp_path, monkeypatch, ratio=1, page_chars=400_000)
+    plan = build(1_000_000)
+    assert plan.initial_mode == "max" and plan.max_projection.memory_facts["floor"]["steps"] == {}
+    monkeypatch.setattr(mv, "capture_memory_view", lambda *_a, **_kw: pytest.fail("recaptured memory"))
+    narrow = _on_route(plan, 65_537)
+    shown = narrow.projection(narrow.initial_mode)
+    floor = shown.memory_facts["floor"]
+    snapshot = mv.snapshot_from_json(core.memory_view_json)
+    whole_memory = mf.view_tokens(mv.render_story(snapshot)) + mf.view_tokens(mv.render_room(snapshot))
+    assert whole_memory > floor["physical_allowance_tokens"]
+    assert narrow.initial_mode == "nano" and floor["steps"]["F5"] == 1
+    reserve = cb.context_mode_limits(narrow.initial_mode, narrow.preferred_mode, narrow.output_reserve_tokens)[1]
+    assert shown.calibrated_tokens + reserve <= narrow.window_tokens
+    enlarged = _on_route(narrow, 1_000_000)
+    assert enlarged.initial_mode == narrow.initial_mode
+    assert enlarged.projection(enlarged.initial_mode).system_content_json == shown.system_content_json
+    assert narrow.core_sha256 == plan.core_sha256
+    assert narrow.core.memory_view_json == plan.core.memory_view_json
 
 
 def test_start_uses_one_floor_walk_and_calibrates_before_book_choice(tmp_path, monkeypatch):
