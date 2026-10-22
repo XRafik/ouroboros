@@ -137,7 +137,8 @@ def test_no_clause_without_a_change_before_that_request(tmp_path):
 
 
 @pytest.mark.parametrize("kind,target", [("api_model", "openai/gpt-fixture"), ("agent_session", "codex=gpt-fixture")])
-def test_context_cache_facts(tmp_path, monkeypatch, kind, target):
+@pytest.mark.parametrize("input_sources", ["shared", "declared"])
+def test_context_cache_facts(tmp_path, monkeypatch, kind, target, input_sources):
     from ouroboros.context import _capture_context_core
     from ouroboros.context_fit import _render_context_system_content
     from ouroboros.memory import Memory
@@ -150,7 +151,8 @@ def test_context_cache_facts(tmp_path, monkeypatch, kind, target):
     monkeypatch.setattr("ouroboros.config.DATA_DIR", tmp_path)
     settings = _settings(_row("worker", kind=kind, target=target, recommendation="Use for implementation."))
     monkeypatch.setattr("ouroboros.config.load_settings", lambda: settings)
-    task = {"id": "task-one", "type": "task", "text": "work", "configured_subagent": {
+    task = {"id": "task-one", "type": "task", "text": "work", "delegation_role": "subagent",
+        "input_sources": input_sources, "configured_subagent": {
         "selected_subagent_id": "worker", "route": {"kind": kind, "target_id": target},
         **({"access": "workspace_write"} if kind == "agent_session" else {})}}
     registry = ToolRegistry(repo_dir=tmp_path / "repo", drive_root=tmp_path)
@@ -171,3 +173,10 @@ def test_context_cache_facts(tmp_path, monkeypatch, kind, target):
     assert '"pending":1' in after.dynamic_text
     assert "Subagent measurements" not in after.semi_stable_text
     assert "Subagent measurements" in after_blocks[-1]["text"]
+
+    other_task = {**task, "input_sources": "shared" if input_sources == "declared" else "declared"}
+    other = _capture_context_core(env, Memory(drive_root=tmp_path), other_task, None, None)
+    markers = ("An Agent-session row", "Subagent measurements")
+    facts = lambda core: [line for line in core.dynamic_text.splitlines() if line.startswith(markers)]
+    assert facts(after) == facts(other)
+    assert len(facts(after)) == (2 if kind == "agent_session" else 1)

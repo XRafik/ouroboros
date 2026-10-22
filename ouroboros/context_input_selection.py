@@ -290,6 +290,7 @@ def _capture_declared_context_core(
     retries and fitting operate on the resulting immutable ContextCore.
     """
     from ouroboros.subagent_work_order import input_source_selection_receipt
+    from ouroboros.subagent_metrics import fact_line
     from ouroboros.subagent_runtime import (
         current_model_visible_subagent_catalog, review_facts_block, review_records_block, subagent_supervision_fact_line,
     )
@@ -318,6 +319,7 @@ def _capture_declared_context_core(
         parts.extend(filter(None, (
             review_records_block(drive_root=canonical_root, task_id=str(task["id"])),
             subagent_supervision_fact_line(task, ctx=ctx, catalog=catalog),
+            fact_line(task, drive_root=canonical_root),
         )))
     except Exception:
         log.warning("Failed to build the Review block", exc_info=True)
