@@ -312,6 +312,16 @@ def _start_request(ctx: ToolContext, route: "DelegationRoute", authority: "Deleg
     return request
 
 
+def _prompt_cache_ttl_request(request, route, gateway, drive, continuation_token):
+    """The prompt-cache lifetime this start negotiates; a continuation carries the one its run had."""
+    from ouroboros.delegate_custody_current import run as current_custody_run
+    from ouroboros.effort_evidence import session_prompt_cache_ttl_request
+
+    return session_prompt_cache_ttl_request(
+        request, route_id=route.route_id, gateway=gateway,
+        continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
+
+
 def _processing_start_request(request, actor, gateway, route):
     """Carry only captured actor intent on a route advertising the wire field."""
     preference = str(actor.get("processing_preference") or "")
@@ -564,12 +574,7 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                                           seconds, instructions, execution_root, continuation=continuation.request, ephemeral=ephemeral,
                                           **({"directory_options": directory_options} if directory_options else {}))
             request_body, processing_info = _processing_start_request(request_body, actor, gateway, route)
-            from ouroboros.delegate_custody_current import run as current_custody_run
-            from ouroboros.effort_evidence import session_prompt_cache_ttl_request
-
-            ttl_info = session_prompt_cache_ttl_request(
-                request_body, route_id=route.route_id, gateway=gateway,
-                continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
+            ttl_info = _prompt_cache_ttl_request(request_body, route, gateway, drive, continuation_token)
             history_facts["access"] = request_body["access"]
             key = custody.idempotency_key(getattr(ctx, "task_id", ""), route.route_id,
                                           access, authority.mode, authority.isolation,

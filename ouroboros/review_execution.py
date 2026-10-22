@@ -659,13 +659,8 @@ class SessionInvocation:
     access: str = ""
     checking_source: Optional[Dict[str, Any]] = None
 
-def run_delegated_review_session(
-    *,
-    prompt: str,
-    root: str,
-    custody_drive: Any,
-    invocation: SessionInvocation,
-) -> Dict[str, Any]:
+def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
+                                 invocation: SessionInvocation) -> Dict[str, Any]:
     """All reviews share this transport: pin one subscription harness, request
     schema only if its effective adapter supports it, store the canonical body
     before POST, and replay only an explicit pending token. Bound tokens join
