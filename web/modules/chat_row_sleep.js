@@ -82,8 +82,6 @@ export function createRowSleep({ feed, win = globalThis.window, onRestyle } = {}
 
     function sleep(row) {
         if (near.has(row) || !row.matches?.(ROWS) || row.querySelector?.(WINDOW_SIZED)) return;
-        // A row without a box (`display: none`, a deck's tucked note) has no size to remember: it would wake at the placeholder.
-        if (typeof row.getClientRects === 'function' && !row.getClientRects().length) return;
         // A picture or a video whose size has not arrived yet (a video's box is 300x150 until its metadata).
         const pictures = [...row.querySelectorAll('img, video')]
             .filter((media) => (media.tagName === 'VIDEO' ? media.readyState === 0 : !media.complete));
@@ -108,11 +106,16 @@ export function createRowSleep({ feed, win = globalThis.window, onRestyle } = {}
         // width would keep a size that is not its own.
         const settled = !feed.hasAttribute('data-resizing') && ++held >= HELD_FRAMES;
         if (settled) {
+            const ready = [];
             for (const [row, at] of due) {
                 if (at > frame) continue;
                 due.delete(row);
-                if (row.parentElement === feed) sleep(row);
+                if (row.parentElement === feed) ready.push(row);
             }
+            // A row without a box (`display: none`, a deck's tucked note) has no size to remember: marked, it would wake at
+            // the placeholder. Every box is read before any mark is written, so the batch costs one layout, not one per row.
+            const boxed = ready.filter((row) => typeof row.getClientRects !== 'function' || row.getClientRects().length > 0);
+            for (const row of boxed) sleep(row);
         }
         if (due.size) win.requestAnimationFrame(tick);
         else ticking = false;

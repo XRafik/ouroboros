@@ -136,6 +136,23 @@ test('an ordinary reconcile rewrites nothing: a focused Hide keeps its focus, a 
     } finally { f.close(); }
 });
 
+test('a focused Hide follows the caption when an older note becomes the first card of an open deck', async () => {
+    const f = fixture();
+    try {
+        const later = [f.note('b'), f.note('c')];
+        await settle();
+        f.act(later[1]).click();
+        later[0].querySelector('.chat-relay-hide').focus();
+        const older = f.note('a, older');
+        f.feed.insertBefore(older, later[0]);
+        f.decks.schedule();
+        await settle();
+        assert.equal(older.dataset.deckFirst, '1');
+        assert.equal(later[0].querySelector('.chat-relay-deck-top'), null, 'the caption left the old first card');
+        assert.equal(f.env.doc.activeElement, older.querySelector('.chat-relay-hide'), 'and Hide kept the focus');
+    } finally { f.close(); }
+});
+
 test('a note read on its own opens the deck it joins, so the passage stays; Hide keeps a deck shut', async () => {
     const f = fixture();
     try {

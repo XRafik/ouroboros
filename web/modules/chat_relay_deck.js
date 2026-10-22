@@ -149,6 +149,8 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
         const n = run.length;
         const deck = n > 1;
         const span = deck && open ? range(run) : '';
+        // A focused Hide follows its caption when the caption moves to another first card (an older note joined).
+        const heldHide = run.some((bubble) => bubble.querySelector(':scope > .chat-relay-deck-top')?.contains(document.activeElement));
         let changed = false;
         run.forEach((bubble, i) => {
             const front = i === n - 1;
@@ -182,6 +184,9 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
             act.removeAttribute('aria-label');
             act.setAttribute('aria-expanded', String(raw));
         });
+        if (heldHide && !run[0].querySelector(':scope > .chat-relay-deck-top')?.contains(document.activeElement)) {
+            run[0].querySelector(':scope > .chat-relay-deck-top .chat-relay-hide')?.focus({ preventScroll: true });
+        }
         return changed;
     }
 
@@ -216,8 +221,9 @@ export function createRelayDecks({ feed, onDomWrite = (write) => write(), format
         }
     }
 
-    // The deck fans out from its front card and folds back into it: the new heights land inside one viewport write,
-    // then each card glides from where it stood (a tucked card from the front card's place).
+    // The deck fans out and folds back: the new heights land at once inside one viewport write; then the cards that come
+    // out of the deck slide in from just above, and the front card glides from where it stood only when that is above
+    // where it lands. A card never starts below its place (see the note in the loop).
     function setOpen(run, open, { instant = false } = {}) {
         if (run.length < 2) return;
         const front = run[run.length - 1];
