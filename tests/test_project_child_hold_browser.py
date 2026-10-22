@@ -144,6 +144,7 @@ def test_nested_child_wait_and_same_id_recovery(direct_server_with_data, tmp_pat
             page.set_viewport_size({"width": 390, "height": 844})
             shot(page, "held-narrow")
             assert child_card.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
+            assert child_card.locator('[data-live-disclosure]').is_visible()
             # Typed unknown-dispatch fact uses the same host projection, without a
             # promise of automatic continuation (no client text classification).
             held = next(row for row in host.pending if row["id"] == child["id"])
@@ -155,6 +156,7 @@ def test_nested_child_wait_and_same_id_recovery(direct_server_with_data, tmp_pat
             assert "automatic recovery is not authorized" in child_card.locator('[data-live-meta]').inner_text()
             assert _chip_mark(child_card.locator('[data-live-phase]')) == STILL
             shot(page, "previous-run-unconfirmed-narrow")
+            assert child_card.evaluate("el => el.scrollWidth <= el.clientWidth + 1")
             held["_project_admission_restore_hold"] = previous_hold
             unreadable["on"] = False
             assert result_signature(root, "held") == original  # the original receipt, unchanged
