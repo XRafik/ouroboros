@@ -1,6 +1,6 @@
-"""Pull-request writers: ``create_github_pr``, ``update_github_pr`` and ``set_github_pr_ready``.
+"""PR methods of ``github_write``: creation, field edits and draft state.
 
-Not a tool module: ``github.py`` registers these entries and owns the transport they call. Each call reads the
+Internal method owner: ``github_write`` dispatches these methods and publishes their shared receipt. Each call reads the
 pull request, its head commit and (when it matters) its base commit first and refuses before any effect when they
 differ from what the caller expected; then sends exactly ONE mutating ``gh`` command; then reads the pull request
 back and states, field by field, what GitHub holds. Once a mutation was sent its effect is unknown until the
@@ -20,8 +20,8 @@ from typing import List, Optional, Tuple
 from ouroboros.github_pr_identity import pull_request_fields_from_cli, same_pull_request
 from ouroboros.tools.github import GhResult, _gh_run, _refuse, _send_facts
 from ouroboros.tools.github_checks import _gh_json, _one_line, _whole
-from ouroboros.tools.registry import ToolContext, ToolEntry
-from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
+from ouroboros.tools.registry import ToolContext
+from ouroboros.utils import utc_now_iso
 
 _FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 # A Git branch name this tool passes to gh: no whitespace or ref-forbidden characters, never flag-shaped.
@@ -54,20 +54,40 @@ def _one_line_text(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip()) and "\n" not in value and "\r" not in value
 
 
-def _ok(ctx: ToolContext, text: str, *, outcome: str = "completed") -> str:
-    return _publish_tool_result(ctx, ToolResult(status="ok", code="OK", text=text, meta={"operation_outcome": outcome}))
+def _receipt(write, text: str, outcome: str, status: str, *, pr: Optional[dict] = None,
+             readback: Optional[dict] = None, res: Optional[GhResult] = None) -> str:
+    pr = pr or getattr(write, "pr_observed", None) or {}
+    res = res or getattr(write, "pr_send", None)
+    number = pr.get("number") or write.args.get("target")
+    target = f"{write.slug(pr.get('url'))}#{number}" if number else (
+        f"{write.slug()} {write.args.get('head')} → {write.args.get('base')}")
+    effect = "pr.create" if write.method == "create_pr" else "pr.draft" if "draft" in write.args else "pr.update"
+    if readback is None:
+        readback = {"verified": False, "via": "lookup", "item": pr or None}
+    lookup = (f"github_read(method='get', kind='pr', target={number}{_hint(write.repo)})" if number else
+              f"github_read(method='list', kind='pr'{_hint(write.repo)})")
+    return write.receipt(effect, target, response=pr, oid=number, actor=None, at=utc_now_iso(),
+                         res=res, readback=readback, lookup=lookup, extra={"at_source": "local", "detail": text},
+                         settlement={"completed": "confirmed", "completed_no_effect": "not_applied", "unknown": "unknown"}[outcome],
+                         result_status=status)
 
 
-def _failed(ctx: ToolContext, text: str, *, no_effect: bool = False) -> str:
-    return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ERROR", text=text,
-                                                meta={"operation_outcome": "completed_no_effect"} if no_effect else {}))
+def _ok(write, text: str, *, outcome: str = "completed", pr: Optional[dict] = None,
+        readback: Optional[dict] = None, res: Optional[GhResult] = None) -> str:
+    return _receipt(write, text, outcome, "ok", pr=pr, readback=readback, res=res)
 
 
-def _precheck_failed(ctx: ToolContext, res: GhResult, what: str, nothing: str) -> str:
+def _failed(write, text: str, *, no_effect: bool = False, pr: Optional[dict] = None,
+            readback: Optional[dict] = None, res: Optional[GhResult] = None) -> str:
+    return _receipt(write, text, "completed_no_effect" if no_effect else "unknown", "error",
+                    pr=pr, readback=readback, res=res)
+
+
+def _precheck_failed(write, res: GhResult, what: str, nothing: str) -> str:
     """A read before the mutation failed, so nothing was sent; the transport's own refusals pass through."""
     if res.failure in ("target", "cli_missing"):
         return res.text
-    return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: {what} could not be read ({res.text}); {nothing}.", no_effect=True)
+    return _failed(write, f"⚠️ PR_PRECHECK_FAILED: {what} could not be read ({res.text}); {nothing}.", no_effect=True)
 
 
 def _hint(repo: str) -> str:
@@ -110,15 +130,16 @@ def _pr_record(data: object, number: int) -> Tuple[Optional[dict], str]:
     return data, ""
 
 
-def _resolve_repo(ctx: ToolContext, repo: str) -> Tuple[Optional[_Repo], str]:
+def _resolve_repo(write) -> Tuple[Optional[_Repo], str]:
     """The repository the CLI resolves for this call (the Project directory, or the explicit repo), from its URL."""
+    ctx, repo = write.ctx, write.repo
     res = _gh_run(["repo", "view", "--json", "nameWithOwner,url"], ctx, timeout=_READ_TIMEOUT, repo=repo)
     if not res.ok:
-        return None, _precheck_failed(ctx, res, "the repository", "nothing was sent")
+        return None, _precheck_failed(write, res, "the repository", "nothing was sent")
     info = _gh_json(res, dict)
     where = _REPO_URL_RE.match(str((info or {}).get("url") or ""))
     if where is None:
-        return None, _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: gh named no repository URL ({res.text[:300]}); nothing was sent.",
+        return None, _failed(write, f"⚠️ PR_PRECHECK_FAILED: gh named no repository URL ({res.text[:300]}); nothing was sent.",
                              no_effect=True)
     return _Repo(*where.groups()), ""
 
@@ -228,16 +249,20 @@ def _readback_lines(confirmed: List[str], differs: List[str], notes: List[str]) 
     return lines
 
 
-def _settled(ctx: ToolContext, headline: str, pr: dict, **expected: object) -> str:
-    """A mutation gh accepted, judged by its read-back: completed only when every requested field is held."""
+def _settled(write, headline: str, pr: dict, **expected: object) -> str:
+    """A CLI success is completed only when the separate readback holds every requested field."""
     confirmed, differs, notes = _reconcile(pr, **expected)
-    return _ok(ctx, "\n".join([headline] + _readback_lines(confirmed, differs, notes)),
-               outcome="unknown" if differs else "completed")
+    return _ok(write, "\n".join([headline] + _readback_lines(confirmed, differs, notes)), pr=pr,
+               readback={"verified": not differs, "mismatch": differs, "confirmed": confirmed, "notes": notes,
+                         "via": "lookup", "item": pr}, outcome="unknown" if differs else "completed")
 
 
-def create_pr(ctx: ToolContext, title: object = "", head: object = "", base: object = "", expected_head_sha: object = "",
-              expected_base_sha: object = "", body: object = "", draft: object = False, repo: str = "") -> str:
+def create(write) -> str:
     """Open one pull request from an existing head branch, after the head and base read as the caller expected."""
+    ctx, repo, args = write.ctx, write.repo, write.args
+    title, head, base, body, draft = (args.get(k, default) for k, default in
+                                     (("title", ""), ("head", ""), ("base", ""), ("body", ""), ("draft", False)))
+    expected_head_sha, expected_base_sha = ((args.get("expect") or {}).get(k, "") for k in ("head_sha", "base_sha"))
     if not _one_line_text(title):
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: title is one non-empty line.", no_effect=True)
     head_arg = head.strip() if isinstance(head, str) else ""
@@ -250,18 +275,18 @@ def create_pr(ctx: ToolContext, title: object = "", head: object = "", base: obj
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: base is the branch name the change should merge into.", no_effect=True)
     head_sha, base_sha = _sha(expected_head_sha), _sha(expected_base_sha)
     if not head_sha or not base_sha:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expected_head_sha and expected_base_sha are the full 40-hex commits you read "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expect.head_sha and expect.base_sha are the full 40-hex commits you read "
                             "for the head and base branches; the call refuses before any effect when GitHub holds others.",
                        no_effect=True)
     if head_sha == base_sha:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expected_head_sha equals expected_base_sha; there is nothing to request.",
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expect.head_sha equals expect.base_sha; there is nothing to request.",
                        no_effect=True)
     if not isinstance(body, str):
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: body is a string; an omitted body is an empty body.", no_effect=True)
     if not isinstance(draft, bool):
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: draft is a boolean.", no_effect=True)
 
-    repo_id, error = _resolve_repo(ctx, repo)
+    repo_id, error = _resolve_repo(write)
     if repo_id is None:
         return error
     head_owner = owner_part or repo_id.owner
@@ -270,23 +295,23 @@ def create_pr(ctx: ToolContext, title: object = "", head: object = "", base: obj
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: head and base are the same branch.", no_effect=True)
     current, res = _ref_sha(ctx, repo_id, head_owner, head_branch)
     if res is not None:
-        return _precheck_failed(ctx, res, f"head {head_label}", "nothing was created")
+        return _precheck_failed(write, res, f"head {head_label}", "nothing was created")
     if current != head_sha:
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: head {head_label} is at {current}, you expected {head_sha}; nothing was "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: head {head_label} is at {current}, you expected {head_sha}; nothing was "
                             "created. Re-read the head and decide again.", no_effect=True)
     current, res = _ref_sha(ctx, repo_id, repo_id.owner, base_arg)
     if res is not None:
-        return _precheck_failed(ctx, res, f"base {base_arg}", "nothing was created")
+        return _precheck_failed(write, res, f"base {base_arg}", "nothing was created")
     if current != base_sha:
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: base {base_arg} is at {current}, you expected {base_sha}; nothing was "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: base {base_arg} is at {current}, you expected {base_sha}; nothing was "
                             "created. Re-read the base and decide again.", no_effect=True)
     rows, res = _open_prs(ctx, repo, head_branch, base_arg)
     if res is not None:
-        return _precheck_failed(ctx, res, f"the open pull requests from {head_branch} into {base_arg}", "nothing was created")
+        return _precheck_failed(write, res, f"the open pull requests from {head_branch} into {base_arg}", "nothing was created")
     existing = _matching(rows, head_owner=head_owner, head_branch=head_branch, base=base_arg, head_sha=None)
     if existing:
-        return _failed(ctx, f"⚠️ PR_EXISTS: {_pr_line(existing[0])} is already open for {head_label} into {base_arg} in "
-                            f"{_where(repo)}; nothing was created. Change it with update_github_pr(number="
+        return _failed(write, f"⚠️ PR_EXISTS: {_pr_line(existing[0])} is already open for {head_label} into {base_arg} in "
+                            f"{_where(repo)}; nothing was created. Change it with github_write(method='update', kind='pr', target="
                             f"{existing[0].get('number')}{_hint(repo)}).", no_effect=True)
 
     # The one mutation. Values ride as `--flag=value` or stdin, never as a following argument.
@@ -302,50 +327,61 @@ def create_pr(ctx: ToolContext, title: object = "", head: object = "", base: obj
             rows, res = _open_prs(ctx, repo, head_branch, base_arg)
             found = _matching(rows or [], head_owner=head_owner, head_branch=head_branch, base=base_arg, head_sha=head_sha)
             if res is not None or len(found) != 1:
-                return _failed(ctx, f"⚠️ PR_CREATE_UNKNOWN: gh reported success but named no pull request ({sent.text[:200]!r}), "
+                return _failed(write, f"⚠️ PR_CREATE_UNKNOWN: gh reported success but named no pull request ({sent.text[:200]!r}), "
                                     "and the read-back " + (f"failed ({res.text})" if res is not None else
                                                             f"found {len(found)} open pull requests for {head_label} into {base_arg}")
-                               + f". One request was sent and not retried. Inspect {_where(repo)} (list_github_prs{_hint(repo)}) "
+                               + f". One request was sent and not retried. Inspect {_where(repo)} (github_read(method='list', kind='pr'{_hint(repo)})) "
                                  "before creating again.")
             number = _whole(found[0].get("number")) or 0
         if number <= 0:
-            return _failed(ctx, "⚠️ PR_CREATE_UNKNOWN: gh reported success but read-back named no valid PR number. "
+            return _failed(write, "⚠️ PR_CREATE_UNKNOWN: gh reported success but read-back named no valid PR number. "
                            "One request was sent and not retried; inspect the repository before creating again.")
         pr, res = _view(ctx, number, repo)
+        write.pr_observed = pr or {"number": number, "url": match.group(0) if match else None}
         if pr is None:
-            return _ok(ctx, f"✅ PR #{number} created: {match.group(0) if match else 'URL not named by gh'}\n⚠️ Read-back failed "
+            return _ok(write, f"✅ PR #{number} created: {match.group(0) if match else 'URL not named by gh'}\n⚠️ Read-back failed "
                             f"({res.text}): the pull request's fields are unconfirmed; read it with "
-                            f"get_github_pr(number={number}{_hint(repo)}).", outcome="unknown")
-        return _settled(ctx, f"✅ PR #{number} created: {pr['url']}", pr, **expected)
+                            f"github_read(method='get', kind='pr', target={number}{_hint(repo)}).", outcome="unknown")
+        return _settled(write, f"✅ PR #{number} created: {pr['url']}", pr, **expected)
 
+    write.pr_send = sent
     # The send failed or its answer was lost: exactly one request went out and its effect is unknown; read.
     prefix = (f"⚠️ PR_CREATE_UNKNOWN: the create request for {head_label} into {base_arg} in {_where(repo)} "
               f"{_send_facts(sent)}. One request was sent and not retried; its effect is unknown until GitHub shows it.")
     rows, res = _open_prs(ctx, repo, head_branch, base_arg)
     if res is not None:
-        return _failed(ctx, prefix + f" Read-back failed too ({res.text}); list the open pull requests "
-                                     f"(list_github_prs{_hint(repo)}) before creating again.")
+        return _failed(write, prefix + f" Read-back failed too ({res.text}); list the open pull requests "
+                                     f"(github_read(method='list', kind='pr'{_hint(repo)})) before creating again.")
     found = _matching(rows, head_owner=head_owner, head_branch=head_branch, base=base_arg, head_sha=None)
     if not found:
-        return _failed(ctx, prefix + f" Read-back: GitHub listed no open pull request from {head_label} into {base_arg} at that "
+        return _failed(write, prefix + f" Read-back: GitHub listed no open pull request from {head_label} into {base_arg} at that "
                                      "moment; a request it is still processing would appear later, so read again "
-                                     f"(list_github_prs{_hint(repo)}) before creating.")
+                                     f"(github_read(method='list', kind='pr'{_hint(repo)})) before creating.")
+    write.pr_observed = found[0]
     exact = _matching(found, head_owner=head_owner, head_branch=head_branch, base=base_arg, head_sha=head_sha)
-    return _failed(ctx, prefix + f" Read-back: {_pr_line((exact or found)[0])} is open for this head and base"
+    return _failed(write, prefix + f" Read-back: {_pr_line((exact or found)[0])} is open for this head and base"
                    + (" at the expected commit" if exact else " at another commit")
                    + " — this call's effect or an earlier one; do not create again. Compare its fields and use "
-                     f"update_github_pr(number={(exact or found)[0].get('number')}{_hint(repo)}) if they differ.")
+                     f"github_write(method='update', kind='pr', target={(exact or found)[0].get('number')}{_hint(repo)}) if they differ.")
 
 
-def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = "", title: object = None,
-              body: object = None, base: object = None, expected_base_sha: object = "", repo: str = "") -> str:
+def update(write) -> str:
     """Change the title, body and/or base of one open pull request in one edit, after it reads as expected."""
+    ctx, repo, args = write.ctx, write.repo, write.args
+    if any(args.get(k) is not None for k in ("state", "state_reason", "labels")):
+        return write.refuse("⚠️ TOOL_ARG_ERROR: PR title/body/base or draft changes are one operation; change state/labels in a separate update.")
+    if "draft" in args:
+        if any(args.get(k) is not None for k in ("title", "body", "base")):
+            return write.refuse("⚠️ TOOL_ARG_ERROR: change draft separately from title/body/base to keep one mutation per receipt.")
+        return _draft(write)
+    number, title, body, base = (args.get(k) for k in ("target", "title", "body", "base"))
+    expected_head_sha, expected_base_sha = ((args.get("expect") or {}).get(k, "") for k in ("head_sha", "base_sha"))
     number = _whole(number)
     if number is None or number <= 0:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: number is the positive pull request number.", no_effect=True)
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target is the positive pull request number.", no_effect=True)
     head_sha = _sha(expected_head_sha)
     if not head_sha:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expected_head_sha is the full 40-hex head commit you read for this pull "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expect.head_sha is the full 40-hex head commit you read for this pull "
                             "request; the call refuses before any effect when the head moved.", no_effect=True)
     if title is None and body is None and base is None:
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: nothing to change: pass title, body (\"\" clears it; omitted leaves it) "
@@ -360,19 +396,19 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
         if not base_arg:
             return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: base is a branch name.", no_effect=True)
         if not base_sha:
-            return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expected_base_sha is required with base: the full 40-hex commit you read "
+            return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expect.base_sha is required with base: the full 40-hex commit you read "
                                 "for the new base branch.", no_effect=True)
 
     pr, res = _view(ctx, number, repo)
     if pr is None:
-        return _precheck_failed(ctx, res, f"pull request #{number}", "nothing was changed")
+        return _precheck_failed(write, res, f"pull request #{number}", "nothing was changed")
     state = str(pr.get("state") or "")
     if state != "OPEN":
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: {_pr_line(pr)} is {state.lower() or 'in an unknown state'}, not open; "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: {_pr_line(pr)} is {state.lower() or 'in an unknown state'}, not open; "
                             "nothing was changed.", no_effect=True)
     current = _sha(pr["headRefOid"])
     if current != head_sha:
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
                             "was changed. Re-read the pull request and decide again.", no_effect=True)
     requested_base = base_arg
     if base_arg is not None and pr.get("baseRefName") == base_arg:
@@ -380,17 +416,17 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
         base_arg = None
     if (base_arg is None and (title is None or title == pr["title"])
             and (body is None or body == (pr["body"] or ""))):
-        return _ok(ctx, f"PR #{number} already holds the requested values; nothing was changed. {pr['url']}",
-                   outcome="completed_no_effect")
+        return _ok(write, f"PR #{number} already holds the requested values; nothing was changed. {pr['url']}",
+                   outcome="completed_no_effect", pr=pr)
     if base_arg is not None:
-        repo_id, error = _resolve_repo(ctx, repo)
+        repo_id, error = _resolve_repo(write)
         if repo_id is None:
             return error
         current, res = _ref_sha(ctx, repo_id, repo_id.owner, base_arg)
         if res is not None:
-            return _precheck_failed(ctx, res, f"base {base_arg}", "nothing was changed")
+            return _precheck_failed(write, res, f"base {base_arg}", "nothing was changed")
         if current != base_sha:
-            return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: base {base_arg} is at {current}, you expected {base_sha}; nothing was "
+            return _failed(write, f"⚠️ PR_PRECHECK_FAILED: base {base_arg} is at {current}, you expected {base_sha}; nothing was "
                                 "changed.", no_effect=True)
 
     # The one mutation: gh pr edit updates title, body and base in one request.
@@ -399,144 +435,90 @@ def update_pr(ctx: ToolContext, number: object = 0, expected_head_sha: object = 
     sent = _gh_run(args, ctx, timeout=_WRITE_TIMEOUT, input_data=body if body is not None else None, repo=repo)
     requested = dict(title=title, body=body, base=requested_base)
     after, res = _view(ctx, number, repo)
+    write.pr_observed = after
     if sent.ok:
         if after is None:
-            return _ok(ctx, f"✅ gh accepted the edit of PR #{number}.\n⚠️ Read-back failed ({res.text}): the fields are "
-                            f"unconfirmed; read them with get_github_pr(number={number}{_hint(repo)}).", outcome="unknown")
+            return _ok(write, f"✅ gh accepted the edit of PR #{number}.\n⚠️ Read-back failed ({res.text}): the fields are "
+                            f"unconfirmed; read them with github_read(method='get', kind='pr', target={number}{_hint(repo)}).", outcome="unknown")
         confirmed, differs, notes = _reconcile(after, **requested, head_sha=head_sha)
         headline = (f"✅ PR #{number} updated: {after['url']}" if not differs else
                     f"⚠️ gh accepted the edit of PR #{number} ({after['url']}), but the read-back does not hold every requested value.")
-        return _ok(ctx, "\n".join([headline] + _readback_lines(confirmed, differs, notes)),
-                   outcome="unknown" if differs else "completed")
+        return _ok(write, "\n".join([headline] + _readback_lines(confirmed, differs, notes)),
+                   outcome="unknown" if differs else "completed", pr=after,
+                   readback={"verified": not differs, "mismatch": differs, "confirmed": confirmed,
+                             "notes": notes, "via": "lookup", "item": after})
 
+    write.pr_send = sent
     prefix = (f"⚠️ PR_UPDATE_UNKNOWN: the edit request for PR #{number} in {_where(repo)} {_send_facts(sent)}. One request "
               "was sent and not retried; its effect is unknown until GitHub shows it.")
     if after is None:
-        return _failed(ctx, prefix + f" Read-back failed too ({res.text}); read the pull request "
-                                     f"(get_github_pr(number={number}{_hint(repo)})) before editing again.")
+        return _failed(write, prefix + f" Read-back failed too ({res.text}); read the pull request "
+                                     f"(github_read(method='get', kind='pr', target={number}{_hint(repo)})) before editing again.")
     confirmed, differs, _notes = _reconcile(after, **requested)
     if not confirmed:
-        return _failed(ctx, prefix + " Read-back: none of the requested values was held at that moment (" + "; ".join(differs)
+        return _failed(write, prefix + " Read-back: none of the requested values was held at that moment (" + "; ".join(differs)
                        + "); a request GitHub is still processing could still land, so read again before resending.")
     if not differs:
-        return _failed(ctx, prefix + " Read-back: GitHub holds every requested value (" + "; ".join(confirmed) + "); do not resend.")
-    return _failed(ctx, prefix + " Read-back at that moment: held: " + "; ".join(confirmed) + "; not held: " + "; ".join(differs)
+        return _failed(write, prefix + " Read-back: GitHub holds every requested value (" + "; ".join(confirmed) + "); do not resend.")
+    return _failed(write, prefix + " Read-back at that moment: held: " + "; ".join(confirmed) + "; not held: " + "; ".join(differs)
                    + ". Read again before resending only the fields not held.")
 
 
-def set_pr_ready(ctx: ToolContext, number: object = 0, ready: object = True, expected_head_sha: object = "",
-                 repo: str = "") -> str:
+def _draft(write) -> str:
     """Mark one open pull request ready for review (or back to draft), after it reads as expected."""
+    ctx, repo = write.ctx, write.repo
+    number, draft = write.args.get("target"), write.args.get("draft")
+    ready = not draft if isinstance(draft, bool) else draft
+    expected_head_sha = (write.args.get("expect") or {}).get("head_sha", "")
     number = _whole(number)
     if number is None or number <= 0:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: number is the positive pull request number.", no_effect=True)
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target is the positive pull request number.", no_effect=True)
     if not isinstance(ready, bool):
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: ready is a boolean: true marks the draft ready for review, false converts "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: draft is a boolean: false marks the draft ready for review, true converts "
                             "the pull request back to a draft.", no_effect=True)
     head_sha = _sha(expected_head_sha)
     if not head_sha:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expected_head_sha is the full 40-hex head commit you read for this pull "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: expect.head_sha is the full 40-hex head commit you read for this pull "
                             "request; the call refuses before any effect when the head moved.", no_effect=True)
     want = "ready for review" if ready else "a draft"
 
     pr, res = _view(ctx, number, repo)
     if pr is None:
-        return _precheck_failed(ctx, res, f"pull request #{number}", "nothing was changed")
+        return _precheck_failed(write, res, f"pull request #{number}", "nothing was changed")
     state = str(pr.get("state") or "")
     if state != "OPEN":
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: {_pr_line(pr)} is {state.lower() or 'in an unknown state'}, not open; "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: {_pr_line(pr)} is {state.lower() or 'in an unknown state'}, not open; "
                             "nothing was changed.", no_effect=True)
     current = _sha(pr["headRefOid"])
     if current != head_sha:
-        return _failed(ctx, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
+        return _failed(write, f"⚠️ PR_PRECHECK_FAILED: the head of PR #{number} is at {current}, you expected {head_sha}; nothing "
                             "was changed. Re-read the pull request and decide again.", no_effect=True)
     if pr["isDraft"] == (not ready):
-        return _ok(ctx, f"PR #{number} is already {want}; nothing was changed. {pr['url']}", outcome="completed_no_effect")
+        return _ok(write, f"PR #{number} is already {want}; nothing was changed. {pr['url']}", outcome="completed_no_effect", pr=pr)
 
     sent = _gh_run(["pr", "ready", str(number)] + ([] if ready else ["--undo"]), ctx, timeout=_WRITE_TIMEOUT, repo=repo)
     after, res = _view(ctx, number, repo)
+    write.pr_observed = after
     if sent.ok:
         if after is None:
-            return _ok(ctx, f"✅ gh accepted marking PR #{number} {want}.\n⚠️ Read-back failed ({res.text}): the state is "
-                            f"unconfirmed; read it with get_github_pr(number={number}{_hint(repo)}).", outcome="unknown")
+            return _ok(write, f"✅ gh accepted marking PR #{number} {want}.\n⚠️ Read-back failed ({res.text}): the state is "
+                            f"unconfirmed; read it with github_read(method='get', kind='pr', target={number}{_hint(repo)}).", outcome="unknown")
         confirmed, differs, notes = _reconcile(after, draft=not ready, head_sha=head_sha)
         headline = (f"✅ PR #{number} is now {want}: {after['url']}" if not differs else
                     f"⚠️ gh accepted marking PR #{number} {want} ({after['url']}), but the read-back does not show that state.")
-        return _ok(ctx, "\n".join([headline] + _readback_lines(confirmed, differs, notes)),
-                   outcome="unknown" if differs else "completed")
+        return _ok(write, "\n".join([headline] + _readback_lines(confirmed, differs, notes)),
+                   outcome="unknown" if differs else "completed", pr=after,
+                   readback={"verified": not differs, "mismatch": differs, "confirmed": confirmed,
+                             "notes": notes, "via": "lookup", "item": after})
 
+    write.pr_send = sent
     prefix = (f"⚠️ PR_READY_UNKNOWN: the request to mark PR #{number} in {_where(repo)} {want} {_send_facts(sent)}. One "
               "request was sent and not retried; its effect is unknown until GitHub shows it.")
     if after is None:
-        return _failed(ctx, prefix + f" Read-back failed too ({res.text}); read the pull request "
-                                     f"(get_github_pr(number={number}{_hint(repo)})) before acting.")
+        return _failed(write, prefix + f" Read-back failed too ({res.text}); read the pull request "
+                                     f"(github_read(method='get', kind='pr', target={number}{_hint(repo)})) before acting.")
     held = after["isDraft"]
     if held == (not ready):
-        return _failed(ctx, prefix + f" Read-back: GitHub reports draft={held}, the requested state; do not resend.")
-    return _failed(ctx, prefix + f" Read-back: GitHub still reported draft={held} at that moment; a request it is still "
+        return _failed(write, prefix + f" Read-back: GitHub reports draft={held}, the requested state; do not resend.")
+    return _failed(write, prefix + f" Read-back: GitHub still reported draft={held} at that moment; a request it is still "
                                  "processing could still land, so read again before resending.")
-
-
-def tool_entries() -> List[ToolEntry]:
-    """Registered by ``github.get_tools`` (which adds the ``repo`` parameter); never a ``get_tools`` of this module."""
-    sha_words = "the full 40-hex commit you read"
-    precheck = ("Expected SHAs are prechecks read just before the send, not a server-side compare-and-swap: a ref that "
-                "moves between the check and the send is not caught; the read-back reports what GitHub holds.")
-    return [
-        ToolEntry("create_github_pr", {
-            "name": "create_github_pr",
-            "description": (
-                "Open one GitHub pull request from a branch that already exists on GitHub. Before any effect it reads "
-                "the head and base branches and the open pull requests, and refuses when the head or base is not at the "
-                "commit you expected or a pull request for this head and base is already open. Then it sends exactly "
-                "one create request and reads the pull request back, confirming title, body, base, head and draft state "
-                "field by field. A failed or lost answer is reported with what GitHub holds, never resent. Pushes, "
-                "forks and merges nothing: push first with the git tools, merge with pr_merge. " + precheck
-            ),
-            "parameters": {"type": "object", "properties": {
-                "title": {"type": "string", "description": "One-line title."},
-                "head": {"type": "string", "description": "Existing head branch name, or OWNER:BRANCH for a head held by another account; "
-                                                          "that precheck reads OWNER/<same repository name>, so a fork under a different name "
-                                                          "is refused as not found."},
-                "base": {"type": "string", "description": "Base branch name to merge into."},
-                "expected_head_sha": {"type": "string", "description": f"Head branch commit, {sha_words} (e.g. after pushing and reading vcs_read action=rev_parse)."},
-                "expected_base_sha": {"type": "string", "description": f"Base branch commit, {sha_words}."},
-                "body": {"type": "string", "default": "", "description": "Markdown body; omitted means empty."},
-                "draft": {"type": "boolean", "default": False, "description": "Open as a draft."},
-            }, "required": ["title", "head", "base", "expected_head_sha", "expected_base_sha"]},
-        }, create_pr, safety_policy="check"),
-
-        ToolEntry("update_github_pr", {
-            "name": "update_github_pr",
-            "description": (
-                "Change the title, body and/or base branch of one open GitHub pull request in one edit request. Before "
-                "any effect it reads the pull request and refuses when it is not open or its head is not at the commit "
-                "you expected (and, for a new base, when that branch is not at expected_base_sha). An omitted body is "
-                "left as it is; an empty body clears it. Reads the pull request back and reports each field as "
-                "confirmed or differing; a failed or lost answer is reported with what GitHub holds, never resent. " + precheck
-            ),
-            "parameters": {"type": "object", "properties": {
-                "number": {"type": "integer", "description": "Pull request number."},
-                "expected_head_sha": {"type": "string", "description": f"The pull request's head commit, {sha_words}."},
-                "title": {"type": "string", "description": "New one-line title; omit to leave it."},
-                "body": {"type": "string", "description": "New Markdown body; \"\" clears it; omit to leave it."},
-                "base": {"type": "string", "description": "New base branch; omit to leave it. Requires expected_base_sha."},
-                "expected_base_sha": {"type": "string", "default": "", "description": f"With base: the new base branch's commit, {sha_words}."},
-            }, "required": ["number", "expected_head_sha"]},
-        }, update_pr, safety_policy="check"),
-
-        ToolEntry("set_github_pr_ready", {
-            "name": "set_github_pr_ready",
-            "description": (
-                "Mark one open GitHub pull request ready for review (ready=true) or convert it back to a draft "
-                "(ready=false), in one request, after reading that it is open and its head is at the commit you "
-                "expected. A pull request already in the requested state is reported as unchanged. Reads the state "
-                "back; a failed or lost answer is reported with what GitHub holds, never resent. " + precheck
-            ),
-            "parameters": {"type": "object", "properties": {
-                "number": {"type": "integer", "description": "Pull request number."},
-                "ready": {"type": "boolean", "default": True, "description": "true: ready for review; false: back to draft."},
-                "expected_head_sha": {"type": "string", "description": f"The pull request's head commit, {sha_words}."},
-            }, "required": ["number", "expected_head_sha"]},
-        }, set_pr_ready, safety_policy="check"),
-    ]

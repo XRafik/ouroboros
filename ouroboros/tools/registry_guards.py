@@ -360,8 +360,6 @@ def disabled_tools_dispatch_only(ctx: Any) -> bool:
 _GITHUB_TOKEN_TOOLS = frozenset({
     "github_read",
     "github_write",
-    "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
-    "create_github_pr", "update_github_pr", "set_github_pr_ready",
     "pr_merge",
     "submit_skill_to_hub",
 })

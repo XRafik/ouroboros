@@ -34,7 +34,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "run_command", "run_script",
     "start_service", "service_status", "service_logs", "stop_service",
     "vcs_status", "vcs_diff", "vcs_read", "vcs_commit_reviewed", "commit_reviewed",
-    "get_github_run_log", "list_github_run_artifacts", "download_github_artifact", "create_github_pr", "update_github_pr", "set_github_pr_ready",
+    "github_read", "github_write",
     "vcs_restore", "vcs_revert", "vcs_pull_ff", "vcs_rollback",
     # One-shot deferred follow-up (W=A): core so a root task facing a typed wait
     # instant (e.g. a structurally unreachable review quorum with a known reset)
@@ -102,7 +102,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
     "read_file", "list_files", "search_code", "query_code", "query_data", "query_sql", "query_records",
-    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
+    "vcs_status", "vcs_diff", "vcs_read", "github_read",
     # Memory: a child reads, writes knowledge notes and marks in its own name (the
     # host signs both with its focus) and publishes chronicle pages and parts only as
     # drafts signed with its focus (it is not the integrating mind, so tools/chronicle.py
@@ -164,7 +164,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
     "read_file", "list_files", "search_code", "query_code", "query_data", "query_sql", "query_records",
-    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact",
+    "vcs_status", "vcs_diff", "vcs_read", "github_read",
     "write_file", "edit_text",
     "apply_patch", "edit_batch",
     "run_command", "run_script",
@@ -217,7 +217,7 @@ READ_ONLY_PARALLEL_TOOLS: frozenset[str] = frozenset({
     "read_file", "list_files",
     "search_code", "query_code", "query_data", "query_sql", "query_records", "recent_tasks",
     "web_search", "chat_history",
-    "vcs_status", "vcs_diff", "vcs_read", "get_github_run_log", "list_github_run_artifacts", "download_github_artifact", "service_status", "service_logs",
+    "vcs_status", "vcs_diff", "vcs_read", "service_status", "service_logs",
     "get_task_result", "list_projects", "memory_read",
 })
 
@@ -361,14 +361,14 @@ RESULT_VIEW_PARAMS: dict[str, dict[str, Any]] = {
 EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
     RESULT_VIEW_HEAD_ARG, RESULT_VIEW_TAIL_ARG,
     "max_chars", "max_lines", "start_char", "start_line",
-    "source_start_char", "source_end_char", "offset", "limit", "page", "tail_lines",
+    "source_start_char", "source_end_char", "offset", "limit", "page", "cursor", "tail_lines",
 })
 
 # Tools whose own affordance IS paging: selects the recovery WORDING of a
 # partial view only; it exempts nothing from source persistence.
 PAGEABLE_TOOL_RESULTS: frozenset[str] = frozenset({
     "read_file", "chat_history", "journal_read", "tree_read", "recent_tasks", "query_code", "query_data",
-    "query_sql", "query_records", "list_github_run_artifacts",
+    "query_sql", "query_records",
 })
 
 
@@ -474,7 +474,6 @@ OBSERVE_WORLD_MUTATION_TOOLS: frozenset[str] = frozenset({
     "skill_install", "skill_update",
     "journal_write", "workpad_write",
     "github_write", "pr_merge",
-    "create_github_pr", "update_github_pr", "set_github_pr_ready",
 })
 
 
