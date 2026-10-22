@@ -20,8 +20,10 @@ def test_helper_selection_peeks_only_and_pins_ownership(tmp_path, monkeypatch):
             for name, review in (("own-run", False), ("review-run", True))}
     monkeypatch.setattr(model_sleep, "_owned_runs", lambda *_args, **_kw: runs)
     monkeypatch.setattr(owner_wait, "_wait_entries", lambda *_a: pytest.fail("peek materialized mail"))
-    state = waiting.select_helpers(ctx)
-    assert state["selection"] == {"tasks": ["child"], "runs": ["own-run"]}
+    default = waiting.select_helpers(ctx)
+    assert default["selection"]["tasks"] == default["selection"]["runs"] == []
+    state = waiting.select_helpers(ctx, {"tasks": ["child"], "runs": ["own-run"]})
+    assert state["selection"]["tasks"] == ["child"] and state["selection"]["runs"] == ["own-run"]
     write_task_result(tmp_path, "peer", "completed", parent_task_id="other")
     write_task_result(tmp_path, "new-child", "completed", parent_task_id="parent")
     assert not waiting.ready_helpers(ctx, state)
@@ -111,7 +113,7 @@ def test_pause_precedes_a_ready_helper(tmp_path, monkeypatch, paused):
     monkeypatch.setattr(review_pause, "author_hears_mail", lambda: False)
     monkeypatch.setattr(review_pause, "_author_coordinates", lambda _op: (str(tmp_path), "parent", "parent"))
     monkeypatch.setattr(owner_pause, "launch_lock", lambda *_a: contextlib.nullcontext())
-    monkeypatch.setattr(waiting, "ready_helpers", lambda *_a: [{"id": "task:child"}])
+    monkeypatch.setattr(waiting, "wake_reason", lambda *_a, **_kw: "task:child:completed")
     with review_pause.receptive_author({"drive_root": tmp_path, "task_id": "parent"}):
         assert review_pause.author_detaches(SimpleNamespace(wait=None), [entry])
     assert entry.pause_before_launch is paused

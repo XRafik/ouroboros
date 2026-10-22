@@ -302,7 +302,7 @@ def _finalize_pending_review(
     from ouroboros.tools.commit_gate import watch_left_commit_review
 
     if watch_left_commit_review(ctx):
-        event = ("A chosen helper" if any(row.get("reason") == "helper_result" for row in
+        event = ("A selected outcome or wake time" if any(row.get("reason") in {"helper_result", "review_result", "wake_at"} for row in
                  getattr(ctx, "_review_detached_operations", []) or []) else "An addressed message")
         message += f" {event} ended your wait; a [Review settled] notice follows the whole wave."
     # The index is part of this live wave's identity. Retain it for exact
@@ -519,7 +519,7 @@ def _receptive_wave(ctx: ToolContext, wave: contextlib.ExitStack, *, review_only
     from ouroboros.tools.review_subject import gate_reading_checkout
 
     binding = (None if review_only or _git()._authorized_managed_update_resolver(ctx)
-               else review_pause.receptive_binding(ctx))
+               else review_pause.receptive_binding(ctx, state=getattr(ctx, "_review_wait_selection", None)))
     if binding is not None and getattr(ctx, "_review_reconcile_only", False):
         with review_pause.receptive_author(binding):
             binding = review_pause.rejoin_binding(ctx, str(getattr(ctx, "_current_review_record_id", "") or

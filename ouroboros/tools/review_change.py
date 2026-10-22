@@ -1043,6 +1043,9 @@ def run_review_change(ctx: ToolContext, **args: Any) -> Dict[str, Any]:
             panel = single_question_panel(supplied_panel, request.surface)
         else:
             panel = compose_panel(request, body=layer == "body", required_root=required_root, chosen_by=chosen_by)
+        if rejoin is None and public_execution:
+            from ouroboros.review_waiting import bind_panel
+            bind_panel(ctx, panel)
         if public_execution and (supplied_execution or {}).get("tested", {}) != {}:
             tested = supplied_execution["tested"]
             if (tested.get("head"), tested.get("tree")) != (frozen.parent_sha, frozen.tree_sha):
@@ -1118,6 +1121,7 @@ def _handle_new_review_change(
     author_questions: Optional[List[str]] = None, reviewers: Optional[List[str]] = None, reason: str = "",
     coupling_only: Optional[List[str]] = None, reviewer_effort: str = "", review_rebuttal: str = "",
     treat_as_body: bool = False, answer: str = "", _resolved_binding: Any = None,
+    wake_on: Any = None,
 ) -> str:
     from ouroboros import review_pause
 
@@ -1131,18 +1135,22 @@ def _handle_new_review_change(
         exhibit = execution_exhibit(ctx)
         # The tool's interactive author may leave the wave on an addressed message (the
         # operator script's synchronous entry binds nothing).
-        with review_pause.receptive_author(review_pause.receptive_binding(ctx)):
+        from ouroboros.review_waiting import select_helpers
+        state = select_helpers(ctx, wake_on)
+        if str(subject or "").strip() == "system" and any((wake_on or {}).values()):
+            raise ValueError("wake_on requires retained review custody; subject=system uses a synchronous report wait")
+        with review_pause.receptive_author(review_pause.receptive_binding(ctx, state=state)):
             result = run_review_change(
                 ctx, root=root, workspace_root=workspace_root, subject=subject, base=base, head=head, surface=surface,
                 goal=goal, scope=scope, author_questions=author_questions, reviewers=reviewers, reason=reason,
                 coupling_only=coupling_only, reviewer_effort=reviewer_effort, review_rebuttal=review_rebuttal,
                 treat_as_body=treat_as_body, answer=answer, _resolved_binding=_resolved_binding,
                 _preflight_execution=exhibit if exhibit.get("status") == "passed" else None, _public_execution=True)
-    except ReviewChangeArgumentError as exc:
+    except ValueError as exc:
         return argument_refusal(ctx, "TOOL_ARG_ERROR (review_change)", [str(exc)], effect="No reviewer was dispatched.")
     result.pop("usage", None)
     if (getattr(ctx, "_left_review_wait", None) or {}).get("surface") in {"change", RESULT, SKILL}:
-        event = ("A chosen helper finished" if any(row.get("reason") == "helper_result" for row in
+        event = ("A selected outcome or wake time was ready" if any(row.get("reason") in {"helper_result", "review_result", "wake_at"} for row in
                  getattr(ctx, "_review_detached_operations", []) or []) else "An addressed message reached you")
         result["message"] = (event + " while the reviewers ran: this call returned and their "
                              "paid work continues separately; a [Review settled] notice follows the whole wave. "
@@ -1223,7 +1231,9 @@ def _names(description: str) -> Dict[str, Any]:
 
 
 def get_tools() -> List[ToolEntry]:
+    from ouroboros.review_waiting import wake_on_schema
     properties = {
+        "wake_on": wake_on_schema(),
         "review_reference": {"type": "object", "description": "Collect the original paid review at $0; supply no other arguments."},
         "root": _string("The bound repository: the active workspace or the system repository.",
                         enum=list(ROOTS), default="active_workspace"),
