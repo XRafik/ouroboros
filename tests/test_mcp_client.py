@@ -480,11 +480,10 @@ def test_stdio_transport_passes_exact_argv_without_env_or_cwd(monkeypatch, stdio
         mcp_client._call_tool_async(cfg, "ping", {"value": "hello"}, timeout_sec=2)
     )
 
-    assert tools == [{"name": "ping", "description": "Ping", "input_schema": {}}]
-    from ouroboros.tool_effects import effect_of
-    fact = effect_of(mcp_client.make_tool_name("local", "ping"))
-    assert fact.annotations == {"readOnlyHint": True}
-    assert fact.effect == "write" and not fact.declared
+    # The listing keeps the spec hints for the published catalog; every process records them when it adopts
+    # that catalog (tests/test_mcp_catalog.py::test_published_annotation_hints_reach_every_process).
+    assert tools == [{"name": "ping", "description": "Ping", "input_schema": {},
+                      "annotations": {"readOnlyHint": True}}]
     assert result == ToolResult(
         status="ok",
         code="OK",

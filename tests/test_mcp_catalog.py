@@ -77,6 +77,30 @@ def test_publication_seeds_identical_rows_without_transport(monkeypatch):
     assert envelope["server_id"] == "demo"
 
 
+def test_published_annotation_hints_reach_every_process(monkeypatch):
+    from ouroboros import tool_effects
+    monkeypatch.setattr(tool_effects, "_MCP_ANNOTATIONS", {})
+    items = listing("read")
+    items[0]["annotations"] = {"readOnlyHint": True, "destructiveHint": False}
+    writer = publisher(items=items)
+    assert writer.refresh_server("demo")["published"]
+    name = mcp_client.make_tool_name("demo", "read")
+    tool_effects._MCP_ANNOTATIONS.clear()  # a worker starts without the server's memory
+    reader = publisher()
+    reader._async_list_tools = Mock(side_effect=AssertionError("worker listed"))
+    reader.list_tools_for_registry()
+    fact = tool_effects.effect_of(name, is_mcp=True)
+    assert fact.annotations == {"readOnlyHint": True, "destructiveHint": False}
+    assert fact.effect == "write" and not fact.declared  # hints never grant authority
+    async def plain(cfg, timeout):
+        return listing("read")
+    writer._async_list_tools = plain
+    assert writer.refresh_server("demo")["published"]
+    tool_effects._MCP_ANNOTATIONS["demo"] = {name: {"readOnlyHint": True}}  # the worker's stale memory
+    reader.reload_catalogs()
+    assert tool_effects.effect_of(name, is_mcp=True).annotations == {}
+
+
 def test_failed_relisting_retains_tools_and_discloses_in_task(monkeypatch, tmp_path):
     value = settings()
     install_settings(monkeypatch, value)

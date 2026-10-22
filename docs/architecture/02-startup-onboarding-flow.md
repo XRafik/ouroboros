@@ -4,7 +4,7 @@ Startup orders launcher checks, gateway onboarding and an atomic save of setting
 
 ### Boot order
 
-The `mcp` step (`server_boot.mcp_startup`) enables the server lister, seeds matching catalogs, prunes obsolete files, then lists in background; even earlier turns seed during configure.
+`server_boot.mcp_startup` makes the server the only MCP lister; it prunes, then lists in background (§6).
 
 UI preparation (Linux: browser), PID lock and automatic-intent check precede activation/Windows tray and Git/venv/seed bootstrap. `launcher_bootstrap` reaps noninteractive commands on completion or Quit/Panic: Jobs on Windows, lifelines on source POSIX, group/token custody without an abrupt-death guardian on frozen POSIX. OS installers keep terminal semantics and captured roots; shutdown during another bootstrap command also requests their stop. The lifecycle thread (exit 42, crash fuse: §1) probes `/api/health` while its child lives (`launcher_readiness.py`); exit before serving fails startup. Readiness permits onboarding, then shell/browser.
 
