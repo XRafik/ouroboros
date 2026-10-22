@@ -154,7 +154,16 @@ def subscription_ui():
         elif path == "/api/claudexor/status":
             body = fixture["status"]
         elif path == "/api/settings":
-            body = settings
+            query = parse_qs(urlparse(request.url).query)
+            if query.get("response_limit_preview") == ["1"]:
+                from ouroboros.context_view_facts import window_projection
+                from ouroboros.context_window import WindowLimit, WindowRecord
+                window = int(query.get("window", [0])[0])
+                body = {"route": {}, "response_limit": {}, "window_ack": False,
+                        "window": window_projection(WindowRecord("fixture", reserve=65536,
+                            total=WindowLimit(window, "total", "user_setting") if window else None))}
+            else:
+                body = settings
         elif path == "/api/review-pool":
             body = backend.get("review_pool", {"pool": [], "excluded": [], "last_executions": {},
                                                "row_costs": {}, "config_error": "", "migration": None})
@@ -303,7 +312,7 @@ def test_model_roles_pin_context_fallback_and_manual_draft_survive_preview(subsc
     light.locator('[data-model-role-account]').select_option('work')
     main.locator('summary').click()
     light.locator('summary').click()
-    assert 'not known' in light.locator('[data-model-context-note]').inner_text()
+    assert 'unknown' in light.locator('[data-model-context-note]').inner_text()
     page.wait_for_function("() => document.querySelector('[data-model-role=light] [data-model-role-account]').value === 'work'")
     assert held_catalog
     work_catalog = copy.deepcopy(ui['fixture']['catalog'])
@@ -311,10 +320,10 @@ def test_model_roles_pin_context_fallback_and_manual_draft_survive_preview(subsc
     for route in held_catalog:
         route.fulfill(content_type='application/json', body=json.dumps(work_catalog))
     page.unroute('**/api/model-catalog?*credential_profile_id=work')
-    page.wait_for_function("() => document.querySelector('[data-model-role=light] [data-model-context-note]').textContent.includes('500,000')")
-    assert '872,000' in main.locator('[data-model-context-note]').inner_text()
+    assert '500,000' not in light.locator('[data-model-context-note]').inner_text()
+    assert '872,000' not in main.locator('[data-model-context-note]').inner_text()
     main.locator('[data-model-role-context]').fill('1000000')
-    assert 'set by you' in main.locator('[data-model-context-note]').inner_text()
+    page.wait_for_function("() => document.querySelector('[data-model-role=main] [data-model-context-note]').textContent.includes('set by you')")
     page.locator('[data-model-role="vision"] [data-model-role-account]').select_option('work')
     page.click('[data-model-add]')
     fallback = page.locator('[data-model-role-group="fallback"]')

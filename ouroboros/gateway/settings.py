@@ -916,11 +916,18 @@ async def api_settings_get(request: Request) -> JSONResponse:
             backend=request.query_params.get("backend"), model=request.query_params.get("model")))
     if request.query_params.get("response_limit_preview") == "1":
         from ouroboros.response_limits import response_limit_preview
+        try:
+            window = int(request.query_params["window"]) if "window" in request.query_params else None
+            if window is not None and window < 0:
+                raise ValueError
+        except ValueError:
+            return json_error("'window' must be a non-negative integer", 400)
         model = str(request.query_params.get("model") or settings.get("OUROBOROS_MODEL") or "")
         route = _active_main_route(settings, model_override=model,
             use_local_override=request.query_params.get("local") == "true")
         return JSONResponse(await asyncio.to_thread(response_limit_preview, request_drive_root(request), route,
-            account=request.query_params.get("account", ""), settings=settings))
+            account=request.query_params.get("account", ""), settings=settings,
+            role=request.query_params.get("role", "main"), window=window))
     safe = {k: v for k, v in settings.items()}
     for key in SECRET_SETTING_KEYS:
         if safe.get(key):

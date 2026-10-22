@@ -369,6 +369,10 @@ def test_settings_preview_binds_the_exact_account_and_stores_nothing(tmp_path, m
     monkeypatch.setattr(gateway, "load_settings", lambda: {"OUROBOROS_MODEL": model})
     monkeypatch.setattr(gateway, "_owner_audit", lambda *a: None)
     monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    # Discovery precedes the passive Settings read; the preview must only read its store.
+    stored = ce._claudexor_metadata_evidence(model, "", None, {}, record=False)
+    ce._save(tmp_path, {"probes": {stored.route_fp: stored.to_json()},
+                       "response_limits": {stored.response_limit["route_fp"]: stored.response_limit}})
     app = Starlette(routes=[Route("/api/settings", gateway.api_settings_get),
                             Route("/api/owner/capability-ack", gateway.api_acknowledge_capability, methods=["POST"])])
     app.state.drive_root = tmp_path

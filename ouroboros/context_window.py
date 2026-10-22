@@ -44,9 +44,13 @@ class WindowRecord:
         return min(limits) if limits else None
 
     @property
+    def limiting(self) -> Optional[WindowLimit]:
+        return min((limit for limit in (self.input, self.total) if limit),
+                   key=lambda item: item.tokens - (self.reserve if item.kind == "total" else 0), default=None)
+
+    @property
     def source(self) -> str:
-        limit = min((limit for limit in (self.input, self.total) if limit),
-                    key=lambda item: item.tokens - (self.reserve if item.kind == "total" else 0), default=None)
+        limit = self.limiting
         if limit is None:
             return "unknown"
         stamp = limit.observed_at.replace("T", " ")[:16]
