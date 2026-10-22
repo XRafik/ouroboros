@@ -385,6 +385,18 @@ _RETIRED_GITHUB_TOOLS: dict[str, tuple[str, tuple[tuple[str, dict[str, str]], ..
 }
 
 
+_RETIRED_VCS_TOOLS = {"vcs_status": "status", "vcs_diff": "diff"}
+
+
+def _retired_vcs_action_refusal(ctx: Any, name: str, args: Any) -> str:
+    if name == "vcs_read":
+        for retired, action in _RETIRED_VCS_TOOLS.items():
+            if retired in _disabled_tools(ctx) and args.get("action") == action:
+                return (f"⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.disabled_tools withholds {retired!r}, "
+                        f"which vcs_read(action={action!r}) would carry out for this task.")
+    return ""
+
+
 def _retired_github_method_refusal(ctx: Any, name: str, args: Any) -> str:
     """The refusal for a successor method a retired, disabled GitHub tool name covered; '' to allow."""
     if name not in ("github_read", "github_write"):
@@ -484,7 +496,7 @@ def _capability_resource_guard_result(
                 f"withholds {name!r} for this task."
             ),
         )
-    if refusal := _retired_github_method_refusal(ctx, name, args):
+    if refusal := (_retired_github_method_refusal(ctx, name, args) or _retired_vcs_action_refusal(ctx, name, args)):
         return ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED", text=refusal)
     available, unavailable_reason, unavailable_detail = _builtin_tool_availability(name, ctx)
     if not available:
@@ -933,7 +945,7 @@ def _shell_git_and_runtime_block(
                     f"⚠️ GIT_VIA_SHELL_BLOCKED: `git {subcmd}` is blocked for acting "
                     "self_worktree children (no commits; the parent integrates the "
                     "returned patch and is the sole committer). For read-only git: "
-                    "vcs_status, vcs_diff tools, or run_command with git "
+                    "vcs_read tool, or run_command with git "
                     "log/show/diff/status/rev-list/show-ref/for-each-ref/listing branch-tag forms."
                 ),
             )
@@ -978,7 +990,7 @@ def _shell_git_and_runtime_block(
             "the Ouroboros runtime (system repo / data drives): self-repo changes go "
             "through commit_reviewed, which enforces pre-commit checks and review. "
             "Read-only git (status/log/diff/show/rev-parse/branch- and tag-listing, "
-            "or the vcs_status/vcs_diff tools) works everywhere, and mutating git is "
+            "or the vcs_read tool) works everywhere, and mutating git is "
             "free in any tree OUTSIDE the runtime (e.g. ~/projects, /tmp, an attached "
             "project folder)."
         ),

@@ -33,7 +33,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "search_code", "query_code", "query_data", "plan_task",
     "run_command", "run_script",
     "start_service", "service_status", "service_logs", "stop_service",
-    "vcs_status", "vcs_diff", "vcs_read", "vcs_commit_reviewed", "commit_reviewed",
+    "vcs_read", "vcs_commit_reviewed", "commit_reviewed",
     "github_read", "github_write",
     "vcs_restore", "vcs_revert", "vcs_pull_ff", "vcs_rollback",
     # One-shot deferred follow-up (W=A): core so a root task facing a typed wait
@@ -102,7 +102,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
     "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff", "vcs_read", "github_read",
+    "vcs_read", "github_read",
     # Memory: a child reads, writes knowledge notes and marks in its own name (the
     # host signs both with its focus) and publishes chronicle pages and parts only as
     # drafts signed with its focus (it is not the integrating mind, so tools/chronicle.py
@@ -164,7 +164,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
     "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff", "vcs_read", "github_read",
+    "vcs_read", "github_read",
     "write_file", "edit_text",
     "apply_patch", "edit_batch",
     "run_command", "run_script",
@@ -217,7 +217,7 @@ READ_ONLY_PARALLEL_TOOLS: frozenset[str] = frozenset({
     "read_file", "list_files",
     "search_code", "query_code", "query_data", "recent_tasks",
     "web_search", "chat_history",
-    "vcs_status", "vcs_diff", "vcs_read", "service_status", "service_logs",
+    "vcs_read", "service_status", "service_logs",
     "get_task_result", "list_projects", "memory_read",
 })
 

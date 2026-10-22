@@ -370,8 +370,6 @@ _IGNORE_ROOT_ARG_TOOLS: frozenset[str] = frozenset()
 
 
 _GENERIC_VCS_TARGET_TOOLS = frozenset({
-    "vcs_status",
-    "vcs_diff",
     "vcs_read",
     "vcs_pull_ff",
     "vcs_restore",
@@ -566,13 +564,12 @@ def _build_builtin_target_binding(ctx: Any, name: str, args: dict[str, Any]) -> 
 
     # Repository selection is a dispatch fact, shared by the handler and every
     # guard. A path filter is resolved inside that selected repository; it must
-    # never choose the repository by itself. Omitted repository on the older
-    # tools retains their historical path binding and target.
-    if name == "vcs_read" or (name in {"vcs_status", "vcs_diff"} and args.get("repository")):
+    # never choose the repository by itself.
+    if name == "vcs_read":
         repository = str(args.get("repository") or ".")
         selected = _one(repository)
         repo = selected.target_path
-        if not repo.is_dir() or not (repo / ".git").exists():
+        if not repo.is_dir() or (args.get("repository") and not (repo / ".git").exists()):
             raise ValueError("repository must name a Git worktree root inside the selected root")
         path = str(args.get("path") or "")
         if path:
@@ -732,8 +729,6 @@ def _binding_error_text(name: str, root: str, exc: Exception) -> str | ToolResul
         "edit_text": "EDIT_TEXT_ERROR",
         "edit_batch": "EDIT_BATCH_ERROR",
         "apply_patch": "APPLY_PATCH_ERROR",
-        "vcs_status": "GIT_ERROR",
-        "vcs_diff": "GIT_ERROR",
         "vcs_read": "GIT_ERROR",
         "vcs_pull_ff": "PULL_ERROR",
         "vcs_restore": "RESTORE_ERROR",
@@ -749,7 +744,7 @@ def _binding_error_text(name: str, root: str, exc: Exception) -> str | ToolResul
     text = f"⚠️ {prefixes.get(name, 'TOOL_ERROR')}: {type(exc).__name__}: {detail}"
     if name == "query_code":
         return ToolResult(status="error", code="TOOL_ARG_ERROR", text=text)
-    if name in {"vcs_status", "vcs_diff", "vcs_read"}:
+    if name == "vcs_read":
         return ToolResult(status="ok", code="GIT_ERROR", text=text)
     if name not in prefixes:
         return ToolResult(status="error", code="TOOL_ERROR", text=text)

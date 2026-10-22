@@ -178,7 +178,7 @@ def native_or_packet_attempt_rail(slot: Any, two_send_surface: bool) -> Any:
 
 _INSPECTION_TOOL_NAMES = (
     "read_file", "list_files", "search_code", "query_code", "query_data",
-    "vcs_status", "vcs_diff", "vcs_read", "compact_context",
+    "vcs_read", "compact_context",
 )
 
 _NATIVE_REVIEW_INSTRUCTIONS = (

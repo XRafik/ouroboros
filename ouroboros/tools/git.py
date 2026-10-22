@@ -1458,31 +1458,6 @@ def get_tools() -> List[ToolEntry]:
             "parameters": {"type": "object", "properties": commit_properties, "required": []}}, _commit_reviewed, is_code_tool=True),
         ToolEntry("vcs_commit_reviewed", {"name": "vcs_commit_reviewed", "description": legacy_commit_description,
             "parameters": {"type": "object", "properties": commit_properties, "required": []}}, _commit_reviewed, is_code_tool=True, alias_for="commit_reviewed"),
-        ToolEntry("vcs_status", {
-            "name": "vcs_status",
-            "description": "Show the selected repository's uncommitted paths (git status --porcelain: staged, unstaged and untracked). repository selects a Git worktree inside root; path only filters files there. The reply names the resolved repository; use vcs_read for branch, HEAD and history.",
-            "parameters": {"type": "object", "properties": {
-                "root": {"type": "string", "enum": ["active_workspace", "system_repo"], "default": "active_workspace", "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
-                "repository": {"type": "string", "default": "", "description": "Git worktree root inside root; omission preserves the current target. Separate from path."},
-                "path": {"type": "string", "default": "", "description": "Optional path filter relative to the selected repository"},
-                "max_chars": {"type": "integer", "default": 0, "description": "Optional output character limit; 0 means no explicit limit"},
-            }, "required": []},
-        }, _git_status, is_code_tool=True),
-        ToolEntry("vcs_diff", {
-            "name": "vcs_diff",
-            "description": "Show the selected repository's local changes as a git diff. Omit refs for unstaged/staged changes. Base compares to worktree or index; base+head compares two trees, not their merge base. repository selects a Git worktree inside root; path only filters files there, never another repository. No fetch. With explicit repository, executable filters are disabled: this is a raw comparison, not custom filter normalization.",
-            "parameters": {"type": "object", "properties": {
-                "root": {"type": "string", "enum": ["active_workspace", "system_repo"], "default": "active_workspace", "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
-                "base": {"type": "string", "default": "", "description": "Optional local base ref, resolved once to an exact tree."},
-                "head": {"type": "string", "default": "", "description": "Optional local second tree; requires base and staged=false."},
-                "staged": {"type": "boolean", "default": False, "description": "If true, show staged changes (--staged)"},
-                "repository": {"type": "string", "default": "", "description": "Git worktree root inside root; omission preserves the current target. Separate from path."},
-                "path": {"type": "string", "default": "", "description": "Optional path filter relative to the selected repository"},
-                "stat": {"type": "boolean", "default": False, "description": "If true, show --stat output"},
-                "name_only": {"type": "boolean", "default": False, "description": "If true, show --name-only output"},
-                "max_chars": {"type": "integer", "default": 0, "description": "Optional output character limit; 0 means no explicit limit"},
-            }, "required": []},
-        }, _git_diff, is_code_tool=True),
         ToolEntry("vcs_pull_ff", {
             "name": "vcs_pull_ff",
             "description": "Update the selected repository from origin: fetch, then fast-forward the current named branch only (git merge --ff-only). This changes the checkout; a diverged branch is refused with both SHAs, never merged or rewritten.",

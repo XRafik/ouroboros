@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from ouroboros.protected_artifacts import block_reason_for_path, protected_artifact_paths
@@ -18,20 +19,16 @@ from ouroboros.tools.git_plumbing import _publish_git_error, _sanitize_git_error
 from ouroboros.tools.tool_result import ToolResult, _publish_tool_result
 
 READ_DESCRIPTION = (
-    "Inspect local Git history, historical file content, refs, merge ancestry, or "
-    "repository identity without changing the repository or contacting a remote. "
-    "Select a worktree with root and optional repository; path only filters files "
-    "inside that worktree. Actions: log lists commits; show displays one commit's "
-    "patch; file reads a file at a commit; blame attributes historical lines; refs "
-    "lists local refs; rev_parse resolves an object; merge_base finds common ancestry; "
-    "identity reports the current HEAD, branch, worktree, Git directories, and dirty "
-    "state as sequential observations, not proof of an exact staged subject. "
-    "ref selects a local revision (or a refs/ prefix for refs); merge_base uses "
-    "base and head. max_count bounds log entries and max_chars truncates rendered output."
+    "Read local Git status, diff, history, files, blame, refs, ancestry, or repository identity. "
+    "root/repository selects a worktree; path filters within it. No fetch. Diff uses configured "
+    "filters: base compares to worktree (or index with staged); base+head compares two trees. "
+    "Identity is sequential observations, not proof of an exact staged subject. "
+    "History output has a physical capture bound; narrow with max_count, ref, or path."
 )
 
 _CONTENT_ACTIONS = frozenset({"show", "file", "blame"})
-_ACTIONS = frozenset({"log", "show", "file", "blame", "refs", "rev_parse", "merge_base", "identity"})
+_ACTIONS = frozenset({"status", "diff", "log", "show", "file", "blame", "refs", "rev_parse", "merge_base", "identity"})
+_CAPTURE_BYTES = 1024 * 1024
 
 
 def _capture_read_git(repo: pathlib.Path, args: list[str]) -> subprocess.CompletedProcess[bytes]:
@@ -49,27 +46,30 @@ def _capture_read_git(repo: pathlib.Path, args: list[str]) -> subprocess.Complet
         "-c", f"core.hooksPath={os.devnull}",
         "-c", "log.showSignature=false",
     ]
-    if args and args[0] in {"status", "diff"}:
-        # Worktree comparison can run repository clean/process filters. Read
-        # their configured driver names with Git's config parser, then blank
-        # only those helper slots for this invocation. Config inspection does
-        # not execute a filter and does not alter the repository.
-        configured = subprocess.run(
-            [*cmd, "config", "--null", "--name-only", "--get-regexp",
-             r"^filter\..*\.(clean|smudge|process|required)$"],
-            cwd=repo, capture_output=True, env=env, timeout=30,
-        )
-        if configured.returncode not in (0, 1):
-            raise _git_failure(configured)
-        drivers = {
-            key.decode("utf-8", "surrogateescape").rsplit(".", 1)[0]
-            for key in configured.stdout.split(b"\0") if key
-        }
-        for driver in sorted(drivers):
-            for slot in ("clean", "smudge", "process"):
-                cmd.extend(["-c", f"{driver}.{slot}="])
-            cmd.extend(["-c", f"{driver}.required=false"])
-    return subprocess.run([*cmd, *args], cwd=repo, capture_output=True, env=env, timeout=30)
+    # Drain both pipes concurrently, retaining only bounded prefixes. A large
+    # object never first accumulates in communicate()/capture_output memory.
+    def drain(stream, limit):
+        prefix, total = bytearray(), 0
+        while chunk := stream.read(65536):
+            total += len(chunk)
+            prefix.extend(chunk[:max(0, limit - len(prefix))])
+        return bytes(prefix), total - len(prefix)
+
+    with subprocess.Popen([*cmd, *args], cwd=repo, stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE, env=env) as process, ThreadPoolExecutor(max_workers=2) as pool:
+        stdout = pool.submit(drain, process.stdout, _CAPTURE_BYTES)
+        stderr = pool.submit(drain, process.stderr, 65536)
+        try:
+            process.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        out, omitted = stdout.result()
+        err, _ = stderr.result()
+    completed = subprocess.CompletedProcess(cmd, process.returncode, out, err)
+    completed.stdout_omitted = omitted
+    return completed
 
 
 def _git_failure(completed: subprocess.CompletedProcess[bytes]) -> RuntimeError:
@@ -82,7 +82,11 @@ def _run_read_git(repo: pathlib.Path, args: list[str], *, preserve_output: bool 
     if completed.returncode:
         raise _git_failure(completed)
     text = completed.stdout.decode("utf-8", "backslashreplace")
-    return text if preserve_output else text.rstrip()
+    text = text if preserve_output else text.rstrip()
+    if omitted := getattr(completed, "stdout_omitted", 0):
+        text += (f"\n⚠️ OUTPUT_TRUNCATED: captured first {_CAPTURE_BYTES} stdout bytes; "
+                 f"{omitted} bytes omitted. Narrow with max_count (log), ref, or path.")
+    return text
 
 
 def _object(repo: pathlib.Path, ref: str, kind: str) -> str:
@@ -183,6 +187,7 @@ def _vcs_read(
     ref: str = "",
     base: str = "",
     head: str = "",
+    staged: bool = False, stat: bool = False, name_only: bool = False,
     max_count: int = 20,
     max_chars: int = 0,
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
@@ -190,9 +195,10 @@ def _vcs_read(
     """Read Git objects using only the prepared repository and path binding."""
     if (action not in _ACTIONS or not isinstance(max_count, int)
             or not isinstance(max_chars, int) or not 1 <= max_count <= 200 or max_chars < 0
-            or (path and action not in {"log", "show", "file", "blame"})
-            or ((base or head) and action != "merge_base")
-            or (ref and action in {"merge_base", "identity"})):
+            or (path and action not in {"status", "diff", "log", "show", "file", "blame"})
+            or ((base or head) and action not in {"merge_base", "diff"})
+            or ((staged or stat or name_only) and action != "diff")
+            or (ref and action in {"merge_base", "identity", "status", "diff"})):
         return _publish_tool_result(ctx, ToolResult(
             status="error", code="TOOL_ARG_ERROR",
             text="⚠️ TOOL_ARG_ERROR (vcs_read): invalid action, limit, or argument for this action.",
@@ -212,6 +218,12 @@ def _vcs_read(
         if binding.operation != "vcs" or binding.root not in {"active_workspace", "system_repo"}:
             raise ValueError("vcs_read requires a prepared VCS worktree binding")
         repo = binding.repository_path or binding.base_path
+        if action in {"status", "diff"}:
+            from ouroboros.tools.git_vcs_ops import _git_diff, _git_status
+
+            common = dict(path=path, max_chars=max_chars, root=root, _resolved_binding=binding)
+            return (_git_status(ctx, **common) if action == "status" else
+                    _git_diff(ctx, staged=staged, stat=stat, name_only=name_only, base=base, head=head, **common))
         literal = _literal_path(binding, path)
         if action in {"file", "blame"} and not literal:
             raise ValueError(f"{action} requires path")
@@ -267,18 +279,22 @@ def get_tools():
         "parameters": {"type": "object", "required": ["action"], "properties": {
             "action": {"type": "string", "enum": sorted(_ACTIONS)},
             "root": {"type": "string", "enum": ["active_workspace", "system_repo"],
-                     "default": "active_workspace"},
+                     "default": "active_workspace",
+                     "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
             "repository": {"type": "string", "default": "",
                            "description": "Git worktree root within root; omitted selects root itself. Not a file filter."},
             "path": {"type": "string", "default": "",
                      "description": "Literal repository-relative file/path filter; required for file and blame."},
             "ref": {"type": "string", "default": "",
                     "description": "Local revision (default HEAD), or a literal refs/ prefix for refs."},
-            "base": {"type": "string", "default": "", "description": "First revision for merge_base only."},
-            "head": {"type": "string", "default": "", "description": "Second revision for merge_base only."},
+            "base": {"type": "string", "default": "", "description": "First revision for merge_base, or diff base resolved once to a tree."},
+            "head": {"type": "string", "default": "", "description": "Second revision for merge_base or diff; diff requires base and staged=false."},
+            "staged": {"type": "boolean", "default": False, "description": "Diff the index (--staged)."},
+            "stat": {"type": "boolean", "default": False, "description": "Diff summary (--stat)."},
+            "name_only": {"type": "boolean", "default": False, "description": "Diff file names only; takes precedence over stat."},
             "max_count": {"type": "integer", "minimum": 1, "maximum": 200, "default": 20,
                           "description": "Maximum commits returned by log."},
             "max_chars": {"type": "integer", "minimum": 0, "default": 0,
-                          "description": "Rendered output limit; zero keeps the complete result."},
+                          "description": "Rendered character limit; zero adds no limit beyond the history capture bound."},
         }},
     }, _vcs_read, is_code_tool=True, safety_policy="skip")]

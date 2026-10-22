@@ -159,27 +159,15 @@ def test_explicit_repository_status_diff_and_omission_parity(world):
     nested = repo(project / "nested")
     (project / "note.txt").write_text("outer\n", encoding="utf-8")
     (nested / "note.txt").write_text("inner\n", encoding="utf-8")
-    # The public schemas are parent-owned. Exercise the exact prepared binding
-    # and handlers here so this slice remains independently testable.
-    from ouroboros.tools.git_vcs_ops import _git_diff, _git_status
-    from ouroboros.tools.tool_resolution import _build_builtin_target_binding
-
-    for name, handler in (("vcs_status", _git_status), ("vcs_diff", _git_diff)):
-        old = _build_builtin_target_binding(ctx, name, {})
-        assert old.base_path == project
-        old_output = handler(ctx, root="active_workspace", _resolved_binding=old)
-        assert "GIT_ERROR" not in old_output
-        assert old_output == registry.execute(name, {})
-        assert f"repo={project}" in old_output
-        if name == "vcs_diff":
-            assert "outer" in old_output and "inner" not in old_output
-        selected = _build_builtin_target_binding(ctx, name, {"repository": "nested", "path": "note.txt"})
-        assert selected.base_path == project and selected.repository_path == nested
-        assert selected.target_path == nested / "note.txt"
-        output = handler(ctx, root="active_workspace", repository="nested", path="note.txt", _resolved_binding=selected)
-        assert "GIT_ERROR" not in output and f"repo={nested}" in output
-        assert ("note.txt" in output if name == "vcs_status" else "inner" in output), (name, output)
-        assert "outer" not in output
+    for action in ("status", "diff"):
+        output = registry.execute("vcs_read", {"action": action})
+        assert "GIT_ERROR" not in output and f"repo={project}" in output
+        if action == "diff":
+            assert "outer" in output and "inner" not in output
+        selected = registry.execute("vcs_read", {"action": action, "repository": "nested", "path": "note.txt"})
+        assert "GIT_ERROR" not in selected and f"repo={nested}" in selected
+        assert ("note.txt" in selected if action == "status" else "inner" in selected)
+        assert "outer" not in selected
 
 
 def test_historical_protected_file_blocks_file_blame_show_and_diff(world):
@@ -207,7 +195,7 @@ def test_historical_protected_file_blocks_file_blame_show_and_diff(world):
     from ouroboros.tools.tool_resolution import _build_builtin_target_binding
 
     args = {"repository": ".", "path": "private", "base": old, "head": "HEAD"}
-    binding = _build_builtin_target_binding(ctx, "vcs_diff", args)
+    binding = _build_builtin_target_binding(ctx, "vcs_read", {**args, "action": "diff"})
     diff = _git_diff(ctx, root="active_workspace", _resolved_binding=binding, **args)
     assert "RESOURCE_POLICY_BLOCKED" in diff and "historical secret" not in diff and "GIT_ERROR" not in diff
 
@@ -246,13 +234,6 @@ def test_hostile_git_env_and_repo_helpers_cannot_execute_or_write(world, monkeyp
     assert "second" in read_ok(ctx, action="show", path="note.txt")
     assert "second\n" in read_ok(ctx, action="file", path="note.txt")
     assert json.loads(read_ok(ctx, action="identity").split("\n\nVCS target:")[0])["dirty"] is True
-    from ouroboros.tools.git_vcs_ops import _git_diff, _git_status
-    from ouroboros.tools.tool_resolution import _build_builtin_target_binding
-
-    for name, handler in (("vcs_status", _git_status), ("vcs_diff", _git_diff)):
-        binding = _build_builtin_target_binding(ctx, name, {"repository": ".", "path": "note.txt"})
-        output = handler(ctx, root="active_workspace", repository=".", path="note.txt", _resolved_binding=binding)
-        assert "note.txt" in output and "GIT_ERROR" not in output
     assert not marker.exists()
     assert index.read_bytes() == before_index
     assert before_objects == {p.relative_to(project / ".git" / "objects")
@@ -278,8 +259,8 @@ def test_registered_reader_and_repository_arguments_work_without_shell(world):
         answer = registry.execute_result("vcs_read", {"action": action, "repository": "nested-public", **extra})
         assert answer.status == "ok" and answer.code != "GIT_ERROR", answer.text
         assert expected in answer.text and f"repo={nested}" in answer.text
-    for name in ("vcs_status", "vcs_diff"):
-        answer = registry.execute_result(name, {"repository": "nested-public", "path": "note.txt"})
+    for action in ("status", "diff"):
+        answer = registry.execute_result("vcs_read", {"action": action, "repository": "nested-public", "path": "note.txt"})
         assert answer.status == "ok" and answer.code != "GIT_ERROR", answer.text
         assert "note.txt" in answer.text and f"repo={nested}" in answer.text
     denied = registry.execute_result("vcs_read", {"action": "file", "repository": "../system", "path": "note.txt"})
@@ -300,9 +281,9 @@ def test_historical_symlink_uses_tree_entry_not_current_target(world):
     (project / "second.txt").write_text("second\n", encoding="utf-8")
     link.unlink()
     link.symlink_to("second.txt")
-    status = registry.execute("vcs_status", {"repository": ".", "path": "link.txt"})
+    status = registry.execute("vcs_read", {"action": "status", "repository": ".", "path": "link.txt"})
     assert "link.txt" in status and "second.txt" not in status, status
-    difference = registry.execute("vcs_diff", {"repository": ".", "path": "link.txt"})
+    difference = registry.execute("vcs_read", {"action": "diff", "repository": ".", "path": "link.txt"})
     assert "a/link.txt" in difference and "+second.txt" in difference, difference
 
 
@@ -329,7 +310,7 @@ def test_registered_nested_repositories_keep_presence_and_policy_root(world):
         skill_name="reader", skill_content_hash="a" * 64,
         profile_fingerprint="b" * 64, state_fingerprint="c" * 64,
         selection_fingerprint="d" * 64, model_slot="main", inline_max_rounds=5,
-        tool_grants=tuple(PresenceToolGrant(name) for name in ("vcs_diff", "vcs_read", "vcs_status")),
+        tool_grants=tuple(PresenceToolGrant(name) for name in ("vcs_read",)),
         resource_grants=(PresenceResourceGrant("active_workspace", ("vcs",), "allowed"),),
         digest="0" * 64,
     )
@@ -337,8 +318,8 @@ def test_registered_nested_repositories_keep_presence_and_policy_root(world):
     registry.set_context(ctx)
     for name, args in (
         ("vcs_read", {"root": "active_workspace", "action": "file", "repository": "other/nested", "path": "allowed/secret.txt"}),
-        ("vcs_status", {"root": "active_workspace", "repository": "other/nested", "path": "allowed/secret.txt"}),
-        ("vcs_diff", {"root": "active_workspace", "repository": "other/nested", "path": "allowed/secret.txt"}),
+        ("vcs_read", {"action": "status", "root": "active_workspace", "repository": "other/nested", "path": "allowed/secret.txt"}),
+        ("vcs_read", {"action": "diff", "root": "active_workspace", "repository": "other/nested", "path": "allowed/secret.txt"}),
     ):
         denied = registry.execute_result(name, args)
         assert denied.status == "blocked" and "PRESENCE_RESOURCE_BLOCKED" in denied.text, (name, denied)
@@ -379,7 +360,7 @@ def test_registered_historical_deleted_directory_and_relative_policy(world):
         result = registry.execute_result("vcs_read", {"action": action, "repository": "nested", **extra})
         assert result.code == "RESOURCE_POLICY_BLOCKED", (action, result)
         assert "historical directory secret" not in result.text
-    difference = registry.execute_result("vcs_diff", {
+    difference = registry.execute_result("vcs_read", {"action": "diff",
         "repository": "nested", "path": "private", "base": old, "head": "HEAD",
     })
     assert "RESOURCE_POLICY_BLOCKED" in difference.text and "historical directory secret" not in difference.text
@@ -410,7 +391,7 @@ def test_registered_protected_ancestor_blocks_unfiltered_history_without_sibling
     def history(repository):
         return (
             registry.execute_result("vcs_read", {"action": "show", "repository": repository}),
-            registry.execute_result("vcs_diff", {"repository": repository}),
+            registry.execute_result("vcs_read", {"action": "diff", "repository": repository}),
         )
 
     for protected_path in ("nested", "."):
@@ -446,7 +427,7 @@ def test_registered_file_content_that_looks_like_tool_error_is_ok(world):
     assert error.code == "GIT_ERROR"
 
 
-def test_registered_worktree_reads_do_not_run_configured_clean_or_process_filters(world):
+def test_registered_worktree_reads_keep_configured_clean_and_process_filters(world):
     registry, _ctx, _system, project = world
     clean_marker = project / "clean-ran"
     process_marker = project / "process-ran"
@@ -470,13 +451,14 @@ def test_registered_worktree_reads_do_not_run_configured_clean_or_process_filter
     assert clean_marker.exists() and process_marker.exists()
     clean_marker.unlink()
     process_marker.unlink()
-    for name in ("vcs_status", "vcs_diff"):
-        result = registry.execute_result(name, {"root": "active_workspace", "repository": "."})
-        assert result.status == "ok" and result.code != "GIT_ERROR", result
-        assert "note.txt" in result.text and "process.txt" in result.text
-    identity = registry.execute_result("vcs_read", {"action": "identity"})
-    assert identity.status == "ok" and '"dirty": true' in identity.text
-    assert not clean_marker.exists() and not process_marker.exists()
+    for action in ("status", "diff"):
+        expected = subprocess.run(["git", action], cwd=project, capture_output=True)
+        clean_marker.unlink(missing_ok=True)
+        process_marker.unlink(missing_ok=True)
+        result = registry.execute_result("vcs_read", {"action": action, "repository": "."})
+        assert (result.code == "GIT_ERROR") == bool(expected.returncode), result
+        if expected.returncode:
+            assert process_marker.exists()  # configured process failure remains visible
 
 
 def test_registered_log_and_show_do_not_invoke_signature_verifier(world, tmp_path):

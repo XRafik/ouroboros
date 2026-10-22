@@ -38,7 +38,7 @@ def _limit_git_output(text: str, max_chars: int = 0) -> str:
     limit = int(max_chars or 0)
     if limit <= 0 or len(text) <= limit:
         return text
-    return text[:limit] + f"\n⚠️ OUTPUT_TRUNCATED: git output limited to {limit} characters by max_chars."
+    return text[:limit] + f"\n⚠️ OUTPUT_TRUNCATED: git output limited to {limit} characters by max_chars. Narrow with path, or ref/max_count for history."
 
 
 def _vcs_binding(
@@ -87,7 +87,7 @@ def _binding_relative_path(binding: ResolvedResourceBinding, requested: str, *, 
     if literal:
         from ouroboros.tools.vcs_read import _literal_path
 
-        return _literal_path(binding, requested)
+        return _literal_path(binding, requested) if requested not in {"", "."} else ""
     if not str(requested or "").strip():
         return ""
     try:
@@ -103,19 +103,13 @@ def _git_status(
     max_chars: int = 0,
     root: str = "system_repo",
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
-    repository: str = "",
 ) -> str:
     try:
-        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=repository or path or ".")
+        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
         cmd = ["git", "status", "--porcelain"]
-        if relative := _git()._binding_relative_path(binding, path, **({"literal": True} if repository else {})):
-            cmd.extend(["--", f":(literal){relative}" if repository else _git().safe_relpath(relative)])
-        if repository:
-            from ouroboros.tools.vcs_read import _run_read_git
-
-            output = _run_read_git(binding.repository_path or binding.base_path, cmd[1:])
-        else:
-            output = _git().run_cmd(cmd, cwd=binding.base_path)
+        if relative := _git()._binding_relative_path(binding, path, literal=True):
+            cmd.extend(["--", f":(literal){relative}"])
+        output = _git().run_cmd(cmd, cwd=binding.repository_path or binding.base_path)
         return _git()._vcs_result(
             _git()._limit_git_output(output, max_chars),
             binding,
@@ -136,32 +130,24 @@ def _git_diff(
     max_chars: int = 0,
     root: str = "system_repo",
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
-    repository: str = "",
     **kwargs,
 ) -> str:
     try:
-        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=repository or path or ".")
+        binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
         repo_dir = binding.repository_path or binding.base_path
         base, head = str(kwargs.get("base") or ""), str(kwargs.get("head") or "")
         if head and (not base or staged):
             return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
-                text="⚠️ TOOL_ARG_ERROR (vcs_diff): head requires base and cannot be combined with staged=true.",
+                text="⚠️ TOOL_ARG_ERROR (vcs_read diff): head requires base and cannot be combined with staged=true.",
                 meta={"operation_outcome": "completed_no_effect"}))
         comparison = {}
         revisions = []
         for name, ref in (("base", base), ("head", head)):
             if ref:
-                if repository:
-                    from ouroboros.tools.vcs_read import _run_read_git
-
-                    tree = _run_read_git(repo_dir, ["rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"]).strip()
-                else:
-                    tree = _git().run_cmd(["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"], cwd=repo_dir).strip()
+                tree = _git().run_cmd(["git", "rev-parse", "--verify", "--end-of-options", f"{ref}^{{tree}}"], cwd=repo_dir).strip()
                 revisions.append(tree)
                 comparison.update({f"{name}_ref": ref, f"{name}_tree": tree})
         cmd = ["git", "diff"]
-        if repository:
-            cmd.extend(["--no-ext-diff", "--no-textconv", "--no-color"])
         if staged:
             cmd.append("--staged")
         if name_only:
@@ -169,9 +155,9 @@ def _git_diff(
         elif stat:
             cmd.append("--stat")
         cmd.extend(revisions)
-        if relative := _git()._binding_relative_path(binding, path, **({"literal": True} if repository else {})):
-            cmd.extend(["--", f":(literal){relative}" if repository else _git().safe_relpath(relative)])
-        if repository and not (stat or name_only):
+        if relative := _git()._binding_relative_path(binding, path, literal=True):
+            cmd.extend(["--", f":(literal){relative}"])
+        if not (stat or name_only):
             from ouroboros.tools.vcs_read import _protected_content_reason
 
             if reason := _protected_content_reason(ctx, binding, relative, "show"):
@@ -183,12 +169,7 @@ def _git_diff(
         )
         if protected_block:
             return _git()._vcs_result(protected_block, binding)
-        if repository:
-            from ouroboros.tools.vcs_read import _run_read_git
-
-            output = _run_read_git(repo_dir, cmd[1:])
-        else:
-            output = _git().run_cmd(cmd, cwd=repo_dir)
+        output = _git().run_cmd(cmd, cwd=repo_dir)
         text = _git()._vcs_result(_git()._limit_git_output(output, max_chars), binding)
         if comparison:
             import json

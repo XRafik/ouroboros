@@ -538,8 +538,8 @@ def test_stable_host_predispatch_denials_are_native_and_keep_legacy_projection(
         ("query_code", {"op": "digest"}, "binding failed", "error", "TOOL_ARG_ERROR", "⚠️ TOOL_ARG_ERROR (query_code): RuntimeError: binding failed", "argument_error", True, 0),
         ("apply_patch", {"patch": "*** Begin Patch\n*** End Patch"}, "binding failed", "blocked", "EDIT_OPS_BLOCKED", "⚠️ APPLY_PATCH_ERROR: RuntimeError: binding failed", "edit_ops_blocked", True, 1),
         ("edit_batch", {"edits": [{"path": "x", "old_str": "a", "new_str": "b", "count": 1}]}, "binding failed", "blocked", "EDIT_OPS_BLOCKED", "⚠️ EDIT_BATCH_ERROR: RuntimeError: binding failed", "edit_ops_blocked", True, 1),
-        ("vcs_status", {}, "binding failed", "ok", "GIT_ERROR", "⚠️ GIT_ERROR: RuntimeError: binding failed", "git_error", False, 0),
-        ("vcs_diff", {}, "binding failed", "ok", "GIT_ERROR", "⚠️ GIT_ERROR: RuntimeError: binding failed", "git_error", False, 0),
+        ("vcs_read", {"action": "status"}, "binding failed", "ok", "GIT_ERROR", "⚠️ GIT_ERROR: RuntimeError: binding failed", "git_error", False, 0),
+        ("vcs_read", {"action": "diff"}, "binding failed", "ok", "GIT_ERROR", "⚠️ GIT_ERROR: RuntimeError: binding failed", "git_error", False, 0),
         ("read_file", {"path": "x"}, "binding failed", "error", "LEGACY_TOOL_ERROR", "⚠️ READ_FILE_ERROR: RuntimeError: binding failed", "error", True, 1),
     ),
 )
