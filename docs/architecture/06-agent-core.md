@@ -329,7 +329,7 @@ Orphan cancellation needs readable terminal owner-finish evidence or the owner's
 
 **Measurements.** `subagent_metric_events.py` feeds `subagent_metrics.fold/read` from task/session/canonical-review publications. Producer upserts partition row identity/purpose (review/plan/execution). `swarm_rollup` commits cursor+totals; gaps stay unknown. Inspection/dynamic supervision lines expose facts; cached catalogs, Review text and schemas stay invariant.
 
-`swarm_receipt.py` and `swarm_receipt_sources.py` publish task receipts at finalization, revised by task/review/session/usage publications. Sources: intervals, ledger/accounts, supervisor context pressure. `swarm_wait_facts.py` records selections and actual wakes. Overlap is not productivity; missing causal edges remain unknown, never summed overlapping lifetimes. Live actors keep receipts provisional; mind-authored `swarm_comparison` is separate. No thresholds or automatic choice.
+`swarm_receipt.py` and `swarm_receipt_sources.py` publish receipts at finalization; task/review/session/usage publications revise them. Sources: intervals, ledger/accounts, supervisor context pressure. `swarm_wait_facts.py` records selections/actual wakes. Overlap is not productivity; missing causal edges stay unknown, never summed overlapping lifetimes. Live actors keep receipts provisional; accepted `finish_task.swarm_comparison` is separately mind-attributed. No thresholds or automatic choice.
 
 #### Run shape and mutation authority
 

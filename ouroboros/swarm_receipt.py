@@ -183,3 +183,20 @@ def refresh_for_task(root, task):
 def usage_changed(root, task_ids):
     for task_id in task_ids:
         refresh_for_task(root, task_id)
+
+
+def retain_comparison(ctx):
+    """Retain the mind's selected statement only after completion gates accept it."""
+    from ouroboros.task_store import patch_document
+
+    statement = (getattr(ctx, "_completion_selected", None) or {}).get("swarm_comparison")
+    root = getattr(ctx, "budget_drive_root", None) or getattr(ctx, "drive_root", None)
+    task_id = str(getattr(ctx, "task_id", "") or "")
+    if not root or not task_id or not isinstance(statement, str) or not statement.strip():
+        return
+    try:
+        row = patch_document(root, task_id, lambda current:
+            {**current, "swarm_comparison": statement} if current else None)
+        refresh_for_task(root, row)
+    except Exception:
+        log.warning("swarm comparison retention unavailable", exc_info=True)
