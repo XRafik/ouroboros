@@ -187,6 +187,8 @@ def test_photo_menu_escapes_gallery_crop_downloads_and_cleans_up(subscription_ui
     assert menu.is_visible()
     page.evaluate("shellPhoto.media.destroy()")
     assert not menu.count() and page.locator(".chat-gallery-item").count() == 0
+    # A leaving menu's inert picture must also leave the DOM once its fade ends.
+    page.wait_for_function("!document.querySelector('body > .chat-photo-menu')", timeout=5_000)
 
 
 def test_settings_footer_controls_are_reachable_at_content_breakpoints(subscription_ui):

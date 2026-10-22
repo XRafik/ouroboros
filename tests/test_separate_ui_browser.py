@@ -841,7 +841,7 @@ def test_update_status_restart_and_panic_are_the_cores_own_process_facts(stack):
 
             # Panic: the core stops everything and exits; the interface host is untouched.
             page.locator('[data-chat-command="panic"]').click()
-            page.locator("[data-confirm-ok]").click()
+            expect(page.locator("[data-confirm-ok]")).to_have_count(0)
             exit_code = core.process.wait_exit(90)
             page.wait_for_function(DISCONNECTED, timeout=30_000)
             after = {"api": session.api("GET", "/api/state", None)["status"],
