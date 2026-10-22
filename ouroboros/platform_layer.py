@@ -1058,9 +1058,8 @@ def kill_process_on_port(port: int) -> None:
     """Kill any process listening on the given TCP port."""
     try:
         if IS_WINDOWS:
-            # The socket table, not netstat's text: netstat translates its state column
-            # (no "LISTENING" on a Russian Windows) and prints in a code page the ANSI
-            # decoder cannot read. psutil is a declared Windows dependency.
+            # psutil's socket table, not netstat's text: netstat translates its state column (no "LISTENING"
+            # on a Russian Windows) and prints in a code page the ANSI decoder cannot read.
             import psutil
 
             listeners = list(dict.fromkeys(  # a dual-stack listener has an IPv4 and an IPv6 row
@@ -1076,12 +1075,8 @@ def kill_process_on_port(port: int) -> None:
                 ["lsof", "-nP", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
                 capture_output=True, text=True, timeout=5,
             )
-            listeners = res.stdout.split()
-        for pid_str in listeners:
-            try:
-                pid = int(pid_str)
-            except ValueError:
-                continue
+            listeners = [int(pid) for pid in res.stdout.split() if pid.isdigit()]
+        for pid in listeners:
             if pid != os.getpid():
                 force_kill_pid(pid)
     except Exception:
