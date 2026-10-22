@@ -1,9 +1,7 @@
-"""Product-management envelopes beside ``contracts.py`` (skills, marketplaces, agent accounts,
-local model, MCP, model catalog, updates, core control): descriptive TypedDicts, the twin of
-``web/modules/management_contract_types.js`` (twins older tests read stay in ``api_types.js``).
-Account routes relay the bundled Claudexor engine's own API v2 objects (protocol major 3, release
-pinned in ``ouroboros/claudexor_runtime_pin.json``, source https://github.com/razzant/claudexor),
-named here by their engine schema type."""
+"""Product-management envelopes beside ``contracts.py`` (skills, marketplaces, agent accounts, local model,
+MCP, model catalog, updates, core control): descriptive TypedDicts, the twin of ``web/modules/management_contract_types.js``
+(twins older tests read stay in ``api_types.js``). Account routes relay the bundled Claudexor engine's own API v2 objects
+(protocol major 3, release pinned in ``ouroboros/claudexor_runtime_pin.json``, source https://github.com/razzant/claudexor), named by their engine schema type."""
 
 from __future__ import annotations
 
@@ -65,13 +63,11 @@ class InstalledSkill(TypedDict, total=False):
     presence_runtime: Dict[str, Any]  # a reviewed presence profile's runtime choice
     provenance: Dict[str, Any]  # a ClawHub install record
     identity_collision: bool
-    # The install record joined with the cached catalog of its source (skill_source_catalog.install_listing):
-    # source {id, name, kind, part}, official (exact endorsed bytes), release, basis, base_known, modified (null: base unknown),
-    # update_available {version, digest} | null, withdrawn ({reason, version} for a withdrawn release), left_source, turn_on_when_ready, installed_by,
-    # installed_at, and reason and task_id when the record has them (an install Ouroboros made says why and in
-    # which task); check {by, notes, at}, pending_update {version, digest}, and
-    # update_rejected {version, digest, reason: review_blockers|review_unfinished|preflight_failed, at}.
-    # null: not installed from a source (made here, a local folder, a built-in seed).
+    # The install record joined with the cached catalog of its source (skill_source_catalog.install_listing): source {id, name, kind, part}, official (exact endorsed bytes),
+    # release, basis, base_known, modified (null: base unknown), update_available {version, digest} | null, withdrawn ({reason, version} for a withdrawn release), left_source,
+    # turn_on_when_ready, installed_by, installed_at, and reason and task_id when the record has them (an install Ouroboros made says why and in which task); check {by, notes,
+    # at}, pending_update {version, digest}, and update_rejected {version, digest, reason: review_blockers|review_unfinished|preflight_failed, at}. null: not installed from a
+    # source (made here, a local folder, a built-in seed).
     install: Optional[Dict[str, Any]]
     category: List[str]  # the source's category ids for this skill, [] when it has none
 

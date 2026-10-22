@@ -13,8 +13,8 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D03 | Context assembly, fit & compaction | 23 | 0 |
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 43 | 0 |
-| D06 | Review stack | 91 | 0 |
-| D07 | Delegation, subagents & Claudexor | 74 | 0 |
+| D06 | Review stack | 95 | 0 |
+| D07 | Delegation, subagents & Claudexor | 86 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 36 | 0 |
@@ -28,7 +28,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **851** | **0** |
+| **total** | | **867** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -40,7 +40,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 | **D02** | ✓ | · | ✓ | · | · | · | ✓ | · | ✓ | · | · | ✓ | · | · | · | ✓ | · | ✓ | · | · |
 | **D03** | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | · |
 | **D04** | · | · | · | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | ✓ | ✓ | · |
-| **D05** | ✓ | ✓ | · | ✓ | · | · | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
+| **D05** | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
 | **D06** | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | · | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D07** | ✓ | ✓ | · | ✓ | ✓ | ✓ | · | ✓ | · | · | · | ✓ | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | · |
 | **D08** | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · | ✓ | · | · | ✓ | · | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | · |
@@ -65,7 +65,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 
 ## Hidden coupling (classified out of the strict graph)
 
-- lazy-only cross-domain pairs: **122**
+- lazy-only cross-domain pairs: **121**
   - D01->D10
   - D01->D11
   - D02->D05
@@ -93,7 +93,6 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D04->D20
   - D05->D03
   - D05->D06
-  - D05->D07
   - D05->D08
   - D05->D14
   - D05->D20
@@ -413,13 +412,13 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/preflight_receipts.py`
 - `ouroboros/preflight_runner.py`
 - `ouroboros/review.py`
-- `ouroboros/review_actor_aggregation.py`
 - `ouroboros/review_body_fact.py`
 - `ouroboros/review_checking.py`
 - `ouroboros/review_checking_prune.py`
 - `ouroboros/review_custody.py`
 - `ouroboros/review_cycles.py`
 - `ouroboros/review_dispatch.py`
+- `ouroboros/review_doctrine.py`
 - `ouroboros/review_evidence.py`
 - `ouroboros/review_evidence_sections.py`
 - `ouroboros/review_execution.py`
@@ -436,6 +435,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/review_price.py`
 - `ouroboros/review_projection.py`
 - `ouroboros/review_records.py`
+- `ouroboros/review_seat_outcome.py`
 - `ouroboros/review_session_custody.py`
 - `ouroboros/review_session_preparation.py`
 - `ouroboros/review_session_reads.py`
@@ -451,6 +451,8 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/review_thread_continuity.py`
 - `ouroboros/review_verdict.py`
 - `ouroboros/review_verdict_extraction.py`
+- `ouroboros/review_waiting.py`
+- `ouroboros/review_wave.py`
 - `ouroboros/reviewer_slot_config.py`
 - `ouroboros/reviewer_window.py`
 - `ouroboros/safe_test_supervisor.py`
@@ -479,6 +481,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/tools/review_change.py`
 - `ouroboros/tools/review_change_custody.py`
 - `ouroboros/tools/review_checklist.py`
+- `ouroboros/tools/review_collection.py`
 - `ouroboros/tools/review_context_atlas.py`
 - `ouroboros/tools/review_file_pack.py`
 - `ouroboros/tools/review_helpers.py`
@@ -504,6 +507,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/claudexor_startup_failure.py`
 - `ouroboros/configured_subagents.py`
 - `ouroboros/delegate_activity.py`
+- `ouroboros/delegate_bootstrap_identity.py`
 - `ouroboros/delegate_collection.py`
 - `ouroboros/delegate_containment.py`
 - `ouroboros/delegate_continuation.py`
@@ -516,18 +520,23 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/delegate_hold.py`
 - `ouroboros/delegate_interactions.py`
 - `ouroboros/delegate_invocation.py`
+- `ouroboros/delegate_message_store.py`
 - `ouroboros/delegate_output.py`
 - `ouroboros/delegate_pending.py`
+- `ouroboros/delegate_plan.py`
 - `ouroboros/delegate_progress.py`
 - `ouroboros/delegate_readonly_inputs.py`
 - `ouroboros/delegate_recovery.py`
+- `ouroboros/delegate_recovery_holders.py`
 - `ouroboros/delegate_registration_policy.py`
+- `ouroboros/delegate_reply.py`
 - `ouroboros/delegate_shared.py`
 - `ouroboros/delegate_source_coverage.py`
 - `ouroboros/delegate_start_claims.py`
 - `ouroboros/delegate_start_instructions.py`
 - `ouroboros/delegate_state_sweep.py`
 - `ouroboros/delegate_supervision.py`
+- `ouroboros/delegate_supervision_state.py`
 - `ouroboros/delegate_target_drift.py`
 - `ouroboros/delegate_terminal.py`
 - `ouroboros/depth_evidence.py`
@@ -547,12 +556,18 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/subagent_history.py`
 - `ouroboros/subagent_inspection.py`
 - `ouroboros/subagent_messages.py`
+- `ouroboros/subagent_metric_events.py`
+- `ouroboros/subagent_metrics.py`
 - `ouroboros/subagent_route_health.py`
 - `ouroboros/subagent_runtime.py`
 - `ouroboros/subagent_work_order.py`
 - `ouroboros/subagent_worktrees.py`
 - `ouroboros/subagents.py`
+- `ouroboros/supervisor_route.py`
+- `ouroboros/swarm_receipt.py`
+- `ouroboros/swarm_receipt_sources.py`
 - `ouroboros/swarm_rollup.py`
+- `ouroboros/swarm_wait_facts.py`
 - `ouroboros/task_tree_ledger.py`
 - `ouroboros/tools/control_delegation.py`
 - `ouroboros/tools/control_scheduling.py`
