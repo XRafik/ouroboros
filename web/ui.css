@@ -191,6 +191,9 @@
     --radius-inner: 12px;
     --radius-sheet: 24px;
     --surface-object: rgba(255, 255, 255, 0.055);
+    /* The object's colour as one opaque paint (its veil over --bg-primary), for marks that must cover what they
+       cross: a chart's label halos and dot rings. */
+    --surface-object-opaque: #1c1c1f;
     --surface-capsule: rgba(255, 255, 255, 0.09);
     --surface-capsule-hover: rgba(255, 255, 255, 0.135);
     --surface-float: rgba(32, 32, 34, 0.92);
@@ -376,6 +379,7 @@
     --elev-float: 0 2px 6px rgba(28, 33, 51, 0.06), 0 18px 44px rgba(28, 33, 51, 0.11);
     --row-lift-dim: rgba(16, 18, 28, 0.24);
     --surface-object: #ffffff;
+    --surface-object-opaque: var(--surface-object);
     --surface-capsule: #ffffff;
     --surface-capsule-hover: #f5f6f8;
     --surface-float: #ffffff;
@@ -638,7 +642,7 @@
 
 
 .ui-chip,
-:where(.status-badge, .mcp-server-status, .evo-runtime-pill, .evo-runtime-chip) {
+:where(.status-badge, .mcp-server-status) {
     display: inline-flex;
     align-items: center;
     gap: 6px;

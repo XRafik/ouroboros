@@ -28,7 +28,7 @@ CATEGORIES = ("owner", "warning", "system", "data", "palette")
 # category | sheet | [at-rule context » ]selector | properties
 AMBER_REGISTRY = """
 # The owner's move: a question to answer or an action only the owner can take (sign in, a spending limit, a
-# suggested trust to confirm, local changes before an update, an Evolution pill that needs the owner).
+# suggested trust to confirm, local changes before an update, an Evolution chip that needs the owner).
 owner | web/ui.css | .status-mark[data-hue="owner"] | color
 owner | web/style.css | .chat-budget-pill[data-attention="1"] .chat-budget-bar | background
 owner | web/style.css | .chat-budget-pill[data-attention="1"] .chat-budget-bar-fill | background
@@ -36,7 +36,6 @@ owner | web/style.css | .chat-budget-pill[data-attention="1"] .chat-budget-text 
 owner | web/style.css | .chat-live-phase[data-chip-tone="owner"] | background, border-color, color
 owner | web/style.css | .chat-question-nav | background, border, color
 owner | web/style.css | .chat-question-nav:hover | border-color
-owner | web/style.css | .evo-runtime-pill.owner | background, border-color, color
 owner | web/style.css | .skills-trust-value.is-suggested | color
 owner | web/style.css | .update-pill.has-local | background, border-color, color
 owner | web/style.css | :root[data-theme] .chat-budget-pill.ui-chrome-control[data-attention="1"] | background
@@ -127,9 +126,9 @@ palette | web/ui.css | :root[data-theme="light"] | --system-border, --system-bub
 palette | web/ui.css | :root[data-theme="light"] | --tone-amber-hover
 """
 
-# How many amber references each first-party script may hold, all data categories: a chart series colour (Evolution's
-# knowledge-base series, a widget chart's palette) and Logs' task category.
-SCRIPT_AMBER = {"web/modules/evolution.js": 1, "web/modules/log_events.js": 1, "web/modules/widget_chart.js": 2}
+# How many amber references each first-party script may hold, all data categories: a chart series colour (a widget
+# chart's palette) and Logs' task category.
+SCRIPT_AMBER = {"web/modules/log_events.js": 1, "web/modules/widget_chart.js": 2}
 
 
 def _decommented(css: str) -> str:

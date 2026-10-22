@@ -97,6 +97,7 @@ ouroboros/ — agent core and shared runtime (§6)
   credential_shapes.py — credential leaf names and physical locations (§6 Credential mutation and diagnostic redaction)
   update_channels.py — Stable/QA/Development channel mapping (§8)
   update_letter.py — the update letter: `base..target` commit material from one accounted light-slot call (§7; §3 Updates)
+  evolution_history.py — Evolution's version history (§3)
   colab_bootstrap.py — Google Colab source-mode bootstrap (official source, Drive-backed data, no-UI server)
   cli.py — source/headless CLI over gateway tasks, logs, settings, skills, local model and MCP (CLI / Headless Boundary below)
   packaged_cli.py, packaged_cli_install.py — packaged desktop CLI bridge and its command-shim installer
@@ -681,7 +682,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   │   ├── server_process.json    ← launcher-owned server identity for relaunch cleanup
 │   │   ├── advisory_review.json   ← commit-review state (attempts, obligations, readiness debts)
 │   │   ├── code_intel/<repo_key>/inventory.json ← code-inventory facts; no source cache
-│   │   ├── evolution_metrics_cache.json ← per-tag metrics cache
+│   │   ├── evolution_metrics_cache.json ← version history cache
 │   │   ├── evolution_campaign.json ← campaign objective, progress, budget
 │   │   ├── evolution_checkpoints.jsonl ← per-cycle checkpoints
 │   │   ├── post_task_evolution_request.json ← one-shot promotion signal for the supervisor idle tick
