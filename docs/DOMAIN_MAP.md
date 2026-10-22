@@ -14,7 +14,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
 | D06 | Review stack | 95 | 0 |
-| D07 | Delegation, subagents & Claudexor | 81 | 0 |
+| D07 | Delegation, subagents & Claudexor | 86 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 33 | 0 |
@@ -28,7 +28,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **854** | **0** |
+| **total** | | **859** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -552,13 +552,18 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/subagent_history.py`
 - `ouroboros/subagent_inspection.py`
 - `ouroboros/subagent_messages.py`
+- `ouroboros/subagent_metric_events.py`
+- `ouroboros/subagent_metrics.py`
 - `ouroboros/subagent_route_health.py`
 - `ouroboros/subagent_runtime.py`
 - `ouroboros/subagent_work_order.py`
 - `ouroboros/subagent_worktrees.py`
 - `ouroboros/subagents.py`
 - `ouroboros/supervisor_route.py`
+- `ouroboros/swarm_receipt.py`
+- `ouroboros/swarm_receipt_sources.py`
 - `ouroboros/swarm_rollup.py`
+- `ouroboros/swarm_wait_facts.py`
 - `ouroboros/task_tree_ledger.py`
 - `ouroboros/tools/control_delegation.py`
 - `ouroboros/tools/control_scheduling.py`

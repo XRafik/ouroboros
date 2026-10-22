@@ -123,6 +123,11 @@ def publish_seat_execution(request: Any, slot: Any, actor: Any, usage_ctx: Any) 
     """A seat publishes its actual execution when it settles, even after its drain left."""
     from ouroboros.reviewer_slot_config import record_reviewer_slot_executions
 
+    from ouroboros.subagent_metric_events import review_execution
+    try:
+        review_execution(request, slot, actor, usage_ctx)
+    except Exception:
+        log.debug("review measurement unavailable", exc_info=True)
     try:
         record_reviewer_slot_executions(request.surface, [actor], {slot.slot_id: slot}, keep_on=usage_ctx)
     except Exception:

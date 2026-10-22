@@ -1,14 +1,10 @@
 """The usage store: ``state/usage.sqlite``, the one monetary authority.
 
-Design contract: docs/USAGE_STORE.md. ONE row per physical attempt id
-(``attempts``), UPDATEd on every transition, plus the current facts every
-ordinary reader asks (``summaries``: the exact ``_summary``/``_breakdown_bucket``
-state per scope and key), maintained in the writing transaction by the one
-reducer (``_usage_rows.summary_delta``: subtract the old row, add the new one,
-Decimal arithmetic on decimal text). ``bindings`` holds the earliest root/group
-cap binding, ``dirty_owners`` the task/root ids whose stored cost projection is
-behind, ``one_shots`` the identity of single-row kinds, ``meta`` the schema,
-the installation's lock tier, the import provenance and the publication marker.
+Contract: docs/USAGE_STORE.md. One ``attempts`` row per physical id, updated on transitions.
+``summaries`` holds exact scope/key buckets, maintained transactionally by
+``_usage_rows.summary_delta`` (subtract old, add new; Decimal arithmetic on decimal text).
+``bindings`` holds earliest root/group caps; ``dirty_owners`` holds stale projections;
+``one_shots`` holds single-row identities; ``meta`` holds schema, tier, import and publication facts.
 
 Nothing on an ordinary path aggregates the ``attempts`` table: admission, sends,
 displays and status read summary rows and addressed rows (one attempt by id,
@@ -63,10 +59,8 @@ log = logging.getLogger(__name__)
 STORE_REL = pathlib.Path("state/usage.sqlite")
 IMPORT_LOCK_NAME = "usage_import.lock"
 SCHEMA_VERSION = 1
-# The database header's application id names the lock protocol every process
-# must use, so a process selects it BEFORE opening (``meta.lock_tier`` is the
-# same fact, recorded by the import that chose it). The connection, tier and
-# transaction core is ``ouroboros.store``, shared with the current-facts store.
+# The header selects the lock protocol BEFORE opening (also recorded in meta.lock_tier).
+# Connection, tier and transaction core are shared with the current store (ouroboros.store).
 _APPLICATION_ID = {TIER_ENFORCED: 0x4F555345, TIER_NAME: 0x4F55534E}
 _OPEN_STATES = ("reserved", "dispatched", "unresolved")
 _OPEN_PREDICATE = ("(state IN ('reserved','dispatched','unresolved') "
@@ -341,6 +335,7 @@ class Txn:
         self._handoff = False
         self._buckets: Dict[Tuple[str, str], Bucket] = {}
         self._marker: Optional[list] = None
+        self._receipt_tasks: set[str] = set()
 
     # -- reads
     def attempt(self, attempt_id: str) -> Optional[Dict[str, Any]]:
@@ -567,6 +562,7 @@ class Txn:
         bind_root_attribution(self.conn, stored)
         for owner in dict.fromkeys((str(stored.get("task_id") or ""), str(stored.get("root_task_id") or ""))):
             if owner:
+                self._receipt_tasks.add(owner)
                 self.conn.execute("INSERT INTO dirty_owners (owner_id, revision) VALUES (?, ?) ON CONFLICT(owner_id) "
                                   "DO UPDATE SET revision=excluded.revision", (owner, seq))
         if previous is None and is_one_shot_kind(str(stored.get("kind") or "")):
@@ -714,13 +710,11 @@ def _sha256_file(path: pathlib.Path) -> Optional[str]:
 @contextlib.contextmanager
 def hold(root: pathlib.Path | str, *, timeout_sec: float = USAGE_LOCK_TIMEOUT_SEC,
          write: bool = True, migrate: bool = True, exporting: bool = False) -> Iterator[Txn]:
-    """One store transaction within ``timeout_sec`` of waiting, else
-    ``UsageLockUnavailable(reason="contention")``. A write takes the write lock
-    at BEGIN (``BEGIN IMMEDIATE``); its COMMIT waits for readers to drain. This
-    is the primitive the money acquisitions slice (``_usage_wait``). A store
-    carrying an export mark refuses every write typed (``UsageExportInProgress``)
-    inside the transaction it would have made; only the export itself and its
-    abandonment write under ``exporting=True``."""
+    """Bounded money acquisition (``_usage_wait``); timeout raises UsageLockUnavailable.
+    Writes use BEGIN IMMEDIATE and wait for readers at COMMIT. An export mark
+    refuses writes with UsageExportInProgress; only export/abandonment use exporting=True.
+    Receipt callbacks run after the transaction and name lock have closed.
+    """
     root = pathlib.Path(root)
     tier = store_tier(root, wait_sec=timeout_sec, migrate=migrate)
     with contextlib.ExitStack() as stack:
@@ -751,6 +745,11 @@ def hold(root: pathlib.Path | str, *, timeout_sec: float = USAGE_LOCK_TIMEOUT_SE
                         raise UsageLockUnavailable(str(exc), reason=exc.reason) from exc
                     except sqlite3.Error as exc:
                         raise _typed(exc) from exc
+
+
+    if txn._receipt_tasks:
+        from ouroboros.swarm_receipt import usage_changed
+        usage_changed(root, txn._receipt_tasks)
 
 
 def _typed(exc: sqlite3.Error) -> UsageAccountingError:
