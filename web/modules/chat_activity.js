@@ -1,15 +1,15 @@
 // Pure chat-activity helpers shared by chat.js and dependency-free node tests:
 // live-card presentation projections (moved verbatim from chat.js) plus the
 // census snapshot hydration. The room's status word is the server's (work_status.js).
-import { META_PART_SEPARATOR, executorIdentityMarkup } from './harness_presentation.js';
+import { META_PART_SEPARATOR, executorIdentityMarkup, executorModelText } from './harness_presentation.js';
 import { effortChipMarkup } from './effort_chip.js';
 import { resultFilesItemHtml } from './result_files.js';
 import { taskSourceDownloadUrl, apiFetch } from './api_client.js';
-import { compactModel, formatLogDuration, modelExecutionLabel } from './log_events.js';
+import { compactModel, formatLogDuration, modelExecutionView } from './log_events.js';
 import { fitText, fullText } from './text_fit.js';
 import { delegatedActivityBodyHtml, delegatedHeadline, delegatedLineView } from './delegated_activity.js';
 import { REUSABLE_TASK_IDS } from './task_control_menu.js';
-import { paintLiveDetail } from './task_phase_chip.js';
+import { ownLiveDetail, paintLiveDetail } from './task_phase_chip.js';
 import { fmt, tr, tx } from './i18n.js';
 import { formatMsgTime } from './utils.js';
 import { hostRowDisplayText } from './host_notice_text.js';
@@ -1326,9 +1326,13 @@ export function cardMetaKeys(src) {
 // so a replay batch renders it exactly once per card.
 // "updated" names the turn's own last narration in the chat's one time format (formatMsgTime: the
 // same words as a bubble's clock), never the host locale's long date.
-function updatedLabel(record) {
+function updatedTime(record) {
     const time = record.latestActivityRaw ? formatMsgTime(record.latestActivityRaw) : null;
-    const text = time?.short || record.latestActivityTs || '';
+    return time?.short || record.latestActivityTs || '';
+}
+
+function updatedLabel(record) {
+    const text = updatedTime(record);
     return text ? `updated ${text}` : '';
 }
 
@@ -1363,6 +1367,20 @@ function metaLineHtml(parts) {
         ? withTrailingSeparator(part) : part}</span>`).join('');
 }
 
+// The card's facts beyond its compact line: labelled rows of its own details block (a nested child
+// carries its own), opened by the card's one disclosure. A row exists only for a known fact; the
+// markup equals its serialization, so an unchanged list is never rebuilt under a reader's selection.
+function paintLiveFacts(record, rows) {
+    const el = ownLiveDetail(record, 'liveFacts');
+    if (!el) return false;
+    const html = rows.filter(([, value]) => value).map(([label, value]) =>
+        `<div class="chat-live-fact"><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`).join('');
+    if (el.innerHTML === html && el.hidden === !html) return false;
+    if (el.innerHTML !== html) el.innerHTML = html;
+    el.hidden = !html;
+    return true;
+}
+
 export function renderLiveCardMeta(record, { agentModel = record?.agentModel || '' } = {}) {
     if (!record?.metaEl) return false;
     const toolCalls = Number.isInteger(record.toolCalls) ? `${record.toolCalls} tool ${record.toolCalls === 1 ? "call" : "calls"}` : '';
@@ -1371,6 +1389,19 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
     // cost · updated, plus the facts that change what the owner may trust. Executor, model and
     // effort details stay on the room's card.
     const portal = record.root?.dataset?.portal === '1';
+    const text = (item) => `<span class="chat-live-meta-text">${escapeHtml(item)}</span>`;
+    // The compact line says who ran the work, on what, how long and for how much (DESIGN §5 "A task card's
+    // summary outranks its details"). A delegated child names its executor and only the executor's own model
+    // evidence; any other card the model a usable solve response observed, else its agent model, and an
+    // unobserved execution in its own words. Effort is the selected leaf's dispatch level, not the nanny's
+    // reasoning level or a provider echo (subagent_runtime.resolve_configured_actor_dispatch).
+    // Coordinator, routine counts and provenance are details; effort and exceptions stay on the line.
+    const chip = record.executorChip;
+    const execution = modelExecutionView(record.modelExecution);
+    const coordinator = compactModel(agentModel);
+    const model = chip ? executorModelText(chip, compactModel)
+        : execution && !execution.observed ? execution.value : execution?.model || coordinator;
+    const updated = record.finished ? updatedTime(record) : '';
     // The executor block is ONE part of this line, joined by the same text
     // separator as the rest: concatenating it left the chip and the first fact
     // touching in a copied line and running together for a screen reader,
@@ -1381,25 +1412,31 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
         // A settled portal needs no activity clock: its chip states how the work ended and the author's
         // final (with its own end time) arrives as a message.
         toolCalls, ...cost, record.finished ? '' : clockLabel(record),
-    ].filter(Boolean).map((item) => `<span class="chat-live-meta-text">${escapeHtml(item)}</span>`)) : metaLineHtml([
-        executorIdentityMarkup(record.executorChip, { agentModel: compactModel(agentModel) }),
+    ].filter(Boolean).map(text)) : metaLineHtml([
+        chip ? executorIdentityMarkup(chip, { model }) : (model ? text(model) : ''),
         effortChipMarkup(record.effort),
         ...[
-            record.initiator === 'consciousness' ? 'Consciousness' : '',
             record.historicalUnavailable ? 'Outcome unavailable' : (record.historicalUnconfirmed ? 'Activity unconfirmed' : ''),
             !record.finished && record.projectHoldDetail || '',
             record.historyRetentionProblem || '',
-            modelExecutionLabel(record.modelExecution),
-            toolCalls,
             record.toolErrors > 0 ? `${record.toolErrors} error${record.toolErrors === 1 ? '' : 's'}` : '',
             Number.isFinite(record.durationSec) ? formatLogDuration(record.durationSec) : '',
             ...(Array.isArray(record._lastFrameMeta) ? record._lastFrameMeta : []),
             ...cost,
-            clockLabel(record),
-        ].filter(Boolean).map((item) => `<span class="chat-live-meta-text">${escapeHtml(item)}</span>`),
+            record.finished ? '' : clockLabel(record),
+        ].filter(Boolean).map(text),
+    ]);
+    const factsChanged = paintLiveFacts(record, portal ? [] : [
+        ['Executor', chip?.title ? escapeHtml(chip.title) : ''],
+        [chip ? 'Coordinator' : 'Agent model', coordinator ? escapeHtml(coordinator) : ''],
+        // An unobserved execution of a card without an executor is its compact model fact already.
+        [execution?.label || 'Model execution', execution && (chip || execution.observed) ? escapeHtml(execution.value) : ''],
+        ['Started by', record.initiator === 'consciousness' ? 'Consciousness' : ''],
+        ['Tool calls', Number.isInteger(record.toolCalls) ? String(record.toolCalls) : ''],
+        ['Updated', escapeHtml(updated)],
     ]);
     const detailChanged = paintLiveDetail(record, 'liveCostDetail', String(record.costMeta?.detail || ''));
-    if (record.metaEl.innerHTML === html) return detailChanged && Boolean(record.metaEl.isConnected);
+    if (record.metaEl.innerHTML === html) return (detailChanged || factsChanged) && Boolean(record.metaEl.isConnected);
     record.metaEl.innerHTML = html;
     return Boolean(record.metaEl.isConnected);
 }

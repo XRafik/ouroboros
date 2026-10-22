@@ -1108,11 +1108,11 @@ preference when it opens and on every reconnect; there is no file watcher.
   `--text-primary`. Details never render larger than the summary above them;
   an inline label inside a row is semibold at the row's own size.
 - **A nested child card is subordinate to its root.** Its compact identity row
-  shows status, role, notes and a chevron; a short task id disambiguates
-  otherwise identical siblings. Executor facts, the agent/coordinator model and
-  the effort chip occupy the metadata row, so the task's coordinating model
-  cannot masquerade as its external executor. The chip is one text part of that
-  line, composed from the child's own frames: the applied level (`Effort High`),
+  shows status, role and `Details`; a short task id disambiguates siblings. Its
+  compact line names the executor with only its own model evidence (observed;
+  `requested …`; unconfirmed absent), else the agent model. Coordinator and
+  provenance stay in details; effort stays visible as the leaf's dispatch choice,
+  not a provider echo. Its chip uses the child's own frames: the applied level (`Effort High`),
   the asked level when it differed (`Effort High (asked Ultra)`), then its
   source: a pin glyph before a pinned level, `· model name` for a level the
   model name carries, `(Cyber Pro)` under Cyber Pro, nothing for the owner's
@@ -1484,11 +1484,9 @@ Anatomy, top to bottom:
    paragraphs, lists, checklists, tables and code keep the shared rich-content
    gutter, rhythm and bounded code scrolling. The card never infers a title from
    the first line or rewrites authored Markdown to fit, and the question has no
-   quiz-specific length cap. After the bubble's time (`15:18 · Asked by …`) a muted
-   plain-text host sentence (`.chat-quiz-host-facts`, `--text-meta`) states what only
-   the host knows: the asking task, how its run started and when the owner last
-   wrote in this chat, unknown facts said as unknown; without `host_facts` it is
-   absent until a delivery carries it.
+   quiz-specific length cap. The bubble ends on its time alone: the host's
+   sentence (`host_facts`: asking task, run start, the owner's last message) is
+   not drawn.
 3. **Stake** — optional one-liner (`At stake: …`), `--type-meta`, `--text-meta`.
 4. **Options** — zero to six real owner actions: elevated cards (the capsule surface
    on the rest shadow with the object radius; a choice, never a field), the label in
@@ -1846,8 +1844,8 @@ the terminal task phase and controls. The row keeps its live position; history
 admits carrier evidence before summaries, progress or references choose their
 presentation. Block presence is consistent across reload and reconnect. A moved
 work lives in its Project, its Main card the work's portal ("Work portal").
-`N notes` in the collapsed header counts timeline items, the evidence row among
-them. A threshold crossing names its bound and threshold without strategic
+`N notes` (timeline items, the evidence row among them) is in the `Details`
+button's name, not its row. A threshold crossing names its bound and threshold without strategic
 advice; distinct bounds and thresholds get distinct rows, and historical
 producers without a named bound keep their old label.
 
@@ -1880,10 +1878,11 @@ control, and its root's conversion converts the whole work. A block that exists
 only for open attention (a model wait, a pending or host-offered Stop) or only
 for a non-Done ending of a turn that did no work carries no title placeholder
 and no conversion; its chip says its state (Waiting…, Cancelling…, Failed), the
-wait controls stay, and its first row of work gives it the title. The collapsed
-header carries the tool count live and, once the turn ends, cost and duration (a
-replayed header carries count and cost; duration is a live fact); its `updated`
-stamp follows the turn's own narration, never a host note or a tool call. Money
+wait controls stay, and its first row of work gives it the title. The compact
+meta line says who ran the work on what (a root: the
+observed solve model, else its agent model), duration, cost, exceptions and, while
+it runs, `updated` from its own narration. Tool calls, model provenance, origin
+and a finished card's update time are labelled rows of its details. Money
 there is ONE line whose wording carries its openness and never renders an
 unknown as a number: `$0.00` only where priced rows evidenced that zero,
 `up to $1.20` while the tracked subtotal is inexact, `Tracked: $1.20` when part
@@ -1992,10 +1991,9 @@ process to keep running.
 A consciousness wake-up needs nothing of its own here: it is an ordinary direct
 turn with its own task id, so its model wait, controls and temporary model
 change behave exactly as an owner turn's and last until that turn ends; the
-persistence checkbox still saves the consciousness role. The origin label
-`Consciousness` identifies the turn in the block's meta line, on its final
-bubble and on the cards of tasks it started, never a separate card, a reused
-slot or a different vocabulary.
+persistence checkbox still saves the consciousness role. `Started by: Consciousness`
+names its origin in the block's details; its final bubble and tasks' cards
+keep that origin, never a separate card, reused slot or vocabulary.
 
 An already-delivered answer does not close a still-open post-task synthesis.
 Consolidation or chooser waits use the same role controls in that task's
@@ -2098,7 +2096,8 @@ disclosed where needed.** A row reads identity, state, facts; its primary choice
 exceptions and owner actions stay visible, and a value keeps its honest form
 (`up to`, `Tracked:`, unknown). A rule every row shares is said once for the
 section; history, provenance and why a state or value reads so wait in details
-pointer, touch and keyboard open, never hover alone. New copy serves a concrete decision or error and adds meaning no
+pointer, touch and keyboard open, never hover alone (Accounts: metrics under Diagnostics,
+explicit store failures visible; exact program text under Details). New copy serves a decision or error, adding meaning no
 control or status already carries: a checked box is not re-said beside it, and
 an unsaved draft is said once by the editor or its host page, not on every row. A conditional
 line never moves the control that caused it: controls own stable slots, and a
@@ -2640,7 +2639,7 @@ door: the whole object is the target and one state layer covers all of it (a fil
 card, a Files row, a navigation row, a Project reference). An object that carries
 reading content or several actions is a container: its body is text and never a
 target, and only its own controls react — a message, a question, a Working card
-whose "Show details" is its one disclosure, a work card bound to a Project whose
+whose "Details" is its one disclosure, a work card bound to a Project whose
 footer strip is its door. Hover never tints part of an object, and hover paint
 applies only where a pointer can hover (`@media (hover: hover)`).
 

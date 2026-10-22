@@ -282,24 +282,19 @@ export function createChatMedia({
         return bubble;
     }
 
-    // A framed node may bring parts for the bubble's two edge lines (docs/DESIGN.md "Quiz card"): `voice` joins the
-    // sender line (a Main question's Project reference beside `Ouroboros`), `foot` the time line (a question's host
-    // facts after its time). Each line stays one line of the bubble, never a second header or meta row.
-    function bubbleFrameNode(msg, node, { voice = [], foot = [] } = {}) {
+    // A Main question's Project reference joins `Ouroboros` on the voice line (DESIGN "Quiz card").
+    function bubbleFrameNode(msg, node, { voice = [] } = {}) {
         const bubble = bubbleFrame(msg, '');
         // The frame's own sender and time, read before the node joins them.
         const sender = bubble.querySelector('.sender');
         const time = bubble.querySelector('.msg-time');
         if (time) time.before(node); else bubble.append(node);
-        // A line wraps the frame's own sender or time, so the bubble keeps one of each.
-        const line = (className, anchor, parts) => {
+        if (voice.length) {
             const wrap = document.createElement('div');
-            wrap.className = className;
-            if (anchor) { anchor.before(wrap); wrap.append(anchor); } else bubble.append(wrap);
-            wrap.append(...parts);
-        };
-        if (voice.length) line('chat-bubble-voice', sender, voice);
-        if (foot.length) line('chat-bubble-foot', time, foot);
+            wrap.className = 'chat-bubble-voice';
+            if (sender) { sender.before(wrap); wrap.append(sender); } else bubble.append(wrap);
+            wrap.append(...voice);
+        }
         return bubble;
     }
 
