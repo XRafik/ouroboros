@@ -732,9 +732,9 @@ def test_the_wake_ack_is_keyed_on_the_published_wake_id(tmp_path, monkeypatch):
             tools=SimpleNamespace(_ctx=ctx),
         )
         # Delivery alone cannot ACK: it waits for the incorporated-save boundary.
-        assert supervision.supervision_checkpoint(ctx)["pending_wake"]["wake_id"] == wake_id
+        assert supervision.supervision_checkpoint(ctx)["runs"]["run-1"]["pending_wake"]["wake_id"] == wake_id
         flush_content_acks(ctx)
-        return supervision.supervision_checkpoint(ctx)
+        return supervision.supervision_checkpoint(ctx)["runs"]["run-1"]
 
     # No published wake id: nothing is acknowledged, even on a delegate_wait row.
     assert _run(wake.text, {})["pending_wake"]["wake_id"] == wake_id

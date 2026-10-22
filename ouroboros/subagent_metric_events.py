@@ -1,5 +1,6 @@
 """Translate producer receipts into measurements without interpreting task correctness."""
 from __future__ import annotations
+import pathlib
 
 from ouroboros.subagent_metrics import publish
 
@@ -109,12 +110,18 @@ def session_execution(root, custody, summary, identity, observed):
                   "terminal": terminal, "account": dict(observed)}})
 
 
-def review_execution(request, slot, actor, ctx):
+def review_execution(request, slot, actor, ctx, *, fallback_root=None):
     from ouroboros.review_ledger import ledger_root
 
     outcome, usage = actor.outcome or {}, actor.usage or {}
     if not outcome.get("outcome_id") or not outcome.get("operation_id"):
         return
+    try:
+        root = ledger_root(ctx)
+    except AttributeError:
+        if fallback_root is None:
+            raise
+        root = pathlib.Path(fallback_root)  # the coordinator's canonical custody root
     session = str(getattr(slot.route, "value", slot.route)) == "agent_session"
     identity = {"kind": "agent_session" if session else "api_model",
                 "target_id": slot.session_target if session else slot.model,
@@ -123,7 +130,7 @@ def review_execution(request, slot, actor, ctx):
                 **({"access": slot.session_access or "workspace_write"} if session else {})}
     received = outcome.get("transport") == "success" or bool(actor.raw_text)
     pending, unsent = outcome.get("status") == "pending", outcome.get("status") == "not_dispatched"
-    publish(ledger_root(ctx), {"row_id": slot.subagent_id or slot.slot_id, "row_identity": identity,
+    publish(root, {"row_id": slot.subagent_id or slot.slot_id, "row_identity": identity,
         "purpose": "plan" if request.surface == "plan_review" else "review",
         "producer_id": "review:" + outcome["outcome_id"], "task_id": request.task_id,
         "ts": usage.get("finished_at") or usage.get("ts"), "terminal": not pending, "pending": pending,

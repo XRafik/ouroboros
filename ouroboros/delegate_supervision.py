@@ -1440,6 +1440,8 @@ def delegate_wait_entry(
 ) -> ToolResult:
     """Event-only wait; hidden ``wait_sec`` is accepted only for old transcripts."""
 
+    if not run_id and runs is None:
+        return _fail("delegate_wait", "missing_run_id", "Supply one run_id or a nonempty runs array.")
     if (bool(run_id) == (runs is not None) or (runs is not None and
             (not isinstance(runs, list) or not runs or any(not isinstance(r, str) or not r.strip() for r in runs)))):
         return _fail("delegate_wait", "run_selector_conflict", "Supply one run_id or a nonempty runs array.")

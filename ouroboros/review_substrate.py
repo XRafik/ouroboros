@@ -639,10 +639,13 @@ class ReviewCoordinator:
             if not actor.response_ref:
                 raise OSError(f"Review producer outcome is not durable: {actor.operation_id}")
         if producer or not actor.late_result_pending:
-            publish_seat_execution(request, slot, actor, self.usage_ctx)
+            publish_seat_execution(request, slot, actor, self.usage_ctx, fallback_root=self._custody_drive_root())
         else:
             from ouroboros.subagent_metric_events import review_execution
-            review_execution(request, slot, actor, self.usage_ctx)
+            try:  # a measurement never decides a pending drain
+                review_execution(request, slot, actor, self.usage_ctx, fallback_root=self._custody_drive_root())
+            except Exception:
+                log.debug("review measurement unavailable", exc_info=True)
 
     def _persist_producer_outcome(self, request, actor, call_id, call_type, payload):
         """Stamp the completed producer beside its existing full response body."""

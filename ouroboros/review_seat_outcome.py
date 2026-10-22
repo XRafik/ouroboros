@@ -119,13 +119,13 @@ def answer_received(usage_ctx: Any, request: Any, slot: Any) -> None:
             log.debug("review answer progress failed", exc_info=True)
 
 
-def publish_seat_execution(request: Any, slot: Any, actor: Any, usage_ctx: Any) -> None:
+def publish_seat_execution(request: Any, slot: Any, actor: Any, usage_ctx: Any, *, fallback_root: Any = None) -> None:
     """A seat publishes its actual execution when it settles, even after its drain left."""
     from ouroboros.reviewer_slot_config import record_reviewer_slot_executions
 
     from ouroboros.subagent_metric_events import review_execution
     try:
-        review_execution(request, slot, actor, usage_ctx)
+        review_execution(request, slot, actor, usage_ctx, fallback_root=fallback_root)
     except Exception:
         log.debug("review measurement unavailable", exc_info=True)
     try:

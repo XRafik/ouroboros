@@ -78,6 +78,7 @@ _AGENT_FAULT_REASONS = frozenset({
     "payload_selector_unresolved",
     "retry_prompt_mismatch",
     "retry_selector_conflict",
+    "run_selector_conflict",
     "selector_on_retry",
     "source_response_invalid",
     "source_response_not_required",

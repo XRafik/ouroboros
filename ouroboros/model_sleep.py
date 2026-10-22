@@ -100,12 +100,13 @@ def selectors(ctx: Any, *, senders: Any = None, tasks: Any = None, runs: Any = N
 
     chosen = {"senders": _ids(senders, "senders"), "tasks": _ids(tasks, "tasks"), "runs": _ids(runs, "runs"),
               "wake_at": _wake_at(wake_at, wake_after_sec)}
-    root = _canonical_root(ctx)
-    for key in ("senders", "tasks"):
-        for task_id in chosen[key]:
-            validate_task_id(task_id)
-            if not load_task_result(root, task_id, strict=True):
-                raise ValueError(f"{key}: task {task_id} is unknown")
+    if chosen["senders"] or chosen["tasks"]:  # the root is read only when a task id needs checking
+        root = _canonical_root(ctx)
+        for key in ("senders", "tasks"):
+            for task_id in chosen[key]:
+                validate_task_id(task_id)
+                if not load_task_result(root, task_id, strict=True):
+                    raise ValueError(f"{key}: task {task_id} is unknown")
     if chosen["runs"]:
         owned = _owned_runs(ctx)
         missing = [run_id for run_id in chosen["runs"] if run_id not in owned]

@@ -39,7 +39,10 @@ def claim_initial_invocation(drive: Any, task_id: str, request: dict) -> dict:
 
 def initial_receipt(ctx: Any, bootstrap: dict) -> dict:
     """A restart observes a claimed bootstrap; it never creates or replays a POST."""
-    drive, task_id = custody.custody_root(ctx), str(ctx.task_id)
+    try:
+        drive, task_id = custody.custody_root(ctx), str(ctx.task_id)
+    except AttributeError:
+        return {}  # a context without a data root has no durable custody to observe
     with custody.actor_decision_lock(drive, task_id):
         if custody.custody_log_unreadable(drive):
             raise ValueError("bootstrap custody unreadable")
