@@ -185,6 +185,7 @@ def get_tools() -> List[ToolEntry]:
                     "effective_criteria": {"type": "string"}, "material_tool_indices": {"type": "array", "items": {"type": "integer"}},
                 }, "required": ["owner_source_sha256"]},
                 "pending_review": {"type": "string", "enum": ["wait", "finish"], "default": "wait"},
+                "swarm_comparison": {"type": "string", "description": "Optional solo-versus-swarm comparison in your own words, attributed to you separately from measured tree facts."},
                 "silent": {"type": "boolean", "default": False, "description": "A consciousness wake or a schedule-born root without a Presence binding may finish without a message when no human reply is owed; any answer stays in the durable result as internal text (wake_silent)."},
             }, "required": ["action"]}}, _finish_task),
         ToolEntry("set_tool_timeout", {

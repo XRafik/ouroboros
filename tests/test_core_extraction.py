@@ -156,15 +156,12 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # Rolled for the infrastructure-under-load PR: forward_to_worker also writes into a requested
     # child's mailbox (read when it starts, or kept as unread mail), so its description and `task_id`
     # description say "running, queued or requested"; nothing else in the catalog changed.
-    # Rolled for the tool usability pass (70baf851... -> d01ff512...): list_files states what it
-    # lists and gains the opt-in tree parameters depth, include and max_scan (path, root and
-    # max_entries unchanged); write_file leads with create/overwrite/append and files=[...];
-    # search_code's lead says it searches a declared resource root and its `path` description says
-    # "relative to the selected root"; send_video drops its example and "(preferred)". No parameter
-    # changed type, default or required status; the other eight entries and every handler owner are identical.
-    # Also preserves the incoming show_card Worker guidance.
+    # Rolled for the start ledger: show_card's description adds one sentence (on most devices an app
+    # shares the owner's page thread, so heavy computation belongs in a blob: Worker); nothing else changed.
+    # D3 adds the recorded reply_to address to forward_to_worker and escalate.
+    # Target merge retains the contributor tool affordances and target review/mail contracts.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "b26a1db3e0197635e5033be47e7a1a1dc24e5994e58c1745826179f7278a6a01"
+        "0e15a534fbf35fcae178fb982a14a492b8886cd3f7551e126e47fafd8ffeb3ac"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

@@ -335,6 +335,7 @@ class ReviewSlotExecutor:
         self.assignment = assignment
         self.llm = llm
         self.usage_observer: Optional[Callable[[Dict[str, Any]], None]] = None
+        self.answer_observer: Optional[Callable[[], None]] = None
 
     def _observe_usage(self, usage: Optional[Dict[str, Any]]) -> None:
         observe_review_usage(self.usage_observer, usage)
@@ -664,8 +665,7 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
     """All reviews share this transport: pin one subscription harness, request
     schema only if its effective adapter supports it, store the canonical body
     before POST, and replay only an explicit pending token. Bound tokens join
-    existing runs; reconciliation never replaces them. The nanny verifies
-    cancellation at ``timeout_sec`` and reads full output before ``delegate_custody`` settlement.
+    existing runs; reconciliation never replaces them. The nanny verifies cancellation at ``timeout_sec`` and reads full output before ``delegate_custody`` settlement.
     """
     from ouroboros import delegate_custody as custody
     from ouroboros.claudexor_daemon import ensure_owned_gateway
@@ -813,7 +813,6 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
                     from ouroboros.review_thread_continuity import start_review_thread_turn
                     return start_review_thread_turn(gateway, thread_id, run_request, idempotency_key=invocation_id)
                 return gateway.start_run(run_request, idempotency_key=invocation_id)
-
             try:
                 launch_source = SimpleNamespace(drive_root=custody_drive, task_id=task_id, root_task_id=root_task_id)
                 handle = run_operation(launch_source, submit)
@@ -885,14 +884,15 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
         if run_state != "succeeded":
             state.pop("pending_invocation_id", None)
             state.pop("delegated_run_id", None)
-            raise run_failure_error(run_id, run_state, summary.get("failure"))
+            failure = run_failure_error(run_id, run_state, summary.get("failure"))
+            failure.review_run_state = run_state
+            raise failure
         text = _full_session_text(gateway, run_id, detail)
         spend, estimated, combined_summary = _combined_session_usage(custody, stopped_summaries, summary)
         thread_receipt: Dict[str, Any] = {}
         if use_thread:
-            thread_receipt, thread_id, turn_id = _session_thread_receipt(
-                gateway, thread_id, run_id, turn_id, route, observed, continued=bool(continuations),
-                run_names=custody.held_run_names(detail, run_id))
+            thread_receipt, thread_id, turn_id = _session_thread_receipt(gateway, thread_id, run_id, turn_id, route, observed,
+                continued=bool(continuations), run_names=custody.held_run_names(detail, run_id))
         state.pop("pending_invocation_id", None)
         state.pop("delegated_run_id", None)
         return {
@@ -956,8 +956,6 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
     finally:
         if gateway is not None:
             gateway.close()
-
-
 def _require_route_headroom(gateway: Any, route: Any, shape: Any) -> None:
     """A fresh seat starts only on a route with headroom: a spent subscription window fails the slot
     typed, never a silent fallback onto metered API spend."""
@@ -1437,6 +1435,8 @@ class AgentSessionReviewExecutor(ReviewSlotExecutor):
 
     def _verdict_result(self, force_extraction: bool = False) -> ReviewAttemptResult:
         text = self._raw_transcript or ""
+        if text.strip() and self.answer_observer:
+            self.answer_observer()
         canonical, method, extraction_usage = canonicalize_session_verdict(
             text,
             conformance_passed=self._conformance_passed and not force_extraction,

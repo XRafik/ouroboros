@@ -120,6 +120,7 @@ def emergency_address_view(
     request: ContextReclaimRequest,
     *,
     rung: EmergencyRung,
+    cause: str = "context_size",
     observation: Optional[Mapping[str, Any]] = None,
     measure_candidate: Optional[Callable[[list], int]] = None,
     trace_refs_by_tool_call_id: Optional[Mapping[str, Any]] = None,
@@ -135,6 +136,9 @@ def emergency_address_view(
     body units remain restorable; no view claims understanding. ``measure_candidate``
     measures the complete final request, including the seal and fresh host facts.
     """
+    label = _EMERGENCY_LABELS[rung]
+    if cause == "output_exhaustion":
+        label = label.replace("context-size recovery", "empty-output recovery")
     trace_refs = trace_refs_by_tool_call_id or {}
     density = request.measurement_density
     before_sha = compaction.context_reclaim_transcript_sha256(messages)
@@ -172,7 +176,7 @@ def emergency_address_view(
         record, ref = compaction._capsule_message(unit,
             f"{len(obsolete)} obsolete host rows replaced together; latest full snapshots retained.",
             [compaction._part(unit.unit_id, unit.source_text)], checkpoint_ref, request,
-            retention="source_view", label=_EMERGENCY_LABELS[rung], address={"checkpoint_ref": dict(checkpoint_ref)})
+            retention="source_view", label=label, address={"checkpoint_ref": dict(checkpoint_ref)})
         first = min(obsolete)
         rebuilt = [record if i == first else row for i, row in enumerate(messages) if i == first or i not in obsolete]
         reclaimed = before_tokens - measure(rebuilt)
@@ -209,7 +213,7 @@ def emergency_address_view(
         record, ref = compaction._capsule_message(
             combined, "\n".join(_unit_facts(messages, u) for u in group),
             [compaction._part(combined.unit_id, combined.source_text)], checkpoint_ref, request, retention="source_view",
-            label=_EMERGENCY_LABELS[rung], address={"checkpoint_ref": dict(checkpoint_ref), "units": members})
+            label=label, address={"checkpoint_ref": dict(checkpoint_ref), "units": members})
         proposal = {**replacements, start: (end, [record], [ref])}
         candidate, refs = compaction._materialize_replacements(messages, proposal)
         delta = before_tokens - measure(candidate)

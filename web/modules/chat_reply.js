@@ -129,7 +129,8 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         }
         if (!wanted()) return null;
         target = decks.surface(target) || target;  // a tucked note's deck opens, so the row it lands on shows
-        const header = feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
+        const header = feed.closest('.project-panel')?.querySelector('.project-panel-bar')
+            || feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
         const clearance = Math.max(HEADER_CLEARANCE,
             (header?.getBoundingClientRect().bottom || 0) - feed.getBoundingClientRect().top + 12);
         revealTimelineNode(target, feed, clearance);
@@ -340,7 +341,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             if (address) bubble.dataset.rowAddress = address;
             const sender = bubble.querySelector('.sender');
             const role = ROLE_NAMES.find((name) => bubble.classList.contains(name));
-            const relay = role === 'assistant' ? createRelayQuote(row?.relay, { onDomWrite }) : null;
+            const relay = role === 'assistant' ? createRelayQuote(row?.relay, { onDomWrite, card: bubble.dataset.systemType === 'relay_entry' }) : null;
             const quote = relay || createReplyQuote(row?.reply_to, { onJump: jump });
             if (quote && !relay && role !== 'user') {
                 quote.dataset.derived = '1';

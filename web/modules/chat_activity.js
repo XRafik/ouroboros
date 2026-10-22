@@ -1,7 +1,7 @@
 // Pure chat-activity helpers shared by chat.js and dependency-free node tests:
 // live-card presentation projections (moved verbatim from chat.js) plus the
 // census snapshot hydration. The room's status word is the server's (work_status.js).
-import { META_PART_SEPARATOR, executorIdentityMarkup, executorModelText } from './harness_presentation.js';
+import { META_PART_SEPARATOR, executorIdentityMarkup, executorModelText, formatCoordinatorProvenance } from './harness_presentation.js';
 import { effortChipMarkup } from './effort_chip.js';
 import { resultFilesItemHtml } from './result_files.js';
 import { taskSourceDownloadUrl, apiFetch } from './api_client.js';
@@ -390,7 +390,7 @@ export function sendPanic({ ws, frame = { type: 'command', cmd: '/panic' }, onAc
     return result;
 }
 
-// A root still settling its pause (the durable row says ``pausing``): its
+// A task still settling its pause (the durable row says ``pausing``): its
 // checkpoint may not be saved yet, so a Restart can interrupt it.
 const PAUSING_PHASES = new Set(['budget_pausing', 'pausing']);
 
@@ -424,10 +424,20 @@ export function restartConfirmBody(activities) {
 async function readLiveActivities() {
     const resp = await apiFetch('/api/state', { cache: 'no-store' });
     const data = resp?.ok ? await resp.json() : null;
-    if (!Array.isArray(data?.active_chat_activities) || data.active_chat_activities_complete !== true) {
+    if (!Array.isArray(data?.active_chat_activities) || data.active_chat_activities_complete !== true
+        || data.works_complete === false) {
         throw new Error('census unavailable');
     }
-    return data.active_chat_activities;
+    // The frozen census lists roots. A parked root can still have a child
+    // saving its Pause: Restart must warn about that member too, once per id.
+    const activities = new Map(data.active_chat_activities.map((row) => [row.activity_id, row]));
+    for (const work of data.works || []) {
+        for (const [id, state] of Object.entries(work.members?.states || {})) {
+            if (state.confirmed === false) activities.set(id, { phase: 'unknown' });
+            else if (state.transition === 'pausing') activities.set(id, { phase: 'pausing' });
+        }
+    }
+    return [...activities.values()];
 }
 
 /**
@@ -1399,6 +1409,9 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
     const chip = record.executorChip;
     const execution = modelExecutionView(record.modelExecution);
     const coordinator = compactModel(agentModel);
+    const provenance = chip ? formatCoordinatorProvenance(
+        record?.coordinatorProvenance || chip?.coordinatorProvenance || chip?.snapshot || '',
+    ) : '';
     const model = chip ? executorModelText(chip, compactModel)
         : execution && !execution.observed ? execution.value : execution?.model || coordinator;
     const updated = record.finished ? updatedTime(record) : '';
@@ -1428,7 +1441,8 @@ export function renderLiveCardMeta(record, { agentModel = record?.agentModel || 
     ]);
     const factsChanged = paintLiveFacts(record, portal ? [] : [
         ['Executor', chip?.title ? escapeHtml(chip.title) : ''],
-        [chip ? 'Coordinator' : 'Agent model', coordinator ? escapeHtml(coordinator) : ''],
+        // Provenance is a recorded fact of the schedule (chosen_by / coordinator_provenance), never inferred here.
+        [chip ? 'Coordinator' : 'Agent model', coordinator ? escapeHtml(provenance ? `${coordinator} (${provenance})` : coordinator) : ''],
         // An unobserved execution of a card without an executor is its compact model fact already.
         [execution?.label || 'Model execution', execution && (chip || execution.observed) ? escapeHtml(execution.value) : ''],
         ['Started by', record.initiator === 'consciousness' ? 'Consciousness' : ''],

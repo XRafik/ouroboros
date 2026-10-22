@@ -1184,9 +1184,8 @@ reader; composer files stay.
 
 An initial read shows one disabled `Loading saved history…` pill at the feed edge,
 not a second loading sentence in the header. Task activity remains separate.
-Persistent history notices are wrapping text in the room's header chrome: the
-Project status bar without an opaque strip, Main's floating header on its own
-reading backing (§5).
+Failure and approximate-restoration notices are wrapping text in the room's header
+chrome: the Project status bar, or Main's floating note on its float-sheet backing (§5).
 
 Main and every Project open at their newest message, regardless of age or other
 rooms' traffic. Returning in the same session does too, including Main after
@@ -1224,9 +1223,11 @@ output leaves it in place; only a newer line moves a card timeline to its end.
 New replies remain below in the same live conversation without moving the passage.
 
 When loaded fragments are disconnected or their coverage is uncertain (reading
-far back releases the newest pages from memory while replies keep arriving), the
-same readable note stays in Main and Project header chrome: `Some saved history
-is not loaded. Shown messages may have gaps.` A failed read says so distinctly.
+far back releases the newest pages from memory while replies keep arriving), a
+toast above the composer announces once per document opening `Some saved history is not loaded.
+Shown messages may have gaps.`, and the same readable explanation stays at the
+in-feed `Load more history` edge, including beside a read failure or approximate position (owner 21.10).
+The notice can be closed; hover and focus pause its six-second dismissal. A failed read stays in header chrome.
 Bytes written after a read found a source empty count as missing until a later
 read delivers them from its start. Mixed task cards keep one node and use this
 general note: dates, common row IDs and an exhausted cursor cannot establish a
@@ -1694,14 +1695,23 @@ above (its own card does not count).
 
 A relay is a note one work leaves another (`tell_task`), written for that work, so
 its room draws a note card, never an Ouroboros bubble (`web/modules/chat_relay_deck.js`):
-the sender's tile (Main's glyph, or the Projects glyph in Project ink) and name over
-`to this work · time`, the teller's line for the owner (`summary`; without it the
-note's first words in meta ink), and Show note, the note as written in a tray with
-Reply and Copy. Consecutive notes make one deck in the work card's material: the
-latest card in front, the edges of up to two behind, Show N notes fanning it out in
-place, Hide folding it. A relay passing the owner's words keeps its own card: every
-message passed on, complete with where/when (six lines, then Show all; files named,
-captionless files by name), above the summary. Telegram receives only a relay that
+the sender's room reference built by `project_reference.js` (Main is named without a
+glyph; an unknown room keeps its plain name), beside `note to this work · time`.
+The teller's line for the owner (`summary`; without it the note's first words in meta
+ink) ends with one `more` control. It expands the note as written in a tray, its
+Reply and Copy actions, and every quoted owner message together; `less` folds them.
+Visible owner quotes keep their blue quote component, where/when and named files
+(captionless files by name), clamped to three lines above the summary until expanded.
+All consecutive notes, from any sender and with or without the owner's words, make
+one deck in the work card's material: the latest card in front, the edges of up to
+two behind, Show N notes fanning it out in place, Hide folding it. Other visible row
+kinds end a run; hidden rows and typing stay transparent. A folded deck with quoted
+owner messages in earlier cards carries the blue mark `Your words in N earlier
+notes` (singular for one); N counts cards, not quotations. Fanning out reveals those
+quotes, and a jump to a tucked row opens its deck before landing on it.
+The owner chose this rule on 22 Oct 2026 (variant A): the blue mark now serves the
+16 Oct decision that his words stay prominent, including when their cards are tucked.
+Telegram receives only a relay that
 passes his words, as plain text. Main keeps its one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
 row, long press on touch) offers Reply, Copy, Open project and a work card's
 Resume, Pause and Stop… exactly when the card does. Esc/outside press closes it
@@ -2576,12 +2586,11 @@ quarter close it in 280 ms, on the iOS sheet curve (`--ease-sheet`). A thumb tha
 rests before it lifts is no fling. The quarter's clear scrim comes and goes with
 it. Reduced motion keeps the finger tracking and drops the rest.
 
-**Moving between places.** On a phone a place picked in the open drawer changes
-inside the room card: the drawer stays painted for one 160 ms beat while the
-leaving room's words fade out and the arriving room fades in with one breath
-(scale .97 → 1), the chosen place's pill slides from its old row to the tapped one,
-then the drawer's own close brings the card home; opening the drawer switches the
-pill on where you are (owner 20.10, 4A; `web/modules/shell_motion.js`). The stack,
+**Moving between places.** On a phone a place picked in the open drawer selects
+its row at once (no travelling pill or hold) and changes inside the room card as
+the drawer closes: the leaving room's words fade out and the arriving room fades
+in with one breath (scale .97 → 1) while the drawer's own close brings the card
+home (owner 20.10, 4A; 21.10; `web/modules/shell_motion.js`). The stack,
 history and Back change at the tap; only the covered room's inert waits for the
 card, because it restyles the whole room. A Project room that is left keeps its
 rows until its exit has run and is the same room when reopened meanwhile. Docked,
@@ -2632,7 +2641,10 @@ content column is too narrow, including while the sidebar is resized; the toolba
 own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's
 width. While a mode it holds is on (Evolve, Consciousness), ⋯ takes its tone,
-with no corner dot. A history note hangs under the bar, never inside it; a page
+with no corner dot. In Main and Project, the bar has no continuous backing strip:
+the title and status share one floating capsule (`--chip-float`, non-shrinking
+mark and caret with inline inset), and each command is its own floating capsule
+(owner 21.10). A failure or approximation note hangs under the bar; a page
 has no caption line, its sidebar row and its tabs name it.
 
 **Doors and containers.** An object whose only job is to take you somewhere is a

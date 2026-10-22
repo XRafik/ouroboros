@@ -578,7 +578,7 @@ def test_a_pending_hand_over_blocks_dispositions_and_a_second_claim(tmp_path):
     pred = custody.replay(tmp_path)["run-pred"]
     assert "CONTINUATION_PENDING" in continuation.disposition_refusal(tmp_path, pred)
     claim, refusal = claimed_start_request(
-        tmp_path, claim_target="", payload_busy=lambda *_a: "", task_id="t-a", invocation_id="inv-2",
+        tmp_path, task_id="t-a", invocation_id="inv-2",
         continuation_of="run-pred", capture_id="inv-2", snapshot_id="snap-1")
     assert claim is False and refusal["reason"] == continuation.REFUSAL_SUPERSEDED
     assert refusal["pending_invocation_id"] == "inv-1"
@@ -588,7 +588,7 @@ def test_a_pending_hand_over_blocks_dispositions_and_a_second_claim(tmp_path):
                                                            "snapshot_id": "snap-1", "disposition": "rejected"})
     custody._CUSTODY.clear()
     claim, refusal = claimed_start_request(
-        tmp_path, claim_target="", payload_busy=lambda *_a: "", task_id="t-a", invocation_id="inv-3",
+        tmp_path, task_id="t-a", invocation_id="inv-3",
         continuation_of="run-pred", capture_id="inv-3", snapshot_id="snap-1")
     assert claim is False and refusal["reason"] == continuation.REFUSAL_SNAPSHOT_RELEASED
 
@@ -676,7 +676,7 @@ def test_an_unavailable_snapshot_lock_is_a_typed_claim_refusal(tmp_path, monkeyp
 
     monkeypatch.setattr(platform_layer, "acquire_exclusive_file_lock", broken)
     claim, refusal = claimed_start_request(
-        tmp_path, claim_target="", payload_busy=lambda *_a: "", task_id="t-a", invocation_id="inv-1",
+        tmp_path, task_id="t-a", invocation_id="inv-1",
         continuation_of="run-pred", capture_id="inv-1", snapshot_id="snap-1")
     assert claim is False and refusal["reason"] == "continuation_handover_busy"
     assert "lock directory unwritable" in refusal["detail"]
