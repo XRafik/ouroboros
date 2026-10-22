@@ -28,6 +28,8 @@ def test_settings_reads_stored_window_and_matches_main(tmp_path, monkeypatch, re
     monkeypatch.setattr(gateway, "_owner_audit", lambda *a: None)
     monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
     monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: pytest.fail("Settings fetched metadata"))
+    monkeypatch.setattr(ce, "_openai_compatible_metadata_window", lambda *a, **k: pytest.fail("Settings fetched /models"))
+    monkeypatch.setattr(ce, "_claudexor_metadata_evidence", lambda *a, **k: pytest.fail("API route read a subscription catalog"))
     ack = ce.record_owner_ack(tmp_path, **route, window_tokens=1000000,
                               note="owner-confirmed via settings save" if retired else "typed")
     if metadata:
@@ -83,7 +85,7 @@ def test_terminal_notice_carries_the_captured_window_and_honest_request_size(tmp
     if kind == "auth_error":
         assert "assumed window" not in notice
     else:
-        assert "assumed window 400,000 total: set by you" in notice
+        assert "assumed window 400,000 total: set in Settings" in notice
         assert "reply reserve 65,536" in notice
         assert ("provider stated" in notice) is stated
         assert ("request input estimated" in notice) is not stated
@@ -91,18 +93,54 @@ def test_terminal_notice_carries_the_captured_window_and_honest_request_size(tmp
             assert "412,345" in notice
 
 
-def test_subscription_preview_reads_only_stored_account_facts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("account,live_profile,fingerprint,expected,maximum", [
+    ("", "account-a", "fingerprint-a", 400000, 4096),
+    ("account-a", "account-a", "fingerprint-a", 400000, 4096),
+    ("account-b", "account-b", "fingerprint-b", 250000, 4096),
+    ("account-a", "account-a", "renewed-a", None, 4096),
+    ("account-a", "account-b", "fingerprint-b", None, 0),
+    ("account-a", "", "", None, 0),
+])
+def test_subscription_preview_binds_stored_windows_to_the_live_catalog(
+        tmp_path, monkeypatch, account, live_profile, fingerprint, expected, maximum):
     from ouroboros.llm import LLMClient
-    from ouroboros.response_limits import response_limit_preview
+    from ouroboros.response_limits import record_metadata_limit, response_limit_preview
 
     model = "claudexor::fixture-source=model"
-    options = dict(source_id="fixture-source", credential_profile_id="account-a", account_fingerprint="fingerprint-a")
-    fp = ce.route_fingerprint(provider="claudexor", model=model, options=options)
-    ce._store_evidence(tmp_path, "probes", fp, ce.CapabilityEvidence(400000, "confirmed", "provider_metadata", fp,
-        model=model, provider="claudexor", ts=ce.utc_now_iso(), provenance="fixture", **options).to_json())
-    monkeypatch.setattr(LLMClient, "claudexor_model_catalog", lambda *a, **kw: pytest.fail("Settings fetched catalog"))
+    for profile, identity, window in [("account-a", "fingerprint-a", 400000), ("account-b", "fingerprint-b", 250000)]:
+        options = dict(source_id="fixture-source", credential_profile_id=profile, account_fingerprint=identity)
+        fp = ce.route_fingerprint(provider="claudexor", model=model, options=options)
+        ce._store_evidence(tmp_path, "probes", fp, ce.CapabilityEvidence(window, "confirmed", "provider_metadata", fp,
+            model=model, provider="claudexor", ts=ce.utc_now_iso(), provenance="fixture", **options).to_json())
+        record_metadata_limit(tmp_path, provider="claudexor", model=model, options=options,
+                              maximum=8192, source="old catalog", observed_at=ce.utc_now_iso())
+    reads = []
+    def catalog(source, profile=None, *, requested_model=None):
+        reads.append((source, profile, requested_model))
+        if not live_profile:
+            raise OSError("catalog unavailable")
+        return {"source": source, "credentialProfileId": live_profile, "accountFingerprint": fingerprint,
+                "observedAt": ce.utc_now_iso(), "provenance": "fixture",
+                "models": [{"id": "model", "maxOutputTokens": 4096}]}
+    monkeypatch.setattr(LLMClient, "claudexor_model_catalog", staticmethod(catalog))
+    monkeypatch.setattr(ce, "_save", lambda *a: pytest.fail("Preview wrote evidence"))
     route = dict(provider="claudexor", model=model, base_url="", use_local=False)
     before = ce._store_path(tmp_path).read_bytes()
-    assert response_limit_preview(tmp_path, route, account="account-a")["window"]["tokens"] == 400000
-    assert response_limit_preview(tmp_path, route, account="account-b")["window"]["tokens"] is None
+    preview = response_limit_preview(tmp_path, route, account=account)
+    assert reads == [("fixture-source", account or None, "model")]
+    assert preview["window"]["tokens"] == expected
+    assert preview["response_limit"]["max_output_tokens"] == maximum
+    if maximum:
+        assert preview["route"]["options"]["account_fingerprint"] == fingerprint
     assert ce._store_path(tmp_path).read_bytes() == before
+
+
+@pytest.mark.parametrize("source,label", [("user_setting", "set in Settings"), ("owner_ack", "owner confirmation"),
+                                        ("provider_metadata", "server metadata"), ("local_health", "local serving window")])
+def test_shared_window_labels_name_the_source_without_a_reader_perspective(source, label):
+    from ouroboros.context_window import WindowLimit, WindowRecord
+
+    projection = window_projection(WindowRecord("route", reserve=4096, total=WindowLimit(400000, "total", source)))
+    assert f"window 400,000 total: {label};" in projection["text"]
+    assert "set by you" not in projection["text"]
+    assert projection["source"] == source

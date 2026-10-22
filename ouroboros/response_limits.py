@@ -242,7 +242,7 @@ def probe_response_limit(drive_root, evidence, route: dict) -> ResponseLimit:
 
 
 def response_limit_preview(drive_root, route: dict, *, account="", settings=None, role="main", window=None) -> dict:
-    """Stored window/output projection for the owner editor; no catalog fetch or write."""
+    """Owner projection: stored API evidence and a live local subscription catalog, without writes."""
     from ouroboros import capability_evidence as ce
     from ouroboros.context_fit import main_output_reserve_tokens
     from ouroboros.context_view_facts import window_projection
@@ -253,21 +253,20 @@ def response_limit_preview(drive_root, route: dict, *, account="", settings=None
     provider, base_url, _key = _dispatch_route(route)
     options = ce.model_account_options(model, credential_profile_id=account, settings=settings) if provider == "claudexor" else {}
     data = ce._load(drive_root)
+    observed = None
     if provider == "claudexor":
-        candidates = []
-        for row in data.get("probes", {}).values():
-            binding = {key: row.get(key, "") for key in ("source_id", "credential_profile_id", "account_fingerprint")}
-            if (row.get("model") == model and row.get("provider") == provider and all(binding.values())
-                    and all(binding.get(key) == value for key, value in options.items() if value)
-                    and row.get("route_fp") == ce.route_fingerprint(provider=provider, model=model,
-                        base_url=route.get("base_url", ""), options=binding)):
-                candidates.append(row)
-        if candidates:
-            newest = max(candidates, key=lambda row: str(row.get("ts") or ""))
-            options = {key: newest[key] for key in ("source_id", "credential_profile_id", "account_fingerprint")}
+        try:
+            bound = ce._claudexor_metadata_evidence(model, base_url, None, options, record=False)
+            if bound.account_fingerprint:
+                options.update(credential_profile_id=bound.credential_profile_id, account_fingerprint=bound.account_fingerprint)
+                observed = {**bound.response_limit, "stale": bool(bound.stale)}
+        except Exception:
+            pass  # Unread account capacity remains unknown, never a fabricated cap.
     window_route = {key: route[key] for key in ("provider", "model", "base_url", "use_local") if key in route}
     window_route.update(provider=provider, options=options)
     evidence = ce.probe(drive_root, **window_route, allow_fetch=False)
+    if observed is not None and evidence.response_limit.get("source") != "owner_ack":
+        evidence.response_limit = observed  # This read's catalog fact, shown without being stored.
     response = evidence.response_limit
     window = int(model_role_option(MODEL_CONTEXT_WINDOWS_KEY, role, settings=settings)) if window is None else int(window)
     evidence = ce.with_role_window(evidence, window)

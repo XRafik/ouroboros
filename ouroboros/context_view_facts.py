@@ -42,7 +42,7 @@ def window_projection(record):
     limit = record.limiting
     observed = limit.observed_at if limit else ""
     source = limit.source if limit else "unknown"
-    label = {"user_setting": "set by you", "owner_ack": "owner confirmation",
+    label = {"user_setting": "set in Settings", "owner_ack": "owner confirmation",
              "provider_metadata": "server metadata", "local_health": "local serving window"}.get(source, source)
     dated = f"{label} {observed.replace('T', ' ')[:16]}".strip()
     if limit:

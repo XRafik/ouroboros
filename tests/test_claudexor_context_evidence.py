@@ -227,24 +227,23 @@ def test_main_input_reserve_and_account_capacity_remain_distinct(tmp_path, monke
     assert measured.target_total_tokens is None
 
 
-def test_unknown_subscription_reviewer_uses_labelled_layout_without_capacity(tmp_path, monkeypatch, catalog):
+def test_unknown_subscription_reviewer_keeps_the_assembler_input_budget(tmp_path, monkeypatch, catalog):
     from ouroboros import config
-    from ouroboros.reviewer_window import REVIEWER_FULL_WINDOW, resolve_reviewer_window, window_scaled_reserves
-    from ouroboros.tools.review_helpers import calibrated_input_token_limit
+    from ouroboros.reviewer_window import resolve_reviewer_window, window_scaled_reserves
+    from ouroboros.tools.review_helpers import REVIEW_PROMPT_TOKEN_BUDGET, calibrated_input_token_limit
     from ouroboros.tools.review_synthesis import per_slot_input_token_limits
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     catalog["value"]["models"] = []
     window = resolve_reviewer_window(MODEL, use_local=False)
     assert window.window_tokens == 0
-    assert window.sizing_window() == REVIEWER_FULL_WINDOW and window.sizing_source == "layout_assumption"
+    assert window.sizing_window() == 0
     assert window.window_record.usable is None and not ce.is_known(window)
     assert window_scaled_reserves(0, output_reserve=65_536, tokenizer_margin=50_000) == (65_536, 50_000)
-    assert calibrated_input_token_limit(MODEL, context_window=0, output_reserve=65_536,
+    assert calibrated_input_token_limit(MODEL, context_window=window.sizing_window(), output_reserve=65_536,
                                          tokenizer_margin=50_000, budget_cap=456_789) == 456_789
     caps = per_slot_input_token_limits([MODEL], output_reserve=65_536, tokenizer_margin=50_000)
-    assert caps == {MODEL: calibrated_input_token_limit(MODEL, context_window=window.sizing_window(),
-                                                        output_reserve=65_536, tokenizer_margin=50_000)}
+    assert caps == {MODEL: REVIEW_PROMPT_TOKEN_BUDGET}
 
 
 def test_unknown_subscription_native_layout_ignores_retired_character_cap(tmp_path, monkeypatch, catalog):

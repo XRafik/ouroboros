@@ -6,7 +6,7 @@ it were 1M, which draws a deterministic provider 400 ("prompt is too long") and
 loses that reviewer's whole review. Capability Evidence is the only source of
 the real number — no static per-model table (v6.33.0).
 
-An UNKNOWN route keeps the full-window assumption, matching the policy
+An UNKNOWN non-subscription route keeps the full-window assumption, matching the policy
 ``context_fit`` already applies to the main lane: unknown routes try Max and are
 never SILENTLY assumed to be 200K (BIBLE P1). Guessing small is not the safe
 direction here, because the guess DECLINES work rather than risking it: a
@@ -18,6 +18,7 @@ is a sizing fact only — it neither grants nor removes a reviewer's authority
 fail-closed sizing policy takes the whole :class:`ReviewerWindow` from
 :func:`resolve_reviewer_window` and applies its floor to
 :meth:`~ReviewerWindow.sizing_window`.
+Raw subscriptions with unknown windows retain the assembler's own input budget.
 
 Deliberately outside ``ouroboros.tools``: the triad, scope, plan, and deep
 self-review surfaces plus the top-level ``deep_self_review`` module all consume
@@ -115,11 +116,15 @@ class ReviewerWindow:
         return self.window_record.limiting.source if self.window_record and self.window_record.limiting else "layout_assumption"
 
     def sizing_window(self, unknown_window: int = REVIEWER_FULL_WINDOW) -> int:
-        """Fresh resolved capacity, or the caller's labelled layout assumption."""
+        """Fresh capacity; unknown subscriptions retain the assembler's input budget."""
+        from ouroboros.provider_models import provider_for_model
+
         if self.window_record and self.window_record.boundary is not None:
             value = self.window_record.boundary
         elif self.window_record is None and not self.stale and self.window_tokens:
             value = self.window_tokens  # legacy caller's explicit layout hint
+        elif provider_for_model(self.model) == "claudexor":
+            value = 0  # No made-up provider size for a raw subscription.
         else:
             value = unknown_window
         return SizedWindow(int(value), self.model_route, self.window_record)

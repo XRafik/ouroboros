@@ -88,3 +88,21 @@ def test_reviewer_uses_shared_role_ack_metadata_order_and_stale_is_layout_only(r
     assert resolved.sizing_source == "layout_assumption" and resolved.window_record.usable is None
     assert not ce.is_known(resolved, require_fresh=True)
     assert rw.ReviewerWindow().sizing_window() == rw.REVIEWER_FULL_WINDOW
+
+
+@pytest.mark.parametrize("model,unknown", [("claudexor::fixture=model", 0), ("openai::fixture", rw.REVIEWER_FULL_WINDOW)])
+@pytest.mark.parametrize("kind", ["input", "total", "unknown"])
+def test_subscription_and_api_layouts_keep_known_windows_and_unknown_budgets(monkeypatch, model, unknown, kind):
+    from ouroboros.context_window import WindowLimit, WindowRecord
+    from ouroboros.tools.review_helpers import calibrated_input_token_limit
+
+    record = WindowRecord("route", reserve=10000, **(
+        {kind: WindowLimit(400000, kind, "provider_refusal")} if kind != "unknown" else {}))
+    window = rw.ReviewerWindow(model=model, window_record=record, model_route={"source": "fixture"}).sizing_window()
+    assert window == (unknown if kind == "unknown" else 400000)
+    assert window.window_record is record and window.model_route == {"source": "fixture"}
+    monkeypatch.setattr(ce, "resolve_review_token_density", lambda *_a, **_kw: (1.0, "test"))
+    assert calibrated_input_token_limit(model, context_window=window, output_reserve=10000, tokenizer_margin=0,
+                                        budget_cap=920000) == {"input": 400000, "total": 390000, "unknown": 920000}[kind]
+    if kind == "unknown":
+        assert rw.ReviewerWindow(model=model).sizing_window(750000) == (0 if unknown == 0 else 750000)
