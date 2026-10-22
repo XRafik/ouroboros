@@ -754,6 +754,25 @@ class MinimumViewUnfit(ValueError):
     """The core, assignment, resident tools and work room cannot fit this route."""
 
 
+def _task_input_pointer(env: Any, task: Mapping[str, Any], core: ContextCore) -> Optional[str]:
+    """The exact task input as a source pointer (user content JSON), or ``None`` when it cannot be retained.
+
+    The original input stays exact in the captured core and the actor source store; only its Nano delivery
+    changes. This is neither the external-assignment compiler nor a summary.
+    """
+    try:
+        from ouroboros.artifacts import store_actor_source_bytes
+        source = store_actor_source_bytes(env.drive_root, str(task["id"]), category="context_checkpoints",
+            source_id="task_input", data=core.user_content_json.encode("utf-8"), extension="json")
+    except (OSError, ValueError, KeyError):
+        log.warning("Exact task input source could not be retained; preserving complete input", exc_info=True)
+        return None
+    return json.dumps("[Exact task input source]\nThe complete original user input is stored as JSON at this source. "
+                      "Read its full content through the given reader in ranges before substantive decisions. "
+                      "This pointer is not a summary or a change to the task.\n"
+                      + json.dumps(source, ensure_ascii=False, sort_keys=True), ensure_ascii=False)
+
+
 def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...]], user_content_json: str, *, preferred: str,
                       tool_schemas: Optional[List[Dict[str, Any]]], window_tokens: int, known_window: bool, output_reserve: int,
                       ratio: float, start: Optional[str] = None, resident: bool = False,
@@ -878,14 +897,24 @@ def build_context_fit_plan(
             *json.loads(core.supplementary_messages_json)],
             list(select_tool_schemas(tool_schemas or [], context_mode=preferred).schemas),
             provider=str(route.get("provider") or "")), view_kind=view_kind)
-    contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio,
-        work_room_levels=start_room(view_task, role))
+    levels, pointer = start_room(view_task, role), None
+    try:
+        contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio,
+                                                   work_room_levels=levels)
+    except MinimumViewUnfit:
+        # Physical rescue only: a known window that cannot hold the owner-Nano request with the whole input gets the
+        # exact source pointer; an unfit pointer request still names the incompatibility (owner decision 2026-10-13, #1527).
+        pointer = _task_input_pointer(env, task, core) if preferred == "nano" else None
+        if pointer is None:
+            raise
+        contents, initial_mode = _view_projections(core, governance, pointer, **view_args, ratio=ratio,
+                                                   work_room_levels=levels)
     def _projection(mode: str) -> ContextFitProjection:
         system_content, memory_facts = contents[mode]
         system_content_json = json.dumps(system_content, ensure_ascii=False, sort_keys=True)
-        estimated = _request_tokens(system_content, core.user_content_json,
+        user_projection = pointer if mode == "nano" else None
+        estimated = _request_tokens(system_content, user_projection or core.user_content_json,
                                     supplementary_messages_json=core.supplementary_messages_json)
-        user_projection = None
         return ContextFitProjection(
             mode=mode,
             system_content_json=system_content_json,
