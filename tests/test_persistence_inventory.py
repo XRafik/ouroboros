@@ -845,7 +845,10 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # ``source_handles/context_checkpoints/inline-image-*.image`` (``budget_pause``; its section-7 row).
 # 411 -> 413: the published MCP catalogs (``state/mcp/catalogs`` and its ``server-*.json`` envelopes,
 # ``ouroboros/mcp_catalog.py``, their section-4 row).
-EXPECTED_SCAN_PATHS = 413
+# 413 -> 416: the shared download cache ``package-downloads`` and its per-manager
+# ``package-downloads/*`` (named by ``workspace_preflight``, written by package managers),
+# and a candidate run's named-evidence ``.../delegated_runs/*/evidence/summary.json`` reread.
+EXPECTED_SCAN_PATHS = 416
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
