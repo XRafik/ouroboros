@@ -190,10 +190,10 @@ def get_tools() -> List[ToolEntry]:
             }, "required": ["action"]}}, _finish_task),
         ToolEntry("set_tool_timeout", {
             "name": "set_tool_timeout",
-            "description": "Change the saved GLOBAL tool-call timeout (OUROBOROS_TOOL_TIMEOUT_SEC in settings.json) and apply it "
-                           "immediately without restart. It sets the default cap of all later tool calls (a tool's own minimum "
-                           "still wins), not of one call; for one long command pass timeout_sec to run_command, run_script or "
-                           "verify_and_record instead.",
+            "description": (
+                "Set the saved global tool-call timeout immediately. Tool minimums still apply; use a call's "
+                'timeout_sec for a single long command.'
+            ),
             "parameters": {"type": "object", "properties": {
                 "seconds": {"type": "integer", "description": "New timeout in seconds (>= 1)"},
             }, "required": ["seconds"]},
@@ -201,10 +201,10 @@ def get_tools() -> List[ToolEntry]:
         *self_change_tool_entries(),
         ToolEntry("promote_to_stable", {
             "name": "promote_to_stable",
-            "description": "Ask the supervisor to move the stable branch (ouroboros-stable) to the development branch's "
-                           "(ouroboros) current commit and push it to origin; an evolution task promotes only its exact "
-                           "reviewed commit. The call returns at request time; the owner is told whether promotion and the "
-                           "push succeeded. Call when you consider the code stable.",
+            "description": (
+                'Ask the supervisor to advance ouroboros-stable to ouroboros and push it. Evolution promotes its exact '
+                'reviewed commit. Returns before completion; the owner receives the outcome.'
+            ),
             "parameters": {"type": "object", "properties": {"reason": {"type": "string"}}, "required": ["reason"]},
         }, _promote_to_stable),
         ToolEntry("start_task", {
@@ -348,14 +348,11 @@ def get_tools() -> List[ToolEntry]:
         }, _send_user_message),
         ToolEntry("update_identity", {
             "name": "update_identity",
-            "description": "Replace your identity manifest with the full new text you supply (who you are, who you want to become). "
-                           "Persists across sessions. Obligation to yourself (Principle 1: Continuity). "
-                           "Read your current identity first, then evolve it — add, refine, deepen. "
-                           "Full rewrites are allowed but should be rare; continuity of self matters. "
-                           "Use this only after substantive reflection or real experience — not on a "
-                           "greeting or trivial turn. This is the only correct way to write identity; "
-                           "never write memory/identity.md through write_file/edit_text. "
-                           "Project rooms included — identity is the same continuous file in every room.",
+            "description": (
+                'Replace your persistent identity manifest with the full supplied text after substantive reflection. '
+                'Read it first and preserve continuity. This is the identity-writing tool in every project room; do not '
+                'edit memory/identity.md through file tools.'
+            ),
             "parameters": {"type": "object", "properties": {
                 "content": {"type": "string", "description": "Full identity content (prefer evolving over rewriting from scratch)"},
                 "expected_revision": {"type": "string", "description": "Required for an existing identity: source_revision (SHA-256 of bytes) from read_file. A stale revision refuses with the current revision."},
@@ -391,12 +388,10 @@ def get_tools() -> List[ToolEntry]:
         }, _set_next_wakeup),
         ToolEntry("switch_model", {
             "name": "switch_model",
-            "description": "Switch to a different LLM model or reasoning effort level. "
-                           "Use when you need more power (complex code, deep reasoning) "
-                           "or want to save budget (simple tasks). Takes effect on next round. "
-                           "After the host moved this turn to a configured fallback, primary='return' "
-                           "or 'wait' goes back to the turn's primary route. Called with no arguments, it lists the "
-                           "available models.",
+            "description": (
+                'Switch model or reasoning effort on the next round. No arguments lists available models. After a host '
+                "fallback, primary='return' or 'wait' returns to this turn's primary route."
+            ),
             "parameters": {"type": "object", "properties": {
                 "model": {"type": "string", "description": "Model name (e.g. anthropic/claude-sonnet-4). Leave empty to keep current."},
                 "effort": {"type": "string", "enum": list(EFFORT_SCALE),
@@ -417,7 +412,7 @@ def get_tools() -> List[ToolEntry]:
             "parameters": {"type": "object", "required": ["task_id"], "properties": {
                 "task_id": {"type": "string", "description": "Task ID to check"},
                 "view": {"type": "string", "enum": ["answer", "summary", "evidence", "full"], "description": "Settled result view; omitted/full preserves the existing handoff. Early returns remain compact wait observations, not a result or full read."},
-                "known_result_sha256": {"type": "string", "description": "For short views, the prior answer_sha256; summary/evidence still refresh current facts. For omitted/full view, the existing child_result_sha256 conditional read. This does not change when the wait ends."},
+                "known_result_sha256": {"type": "string", "description": "Prior child_result_sha256 in every view; current facts still refresh. This does not change when the wait ends."},
                 "timeout_sec": {"type": "integer", "default": 180, "description":
                                 "Maximum seconds to wait (default 180); a larger value is clamped to "
                                 f"{_WAIT_TASK_CLAMP_SEC}, and a deadline narrows it (named in the result). Size the window to the child's expected life."},

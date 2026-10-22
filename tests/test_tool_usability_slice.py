@@ -572,7 +572,7 @@ def test_extract_pdf_text_shares_the_ocr_pdf_handler_and_contract():
     assert ocr.handler is extract.handler is media._ocr_pdf
     assert ocr.schema["parameters"] == extract.schema["parameters"]
     assert set(extract.schema["parameters"]["properties"]) == {"path", "pages", "max_pages", "start_char"}
-    assert "does not OCR" in ocr.schema["description"] and "not OCR" in extract.schema["description"]
+    assert "not OCR" in ocr.schema["description"] and "not OCR" in extract.schema["description"]
 
 
 # ---------------------------------------------------------------------------

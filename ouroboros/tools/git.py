@@ -1460,14 +1460,21 @@ def get_tools() -> List[ToolEntry]:
             "parameters": {"type": "object", "properties": commit_properties, "required": []}}, _commit_reviewed, is_code_tool=True, alias_for="commit_reviewed"),
         ToolEntry("vcs_pull_ff", {
             "name": "vcs_pull_ff",
-            "description": "Update the selected repository from origin: fetch, then fast-forward the current named branch only (git merge --ff-only). This changes the checkout; a diverged branch is refused with both SHAs, never merged or rewritten.",
+            "description": (
+                "Fetch origin and fast-forward the selected repository's current named branch. Changes the checkout; "
+                'divergence is refused with both SHAs, without merging or rewriting history.'
+            ),
             "parameters": {"type": "object", "properties": {
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo"], "default": "active_workspace", "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
             }, "required": []},
         }, _pull_from_remote, is_code_tool=True, mutates_worktree=True),
         ToolEntry("vcs_restore", {
             "name": "vcs_restore",
-            "description": "Discard uncommitted changes in the selected repository back to HEAD: all of them, or only paths=[...]. Tracked changes are checked out from HEAD and untracked files in scope are deleted (git clean -fd; ignored files stay). confirm=false only previews the uncommitted changes; confirm=true executes. In Ouroboros's own repository, dirty protected paths are refused.",
+            "description": (
+                'Restore all uncommitted changes, or paths, to HEAD. Deletes untracked files in scope; ignored files '
+                "stay. confirm=false previews; true executes. Dirty protected paths in Ouroboros's own repository are "
+                'refused.'
+            ),
             "parameters": {"type": "object", "properties": {
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo"], "default": "active_workspace", "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
                 "confirm": {"type": "boolean", "description": "false previews; true executes."},
@@ -1476,7 +1483,10 @@ def get_tools() -> List[ToolEntry]:
         }, _restore_to_head, is_code_tool=True, mutates_worktree=True),
         ToolEntry("vcs_revert", {
             "name": "vcs_revert",
-            "description": "Undo one commit of the selected repository by creating a new revert commit; history is not rewritten. confirm=false previews; confirm=true needs a clean worktree. Merge commits, and in Ouroboros's own repository commits touching protected paths, are refused.",
+            "description": (
+                'Undo one commit by creating a revert commit. confirm=false previews; true requires a clean worktree. '
+                "Refuses merge commits and, in Ouroboros's own repository, commits touching protected paths."
+            ),
             "parameters": {"type": "object", "properties": {
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo"], "default": "active_workspace", "description": "Omit for the active project workspace; use system_repo for Ouroboros source."},
                 "sha": {"type": "string", "description": "Commit SHA to revert"},

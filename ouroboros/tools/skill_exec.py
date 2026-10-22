@@ -1405,8 +1405,7 @@ _REVIEW_SCHEMA = {
 _EXEC_SCHEMA = {
     "name": "skill_exec",
     "description": (
-        "Run one manifest-declared script of an enabled type=script skill; instruction and extension "
-        "skills do not run here. The skill must be "
+        "Run one manifest-declared script of a type=script skill. The skill must be "
         "enabled and its review_gate must permit the current bytes: outside "
         "Cyber Pro, a current executable reviewer verdict or a qualified "
         "Advisory author acceptance of these exact bytes (the reviewer status "

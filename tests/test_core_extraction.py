@@ -161,7 +161,7 @@ def test_core_catalog_schema_bytes_and_handler_owners_are_stable():
     # D3 adds the recorded reply_to address to forward_to_worker and escalate.
     # Target merge retains the contributor tool affordances and target review/mail contracts.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "0e15a534fbf35fcae178fb982a14a492b8886cd3f7551e126e47fafd8ffeb3ac"
+        "c96acac3175e8b2468a501d0f621d40fc468fddfff8876fcd4de286bdff86aa2"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)

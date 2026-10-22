@@ -377,12 +377,9 @@ def _pdf_text_schema(name: str, lead: str) -> dict:
     return {
         "name": name,
         "description": (
-            lead + " Use for reading PDFs attached to the task (see the [ATTACHMENTS] manifest) or produced "
-            "during work. Text comes page by page; every page not delivered (not requested, past max_pages, "
-            "no text layer, extraction failure, size cap) is named. Resume a partially delivered page with its "
-            "pages selection and returned start_char. Reads use current PDF bytes, not an immutable snapshot. This "
-            "is not OCR: a selection with no text layer returns a typed OCR_PDF_SCANNED_UNAVAILABLE notice — "
-            "for scanned pages, render a page and view_image it (or vlm_query it)."
+            lead + " Reports every omitted page and its reason. Resume a partial page with pages and the returned "
+            "start_char; reads use current PDF bytes. This is not OCR: no text layer returns "
+            "OCR_PDF_SCANNED_UNAVAILABLE. Render scanned pages and use view_image or vlm_query."
         ),
         "parameters": {
             "type": "object",
@@ -400,7 +397,7 @@ def _pdf_text_schema(name: str, lead: str) -> dict:
 def get_tools() -> List[ToolEntry]:
     return [
         ToolEntry(name="ocr_pdf", schema=_pdf_text_schema("ocr_pdf", (
-            "Extract the embedded text layer of a local PDF (historical name: it does not OCR; same tool as "
+            "Extract the embedded text layer of a local PDF (historical alias of "
             "extract_pdf_text).")), handler=_ocr_pdf, timeout_sec=120, alias_for="extract_pdf_text"),
         # ocr_pdf's read-only skip lives in safety.TOOL_POLICY; one declaration per tool, never both.
         ToolEntry(name="extract_pdf_text", schema=_pdf_text_schema(

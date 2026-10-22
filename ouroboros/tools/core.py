@@ -1342,16 +1342,13 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("write_file", {
             "name": "write_file",
             "description": (
-                "Create, overwrite or append UTF-8 file(s) in a declared resource root: path+content, or files=[...] for several. "
-                "For canonical output use root=artifact_store (created lazily), e.g. path=report.txt. Do not assume its physical directory already exists. "
-                "With root omitted, relative paths use active_workspace; absolute paths select their permitted physical root, including user_files for home paths. "
-                "OK messages show root:path. "
-                "Overwriting an existing repo file returns the unified diff vs the "
-                "previous version — CHECK IT; invalid .py/.json content is blocked "
-                "before writing (force=true bypasses). "
-                "Use mode='append' to write a large file in chunks across multiple calls "
-                "(useful when the full content exceeds a single LLM output budget). "
-                "Set bucket/skill_name ONLY for root=skill_payload (skill authoring); leave empty for normal file edits."
+                (
+                'Create, overwrite or append UTF-8 files using path+content or files=[...]. Canonical output uses '
+                'root=artifact_store, created lazily. Omitted root selects active_workspace for relative paths and the '
+                'permitted physical root for absolute paths. Repo overwrites return a diff; check it. Invalid '
+                "Python/JSON is blocked unless force=true. Use mode='append' for chunks. bucket/skill_name apply only "
+                'to skill_payload.'
+            )
             ),
             "parameters": {"type": "object", "properties": {
                 "path": {"type": "string"},
@@ -1448,14 +1445,12 @@ def get_tools() -> List[ToolEntry]:
         ToolEntry("search_code", {
             "name": "search_code",
             "description": (
-                "Search files under a declared resource root for literal text or a regex; returns root:file:line matches. "
-                "Literal search by default; set regex=True for regular expressions. "
-                "Scoped to path (default: entire active workspace). "
-                "Skips binaries, caches, vendor dirs, and files >1MB. "
-                "Returns up to max_results matches (default 200) with root:file:line context; a long matched "
-                "line shows a window around its first match with that window's read_file range. "
-                "Use this for plain-text/regex matches (prefer it over grep/find-as-search in run_command); "
-                "for symbol-aware lookups (definitions, callers, references, impact) prefer query_code."
+                (
+                'Search literal text (default) or regex under root/path. Returns root:file:line matches with context; '
+                'long lines include a read_file range around the first match. Skips binaries, caches, vendor '
+                'directories and files over 1MB. max_results bounds matches. Use query_code for definitions, callers, '
+                'references or impact.'
+            )
             ),
             "parameters": {"type": "object", "properties": {
                 "query": {"type": "string", "description": "Search pattern (literal or regex)"},

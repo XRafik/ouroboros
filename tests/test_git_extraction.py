@@ -114,7 +114,7 @@ def test_git_catalog_schema_bytes_and_handler_owners_are_stable():
     # S3 collection permits omitted commit_message; S5 adds author doctrine; D4 adds wake_on.
     # Target merge retains the contributor tool affordances and target review/mail contracts.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "ba1fae1198faf5a5e3d5d773afe52fd7c42080c8ac76dcbd46e9708d2bcaa907"
+        "ee67d7c420ee8516363d0e01b6a7bbadcf83f6438deb5d11f9425289f7b8af66"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)
