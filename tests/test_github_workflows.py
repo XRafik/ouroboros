@@ -608,3 +608,47 @@ def test_shared_cut_manifest_preserves_entire_artifact_page_and_cursor(fake, ctx
     assert saved["items"] == rows and saved["next_cursor"] == "2" and not saved["complete"]
     assert manifest["summary"]["next_cursor"] == "2" and manifest["summary"]["items"] == 100
     assert len(data) == manifest["saved"]["bytes"] and hashlib.sha256(data).hexdigest() == manifest["saved"]["sha256"]
+
+
+def test_gh_run_readers_add_run_identity_exact_capture_and_artifact_id(tmp_path, monkeypatch):
+    from tests.test_github_project_target import _context
+
+    ctx, _project = _context(tmp_path, "queued")
+    ctx._active_builtin_tool_result = None
+    driver = FakeGh(artifacts=[_DIST], artifact=_DIST, archive=_zip({"out.txt": b"ok"}))
+    monkeypatch.setattr(github_workflows, "_gh_run", driver)
+    listing = _read(ctx, "list", "artifact", run_id=11)
+    assert "owner/selected run 11:" in listing and "github_read(method='download', kind='artifact', target=501" in listing
+    assert "attempt 1" not in listing  # artifact API is run-scoped, not attempt-scoped
+    log = _read(ctx, "get", "run", run_id=11)
+    assert "run 11 attempt 1" in log and hashlib.sha256(LOG).hexdigest() in log
+    assert driver.calls[-1].args == ["run", "view", "11", "--log", "--attempt", "1"]
+    assert _retained(ctx, log).read_bytes() == LOG
+    downloaded = _read(ctx, "download", "artifact", artifact_id=501, max_bytes=4096)
+    assert "artifact 501" in downloaded and "out.txt" in downloaded
+    assert driver.kinds()[-3:] == ["repo", "artifact", "zip"]
+    assert "Retained as the archive" in downloaded
+
+
+def test_gh_readers_reach_readonly_child_that_cannot_use_shell(tmp_path, monkeypatch):
+    from ouroboros.contracts.task_constraint import TaskConstraint
+    from ouroboros.tools.registry import ToolRegistry
+    from tests.test_github_project_target import _context
+
+    ctx, _project = _context(tmp_path, "queued")
+    ctx.task_constraint = TaskConstraint(mode="local_readonly_subagent", allow_enable=False)
+    registry = ToolRegistry(ctx.repo_dir, ctx.drive_root)
+    registry.set_context(ctx)
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_kw: (True, ""))
+    monkeypatch.setattr(github, "github_cli_configured", lambda: True)
+    driver = FakeGh(artifacts=[_DIST], artifact=_DIST, archive=_zip({"out.txt": b"ok"}))
+    monkeypatch.setattr(github_workflows, "_gh_run", driver)
+    assert registry.get_schema_by_name("run_command") is None
+    for name, args, content in (
+        ("github_read", {"method": "get", "kind": "run", "target": 11, "include": ["log"]}, "run 11 attempt 1"),
+        ("github_read", {"method": "list", "kind": "artifact", "target": 11, "limit": 100}, "target=501"),
+        ("github_read", {"method": "download", "kind": "artifact", "target": 501, "max_bytes": 4096}, "out.txt"),
+    ):
+        assert registry.get_schema_by_name(name) is not None
+        result = registry.execute_result(name, args)
+        assert result.status == "ok" and content in result.text, (name, result.text)

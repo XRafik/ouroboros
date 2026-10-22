@@ -710,3 +710,61 @@ def test_create_missing_url_never_invents_a_pr_number(fake, ctx, number):
         assert "PR_CREATE_UNKNOWN" in text and "valid PR number" in text
         assert "view" not in gh.kinds()
         assert "PR #0" not in text and "PR #-1" not in text
+
+
+@pytest.mark.parametrize("tool,kwargs,fragment", [
+    ("create", CREATE, "PR_PRECHECK_FAILED"),
+    ("edit", {"number": 7, "expected_head_sha": SHA, "title": "New title"}, "PR_PRECHECK_FAILED"),
+    ("ready", {"number": 7, "expected_head_sha": SHA, "ready": True}, "nothing was changed"),
+])
+def test_pr_writers_require_fresh_precheck_and_send_once(
+    tmp_path, monkeypatch, tool, kwargs, fragment,
+):
+    from tests.test_github_project_target import MOVED, _context
+
+    ctx, _project = _context(tmp_path, "queued")
+    ctx._active_builtin_tool_result = None
+    pr = _open_pr(headRefOid=MOVED) if tool != "create" else None
+    refs = {"owner:feature": MOVED, "owner:main": BASE_SHA}
+    guarded = FakeGitHub(pr=pr, refs=refs)
+    monkeypatch.setattr(github_pr_write, "_gh_run", guarded)
+    def handler(ctx, **kwargs):
+        return _pr(ctx, "create_pr" if tool == "create" else "update", **kwargs)
+    text = handler(ctx, **kwargs)
+    assert fragment in text and guarded.writes() == []
+
+    fresh_pr = None if tool == "create" else _open_pr(isDraft=True)
+    fresh_refs = {"owner:feature": SHA, "owner:main": BASE_SHA}
+    fresh = FakeGitHub(pr=fresh_pr, refs=fresh_refs)
+    monkeypatch.setattr(github_pr_write, "_gh_run", fresh)
+    assert not handler(ctx, **kwargs).startswith("⚠️")
+    assert len(fresh.writes()) == 1
+    entry = next(x for x in github.get_tools() if x.name == "github_write")
+    assert "head_sha" in entry.schema["parameters"]["properties"]["expect"]["properties"]
+
+
+def test_pr_update_reports_partial_state_after_one_send(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from tests.test_github_project_target import _context
+
+    ctx, _project = _context(tmp_path, "queued")
+    ctx._active_builtin_tool_result = None
+    def partial_driver():
+        driver = FakeGitHub(pr=_open_pr())
+
+        def call(args, context, **options):
+            if driver.kind(args) == "edit":
+                driver.calls.append(SimpleNamespace(args=list(args), repo=options.get("repo"),
+                                                    input=options.get("input_data"), timeout=60))
+                driver.pr["title"] = "New title"
+                return github.GhResult(False, "⚠️ GH_ERROR: HTTP 422", 1, 422, "exit")
+            return driver(args, context, **options)
+        return driver, call
+
+    driver, call = partial_driver()
+    monkeypatch.setattr(github_pr_write, "_gh_run", call)
+    text = _pr(ctx, "update", number=7, expected_head_sha=SHA, title="New title", body="New body")
+    assert len(driver.writes()) == 1 and "held: title confirmed" in text
+    assert "not held: body differs" in text and "before resending only the fields not held" in text
+    assert (driver.pr["title"], driver.pr["body"]) == ("New title", "Old body")

@@ -16,6 +16,9 @@ def test_retired_names_are_unknown_and_saved_disables_withhold_only_their_action
     assert registry.execute_result("vcs_read", {"action": other}).code == "RESOURCE_CONSTRAINT_BLOCKED"
     ctx.task_contract = {}
     assert registry.execute_result("vcs_read", {"action": action}).status == "ok"
+    from tests.test_preflight_recovery_authority import _presence_contract
+    ctx.task_contract = _presence_contract(retired)
+    assert registry.get_schema_by_name("vcs_read") is None
 
 
 @pytest.mark.parametrize("repository", [None, "."])
