@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 from ouroboros.context_layout import reference_doc_sections
 from ouroboros.reference_books import ReferenceBook
 from ouroboros import context_budget
-from ouroboros.context_window import WindowRecord, resolve_window
+from ouroboros.context_window import WindowRecord, resolve_window, route_observation_scope
 from ouroboros.tool_result_delivery import project_tool_result_batch  # noqa: F401
 from ouroboros.utils import estimate_tokens
 
@@ -668,7 +668,6 @@ def _context_route(task: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, Any]
             credential_profile_id=account,
             model_route=task.get("model_route"),
         )
-    from ouroboros.context_window import route_observation_scope
     route["window_observation_fp"] = route_observation_scope(route, settings)
     return route, settings
 
@@ -700,6 +699,10 @@ def resolve_context_fit_route(
         allow_fetch=allow_fetch,
         options=route["options"] or None,
     )
+    if route["provider"] == "claudexor" and getattr(evidence, "account_fingerprint", ""):  # the account receipts name
+        route["options"] = {**route["options"], **{key: getattr(evidence, key) for key in (
+            "source_id", "credential_profile_id", "account_fingerprint")}}
+        route["window_observation_fp"] = route_observation_scope(route, settings)
     window = int(model_role_option(MODEL_CONTEXT_WINDOWS_KEY, route["model_role"],
                                    settings=settings))
     if window:

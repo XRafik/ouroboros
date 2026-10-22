@@ -196,3 +196,60 @@ def test_direct_account_scope_survives_same_key_but_not_key_rotation(tmp_path, m
     settings[key] = "fixture-account-A"
     assert start().window_record.usable == 134_464
     assert "fixture-account-" not in json.dumps(ce._load(tmp_path))
+
+
+def test_a_claudexor_account_reads_the_acceptances_its_receipts_wrote(tmp_path, monkeypatch):
+    """6A through the production route builder: the catalog binds the account after the route is resolved; the
+    next plan of that account reads what its receipts wrote, another account does not, and N <= T keeps T - R."""
+    from ouroboros import config, context_fit as cf, server_runtime
+    from ouroboros.context_anchor import record_input_anchor
+    from ouroboros.llm_attempt import main_context_fit_refusal
+    from ouroboros.usage_accounting import AttemptRequest
+
+    model, catalog = "claudexor::codex=gpt-fixture", {"account": "a", "window": 872_000}
+    monkeypatch.setattr(config, "runtime_settings", lambda: {"OUROBOROS_MODEL": model})
+    monkeypatch.setattr(server_runtime, "apply_runtime_provider_defaults", lambda s: (s, False, []))
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    monkeypatch.setattr(cf, "_route_calibration_ratio", lambda *_a, **_kw: 1.0)
+    monkeypatch.setattr(ce, "resolve_main_token_density", lambda *_a, **_kw: (1.0, "cold_estimate"))
+
+    def probe(_root, **kw):  # the catalog names the account it advertises; the request carried none
+        assert "account_fingerprint" not in (kw["options"] or {})
+        bound = {"source_id": "codex", "credential_profile_id": f"profile-{catalog['account']}",
+                 "account_fingerprint": f"fp-{catalog['account']}"}
+        return ce.CapabilityEvidence(catalog["window"], "confirmed", "metadata", ce.route_fingerprint(
+            provider=kw["provider"], model=kw["model"], base_url=kw["base_url"], options={**kw["options"], **bound}), **bound)
+    monkeypatch.setattr(ce, "probe", probe)
+    core = cf.ContextCore("Core", "", "", "", "", "", '"Assignment"', False)
+
+    def start():
+        return cf.build_context_fit_plan(None, core, {}, preferred_mode="max", route_resolver=cf.resolve_context_fit_route)
+
+    def accept(plan, tokens):  # the settled response's receipt names the serving account
+        record_input_anchor({"_model_route": {"source": "codex", "model": "gpt-fixture", "accountFingerprint": f"fp-{catalog['account']}",
+                                              "credentialProfileId": f"profile-{catalog['account']}"},
+                             "_last_round_cache_usage": {"prompt_tokens": tokens, "provider": "claudexor"},
+                             "_context_raw_input_tokens": tokens}, plan, round_idx=1)
+
+    estimate = cf.estimate_context_prompt_tokens
+
+    def refused(plan, size):  # the pre-send gate on a request of ``size`` estimated tokens
+        monkeypatch.setattr(cf, "estimate_context_prompt_tokens", lambda *_a, **_kw: size)
+        measured = cf.measure_main_fit(plan, [], [], profile="owner_max", rendered_mode="max", round_id="r")
+        monkeypatch.setattr(cf, "estimate_context_prompt_tokens", estimate)
+        return main_context_fit_refusal(AttemptRequest(model=model, provider="claudexor",
+            prompt_tokens_bounded_estimate=size, physical_context=cf._physical_context_for_fit(measured))) is not None
+
+    first = start()
+    assert first.window_record.usable == 806_464
+    accept(first, 921_227)
+    same = start()
+    assert same.window_record.usable == 921_227 and same.window_record.accepted == 921_227
+    assert (refused(same, 921_227), refused(same, 921_228)) == (False, True)
+    assert first.window_witness_bound and same.model_route["accountFingerprint"] == "fp-a"
+    catalog["account"] = "b"  # a second account of the same model inherits nothing
+    other = start()
+    assert other.window_record.accepted == 0 and other.window_record.usable == 806_464 and refused(other, 921_227)
+    catalog.update(account="c", window=1_000_000)  # an acceptance under a stated total keeps T - R
+    accept(start(), 200_000)
+    assert start().window_record.usable == 934_464 and start().window_record.accepted == 200_000
