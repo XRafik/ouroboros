@@ -752,6 +752,7 @@ def _request_tokens(system_content: List[Dict[str, Any]], user_content_json: str
 
 class MinimumViewUnfit(ValueError):
     """The core, assignment, resident tools and work room cannot fit this route."""
+    physical = True  # False: the request itself fits the window, only the start work room beside it does not
 
 
 def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...]], user_content_json: str, *, preferred: str,
@@ -806,8 +807,11 @@ def _view_projections(core: ContextCore, governance: Mapping[str, Tuple[str, ...
             mode = "low"
             sent, fixed, reserve, window, boundary, allowances = frame(mode)
     if kept is None and known_window and math.ceil(fixed * ratio) + reserve + work() > window:
-        raise MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
-                               f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work()} work > {window} tokens")
+        unfit = MinimumViewUnfit(f"Core, assignment, resident control tools and work room cannot fit: "
+                                 f"{math.ceil(fixed * ratio)} input + {reserve} reply + {work()} work > {window} tokens")
+        minimum = floor.minimal_view_tokens(snapshot, window_tokens=window) if snapshot else 0
+        unfit.physical = math.ceil((fixed + minimum) * ratio) + reserve > window  # with my shortest memory view
+        raise unfit
 
     def render():
         saved = max(0, (saving or {}).get(start or preferred, 0) - (original_fixed - fixed)
@@ -891,12 +895,11 @@ def build_context_fit_plan(
     try:
         contents, initial_mode = _view_projections(core, governance, core.user_content_json, **view_args, ratio=ratio,
                                                    work_room_levels=levels)
-    except MinimumViewUnfit:
-        # Physical rescue only: a known window that cannot hold the owner-Nano request with the whole input gets the
-        # exact source pointer; an unfit pointer request still names the incompatibility (owner decision 2026-10-13, #1527).
+    except MinimumViewUnfit as unfit:
+        # Physical rescue only (owner 2026-10-13, #1527): the exact source pointer replaces the whole input only when the
+        # owner-Nano request itself overflows; a room-only shortfall or an unfit pointer request names the start (7A).
         from ouroboros.context_input_selection import task_input_pointer
-
-        pointer = task_input_pointer(env, task, core.user_content_json) if preferred == "nano" else None
+        pointer = task_input_pointer(env, task, core.user_content_json) if preferred == "nano" and unfit.physical else None
         if pointer is None:
             raise
         contents, initial_mode = _view_projections(core, governance, pointer, **view_args, ratio=ratio,
