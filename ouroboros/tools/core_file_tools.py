@@ -501,7 +501,7 @@ def _tree_list(ctx: ToolContext, binding: ResolvedResourceBinding, depth: int, i
             rel, link = shown(child), child.is_symlink()
             is_dir = not link and child.is_dir()
             gap = ("symlink_not_followed" if link else "" if not is_dir else "depth_limit" if level >= depth
-                   else "generated_not_descended" if child.name in SKIP_DIRS
+                   else "generated_not_descended" if binding.root in {"active_workspace", "system_repo", "skill_payload"} and child.name in SKIP_DIRS
                    else "protected_not_descended" if block_reason_for_path(ctx, child, "static_introspection", binding) else "")
             if gap:
                 gaps[gap].append(rel + ("/" if is_dir else ""))
@@ -521,7 +521,7 @@ def _tree_list(ctx: ToolContext, binding: ResolvedResourceBinding, depth: int, i
     rows += [{"kind": kind, "count": len(names), "paths": names[:_TREE_GAP_NAMES], "paths_omitted": max(0, len(names) - _TREE_GAP_NAMES), "detail": _TREE_GAP_HINTS[kind]}
              for kind, names in gaps.items() if names]
     rows += [{"kind": "policy_hidden", "count": hidden, "detail": "entries the list policy omits"}] if hidden else []
-    complete = not stop and not any(gaps[kind] for kind in ("generated_not_descended", "protected_not_descended", "unreadable", "packed_index_not_scanned"))
+    complete = not rows
     return json.dumps({"path": f"{binding.root}:{shown(target)}", "depth": depth, **({"include": include} if include else {}),
                        "scanned": scanned, "max_scan": max_scan, "complete": complete, "order": _TREE_ORDER,
                        "entries": entries, "gaps": rows}, ensure_ascii=False, indent=2)

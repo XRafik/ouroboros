@@ -54,7 +54,7 @@ def test_tree_walk_is_breadth_first_filtered_and_complete_when_nothing_is_hidden
 
     full = _tree(core_file_tools._list_files(ctx, ".", depth=3))
     assert full["entries"] == ["a.py", "b.txt", "pkg/", "pkg/c.py", "pkg/sub/", "pkg/sub/d.py", "pkg/sub/deeper/"]
-    assert full["complete"] is True and full["scanned"] == 7
+    assert full["complete"] is False and full["scanned"] == 7
     assert _gap(full, "depth_limit")["paths"] == ["pkg/sub/deeper/"]
 
     matched = _tree(core_file_tools._list_files(ctx, "pkg", depth=5, include="*.{py,md}"))
@@ -177,6 +177,7 @@ def test_runtime_data_tree_hides_the_project_store_and_counts_it(tmp_path):
     assert "logs/a.jsonl" in listing["entries"]
     assert not any(entry.startswith("projects") for entry in listing["entries"])
     assert _gap(listing, "policy_hidden")["count"] >= 1
+    assert listing["complete"] is False
 
 
 def test_read_file_on_an_admitted_directory_returns_the_listing_call(tmp_path):
@@ -712,3 +713,29 @@ def test_run_script_early_handler_refusal_keeps_dispatch_source(script_registry,
         result = shell._run_script(registry._ctx, **arguments)
     assert "nothing ran" in result and "tool_dispatch_" in result
     assert "# script_path=" not in result
+
+
+@pytest.mark.parametrize("gap", ["depth_limit", "symlink_not_followed"])
+def test_tree_with_any_gap_is_incomplete(tmp_path, gap):
+    ctx = _ctx(tmp_path)
+    folder = ctx.repo_dir / "nested"
+    folder.mkdir()
+    (folder / "file.py").write_text("x")
+    if gap == "symlink_not_followed":
+        (ctx.repo_dir / "link").symlink_to(folder, target_is_directory=True)
+    result = _tree(core_file_tools._list_files(ctx, ".", depth=1 if gap == "depth_limit" else 3, include="*.py"))
+    assert _gap(result, gap) and result["complete"] is False
+
+
+def test_user_file_tree_descends_generated_directory_names(tmp_path, monkeypatch):
+    from dataclasses import replace
+    from ouroboros.tool_access import build_resolved_resource_binding
+    ctx = _ctx(tmp_path)
+    (ctx.repo_dir / "build" / "dist").mkdir(parents=True)
+    (ctx.repo_dir / "build" / "dist" / "report.txt").write_text("user document")
+    binding = build_resolved_resource_binding(ctx, root="active_workspace", operation="list", path=".")
+    code = _tree(core_file_tools._tree_list(ctx, binding, 4, "", 500, 2000))
+    assert _gap(code, "generated_not_descended") and not code["complete"]
+    monkeypatch.setattr(core_file_tools, "user_files_path_block_reason", lambda *_a, **_kw: "")
+    user = _tree(core_file_tools._tree_list(ctx, replace(binding, root="user_files"), 4, "", 500, 2000))
+    assert user["complete"] and "build/dist/report.txt" in user["entries"] and not user["gaps"]

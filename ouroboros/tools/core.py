@@ -1326,8 +1326,8 @@ def get_tools() -> List[ToolEntry]:
         }, _read_file),
         ToolEntry("list_files", {
             "name": "list_files",
-            "description": "List the entries of one directory in a declared resource root (subdirectories end with '/'), up to max_entries (default 500). "
-                           "Opt into depth/include for a bounded live tree, with scan limits and named gaps; it skips observed symlink directories and generated subtrees (not an atomic filesystem snapshot). To search contents use search_code or query_code.",
+            "description": "List a directory, or use depth/include for a bounded live tree. Gaps make complete=false. "
+                           "Generated subtrees are skipped only in code roots; symlink directories are not followed.",
             "parameters": {"type": "object", "properties": {
                 "path": {"type": "string", "default": "."},
                 "root": {"type": "string", "enum": ["active_workspace", "system_repo", "runtime_data", "task_drive", "skill_payload", "artifact_store", "user_files", "subagent_projects", "deliverables"], "description": _FILE_ROOT_DESCRIPTION},
