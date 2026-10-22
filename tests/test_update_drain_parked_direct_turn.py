@@ -78,13 +78,18 @@ def _wait_for_owner_wait_state(
     expected_reason: str,
     timeout: float = 5.0,
 ) -> dict:
+    # The durable row is written before the registry mark, so wait for both:
+    # returning on the row alone races the mark (review rl-20261022T144146).
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         wait = (load_task_result(drive_root, task_id) or {}).get("owner_wait") or {}
+        entry = get_direct_activity_registry().get(task_id)
         if (
             wait.get("state") == "waiting"
             and wait.get("reason") == expected_reason
             and isinstance(wait.get("source_ref"), dict)
+            and entry is not None
+            and entry.parked_wait is not None
         ):
             return wait
         time.sleep(0.02)
