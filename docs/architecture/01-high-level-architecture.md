@@ -97,6 +97,7 @@ ouroboros/ — agent core and shared runtime (§6)
   credential_shapes.py — credential leaf names and physical locations (§6 Credential mutation and diagnostic redaction)
   update_channels.py — Stable/QA/Development channel mapping (§8)
   update_letter.py — the update letter: `base..target` commit material from one accounted light-slot call (§7; §3 Updates)
+  evolution_history.py — Evolution's version history (§3)
   colab_bootstrap.py — Google Colab source-mode bootstrap (official source, Drive-backed data, no-UI server)
   cli.py — source/headless CLI over gateway tasks, logs, settings, skills, local model and MCP (CLI / Headless Boundary below)
   packaged_cli.py, packaged_cli_install.py — packaged desktop CLI bridge and its command-shim installer
@@ -281,7 +282,7 @@ ouroboros/ — agent core and shared runtime (§6)
   size_ratchet_manifest.py — Generated data-only size-debt manifest (`scripts/regenerate_size_ratchet.py`)
   review_execution_projection.py — Reviewer-execution projection; kinds `api` | `harness` | `native`, so the owner can tell a retrieving review from a packet review on the same model
   preflight_runner.py, preflight_node.py, preflight_receipts.py, test_parallelism.py, test_evidence.py, safe_test_supervisor.py — Hermetic gate, Node, receipts, worker budget, durable results, command lifetime (§6; §8)
-  test_selection.py, preflight_inventory.py, preflight_qualification.py — Scope, execution inventory, full adoption proof (§6)
+  test_selection.py, preflight_inventory.py, preflight_qualification.py — Scope, execution inventory, adoption evidence (§6)
   review_substrate.py — Review seat coordinator: independent seats, per-actor records that keep transport, parse, verdict, coverage and quorum distinct (§6 Review stack, Result review)
   review_custody.py, review_source_closure.py, review_operation.py, review_live_join.py — Reviewer workers: no-resend custody, retained owner-bound inputs, panel waits/checkpoints, existing-producer collection/live joins (§6 Review stack; Paid stamp and owner custody)
   review_owner_custody.py — Paid attempts record `(server session, pid)` (§6 Paid stamp and owner custody)
@@ -515,8 +516,8 @@ ouroboros/ — agent core and shared runtime (§6)
     commit_gate.py — Commit gate: LLM claim synthesis, block classification, the free identical-verdict refusal, paid review-cycle counting and ceiling, the review-contract fingerprint
     git_rollback.py — Emits `rollback_request`; the supervisor runs the UI Rollback door's procedure (P4-S)
     git_pr.py — Five PR tools (non-core)
-    github.py — Issue, PR and checks tools (frozen tool module): the shared process binding selects the active Project; discovery reads token sources or native CLI configuration without an authentication probe; a refusal before the first `gh` launch is `completed_no_effect`
-    github_checks.py — the reader behind `get_github_checks`: one commit's runs, jobs, annotations and PR rollup as facts and named unavailable sources under one deadline
+    github.py, github_read.py, github_write.py — `github_read`, `github_write`, `pr_merge` (frozen tool module), one `gh` transport bound to the active Project; discovery reads token sources or native CLI config unprobed; a refusal before its first `gh` launch is `completed_no_effect`
+    github_checks.py — checks reader: a commit's runs, jobs, annotations, PR rollup as facts, unavailable sources named, one deadline
     parallel_review.py — Prepares and admits every seat before the review wave sends (§6 Surfaces and money admission)
     plan_review_references.py — Reference projection with its own provenance rows (progress stream); no plan authority
     plan_review.py — `plan_task` entry: free write and read, the paid ask, typed `PLAN_*` refusals (§6 Plan construction and review)
@@ -681,7 +682,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   │   ├── server_process.json    ← launcher-owned server identity for relaunch cleanup
 │   │   ├── advisory_review.json   ← commit-review state (attempts, obligations, readiness debts)
 │   │   ├── code_intel/<repo_key>/inventory.json ← code-inventory facts; no source cache
-│   │   ├── evolution_metrics_cache.json ← per-tag metrics cache
+│   │   ├── evolution_metrics_cache.json ← version history cache
 │   │   ├── evolution_campaign.json ← campaign objective, progress, budget
 │   │   ├── evolution_checkpoints.jsonl ← per-cycle checkpoints
 │   │   ├── post_task_evolution_request.json ← one-shot promotion signal for the supervisor idle tick

@@ -841,10 +841,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # #2151's pure observability helper hid two named paths and introduced three false
 # data-root spellings. Resolving its return restores the audited 410-path population;
 # the local evolution export introduced by #2137 is also a sentinel below.
-# 410 -> 413: the shared download cache ``package-downloads`` and its per-manager
+# 410 -> 411: #2177 retains a parked pre-start task's inline image as
+# ``source_handles/context_checkpoints/inline-image-*.image`` (``budget_pause``; its section-7 row).
+# 411 -> 414: the shared download cache ``package-downloads`` and its per-manager
 # ``package-downloads/*`` (named by ``workspace_preflight``, written by package managers),
 # and a candidate run's named-evidence ``.../delegated_runs/*/evidence/summary.json`` reread.
-EXPECTED_SCAN_PATHS = 413
+EXPECTED_SCAN_PATHS = 414
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

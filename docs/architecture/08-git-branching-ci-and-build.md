@@ -4,13 +4,13 @@ This chapter owns release topology: the branch and channel model behind the thre
 
 `ouroboros` is the local working branch; the runtime setting selects one official feed independently of it: Stable is the newest plain release tag reachable from both `main` and `ouroboros-stable`, QA the `ouroboros-stable` tip, Development the `ouroboros` tip (`update_channels.py`). Promotion and rollback are owner-controlled exact-SHA movements; ordinary restart preserves the local tip, while explicit update owns fetch, target validation, rescue, apply and rollback. `managed` is the official read/update remote, `origin` optional personal persistence. Desktop and Colab reject a target without a regular non-empty `BIBLE.md`. External pull requests target `ouroboros`, allocate no release version and get the collision-free version when maintainers land them (CONTRIBUTING.md).
 
-Candidates use `candidate/<task>` and private pins (§6). Auto-push sends the branch, then only its operation-created annotated tag. Adoption carries the selected commit's creation fact; interruption before recording leaves its tag local. A later neutral commit backfills none, nor do legacy receipts. Tag failure is disclosed without retry; diagnostics stay in Logs. Candidate branches publish explicitly.
+Candidates use `candidate/<task>` and private pins (§6), published explicitly. Auto-push sends the branch and its operation-created annotated tag; selected adoption withholds both (DEVELOPMENT "The tiered commit and CI gates"). Adoption retains that creation fact; interrupted recording leaves the tag local. Neutral commits and legacy receipts backfill none. Tag failure is disclosed, not retried.
 
 The local `ouroboros-stable` ref is also a recovery fallback maintained by explicit promotion; that local role does not select the QA feed. Launcher metadata is bootstrap provenance only: status, preflight, Colab bootstrap and apply resolve the selected channel and exact fetched SHA themselves, so an older frozen launcher cannot redirect updates. Stable additionally requires the shared plain release tag; QA and Development use no version comparison as an admission gate.
 
 ### CI topology
 
-`ci.yml` runs only on dispatch or `v*` tags; local tests and review stay as strict. After merges to `ouroboros` the secret-free `post-merge.yml` tests the affected selection (coalesced, one retry), bisects a red to its merge and reports it to that PR and a `post-merge-red` issue, blocking nothing. UI/provider wrappers are manual-only; Claudexor integration and non-test publishing keep their triggers; Hub validation is separate.
+`ci.yml` runs only on dispatch or `v*` tags; local tests and review stay strict. After merges to `ouroboros` the secret-free `post-merge.yml` runs the affected tests (coalesced, one retry) and `ruff --select F`, bisects a red to its merge and reports it to that PR and a `post-merge-red` issue, blocking nothing. UI/provider wrappers are manual; Claudexor and non-test publishing keep their triggers; Hub validation is separate.
 
 | Tier | Jobs | Trust boundary |
 |---|---|---|

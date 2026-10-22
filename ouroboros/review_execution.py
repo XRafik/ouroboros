@@ -675,15 +675,13 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
     from ouroboros.review_checking import bind_checking_thread, session_checking, terminal_seat_evidence
     task_id, surface, slot_id, timeout_sec, logical_key_extra, output_schema, \
         session_route, instructions, retry_state = session_invocation_fields(invocation)
-    use_thread = bool(invocation.use_thread)
-    thread_id = str(invocation.thread_id or "")
+    use_thread, thread_id = bool(invocation.use_thread), str(invocation.thread_id or "")
     root_task_id, parent_task_id, usage_custody = session_custody_attribution(current_usage_scope())
     # A reviewer never holds candidate write authority: writable access is an investigation.
     shape = delegated_run_shape(False, str(invocation.access or "readonly"))
     checking: Dict[str, Any] = {}
     state = retry_state if retry_state is not None else {}
-    run_id, turn_id, run_request, invocation_id = "", "", None, ""
-    started_custody = None
+    run_id, turn_id, run_request, invocation_id, started_custody = "", "", None, "", None
     retry_token = str(state.get("pending_invocation_id") or "")
     unrequested = not (retry_token or invocation.reconcile_only)
     gateway, route = None, session_route
@@ -772,15 +770,10 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
                 source_root=custody_drive, delivery_facts=delivery_facts, gateway=gateway)
         if not run_id:
             from ouroboros.budget_pause import dispatch_fenced
-
-            if dispatch_fenced(task_id):
-                # Observation-only while the owning task pauses (#1196): a
-                # fresh start AND a pending-invocation replay are both a new
-                # POST. The invocation row stays pending for the resumed task.
-                raise ReviewRouteUnavailable(
-                    "the owning task is entering an exact pause; no delegated "
-                    "review is started or re-posted while it pauses",
-                    code="budget_pausing_no_send")
+            if dispatch_fenced(task_id):  # Observation-only while the owning task pauses (#1196): a fresh
+                # start AND a pending-invocation replay are both a new POST; the row stays pending for Resume.
+                raise ReviewRouteUnavailable("the owning task is entering an exact pause; no delegated review is "
+                                             "started or re-posted while it pauses", code="budget_pausing_no_send")
             if (not recovering and invocation.owner_deadline_at and owner_deadline_exhausted(
                 deadline_at=invocation.owner_deadline_at, reserve_sec=get_finalization_grace_sec())):
                 raise _deadline_exhausted_error()
@@ -822,8 +815,7 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
                 return gateway.start_run(run_request, idempotency_key=invocation_id)
 
             try:
-                launch_source = SimpleNamespace(drive_root=custody_drive,
-                    task_id=task_id, root_task_id=root_task_id)
+                launch_source = SimpleNamespace(drive_root=custody_drive, task_id=task_id, root_task_id=root_task_id)
                 handle = run_operation(launch_source, submit)
             except (ClaudexorUnavailable, OwnerPauseRefused) as exc:
                 code = getattr(exc, "code", str(exc))
@@ -840,8 +832,7 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
         state["pending_invocation_id"] = invocation_id or retry_token
         state["delegated_run_id"] = run_id
         if started_custody is not None:
-            entry = started_custody
-            custody_durable = True
+            entry, custody_durable = started_custody, True
         else:
             entry = custody.RunCustody(
                 run_id=run_id, task_id=task_id, route_id=route.route_id, model=str(route.model or ""),
@@ -905,18 +896,12 @@ def run_delegated_review_session(*, prompt: str, root: str, custody_drive: Any,
         state.pop("pending_invocation_id", None)
         state.pop("delegated_run_id", None)
         return {
-            "run_id": run_id, "thread_id": thread_id, "turn_id": turn_id,
-            "thread_receipt": thread_receipt,
-            "profile_continuity_receipt": thread_receipt.get("profile_continuity") or {},
-            "text": text,
-            "conformance": str(summary.get("outputConformance") or "").strip().lower(),
-            "schema_asked": schema_asked,
-            "custody_durable": custody_durable,
-            "idempotent_recovery": recovering,
-            "late_success_accepted": late_success,
-            "settlement": settlement,
-            "review_source_delivery": delivery_facts,
-            "review_continuations": continuations,
+            "run_id": run_id, "thread_id": thread_id, "turn_id": turn_id, "thread_receipt": thread_receipt,
+            "profile_continuity_receipt": thread_receipt.get("profile_continuity") or {}, "text": text,
+            "conformance": str(summary.get("outputConformance") or "").strip().lower(), "schema_asked": schema_asked,
+            "custody_durable": custody_durable, "idempotent_recovery": recovering,
+            "late_success_accepted": late_success, "settlement": settlement,
+            "review_source_delivery": delivery_facts, "review_continuations": continuations,
             "route_id": str(entry.route_id), "run_dir": str(summary.get("runDir") or ""),
             # One final attempt, never the requested pool or a mixed summary route.
             "effective_route_ids": [observed["harness_id"]] if observed.get("harness_id") else [],
