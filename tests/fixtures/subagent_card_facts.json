@@ -15,8 +15,8 @@
   },
   {
     "name": "recorded parent fallback",
-    "task": {"id": "child", "delegation_role": "subagent", "model": "claudexor::codex=gpt-5", "executor_route": "codex", "parent_cognitive_route": {"model": "claudexor::codex=gpt-5", "source_role": "fallback", "chosen_by": "inherited"}},
-    "facts": {"model": "claudexor::codex=gpt-5", "executor_route": "codex", "parent_cognitive_route": {"model": "claudexor::codex=gpt-5", "source_role": "fallback", "chosen_by": "inherited"}, "use_local_model": false, "coordinator_route": "claudexor::codex=gpt-5", "coordinator_billing": "subscription"},
+    "task": {"id": "child", "delegation_role": "subagent", "model": "claudexor::codex=gpt-5", "executor_route": "codex", "parent_cognitive_route": {"model": "claudexor::codex=gpt-5", "source_role": "fallback", "chosen_by": "parent_fallback"}},
+    "facts": {"model": "claudexor::codex=gpt-5", "executor_route": "codex", "parent_cognitive_route": {"model": "claudexor::codex=gpt-5", "source_role": "fallback", "chosen_by": "parent_fallback"}, "use_local_model": false, "coordinator_route": "claudexor::codex=gpt-5", "coordinator_billing": "subscription"},
     "provenance": "parent's fallback",
     "clause": "this subagent itself runs on claudexor::codex=gpt-5 (bills as subscription)"
   },

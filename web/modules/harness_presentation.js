@@ -132,17 +132,16 @@ export function formatCoordinatorProvenance(source) {
     ).trim();
     const explicit = String(
         source.coordinatorProvenance || source.coordinator_provenance
-        || snap?.chosen_by || snap?.provenance || source.chosen_by || '',
+        || snap?.chosen_by || source.chosen_by || '',
     ).trim();
     const lower = explicit.toLowerCase();
-    const role = String(snap?.source_role || '').trim().toLowerCase();
-    if (chosenRow || lower === 'delegator') {
+    if (lower === 'delegator') {
         return chosenRow ? `chosen by the delegator (${chosenRow})` : 'chosen by the delegator';
     }
-    if (lower === 'fallback' || lower === 'parent_fallback' || lower === "parent's fallback" || role === 'fallback') {
+    if (lower === 'fallback' || lower === 'parent_fallback' || lower === "parent's fallback") {
         return "parent's fallback";
     }
-    if (lower === 'inherited' || lower === 'parent' || Boolean(snap?.model)) {
+    if (lower === 'inherited' || lower === 'parent') {
         return 'inherited';
     }
     return explicit ? formatCoordinatorProvenance(explicit) : '';

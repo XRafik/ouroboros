@@ -42,5 +42,10 @@ test('the chip renders supplied billing and never prices or reclassifies the rou
         assert.match(coordinatorRouteClause({ model, coordinator_billing: 'measured' }), /bills as measured/);
     }
     assert.equal(formatCoordinatorProvenance({ model: 'm', effective_model_lane: 'fallback' }), '');
-    assert.equal(formatCoordinatorProvenance({ model: 'm', parent_cognitive_route: { model: 'm', source_role: 'fallback' } }), "parent's fallback");
+    for (const snap of [{ model: 'm' }, { model: 'm', source_role: 'fallback' },
+        { model: 'm', selected_supervisor_snapshot: { selected_subagent_id: 'row' } }]) {
+        assert.equal(formatCoordinatorProvenance({ parent_cognitive_route: snap }), '');
+        assert.equal(formatCoordinatorProvenance({ parent_cognitive_route: { ...snap, chosen_by: 'inherited' } }), 'inherited');
+        assert.equal(formatCoordinatorProvenance({ parent_cognitive_route: { ...snap, chosen_by: 'parent_fallback' } }), "parent's fallback");
+    }
 });

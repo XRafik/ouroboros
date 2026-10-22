@@ -412,7 +412,7 @@ def cognitive_route_billing_basis(
             last_meta = usage.get("_last_llm_call_meta")
             last_model = str(last_meta.get("model") or "").strip() if isinstance(last_meta, Mapping) else ""
             raw_cost = usage.get("cost")
-            if (not last_model or last_model in {raw, base, route_label}) and isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
+            if last_model and last_model in {raw, base, route_label} and isinstance(raw_cost, (int, float)) and not isinstance(raw_cost, bool):
                 observed = raw_cost
     return route_label, str(review_cost_facts(observed, model=route_label)["cost_kind"])
 
