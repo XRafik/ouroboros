@@ -58,6 +58,7 @@ from tests.ci_verdicts import final, journal_rows, valid  # noqa: E402
 MAX_ROUNDS = 10  # A backstop below the step's own deadline: a pass that needs more ends red, naming the rest.
 _PASSING = frozenset({"green", "flaky", "accepted"})
 _LANES = ("default_parallel", "default_serial", "ui_browser")
+_INTERNAL_ERROR = 3  # pytest.ExitCode.INTERNAL_ERROR: a hook or the xdist scheduler raised
 # A positional test path or node id: what a round replaces with its argument file.
 _TEST_PATH = re.compile(r"(?:tests|devtools)/")
 # Options of the wrapped programs (python, safe_test, run_tests, pytest and its plugins) that
@@ -219,7 +220,7 @@ def _outcomes(rows) -> dict[str, dict]:
     return outcomes
 
 
-def _evidence(directory: Path) -> dict | None:
+def _evidence(directory: Path, *, aborted: bool = False) -> dict | None:
     """What one session's projection shows; None when it left neither results.json nor a journal.
 
     Without a valid final export the journal stands in for it, with the lane block it
@@ -228,7 +229,9 @@ def _evidence(directory: Path) -> dict | None:
     did not finish. With no crash report to explain why, it is what ended the session
     (pytest-timeout's thread method kills the whole process): a failed attempt, as a
     crash is. Beside a crash it was another worker's test that the stop interrupted
-    (tests/conftest.py aborts an owned run at once): it counts as never run.
+    (tests/conftest.py aborts an owned run at once): it counts as never run. So it does
+    when the session `aborted` with pytest's internal error (exit status 3): that error
+    is raised by a hook or the xdist scheduler between tests, not by the tests in flight.
     """
     data, unreadable = final(directory)
     data = None if unreadable else data
@@ -237,7 +240,8 @@ def _evidence(directory: Path) -> dict | None:
         return None
     rows = data["reports"] if data is not None else journal[0]
     results = _outcomes(rows)
-    for node in journal[1] if journal and not any(row["phase"] == "crash" for row in rows) else []:
+    explained = aborted or any(row["phase"] == "crash" for row in rows)
+    for node in journal[1] if journal and not explained else []:
         results.setdefault(node, {"outcome": "failed", "phase": "crash", "error_type": "InFlight"})
     lane = (next((data[key] for key in _LANES if isinstance(data.get(key), dict)), None) if data is not None
             else journal[2])
@@ -339,7 +343,7 @@ def run_pass(directory: Path, command: list[str], *, max_rounds: int = MAX_ROUND
         code = _run(command)
     except KeyboardInterrupt:
         code, causes = 130, ["interrupted"]
-    first = _evidence(directory)
+    first = _evidence(directory, aborted=code == _INTERNAL_ERROR)
     rounds = [{"dir": ".", "exit": code, "ran": len(first["results"]) if first else 0}]
     assigned = first["assigned"] if first else None
     if first is not None:
@@ -377,7 +381,8 @@ def run_pass(directory: Path, command: list[str], *, max_rounds: int = MAX_ROUND
             code = _run(retry_command(command, argsfile=argsfile, direct=direct, round_dir=round_dir))
         except KeyboardInterrupt:
             code, causes = 130, ["interrupted"]
-        facts, wanted = _evidence(round_dir) or {"results": {}, "collection_failures": []}, set(pending)
+        facts = _evidence(round_dir, aborted=code == _INTERNAL_ERROR) or {"results": {}, "collection_failures": []}
+        wanted = set(pending)
         results = {node: result for node, result in facts["results"].items() if node in wanted}
         rounds.append({"dir": round_dir.name, "exit": code, "ran": len(facts["results"])})
         _record(tries, results, round_)
