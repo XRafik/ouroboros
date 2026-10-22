@@ -226,6 +226,8 @@ def get_task_result_entry() -> ToolEntry:
         "description": "Read a task's selected answer, current outcome and evidence (view=answer/summary/evidence/full), or its exact authority/source ranges. Omitted/full keeps the legacy complete response; short views name their omissions and do not count as reading those sources.",
         "parameters": {"type": "object", "required": ["task_id"], "properties": {
             "task_id": {"type": "string", "description": "Task ID returned by scheduling or exposed by the host routing manifest."},
+            "call_id": {"type": "string", "description": "With manifest_sha256: read one retained redacted tool call or script dispatch of this task. Uses the source range and presence scope parameters."},
+            "manifest_sha256": {"type": "string", "description": "Exact retained manifest digest for call_id. Omit ranges for source length/hash; provide both bounds for text."},
             "known_result_sha256": {"type": "string", "description": "Conditional identity. With answer/summary/evidence it is the exact answer_sha256 (summary/evidence still refresh dynamic facts); with the legacy full view it retains the existing child_result_sha256 behavior."},
             "view": {"type": "string", "enum": ["answer", "summary", "evidence", "full"], "description": "Optional semantic result view. Omitted/full preserves the legacy response exactly. Short views retain answer identity, terminal origin, outcome, host notice, and capability facts; summary adds current cost/custody/retry; evidence adds only authorized current-projection recipes."},
             "include_authority": {"type": "boolean", "default": False, "description": "Return the exact selected result, task contract, origin, artifact references, and current plan-review authority."},
@@ -256,7 +258,7 @@ def _get_task_result(
     presence_scope: str = "", review_source_sha256: str = "",
     presence_reentry_sha256: str = "", presence_reentry_offset: Any = None,
     view_head_chars: Any = None, view_tail_chars: Any = None, delegated_output_sha256: str = "",
-    view: str = "",
+    view: str = "", call_id: str = "", manifest_sha256: str = "",
 ) -> str:
     """Read a task result, or a bounded canonical work-order/completion source range.
 
@@ -267,6 +269,17 @@ def _get_task_result(
     from ouroboros.tools.task_result_views import validate_result_view
 
     try:
+        if call_id or manifest_sha256:
+            import re
+
+            if (not isinstance(call_id, str) or not re.fullmatch(r"[A-Za-z0-9_.-]+", call_id)
+                    or call_id in {".", ".."} or not isinstance(manifest_sha256, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", manifest_sha256)):
+                raise ValueError("call_id and a lowercase 64-character manifest_sha256 are required together")
+            if (include_authority or include_work_order_source or include_completion_source or include_focus_source
+                    or focus_source_sha256 or review_source_sha256 or delegated_output_sha256
+                    or presence_reentry_sha256 or presence_reentry_offset is not None):
+                raise ValueError("call_id cannot be combined with another authority/source selector")
         selected_view = validate_result_view(view)
     except ValueError as exc:
         return _publish_tool_result(ctx, ToolResult(
@@ -276,6 +289,7 @@ def _get_task_result(
         include_authority or include_work_order_source or include_completion_source or include_focus_source
         or focus_source_sha256 or review_source_sha256 or delegated_output_sha256
         or presence_reentry_sha256 or presence_reentry_offset is not None
+        or call_id or manifest_sha256
         or source_start_char is not None or source_end_char is not None
     )
     if selected_view not in {"", "full"} and source_request:
@@ -334,6 +348,24 @@ def _get_task_result(
     notice = promotion_intent_notice(task_id, data)
     if notice:
         return _publish_tool_result(ctx, ToolResult(status="unavailable", code="LEGACY_UNAVAILABLE", text=notice))
+    if call_id:
+        from ouroboros.tools.task_result_views import retained_call_source
+
+        try:
+            source = retained_call_source(ctx, status_drive_root, data, str(task_id), call_id,
+                                          manifest_sha256, source_start_char, source_end_char)
+        except PermissionError as exc:
+            return _publish_tool_result(ctx, ToolResult(status="blocked", code="ACCESS_BLOCKED", text=str(exc)))
+        except FileNotFoundError:
+            return _publish_tool_result(ctx, ToolResult(status="unavailable", code="LEGACY_UNAVAILABLE",
+                text="Retained call has no available redacted projection."))
+        except (OSError, ValueError, TypeError):
+            return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ERROR",
+                text="Retained call source is unreadable or failed verification."))
+        text = json.dumps({"call_source": source}, ensure_ascii=False, sort_keys=True)
+        if source.get("reason") == "source_range_invalid":
+            return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=text))
+        return text
     if presence_reentry_sha256:
         from ouroboros.presence_continuation import reentry_source_projection
 

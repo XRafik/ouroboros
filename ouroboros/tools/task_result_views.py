@@ -10,6 +10,52 @@ RESULT_VIEWS = ("answer", "summary", "evidence", "full")
 _EVIDENCE_ARTIFACT_LIMIT = 10
 
 
+def retained_call_source(ctx, root, data, task_id, call_id, digest, start, end):
+    """One redacted source from the already-selected task result, or its dispatch."""
+    import re
+
+    from ouroboros.artifacts import text_source_range_projection
+    from ouroboros.observability import call_manifest_path, read_blob_ref, read_call_manifest_ref
+    from ouroboros.tools.query_data import _read_refusal
+
+    def admit(path):
+        if refusal := _read_refusal(ctx, path):
+            raise PermissionError(refusal)
+
+    dispatch = bool(re.fullmatch(r"tool_dispatch_[0-9a-f]{32}", call_id))
+    if dispatch:
+        ref = {"call_id": call_id, "sha256": digest,
+               "path": str(call_manifest_path(root, task_id, call_id))}
+    else:
+        rows = (data.get("trace_refs") or {}).get("tool_call_refs") or []
+        ref = next((row["manifest_ref"] for row in rows if isinstance(row, dict)
+                    and isinstance(row.get("manifest_ref"), dict)
+                    and row["manifest_ref"].get("call_id") == call_id
+                    and row["manifest_ref"].get("sha256") == digest), None)
+        if ref is None:
+            raise PermissionError("call identity is not published by this task result")
+    manifest = read_call_manifest_ref(
+        root, ref, task_id=task_id, admit=admit, max_bytes=1024 * 1024,
+        call_types=("tool_dispatch",) if dispatch else ("tool_call", "tool_timeout"),
+    )
+    projection = manifest.get("redacted_projection_ref")
+    if not isinstance(projection, dict) or not projection:
+        projection = manifest.get("full_payload_ref") if manifest.get("full_payload_redacted") is True else None
+    if not isinstance(projection, dict) or not projection:
+        raise FileNotFoundError("retained call has no redacted projection")
+    raw = read_blob_ref(root, projection, expected_kind=str(projection.get("kind") or "json"),
+                        max_bytes=16 * 1024 * 1024, raw_bytes=True, admit=admit)
+    source, reason = text_source_range_projection(
+        raw.decode("utf-8"), kind="redacted_dispatch_projection" if dispatch else "redacted_call_projection",
+        start_char=start, end_char=end,
+    )
+    source.update(task_id=task_id, call_id=call_id, manifest_sha256=digest,
+                  call_type=manifest["call_type"], raw_payload_used=False)
+    if reason:
+        source["reason"] = reason
+    return source
+
+
 def validate_result_view(value: Any) -> str:
     view = str(value or "")
     if view and view not in RESULT_VIEWS:

@@ -60,5 +60,3 @@ def test_missing_filter_field_stays_a_nonmatch_through_query_data(tmp_path):
         filter={"field": "missing", "op": "eq", "value": 1}, tail=0,
     ))
     assert result["status"] == "ok" and result["data"] == []
-
-

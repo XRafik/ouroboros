@@ -435,10 +435,15 @@ def read_call_manifest_ref(
     expected_sha = str(ref.get("sha256") or "")
     if not expected_sha:
         raise ValueError("observability call manifest ref has no sha256")
+    admission_refused = False
     try:
         path = _ref_path(drive_root, ref, pathlib.Path("calls") / safe_task / f"{call_id}.json")
         if admit is not None:
-            admit(path)
+            try:
+                admit(path)
+            except PermissionError:
+                admission_refused = True
+                raise
         if max_bytes is None:
             raw = path.read_bytes()
         else:
@@ -448,9 +453,9 @@ def read_call_manifest_ref(
                 raise ValueError("observability call manifest exceeds byte limit")
         if hashlib.sha256(raw).hexdigest() != expected_sha:
             raise ValueError("observability call manifest ref failed sha256 verification")
-    except PermissionError:
-        raise
     except (OSError, ValueError) as original_error:
+        if admission_refused:
+            raise
         from ouroboros.evidence_packs import blob_bytes
         from ouroboros.source_retention import manifest_version_ref
 

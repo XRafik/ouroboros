@@ -335,13 +335,13 @@ def test_run_script_cites_the_retained_redacted_dispatch_record_after_temp_remov
 
     ref = invocation["args_source_ref"]
     assert result.status == "ok" and "kept-source-marker" in result.text
-    assert f"redacted dispatch record {ref['call_id']} (manifest_sha256 {ref['sha256']})" in result.text
+    assert f"call_id={ref['call_id']!r}, manifest_sha256={ref['sha256']!r}" in result.text
     source_fact = result.meta["script_source"]
     assert source_fact["status"] == "ready"
     assert source_fact["call_id"] == ref["call_id"] and source_fact["sha256"] == ref["sha256"]
     recipe = source_fact["source_read"]
-    assert recipe == {"tool": "query_records", "arguments": {
-        "form": "task_trace", "task_id": "task1", "operation": "read_call",
+    assert recipe == {"tool": "get_task_result", "arguments": {
+        "task_id": "task1",
         "call_id": ref["call_id"], "manifest_sha256": ref["sha256"],
     }}
     assert not _script_path(result.text).exists()
@@ -354,23 +354,15 @@ def test_run_script_cites_the_retained_redacted_dispatch_record_after_temp_remov
     write_task_result(data, "task1", "completed", result="done")
     metadata_result = registry.execute_result(recipe["tool"], recipe["arguments"])
     metadata = json.loads(metadata_result.text)
-    assert metadata_result.status == metadata["status"] == "ok"
-    assert metadata["data"]["source"]["call_type"] == "tool_dispatch"
-    range_recipe = source_fact["range_read"]
-    assert range_recipe["source_end_char_from"] == (
-        "min(data.source.complete_chars, source_start_char + 8192)"
-    )
-    complete_chars = metadata["data"]["source"]["complete_chars"]
-    ranged_arguments = {
-        **recipe["arguments"],
-        "source_start_char": range_recipe["source_start_char"],
-        "source_end_char": min(complete_chars, range_recipe["source_start_char"] + 8192),
-        "max_bytes": range_recipe["max_bytes"],
-    }
+    assert metadata_result.status == "ok"
+    assert metadata["call_source"]["call_type"] == "tool_dispatch"
+    assert "range_read" not in source_fact
+    ranged_arguments = {**recipe["arguments"], "source_start_char": 0,
+                        "source_end_char": metadata["call_source"]["complete_chars"]}
     recovered_result = registry.execute_result(recipe["tool"], ranged_arguments)
     recovered = json.loads(recovered_result.text)
-    assert recovered_result.status == recovered["status"] == "ok"
-    assert "kept-source-marker" in recovered["data"]["source"]["text"]
+    assert recovered_result.status == "ok"
+    assert "kept-source-marker" in recovered["call_source"]["text"]
     # No second script store: the only copy is the existing dispatch record.
     assert not list(data.rglob("*.py"))
 
@@ -383,14 +375,14 @@ def test_run_script_nonzero_and_timeout_keep_their_own_first_line(script_registr
     with invocation_scope(_dispatch(data, failing)):
         result = registry.execute_result("run_script", failing)
     assert result.text.startswith("⚠️ SHELL_EXIT_ERROR: command exited with exit_code=3")
-    assert "partial" in result.text and "redacted dispatch record tool_dispatch_" in result.text
+    assert "partial" in result.text and "get_task_result(task_id='task1', call_id='tool_dispatch_" in result.text
     assert result.meta["exit_code"] == 3 and result.meta["script_source"]["status"] == "ready"
 
     slow = {"script": "import time\ntime.sleep(30)", "timeout_sec": 1}
     with invocation_scope(_dispatch(data, slow)):
         timed_out = registry.execute("run_script", slow)
     assert timed_out.startswith("⚠️ TOOL_TIMEOUT (run_command)")
-    assert "redacted dispatch record tool_dispatch_" in timed_out and not _script_path(timed_out).exists()
+    assert "get_task_result(task_id='task1', call_id='tool_dispatch_" in timed_out and not _script_path(timed_out).exists()
 
 
 def test_run_script_capture_failure_never_erases_the_command_effect(script_registry, monkeypatch):
@@ -449,8 +441,8 @@ def test_run_script_preparation_failure_cites_an_existing_dispatch_record(script
         result = registry.execute_result("run_script", arguments)
     ref = invocation["args_source_ref"]
     assert result.text.startswith("⚠️ RUN_SCRIPT_BLOCKED: script preparation failed: disk full")
-    assert f"redacted dispatch record {ref['call_id']} (manifest_sha256 {ref['sha256']})" in result.text
-    assert "query_records arguments" in result.text and "at most 8192-character ranges" in result.text
+    assert f"call_id={ref['call_id']!r}, manifest_sha256={ref['sha256']!r}" in result.text
+    assert "get_task_result(" in result.text and "8192-character" not in result.text
     assert "# script_path=" not in result.text and not (repo / ".ouroboros").exists()
     assert result.meta["operation_outcome"] == "completed_no_effect"
     assert result.meta["script_source"]["source_read"]["arguments"]["manifest_sha256"] == ref["sha256"]

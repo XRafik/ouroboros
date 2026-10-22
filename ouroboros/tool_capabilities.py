@@ -57,7 +57,7 @@ CORE_TOOL_NAMES: frozenset[str] = frozenset({
     "resume_child_task",
     # Task-tree coordination must be in the round-one envelope so a parent can publish the
     # shared frame BEFORE fanning out interdependent children (no enable_tools detour).
-    "tree_note", "tree_read", 
+    "tree_note", "tree_read",
     # Main-chat routing capabilities the SYSTEM.md decision turn relies on
     # (kept in the core envelope so the anti-freeze ephemeral turn never needs an
     # enable_tools detour to route — though initial_tool_schemas exposes the full
@@ -101,7 +101,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # the cheap lane and finds the work harder raises itself instead of failing or
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
-    "read_file", "list_files", "search_code", "query_code", "query_data", 
+    "read_file", "list_files", "search_code", "query_code", "query_data",
     "vcs_status", "vcs_diff", "vcs_read", "github_read",
     # Memory: a child reads, writes knowledge notes and marks in its own name (the
     # host signs both with its focus) and publishes chronicle pages and parts only as
@@ -110,7 +110,7 @@ LOCAL_READONLY_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # keeps identity and scratchpad, and receives the child's result as a report.
     "knowledge_read", "knowledge_list", "knowledge_write", "memory_read", "memory_mark", "chronicle_write",
     "chat_history", "recent_tasks", "get_task_result", "wait_task", "wait_tasks",
-    "await_messages", 
+    "await_messages",
     "escalate",
     "forward_to_worker", "peek_task", "cancel_task", "discard_child_result",
     # A recursive parent selects its OWN budget-paused children (#1196, Q9); the
@@ -163,7 +163,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     # the cheap lane and finds the work harder raises itself instead of failing or
     # asking the parent to respawn it (BIBLE P5). Nothing about the sandbox changes.
     "switch_model",
-    "read_file", "list_files", "search_code", "query_code", "query_data", 
+    "read_file", "list_files", "search_code", "query_code", "query_data",
     "vcs_status", "vcs_diff", "vcs_read", "github_read",
     "write_file", "edit_text",
     "apply_patch", "edit_batch",
@@ -171,7 +171,7 @@ ACTING_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({
     "start_service", "service_status", "service_logs", "stop_service",
     "integrate_subagent_patch", "compare_subagent_patches",
     "schedule_subagent", "wait_task", "wait_tasks", "get_task_result",
-    "await_messages", 
+    "await_messages",
     "escalate",
     "forward_to_worker", "peek_task", "cancel_task", "discard_child_result",
     "resume_child_task",
@@ -252,7 +252,7 @@ UNTRUNCATED_TOOL_RESULTS: frozenset[str] = frozenset({
     "get_task_result",
     "wait_task",
     "wait_tasks",
-    "await_messages", 
+    "await_messages",
     # A short receipt (id, operation, room); it never echoes the mark's text.
     "memory_mark",
 })
@@ -366,7 +366,7 @@ EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
 # partial view only; it exempts nothing from source persistence.
 PAGEABLE_TOOL_RESULTS: frozenset[str] = frozenset({
     "read_file", "chat_history", "journal_read", "tree_read", "recent_tasks", "query_code", "query_data",
-    
+
 })
 
 

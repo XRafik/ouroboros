@@ -278,7 +278,3 @@ def test_frozen_and_source_registries_advertise_same_contracts(tmp_path, monkeyp
     assert set(ordinary._base_catalog.entries) == set(frozen._base_catalog.entries)
     for name in ordinary._base_catalog.entries:
         assert ordinary._base_catalog.entries[name].schema == frozen._base_catalog.entries[name].schema
-
-
-
-

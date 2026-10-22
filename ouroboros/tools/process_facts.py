@@ -150,31 +150,18 @@ def _script_source(ctx):
                 status = "unavailable:task_identity"
                 return {"status": status}, f"retention is unavailable or unknown ({status})"
             arguments = {
-                "form": "task_trace", "task_id": task_id, "operation": "read_call",
+                "task_id": task_id,
                 "call_id": str(ref["call_id"]), "manifest_sha256": str(ref["sha256"]),
             }
             if presence_caller_binding(ctx) is not None:
                 arguments["presence_scope"] = PRESENCE_OWN_WORK_SCOPE
-            source_read = {"tool": "query_records", "arguments": arguments}
+            source_read = {"tool": "get_task_result", "arguments": arguments}
             fact = {
                 "status": "ready", "call_id": str(ref["call_id"]),
                 "sha256": str(ref["sha256"]), "source_read": source_read,
-                "range_read": {
-                    "arguments": "same_as_source_read_plus_bounds",
-                    "source_start_char": 0,
-                    "source_end_char_from": "min(data.source.complete_chars, source_start_char + 8192)",
-                    "max_bytes": 65536,
-                    "repeat_until": "source_start_char == data.source.complete_chars",
-                },
             }
-            rendered = json.dumps(arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            return fact, (
-                "its text is retained in the redacted dispatch record "
-                f"{fact['call_id']} (manifest_sha256 {fact['sha256']}); recover metadata with "
-                f"query_records arguments {rendered}, then repeat those arguments with "
-                "source_start_char=0, source_end_char=min(data.source.complete_chars,8192), and "
-                "max_bytes=65536; advance in at most 8192-character ranges to complete_chars"
-            )
+            rendered = ", ".join(f"{key}={value!r}" for key, value in arguments.items())
+            return fact, f"its redacted source is get_task_result({rendered})"
         status = str(source.get("args_source_status") or "no dispatch record for this call")
     except Exception as exc:  # observational: the outcome stands
         status = f"unavailable:{type(exc).__name__}"
