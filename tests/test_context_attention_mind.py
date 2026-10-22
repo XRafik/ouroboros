@@ -183,8 +183,9 @@ def test_memory_step_passes_the_actual_window_and_current_transcript(tmp_path, m
     monkeypatch.setattr(loop, "_emit_checkpoint_event", lambda *_a, **_kw: None)
 
     def plan(system):
-        p = SimpleNamespace(model="same-model", route_fp="route-a", preferred_mode="max", core_sha256="a" * 64,
-                            core=object(), provider="openai", output_reserve_tokens=65_536, window_tokens=500_000)
+        p = SimpleNamespace(model="same-model", route_fp="route-a", preferred_mode="max", initial_mode="max",
+                            core_sha256="a" * 64, core=object(), provider="openai", output_reserve_tokens=65_536,
+                            window_tokens=500_000)
         p.projection = lambda mode: SimpleNamespace(system_content_json=system, calibration_ratio=1.0)
         p.reproject_transcript = lambda messages, mode: [{"role": "system", "content": system}, *messages[1:]]
 
