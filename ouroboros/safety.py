@@ -841,9 +841,9 @@ def _is_throughput_rate_limit(kind: str, status_code: Optional[int], safe_error:
     """True only for provider THROTTLING, never for a plain outage (408/5xx/timeout).
 
     A KNOWN status code is the authority and the text is never consulted beside it: the
-    shared markers are substrings, so `429`, `rpm` and `tpm` occur inside the request
-    ids, trace ids and hostnames real outages carry ("503 ... (request id: req_1f429ab0)",
-    "504 Gateway Timeout ... rpm-edge-proxy-3"). The text branch therefore runs ONLY when
+    short markers `429`, `rpm` and `tpm` are bounded only by letters and digits, so they
+    still match the separated ids and hostnames real outages carry ("503 ... (request id:
+    req-429-ab0)", "504 Gateway Timeout ... rpm-edge-proxy-3"). The text branch runs ONLY when
     no status code was recoverable at all, which is the case it exists for — a transport
     that raised a bare throttling message.
     """

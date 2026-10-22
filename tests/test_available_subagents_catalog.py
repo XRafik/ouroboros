@@ -249,10 +249,16 @@ def test_catalog_is_semi_stable_while_dated_history_stays_dynamic(tmp_path, monk
     assert "subagent_last_delegation" in core.dynamic_text
     # An old receipt without a typed identity shows its recorded route target.
     assert '"selected_subagent_id": "codex=gpt-5.6-sol"' in core.dynamic_text
+    # Runtime history is identities and exact readers (C5, THESIS I-7): the requested and applied
+    # profiles stay in the receipts the named readers return.
+    receipts = {name: (tmp_path / "state" / name).read_text(encoding="utf-8")
+                for name in ("reviewer_slot_last_execution.json", "subagent_last_delegation.json")}
+    assert all(f"state/{name}" in core.dynamic_text for name in receipts)
     for profile in (
         "review-requested", "review-applied", "delegate-requested", "delegate-applied",
     ):
-        assert profile in core.dynamic_text
+        assert profile not in core.dynamic_text
+        assert any(profile in text for text in receipts.values())
     assert "configured_route" not in core.dynamic_text
 
 

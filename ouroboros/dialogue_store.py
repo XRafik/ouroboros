@@ -764,12 +764,13 @@ def main_candidates(root: Any, stream: str, *, exclude_chats: Iterable[int], pin
     return [_row(record) for record in records]
 
 
-def task_rows(root: Any, task_ids: Iterable[str], *, stream: str, after: int = -1, limit: int = 1000) -> List[Row]:
+def task_rows(root: Any, task_ids: Iterable[str], *, stream: str, after: int = -1,
+              before: Optional[int] = None, limit: int = 1000) -> List[Row]:
     """A task tree's rows in one stream, oldest first: every row whose task, parent, root or
     ``subagent_task_id`` (a child's rows written under its parent's task) is one of ``task_ids``
-    and lies after ``after`` (the timeline, the SSE follower, the recent-activity window)."""
+    and lies after ``after`` and before ``before`` (a captured boundary, or the live end)."""
     keys: List[Tuple[str, Any]] = [(column, task) for task in task_ids for column in _TASK_KEYS]
-    return probe_rows(root, stream, keys, lower=after + 1, limit=limit, newest_first=False)
+    return probe_rows(root, stream, keys, lower=after + 1, before=before, limit=limit, newest_first=False)
 
 
 def accepted_row(root: Any, chat_id: Optional[int], client_message_id: str) -> Optional[Row]:
