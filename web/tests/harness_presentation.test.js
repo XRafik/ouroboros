@@ -358,7 +358,7 @@ test('#516 the card meta line separates its parts with real text, not a CSS gap'
     assert.match(
         executorIdentityMarkup(chip, {
             agentModel: 'sonnet',
-            snapshot: { parent_cognitive_route: { model: 'sonnet', source_role: 'fallback' } },
+            snapshot: { parent_cognitive_route: { model: 'sonnet', source_role: 'fallback', chosen_by: 'parent_fallback' } },
         }),
         /Coordinator: sonnet \(parent&#39;s fallback\)/,
     );
