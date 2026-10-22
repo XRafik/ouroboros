@@ -52,6 +52,15 @@ jobs:
           apps[0].chmod(0o755)
           (out / 'retained-artifact.json').write_text(json.dumps({'source_run':39691400406,'source_sha':'a736ceb6e748f83ce2cc09d79203a6023adaf7d2','artifact_id':12389322932,'archive_sha256':'e9a493497c95519875cbc06c1ab88881075874f69eb16f52c27c0081d7ade9fb','appimage_sha256':expected,'selected_members':selected,'prior_native':'not run: runner permission failure before container start'}, indent=2))
           PY
+      - name: Apply the retained native-reader correction only
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
+          for path in scripts/x11_window_identity.py tests/test_x11_window_identity.py; do
+            git show "$GITHUB_SHA:$path" > "$path"
+          done
+          git diff --binary > "$RUNNER_TEMP/ob688-evidence/qualifier-correction.patch"
+          sha256sum scripts/x11_window_identity.py tests/test_x11_window_identity.py > "$RUNNER_TEMP/ob688-evidence/qualifier-correction.sha256"
       - name: Build the clean desktop without GTK or WebKit
         run: |
           set -euo pipefail
@@ -89,6 +98,8 @@ jobs:
           path: |
             ${{ runner.temp }}/ob688-evidence/*.json
             ${{ runner.temp }}/ob688-evidence/*.log
+            ${{ runner.temp }}/ob688-evidence/*.patch
+            ${{ runner.temp }}/ob688-evidence/*.sha256
             ${{ runner.temp }}/ob688-evidence/native
           include-hidden-files: true
           if-no-files-found: error
