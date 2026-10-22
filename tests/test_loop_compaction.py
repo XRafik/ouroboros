@@ -292,10 +292,12 @@ SLACK = math.ceil(500_000 / RECLAIM_LOW_WATER_DIVISOR)  # the owner's return-aft
     (STATED, None, None, 520_000, 520_000 + 65_536 - 500_000 + SLACK),  # a stated limit measures even a cold E
 ])
 def test_refusal_target_is_measured_from_a_stated_limit_or_the_accepted_floor_else_unknown(
-        tmp_path, message, anchor, accepted, estimate, target):
-    from ouroboros import loop_model_call
+        tmp_path, monkeypatch, message, anchor, accepted, estimate, target):
+    from ouroboros import capability_evidence as ce, loop_model_call
     from ouroboros.context_anchor import refused_input
 
+    # A stated limit is a durable window observation: it stays in this test's store, not the session's.
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
     context = _ctx(tmp_path)
     context.accumulated_usage["_last_llm_provider_message"] = message
     fit = _fit(estimated_input=estimate, anchor_input=anchor, anchor_round=3, accepted_input=accepted,
