@@ -53,6 +53,38 @@ def test_status_diff_paths_normalize_like_the_retired_tools(world):
         assert registry.execute_result("vcs_read", {"action": action, "path": "*.md"}).text.startswith("VCS target:")
 
 
+def test_history_names_entries_as_given_while_status_and_diff_take_worktree_spellings(world):
+    registry, _, _, project = world
+    # A package that moved from <repository name>/ to src/<repository name>/ (a src-layout migration).
+    (project / project.name).mkdir()
+    (project / project.name / "cli.py").write_text("old layout\n")
+    git(project, "add", ".")
+    git(project, "commit", "-qm", "old layout")
+    old = git(project, "rev-parse", "HEAD")
+    (project / "src").mkdir()
+    git(project, "mv", project.name, f"src/{project.name}")
+    git(project, "commit", "-qm", "src layout")
+    entry = f"{project.name}/cli.py"
+    assert "old layout" in registry.execute_result("vcs_read", {"action": "log", "path": entry}).text
+    assert registry.execute_result("vcs_read", {"action": "file", "path": entry, "ref": old}).text.startswith("old layout")
+    (project / "note.txt").write_text("changed\n")
+    status = registry.execute_result("vcs_read", {"action": "status", "path": f"{project.name}/note.txt"})
+    assert "note.txt" in status.text.split("VCS target:")[0], status.text
+
+
+def test_docker_backend_paths_map_to_the_workspace_for_every_action(world):
+    registry, ctx, _, project = world
+    (project / "note.txt").write_text("changed\n")
+    assert registry.execute_result("vcs_read", {"action": "status", "path": "/app/note.txt"}).code == "GIT_ERROR"
+    ctx.task_metadata = {"executor_ref": {"type": "docker_exec", "container_name": "probe",
+                                          "workspace_host_path": str(project), "workspace_backend_path": "/app"}}
+    registry.set_context(ctx)
+    for action in ("status", "diff"):
+        result = registry.execute_result("vcs_read", {"action": action, "path": "/app/note.txt"})
+        assert "note.txt" in result.text.split("VCS target:")[0], (action, result.text)
+    assert registry.execute_result("vcs_read", {"action": "file", "path": "/app/note.txt"}).text.startswith("first")
+
+
 def test_diff_pattern_that_can_reach_a_protected_file_is_blocked_like_a_bare_diff(world):
     registry, ctx, _, project = world
     (project / "secret.txt").write_text("PROTECTED-BYTES\n")

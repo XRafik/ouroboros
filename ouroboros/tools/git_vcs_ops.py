@@ -83,10 +83,10 @@ def _vcs_validation_refusal(ctx: ToolContext, text: str) -> str:
         result, meta_updates={"operation_outcome": "completed_no_effect"}))
 
 
-def _binding_relative_path(binding: ResolvedResourceBinding, requested: str) -> str:
+def _binding_relative_path(ctx: ToolContext, binding: ResolvedResourceBinding, requested: str) -> str:
     from ouroboros.tools.vcs_read import _literal_path
 
-    return _literal_path(binding, requested)
+    return _literal_path(ctx, binding, requested, worktree_spelling=True)
 
 
 def _git_status(
@@ -99,7 +99,7 @@ def _git_status(
     try:
         binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
         cmd = ["git", "status", "--porcelain"]
-        if relative := _git()._binding_relative_path(binding, path):
+        if relative := _git()._binding_relative_path(ctx, binding, path):
             cmd.extend(["--", relative])  # an ordinary pathspec, as before: globs keep working
         output = _git().run_cmd(cmd, cwd=binding.repository_path or binding.base_path)
         return _git()._vcs_result(
@@ -147,7 +147,7 @@ def _git_diff(
         elif stat:
             cmd.append("--stat")
         cmd.extend(revisions)
-        if relative := _git()._binding_relative_path(binding, path):
+        if relative := _git()._binding_relative_path(ctx, binding, path):
             cmd.extend(["--", relative])
         if not (stat or name_only):
             from ouroboros.tools.vcs_read import _protected_content_reason

@@ -109,6 +109,8 @@ def test_literal_metacharacter_filename_blame_and_file_whitespace(world):
     assert read_ok(ctx, action="file", path="empty.txt") == (
         f"\n\nVCS target: root=active_workspace; repo={project}"
     )
+    for absent in ("*.txt", "literal [y] ?.txt"):  # a pattern-looking name is never a pathspec match
+        assert "GIT_ERROR" in read(ctx, action="file", path=absent)
 
 
 def test_identity_unborn_dirty_refs_merge_base_and_linked_worktree(world):

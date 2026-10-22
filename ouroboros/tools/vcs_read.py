@@ -104,28 +104,48 @@ def _object(repo: pathlib.Path, ref: str, kind: str) -> str:
     return oid
 
 
-def _literal_path(binding: ResolvedResourceBinding, path: str) -> str:
-    if not path:
-        return ""
+def repository_entry(ctx, root: str, repo: pathlib.Path, path: str, *, worktree_spelling: bool) -> str:
+    """The repository-relative spelling both Git and the policy checks use for ``path``.
+
+    An absolute path (a Docker workspace's backend spelling mapped to the host first) becomes
+    relative with its folders resolved and its final entry kept: a symlink names itself, as in
+    Git's tree. status/diff also take the retired tools' worktree spellings (a redundant
+    root-basename prefix); history names an entry as given, since a folder absent today may
+    exist in an older tree.
+    """
+    from ouroboros.shell_parse import is_absolute_path_text
     from ouroboros.tool_access_paths import normalize_root_relative
     from ouroboros.utils import normalized_path_text
 
+    text = normalized_path_text(path)
+    if not is_absolute_path_text(text):
+        return normalize_root_relative(repo, text) if worktree_spelling else text
+    if root == "active_workspace":
+        from ouroboros.workspace_executor import executor_ref_from_ctx, map_backend_path_lexical
+
+        executor = executor_ref_from_ctx(ctx)
+        if executor is not None and executor.kind == "docker_exec":
+            try:
+                text = str(map_backend_path_lexical(executor, text))
+            except ValueError:
+                pass  # a host spelling, not a backend one
+    entry = pathlib.Path(os.path.normpath(text))
+    try:
+        return (entry.parent.resolve(strict=False) / entry.name).relative_to(repo.resolve(strict=False)).as_posix()
+    except ValueError:
+        return text  # outside the repository: callers refuse it
+
+
+def _literal_path(ctx, binding: ResolvedResourceBinding, path: str, *, worktree_spelling: bool = False) -> str:
+    if not path:
+        return ""
     # The binding proves current physical confinement; Git needs the requested
     # tree entry, not a symlink's current target (which may have different bytes).
     repo = binding.repository_path or binding.base_path
     if not binding.target_path.is_relative_to(repo):
         raise ValueError("path escapes the selected repository")
-    text = normalized_path_text(path)
-    if pathlib.Path(text).is_absolute():
-        # Resolve the folders only: the final entry names itself, as a symlink does in Git's tree.
-        entry = pathlib.Path(os.path.normpath(text))
-        try:
-            text = (entry.parent.resolve(strict=False) / entry.name).relative_to(repo.resolve(strict=False)).as_posix()
-        except ValueError:
-            pass  # outside the repository: refused below
-    else:
-        text = normalize_root_relative(repo, text)
-    relative = pathlib.PurePosixPath(text).as_posix()
+    relative = pathlib.PurePosixPath(
+        repository_entry(ctx, binding.root, repo, path, worktree_spelling=worktree_spelling)).as_posix()
     if relative.startswith("/") or ".." in pathlib.PurePosixPath(relative).parts:
         raise ValueError("path must be repository-relative")
     return "" if relative in {"", "."} else relative
@@ -229,7 +249,7 @@ def _vcs_read(
             from ouroboros.tools.tool_resolution import _build_builtin_target_binding
 
             binding = _build_builtin_target_binding(ctx, "vcs_read", {
-                "root": root, "repository": repository, "path": path,
+                "action": action, "root": root, "repository": repository, "path": path,
             })
         else:
             binding = _resolved_binding
@@ -242,7 +262,7 @@ def _vcs_read(
             common = dict(path=path, max_chars=max_chars, root=root, _resolved_binding=binding)
             return (_git_status(ctx, **common) if action == "status" else
                     _git_diff(ctx, staged=staged, stat=stat, name_only=name_only, base=base, head=head, **common))
-        literal = _literal_path(binding, path)
+        literal = _literal_path(ctx, binding, path)
         if action in {"file", "blame"} and not literal:
             raise ValueError(f"{action} requires path")
         if action in _CONTENT_ACTIONS:
@@ -255,7 +275,7 @@ def _vcs_read(
             if pathlib.Path(_run_read_git(repo, ["rev-parse", "--show-toplevel"])).resolve(strict=False) != repo.resolve(strict=False):
                 raise ValueError("repository must name the Git worktree root")
             if action == "log":
-                cmd = ["log", f"--max-count={max_count}", "--format=fuller"]
+                cmd = ["log", "--no-color", f"--max-count={max_count}", "--format=fuller"]
                 if ref:
                     cmd.append(_object(repo, ref, "commit"))
                 if literal:
@@ -267,7 +287,8 @@ def _vcs_read(
                     cmd.extend(["--", f":(literal){literal}"])
                 output = _run_read_git(repo, cmd)
             elif action == "file":
-                output = _run_read_git(repo, ["show", "--no-ext-diff", "--no-textconv", f"{_object(repo, ref or 'HEAD', 'commit')}:{literal}"], preserve_output=True)
+                # cat-file names the object literally: a missing path is an error, never a pathspec match.
+                output = _run_read_git(repo, ["cat-file", "blob", f"{_object(repo, ref or 'HEAD', 'commit')}:{literal}"], preserve_output=True)
             elif action == "blame":
                 output = _run_read_git(repo, ["blame", "--no-ext-diff", "--no-textconv", _object(repo, ref or "HEAD", "commit"), "--", literal])
             elif action == "refs":

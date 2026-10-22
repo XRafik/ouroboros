@@ -573,10 +573,10 @@ def _build_builtin_target_binding(ctx: Any, name: str, args: dict[str, Any]) -> 
             raise ValueError("repository must name a Git worktree root inside the selected root")
         path = str(args.get("path") or "")
         if path:
-            from ouroboros.tool_access_paths import normalize_root_relative
-            from ouroboros.utils import normalized_path_text
+            from ouroboros.tools.vcs_read import repository_entry
 
-            normalized_path = normalize_root_relative(repo, normalized_path_text(path))
+            normalized_path = repository_entry(
+                ctx, root, repo, path, worktree_spelling=str(args.get("action") or "") in {"status", "diff"})
             parts = pathlib.PurePosixPath(normalized_path).parts
             if (pathlib.PurePosixPath(normalized_path).is_absolute() or ".." in parts
                     or normalized_path.startswith(":") or not normalized_path.strip()):
