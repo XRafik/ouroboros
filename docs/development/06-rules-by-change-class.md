@@ -26,14 +26,14 @@ Mechanism: ARCHITECTURE §13; §6 "Skills and extensions". Enforcement: `tests/t
 
 ### Capability placement
 
-Ouroboros is one open core and many installations that evolve on their own: a skill survives every core update untouched, a private core edit is re-merged at each one. Before building a capability, asked for by the owner, a user or myself:
+Skills survive core updates untouched; private core edits need re-merging. For any new capability, whether requested by the owner, a user or myself:
 
 - Name the lowest rung that delivers it and offer it first: a setting; an arrangement of what exists; a declarative contribution (`contributes`); skill code (routes, tools, providers, page modules); a core seam. Offer the lower rung even when the request names core; build the higher one when the requester, informed, keeps it.
 - The core is open for extension and closed for features: it keeps the seams and the floors every rung relies on (the draft, Send and message authorship, device leases and native permissions, host-owned sessions and cognition, Panic and recovery). Vendor- or feature-specific code in core is a defect unless the plan names the floor it implements.
 - A new seam ships with its first real consumer in the same change; no seam without a consumer, no consumer-shaped seam. Core consumes the contract, never a skill's name. A shared provider contract (speech, realtime …) is minted only when more than one provider is plausible, consumers must not care which runs, and core owns selection; a fallback is never silent.
 - On an installation that evolves itself the wish becomes a skill, and a missing seam is offered upstream as a pull request instead of living on as a private core patch.
 
-Judgment, not a gate. Review: CHECKLISTS Plan Review row 6 and body item `capability_placement` (advisory). Mechanism: CREATING_SKILLS "Contributing controls and speech engines", CLIENT_CONTRACT §11.
+Judgment, not a gate. Review: CHECKLISTS Plan row 6 and `capability_placement` (advisory). Mechanisms: CREATING_SKILLS "Contributing controls and speech engines" or "Declaring a place, tool effects and an icon"; CLIENT_CONTRACT §11.
 
 ### Extension dispatch and isolated dependencies
 
