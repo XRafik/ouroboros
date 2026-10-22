@@ -201,3 +201,34 @@ def test_pending_error_projection_uses_the_original_prompt_when_retained(tmp_pat
     else:
         assert actor.prompt_ref["call_id"] != "paid_prompt"
         assert read_call_payload(tmp_path, task_id="author", call_id=actor.prompt_ref["call_id"])[0]["synthetic"]
+
+
+def test_measurement_uses_the_context_root_first_and_never_stops_a_pending_drain(tmp_path):
+    """A measurement lands in the context's canonical root when it has one and in the
+    coordinator's custody root otherwise; a failing measurement of a pending seat leaves
+    the drain and the seat's pending custody untouched."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from ouroboros import subagent_metric_events
+    from ouroboros.review_records import ReviewActorRecord, ReviewRequest, ReviewSlot
+    from ouroboros.review_seat_outcome import finalize_seat_outcome
+    from ouroboros.review_substrate import ReviewCoordinator
+
+    request = ReviewRequest(surface="multi_model_review", task_id="metric-task", goal="review", policy={"parts": ["result"]})
+    slot = ReviewSlot("seat", "model")
+    actor = ReviewActorRecord("seat", "model", "ok", raw_text="[]\nNO_FINDINGS", operation_id="op-measured")
+    finalize_seat_outcome(request, slot, actor)
+    other = tmp_path / "other"
+    with patch("ouroboros.subagent_metric_events.publish") as publish:
+        subagent_metric_events.review_execution(request, slot, actor, None, fallback_root=tmp_path)
+        assert publish.call_args.args[0] == tmp_path and publish.call_args.args[1]["usable_verdict"] is True
+    with patch("ouroboros.subagent_metric_events.publish") as publish:
+        subagent_metric_events.review_execution(request, slot, actor, SimpleNamespace(drive_root=other), fallback_root=tmp_path)
+        assert publish.call_args.args[0] == other.resolve()
+    pending = ReviewActorRecord("seat", "model", "pending", operation_id="op-pending",
+                                late_result_pending=True, operation_state="in_flight")
+    coordinator = ReviewCoordinator(llm=object(), drive_root=tmp_path)
+    with patch.object(coordinator, "_finalize_outcome"), \
+            patch("ouroboros.subagent_metric_events.review_execution", side_effect=OSError("metric unavailable")):
+        coordinator._settle_actor(request, slot, pending, producer=False)
+    assert pending.late_result_pending

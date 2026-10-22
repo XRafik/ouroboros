@@ -331,3 +331,24 @@ def test_system_report_refuses_unsupported_wake_choice_before_dispatch(tmp_path,
     selected = bool((wake_on or {}).get("tasks"))
     assert bool(calls) is not selected
     assert ("TOOL_ARG_ERROR" in text and "synchronous report" in text) is selected
+
+
+def test_selectors_read_the_data_root_only_for_selected_task_ids(tmp_path):
+    """A wait without task ids (none, or reviewers only) never touches a data root, so a
+    commit ask without wake_on cannot fail on a context that has none; selected task ids
+    are still checked against the root."""
+    from types import SimpleNamespace
+    import pytest
+    from ouroboros import model_sleep
+    from ouroboros.task_results import write_task_result
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(model_sleep, "_canonical_root",
+                        lambda ctx: pytest.fail("a selection without task ids read the data root"))
+        assert model_sleep.selectors(SimpleNamespace())["any_mail"] is True
+        assert model_sleep.selectors(SimpleNamespace(), reviewers=["seat"])["reviewer_slots"] == ["seat"]
+    write_task_result(tmp_path, "known", "completed")
+    ctx = SimpleNamespace(drive_root=tmp_path)
+    assert model_sleep.selectors(ctx, tasks=["known"])["tasks"] == ["known"]
+    with pytest.raises(ValueError, match="unknown"):
+        model_sleep.selectors(ctx, tasks=["unknown"])

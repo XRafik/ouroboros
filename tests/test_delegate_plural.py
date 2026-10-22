@@ -155,3 +155,26 @@ def test_later_success_does_not_hide_the_initial_execution(tmp_path, initial_sta
     assert custody.record_start_requested(tmp_path, task_id="nanny", invocation_id="pending", request={"prompt": "other"})
     fact = bootstrap.actor_first_unresolved_fact(ctx, task_id="nanny", drive_root=tmp_path)
     assert fact["delegated_obligations"]["pending_invocation_ids"] == ["pending"]
+
+
+def test_initial_receipt_observes_nothing_without_a_root_and_names_a_corrupt_marker(tmp_path):
+    """No data root: nothing durable to observe (a test double, never a live context). A real
+    root without a claim: the first start is still to come. A claimed identity is observed
+    without a second start; a corrupt marker is named, never read as «no bootstrap»."""
+    from types import SimpleNamespace
+    import pytest
+    from ouroboros import delegate_custody
+    from ouroboros.delegate_bootstrap_identity import claim_initial_invocation, initial_receipt
+
+    assert initial_receipt(SimpleNamespace(task_id="mock"), {}) == {}
+    ctx = SimpleNamespace(task_id="bootstrap-task", drive_root=tmp_path)
+    assert initial_receipt(ctx, {}) == {}
+    request = {"invocation_id": "inv-initial", "selected_subagent_id": "sub", "config_fingerprint": "cfg",
+               "work_order_fingerprint": "work", "authority_fingerprint": "auth"}
+    with delegate_custody.actor_decision_lock(tmp_path, ctx.task_id):
+        assert claim_initial_invocation(tmp_path, ctx.task_id, request) == {}
+    receipt = initial_receipt(ctx, {})
+    assert receipt["invocation_id"] == "inv-initial" and receipt["physical_start"] == "not_repeated"
+    (tmp_path / "state" / "delegate_bootstrap" / "bootstrap-task.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError):
+        initial_receipt(ctx, {})

@@ -201,12 +201,12 @@ def test_no_detach_waits_for_settlement_and_outer_exception_is_durable_before_re
         assert release.wait(10)
         raise ValueError("outer worker failed before executor preparation")
     monkeypatch.setattr(ReviewCoordinator, "_run_slot", fail)
-    def publish(request, slot, actor, ctx):
+    def publish(request, slot, actor, ctx, **kw):
         entry = next((e for e in review_custody._ACTIVE.values() if e.operation_id == actor.operation_id), None)
         observed.append(entry is None or entry.event.is_set())
         assert read_call_payload(tmp_path, **actor.outcome["source_ref"])[0]["producer_complete"]
         published.set()
-        return publish_seat_execution(request, slot, actor, ctx)
+        return publish_seat_execution(request, slot, actor, ctx, **kw)
     monkeypatch.setattr("ouroboros.review_seat_outcome.publish_seat_execution", publish)
     request = ReviewRequest(surface="multi_model_review", task_id="outer", goal="g", policy={"parts": ["result"]})
     coordinator = ReviewCoordinator(llm=object(), drive_root=tmp_path)

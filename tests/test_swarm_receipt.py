@@ -303,3 +303,33 @@ def test_refresh_follows_the_stored_root_and_skips_roots_without_a_receipt(tmp_p
     swarm_receipt.refresh_for_task(tmp_path, {"task_id": "child-a", "root_task_id": "root-a"})
     assert publishes == ["root-a", "root-a"]
     assert swarm_receipt.refresh_for_task(tmp_path, "absent-task") is None and publishes == ["root-a", "root-a"]
+
+
+def test_receipt_anchor_resolves_the_root_and_the_receipt_without_a_body_parse(tmp_path):
+    """Typed root, legacy metadata root (NULL or empty typed column), the task itself; JSON
+    null and an absent key both mean no receipt, any other value means one; a root header
+    without its body triggers nothing; an absent task is None."""
+    from ouroboros import store, task_store
+
+    with store.open_store(tmp_path, write=True) as txn:
+        txn.store_task({"task_id": "root", "status": "running", "swarm_receipt": {"revision": 1}})
+        txn.store_task({"task_id": "child", "status": "completed", "root_task_id": "root"})
+        txn.store_task({"task_id": "legacy", "status": "completed", "metadata": {"root_task_id": "root"}})
+        txn.conn.execute("UPDATE tasks SET root_task_id=NULL WHERE task_id='legacy'")
+        txn.store_task({"task_id": "self", "status": "running"})
+        txn.conn.execute("UPDATE tasks SET root_task_id=NULL WHERE task_id='self'")
+    assert task_store.receipt_anchor(tmp_path, "child") == ("root", True)
+    assert task_store.receipt_anchor(tmp_path, "legacy") == ("root", True)
+    assert task_store.receipt_anchor(tmp_path, "self") == ("self", False)
+    assert task_store.receipt_anchor(tmp_path, "missing") is None
+    with store.open_store(tmp_path, write=True) as txn:
+        txn.conn.execute("UPDATE tasks SET root_task_id='' WHERE task_id='legacy'")
+    assert task_store.receipt_anchor(tmp_path, "legacy") == ("root", True)
+    for value, expected in ((None, False), ({}, True), (False, True), ({"revision": 2}, True)):
+        with store.open_store(tmp_path, write=True) as txn:
+            txn.store_task({"task_id": "root", "status": "running", "swarm_receipt": value})
+        assert task_store.receipt_anchor(tmp_path, "child") == ("root", expected), value
+    with store.open_store(tmp_path, write=True) as txn:
+        txn.conn.execute("DELETE FROM task_bodies WHERE task_id='root'")
+    assert task_store.receipt_anchor(tmp_path, "child") == ("root", False)
+    assert task_store.receipt_anchor(tmp_path, "root") is None
