@@ -112,7 +112,7 @@ companion_processes:                # optional; PLURAL, and needs the companion_
   - name: demo_worker               # see "Declaring a companion process"
     command: [python3, scripts/worker.py]
     runtime: python3
-scheduled_tasks:                    # optional reviewed cron jobs
+scheduled_tasks:                    # optional cron suggestions; nothing runs until adopted
   - name: refresh-cache
     cron: "0 * * * *"                # 5-field cron, host-local timezone by default
     timezone: Europe/Moscow          # optional IANA timezone override
@@ -589,25 +589,27 @@ companions to tolerate this small asynchronous handoff.
 
 ### Scheduled skill tasks and daemons
 
-Skills may declare reviewed cron jobs in `scheduled_tasks`. A scheduled task is
-not a hidden daemon: it is a reviewed schedule entry that the core supervisor
-turns into ordinary queued work using the same task queue, logs, timeout, and
-review-visible provenance as other work. The first supported syntax is standard
-5-field cron (`minute hour day month weekday`), with host-local timezone by
-default and optional per-task IANA timezone override. If Ouroboros was offline
-when a cron became due, the scheduler performs one catch-up run rather than
-replaying every missed occurrence.
+Skills may suggest cron jobs in `scheduled_tasks`. A declaration installs
+nothing: Ouroboros sees each suggestion of a reviewed, enabled skill as one line
+in its context, and a schedule exists only once the mind creates one with
+`schedule_followup` or the owner creates one through `POST /api/schedules`.
+An adopted schedule is ordinary queued work with the same task queue, logs,
+timeout and provenance as other work; its objective can name the skill, and a
+later skill update, disable or uninstall neither rewrites nor withdraws it (the
+run judges whether the skill is still there). The syntax is standard 5-field
+cron (`minute hour day month weekday`), with host-local timezone by default and
+an optional IANA timezone override. If Ouroboros was offline when an adopted
+cron became due, the scheduler performs one catch-up run rather than replaying
+every missed occurrence.
 
-In v1, a skill scheduled task is an agent-visible reminder to run the reviewed
-skill task by name; the agent still chooses the correct `skill_exec` or extension
-surface at execution time. Deterministic script/route targets can be added as a
-future manifest extension once the schedule lifecycle has stabilized.
+Schedules that earlier versions mirrored from a manifest automatically were
+adopted once as ordinary rows: they keep their ids, history and owed work, and
+are changed, paused or withdrawn like any other schedule.
 
 Long-running processes are still represented by extension companion processes,
 not by `start_service`. `start_service` is task-scoped and is stopped when the
 owning task ends. Companions require reviewed manifest declarations and the
-`companion_process` permission; scheduled tasks require review-visible manifest
-metadata and the `supervised_task` permission.
+`companion_process` permission.
 
 ### Declaring a companion process
 

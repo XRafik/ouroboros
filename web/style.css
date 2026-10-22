@@ -5874,7 +5874,7 @@ textarea.chat-input::placeholder { color: var(--text-muted); }
 }
 
 /* One disclosure, two surfaces: a Skills card's detail and Activity's retained
-   schedules (a fired one-shot, a suppressed skill row) read the same, so they
+   schedules (a fired one-shot, a withdrawn row) read the same, so they
    share these rules instead of growing a second look for the same gesture. */
 .skills-details,
 .activity-history {

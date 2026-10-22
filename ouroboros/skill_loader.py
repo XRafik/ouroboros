@@ -29,6 +29,7 @@ from ouroboros.skill_conflicts import (
 from ouroboros.skill_review_status import ACCEPTANCE_REASONS, STATUS_BLOCKERS, STATUS_CLEAN, STATUS_PENDING, STATUS_WARNINGS, VALID_SKILL_REVIEW_STATUSES, aggregate_skill_review_status, normalize_skill_review_status, skill_review_gate
 from ouroboros.utils import append_jsonl, atomic_write_json, read_json_dict, utc_now_iso
 from ouroboros.review_records import validate_author_disposition
+from ouroboros.skill_schedule_suggestions import suggested_schedule_fields
 
 log = logging.getLogger(__name__)
 
@@ -1464,12 +1465,8 @@ def list_available_for_execution(
     return out
 
 
-# Status helpers consumed by the model-facing catalogue: the per-turn Installed
-# Skills section (context.py) and the list_skills tool.
-
-
 def summarize_skills(drive_root: pathlib.Path, skills: Optional[List[LoadedSkill]] = None) -> Dict[str, Any]:
-    """Return a compact catalogue summary; ``skills`` reuses a caller's own discovery of ``drive_root``."""
+    """Compact catalogue for the installed-skills context and list_skills; ``skills`` reuses a caller's discovery."""
     skills = discover_skills(drive_root) if skills is None else skills
     tool_surfaces_by_skill: Dict[str, List[Dict[str, str]]] = {}
     try:
@@ -1520,6 +1517,7 @@ def summarize_skills(drive_root: pathlib.Path, skills: Optional[List[LoadedSkill
             "name": s.name,
             "description": s.manifest.description,
             "when_to_use": s.manifest.when_to_use,
+            **suggested_schedule_fields(s.manifest.scheduled_tasks),
             # CPL-7: optional Model Experience prose travels to every
             # model-visible skill surface (list_skills JSON, context section).
             "model_experience": s.manifest.model_experience,
