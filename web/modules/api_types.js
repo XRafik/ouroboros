@@ -1528,6 +1528,7 @@
  * @property {string=} task_id
  * @property {UpdateMergePlan=} merge_plan
  * @property {string=} error
+ * @property {string=} keep_branch
  */
 
 /**

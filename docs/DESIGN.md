@@ -549,6 +549,8 @@ runtime; known queued, active or finalizing work keeps its own factual label. A
 durably accepted incoming message likewise proves acceptance, not that its task
 has begun or a model has read it.
 
+The Update indicator names the real stage, then the last confirmed outcome or explicit uncertainty. It opens the existing Updates panel, never a second apply flow. The owner may dismiss that result from the indicator only; the panel retains it until the next admitted attempt, with actual saved-local-work references and accessible diagnostics. A pre-admission refusal stays with the request. A busy-work refusal offers explicit retry, never a delayed automatic restart. Connection or version alone proves no successful update. Unknown remains neutral; confirmed completion uses the success triple and a failed/refused/rolled-back attempt the error triple.
+
 Status, owner action, and urgent notification are separate product concepts:
 
 - **Status** states a fact about the affected object, never implying that the
