@@ -56,8 +56,7 @@ from ouroboros.skill_loader import (
     save_enabled,
 )
 from ouroboros.skill_readiness import skill_readiness_for_execution
-from ouroboros.skill_review_cycles import SUBSTANTIVE_SKILL_REVIEW_STATUSES
-from ouroboros.skill_review_history import load_history
+from ouroboros.skill_review import SUBSTANTIVE_STATUSES
 from ouroboros.skill_review_status import normalize_skill_review_status
 from ouroboros.tools.registry import ToolContext
 from ouroboros.tools.skill_preflight import _handle_skill_preflight
@@ -736,12 +735,12 @@ def _review_diag(name: str, status: str, error: str, payload: Dict[str, Any]) ->
             "raw_actor_records="
             + json.dumps(review.get("raw_actor_records"), ensure_ascii=False)
         )
-    # Quorum failures return before review.json is saved. Their actors live in
-    # history, including provider errors that look like malformed verdicts at
-    # this boundary. Include the latest attempt even if an older review exists.
-    history = load_history(DATA_DIR, name, limit=1)
-    if history:
-        parts.append("latest_review_history=" + json.dumps(history[-1], ensure_ascii=False))
+    # Quorum failures return before review.json is saved. Their actors live on the wave's
+    # review ledger record, including provider errors that look like malformed verdicts at
+    # this boundary. Include the latest wave even if an older review exists.
+    wave = _latest_wave(name)
+    if wave:
+        parts.append("latest_review_record=" + json.dumps(wave, ensure_ascii=False))
     return "\n".join(parts)
 
 
@@ -752,12 +751,12 @@ def _actor_reported_valuation_usd(review: Dict[str, Any]) -> float:
 
 def _smoke_retry_refusal(name: str, status: str) -> str:
     """Retry only settled work, retaining production replay/cycle and custody facts."""
-    if status not in ("clean", "warnings") and normalize_skill_review_status(status) in SUBSTANTIVE_SKILL_REVIEW_STATUSES:
+    if status not in ("clean", "warnings") and normalize_skill_review_status(status) in SUBSTANTIVE_STATUSES:
         return f"recorded {status!r} verdict is final for identical material"
-    skill, history = find_skill(DATA_DIR, name), load_history(DATA_DIR, name, limit=1)
-    if skill is None or not history or history[-1].get("content_hash") != skill.content_hash:
+    skill, wave = find_skill(DATA_DIR, name), _latest_wave(name)
+    if skill is None or not wave or wave.get("content_hash") != skill.content_hash:
         return "no recorded wave for the current content"
-    records = history[-1].get("raw_actor_records")
+    records = wave.get("raw_actor_records")
     if not isinstance(records, list) or not records:
         return "the recorded wave has no reviewer records"
     stack = list(records)
@@ -805,8 +804,26 @@ def _refused_by_provider(wave: Any) -> bool:
 
 
 def _latest_wave(name: str) -> Any:
-    history = load_history(DATA_DIR, name, limit=1)
-    return history[-1] if history else None
+    """The newest recorded wave of this skill: its review ledger record (``surface="skill"``), read as the
+    smoke needs it (the reviewed hash and the seats in the legacy actor shape); ``None`` when none."""
+    from ouroboros import review_ledger as ledger
+    from ouroboros.tools.review_change import review_result
+    from ouroboros.tools.review_skill import legacy_actor_records, skill_record_rows
+
+    rows = skill_record_rows(DATA_DIR, name, limit=1)
+    if not rows:
+        return None
+    try:
+        record = ledger.load_record(DATA_DIR, str(rows[0].get("record_id") or ""))
+    except ValueError:
+        return None
+    if not record:
+        return None
+    return {"record_id": str(record.get("record_id") or ""), "ts": str(record.get("ts") or ""),
+            "state": str(record.get("state") or ""),
+            "aggregate": str((record.get("verdict") or {}).get("aggregate") or ""),
+            "content_hash": str((record.get("subject") or {}).get("tree_sha") or ""),
+            "raw_actor_records": legacy_actor_records(review_result(record, reused=False))}
 
 
 def _review_with_one_settled_retry(slug: str, name: str):

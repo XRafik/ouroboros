@@ -826,9 +826,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # author-census member family, documented in section 2.
 # 414 -> 415: ``state/sent_history_changes.json``, the running code's record of sent-history changes
 # (``ouroboros/transcript_prefix.py``, its own section-2 row).
-# 415 -> 417: the published MCP catalogs (``state/mcp/catalogs`` and its ``server-*.json`` envelopes,
+# The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
+# accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
+# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 415 -> 410.
+# 410 -> 412: the published MCP catalogs (``state/mcp/catalogs`` and its ``server-*.json`` envelopes,
 # ``ouroboros/mcp_catalog.py``, their section-4 row).
-EXPECTED_SCAN_PATHS = 417
+EXPECTED_SCAN_PATHS = 412
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

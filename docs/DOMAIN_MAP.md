@@ -15,20 +15,20 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D05 | Tool surfaces: files, code, shell, media, external | 43 | 0 |
 | D06 | Review stack | 91 | 0 |
 | D07 | Delegation, subagents & Claudexor | 74 | 0 |
-| D08 | Supervisor: queue, workers, events & runtime control | 72 | 0 |
+| D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 33 | 0 |
 | D11 | Gateway, server & Web UI | 101 | 0 |
 | D12 | Settings & configuration | 22 | 0 |
 | D13 | Safety, guards & runtime mode | 11 | 0 |
-| D14 | Skills & extensions | 73 | 0 |
+| D14 | Skills & extensions | 69 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 31 | 0 |
 | D16 | Observability, usage accounting & cost | 24 | 0 |
 | D17 | Projects, workspaces & task results | 47 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **849** | **0** |
+| **total** | | **846** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -51,7 +51,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 | **D13** | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | ✓ | · | · | ✓ | · | ✓ | ✓ | · | ✓ |
 | **D14** | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D15** | ✓ | · | ✓ | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | ✓ | ✓ | ✓ | · |
-| **D16** | · | ✓ | · | · | · | ✓ | · | · | · | · | · | ✓ | · | ✓ | · | · | ✓ | ✓ | · | · |
+| **D16** | · | ✓ | · | · | · | ✓ | · | · | · | · | · | ✓ | · | · | · | · | ✓ | ✓ | · | · |
 | **D17** | ✓ | · | · | ✓ | ✓ | ✓ | · | ✓ | · | · | ✓ | ✓ | · | · | ✓ | ✓ | · | ✓ | ✓ | · |
 | **D18** | · | · | · | · | · | · | · | · | ✓ | ✓ | · | ✓ | · | · | · | · | · | · | · | · |
 | **D19** | · | · | · | · | · | · | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | · | · |
@@ -624,6 +624,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `supervisor/schedule_notes.py`
 - `supervisor/schedule_occurrence.py`
 - `supervisor/schedule_time.py`
+- `supervisor/schedule_view.py`
 - `supervisor/sleep_wake.py`
 - `supervisor/state.py`
 - `supervisor/state_initialization.py`
@@ -902,17 +903,12 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/skill_readiness.py`
 - `ouroboros/skill_repair_admission.py`
 - `ouroboros/skill_review.py`
-- `ouroboros/skill_review_collect.py`
-- `ouroboros/skill_review_cycles.py`
 - `ouroboros/skill_review_history.py`
 - `ouroboros/skill_review_output.py`
 - `ouroboros/skill_review_packs.py`
-- `ouroboros/skill_review_passes.py`
-- `ouroboros/skill_review_prompt.py`
-- `ouroboros/skill_review_rebuttals.py`
 - `ouroboros/skill_review_runner.py`
 - `ouroboros/skill_review_status.py`
-- `ouroboros/skill_review_usage.py`
+- `ouroboros/skill_schedule_suggestions.py`
 - `ouroboros/skill_source_catalog.py`
 - `ouroboros/skill_source_git.py`
 - `ouroboros/skill_source_install.py`
@@ -920,6 +916,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/skill_starter.py`
 - `ouroboros/skill_token.py`
 - `ouroboros/skill_uninstall_state.py`
+- `ouroboros/tools/review_skill.py`
 - `ouroboros/tools/skill_exec.py`
 - `ouroboros/tools/skill_preflight.py`
 - `ouroboros/tools/skill_publish.py`

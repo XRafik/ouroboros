@@ -134,8 +134,9 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   three-dot loop only while work runs. A surface that comes, goes or fades rides one
   curve, `--ease-sheet`, for `--motion-open` (340 ms, coming in), `--motion-close`
   (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
-  in); it moves by position, opacity and a small scale, never blur. Two folds change a
-  height on that curve: the capsule row and the reply strip. The handover between places
+  in); it moves by position, opacity and a small scale, never blur. Three folds change a
+  height: the capsule row and the reply strip on that curve, and a deck of notes between works,
+  whose height lands at once inside the reading write while its cards glide in by position and opacity. The handover between places
   keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
@@ -549,6 +550,8 @@ runtime; known queued, active or finalizing work keeps its own factual label. A
 durably accepted incoming message likewise proves acceptance, not that its task
 has begun or a model has read it.
 
+The Update indicator names the real stage, then the last confirmed outcome or explicit uncertainty. It opens the existing Updates panel, never a second apply flow. The owner may dismiss that result from the indicator only; the panel retains it until the next admitted attempt, with actual saved-local-work references and accessible diagnostics. A pre-admission refusal stays with the request. A busy-work refusal offers explicit retry, never a delayed automatic restart. Connection or version alone proves no successful update. Unknown remains neutral; confirmed completion uses the success triple and a failed/refused/rolled-back attempt the error triple.
+
 Status, owner action, and urgent notification are separate product concepts:
 
 - **Status** states a fact about the affected object, never implying that the
@@ -564,18 +567,26 @@ Status, owner action, and urgent notification are separate product concepts:
   task as a proxy.
 
 Activity schedule rows use the same factual status rule: `active`, `disabled`,
-`suppressed`, `consumed once · history` and `deletion pending` describe
-lifecycle state, while the adjacent Disable/Enable, Restore and Delete controls
-state the owner action. A consumed one-shot is history whether its task
-succeeded or failed; the status never implies a result. Retained rows (consumed
-and suppressed) collapse into one disclosure rather than padding the standing
-list or disappearing: history the owner can still open, read and act on. A
-suppressed skill row keeps Restore so the owner can ask for it back; a consumed
-one keeps only Delete, since Enable on a schedule that cannot fire again would
-be a lie. A deleted row still finishing work it already accepted stays in the
-standing list and says what it waits for. Where generic Restore can cancel the
-pending deletion, the button says Cancel deletion, not Enable; an exact hold
-release stays separate and preserves the deletion intent.
+`consumed once · history`, `withdrawn` and `deletion pending · work in flight`
+describe lifecycle state, while the adjacent Disable/Enable, Restore and Delete
+controls state the owner action. Lifecycle and the last run's outcome are
+separate facts: the outcome line says the settled word as stored (`completed`,
+`failed`, `cancelled`), `ran · no message` for a quiet run, or `outcome not
+observed yet` until the scheduler has read the settled result; it never says
+running, and only the host's own observation writes `previous run still open`.
+A consumed one-shot is history whether its task succeeded or failed; the status
+never implies a result. A row is headed by its name; the instruction stays
+readable and expands by touch, and a waiting row says why inline, never in a
+hover-only tooltip. Retained rows (consumed and withdrawn) collapse into one
+History & withdrawn disclosure rather than padding the standing list or
+disappearing: history the owner can still open, read and act on. A withdrawn
+row says who withdrew it, when and why, and keeps Restore through the retention
+window once no hold remains on it; Restore cancels the withdrawal and brings
+the row back enabled, even if it was paused before, but never re-arms a one-shot
+that already fired. A consumed row keeps only Delete, since Enable on a schedule
+that cannot fire again would be a lie. A withdrawn row whose accepted work is
+known to be in flight stays in the standing list and says so; an exact hold release (Restore
+hold) stays separate and preserves the withdrawal.
 
 A record of what the owner did earlier is history, not status. A skill's
 OuroborosHub submission (the version it sent and its PR link) lives in the
@@ -1549,7 +1560,7 @@ Expanded ordinary cards disclose earlier Files, timeline, Reviews and children
 in collapsible sections using their original content, never duplicate cards.
 A Project portal still reaches that content through its room.
 
-**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
+**Project completion mirror.** Eligible managed/transferred Project finals reach Main as Markdown in Ouroboros's voice, host-stamped only for a model-authored final, so the browser never infers authorship; ordinary Project-native replies stay local. A long answer folds to about seven lines of complete selectable text, faded only where text is hidden; folded text has no keyboard stops. The Project reference below opens the complete answer and its delivered documents; Main has no in-place expansion or Files inventory. A nonclean final carries one compact factual limitation from the recorded outcome and review beside the answer, wrapping legibly at narrow widths; a clean final has no status caption. Copy and Reply quote the answer alone. Ordinary document readers, quiz materials and task-card Files stay on their existing surfaces; retained availability is not delivery or owner receipt. Full reviews, logs and progress stay in their sources. Durable rows/wire frames keep System metadata and text; Reply uses the persisted visible answer without changing its address. Telegram status replies reference the work instead. Endings without an authored answer keep System voice: Main shows the work's name and true outcome, its cause, accessible recorded details and any labelled preserved output. The Project is named once by its reference; Copy, canonical history and Telegram retain full context. Older rows without these typed facts keep their stored text. A quiet scheduled run (it finished without a message) keeps its internal result and a terse `Done · no message` row in its own room; it creates no Main completion summary and sends no finish notification, while a host notice it carries stays visible. One logical identity joins retries/history and keeps one-ending-one-notification; external transport stays at-least-once.
 
 History with no current execution or known outcome keeps its expandable content under `Outcome unavailable`, without a task chip, typing or Stop. Before complete live-source reconciliation, it is `Activity unconfirmed`. Positive current activity restores only its proven controls. A delivery warning may coexist with a preserved result-review PASS. Model metadata says `Last solve response`, naming the initial request only when the route changed.
 
@@ -1683,10 +1694,17 @@ down that page chain until `Scroll to latest message`. Old sources read no newer
 messages. Ouroboros quotes the message it answers only when it is not directly
 above (its own card does not count).
 
-A relay is one Ouroboros bubble in the work's room: every owner's message passed
-on, complete with where/when (six lines, then Show all; files named, captionless
-files by name), then Ouroboros's note; Telegram uses plain text. Main keeps its
-one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
+A relay is a note one work leaves another (`tell_task`), written for that work, so
+its room draws a note card, never an Ouroboros bubble (`web/modules/chat_relay_deck.js`):
+the sender's tile (Main's glyph, or the Projects glyph in Project ink) and name over
+`to this work · time`, the teller's line for the owner (`summary`; without it the
+note's first words in meta ink), and Show note, the note as written in a tray with
+Reply and Copy. Consecutive notes make one deck in the work card's material: the
+latest card in front, the edges of up to two behind, Show N notes fanning it out in
+place, Hide folding it. A relay passing the owner's words keeps its own card: every
+message passed on, complete with where/when (six lines, then Show all; files named,
+captionless files by name), above the summary. Telegram receives only a relay that
+passes his words, as plain text. Main keeps its one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
 row, long press on touch) offers Reply, Copy, Open project and a work card's
 Resume, Pause and Stop… exactly when the card does. Esc/outside press closes it
 and returns focus; selected words keep the browser's menu. On touch the row sinks a
@@ -2327,7 +2345,8 @@ to interrupt you. Judge it by use and turn it off if it is too chatty.
 **What never notifies.** Progress, a transient failure, one tool's error and a
 reviewer's finding are not notifications; they stay in the transcript. A child
 task never notifies the owner: it escalates to its parent, and only the parent's
-own message or the root's terminal can ring. Machine partitions — the hidden
+own message or the root's terminal can ring, and a run that finished quietly
+(`quiet_effective`) does not, unless it publishes a host notice. Machine partitions — the hidden
 chat and agent-to-agent traffic — never reach a banner. A Project's room
 notifies once this client knows it; any other ordinary conversation, including
 one arriving over an external transport, is treated as the owner's exactly as

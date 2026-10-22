@@ -698,9 +698,9 @@ def sealed_final_prompt_section(sealed_final: Dict[str, Any] | None) -> str:
     heading, presence_facts, internal_text = "Final result text (submitted for delivery):\n", "", ""
     presence = sealed_final.get("presence_delivery")
     if sealed_final.get("wake_silent") is True:
-        heading, final_text = "Final result text:\n", "(none: the wake finished silently; no model words were submitted)"
+        heading, final_text = "Final result text:\n", "(none: the run finished silently; no model words were submitted)"
         if raw := str(sealed_final.get("internal_terminal_text") or ""):
-            internal_text = "Internal wake result (retained, never sent to the owner):\n" + truncate_review_artifact(
+            internal_text = "Internal run result (retained, never sent to the owner):\n" + truncate_review_artifact(
                 raw, limit=_SEALED_FINAL_TEXT_PROMPT_CHARS) + "\n"
     if isinstance(presence, dict):
         introduction = (

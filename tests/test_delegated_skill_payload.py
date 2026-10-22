@@ -687,12 +687,9 @@ def test_registry_golden_e2e_start_wait_apply_review_stale(tmp_path, monkeypatch
 
     # Sol P2-1: CLOSE the loop with the REAL skill preflight + review path over
     # the APPLIED content — reviewer LLM faked deterministically, no live model.
-    from tests.test_skill_review_persist_guard import _pass_actor
+    from tests.test_skill_review_persist_guard import _clean_wave
 
-    monkeypatch.setattr(
-        "ouroboros.tools.review._handle_multi_model_review",
-        lambda *_a, **_kw: json.dumps(
-            {"results": [_pass_actor("fake/a"), _pass_actor("fake/b")]}))
+    _clean_wave(monkeypatch)  # the golden pool's seats answer clean through the real custody layer
     preflight = json.loads(registry.execute("skill_preflight", {"skill": "alpha"}))
     assert preflight.get("ok") is True, preflight
     review_out = registry.execute("skill_review", {"skill": "alpha"})

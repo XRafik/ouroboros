@@ -116,7 +116,9 @@ _PROGRESS_META_FIELDS = (
 )
 
 _SKILL_REVIEW_STRING_FIELDS = (
-    "skill", "status", "content_hash", "job_id", "group_id",
+    # ``record_id``: the review ledger record a row references (a reused review has a fresh job id but the
+    # retained record; the detail reader resolves the record id, the job id only for rows of an earlier version).
+    "skill", "status", "content_hash", "job_id", "record_id", "group_id",
     "presentation_owner_task_id", "origin_task_id", "origin_root_task_id",
     "root_task_id", "source", "job_status", "terminal_reason",
     "replayed_from_ts",
@@ -311,6 +313,7 @@ def _copy_task_summary_metadata(rec: Dict[str, Any], entry: Dict[str, Any]) -> N
     """Copy terminal chat facts for task summaries."""
     if entry.get("type") != "task_summary":
         return
+    rec.update({key: entry[key] for key in ("wake_silent", "quiet_effective") if type(entry.get(key)) is bool})
     for key in ("model_execution", "review_projection", "history_retention", "terminal_time"):
         if isinstance(entry.get(key), dict):
             rec[key] = dict(entry[key])
@@ -737,6 +740,8 @@ def _collect_chat_rows(
             # the final visible window are annotated with it below.
             historical = historical_terminal_projection(entry)
             if historical and historical_terminals is not None:
+                historical.update({key: entry[key] for key in ("wake_silent", "quiet_effective")
+                                   if type(entry.get(key)) is bool})
                 tid = str(entry["task_id"])
                 previous = historical_terminals.get(tid, {})
                 if historical["ts"] >= previous.get("ts", ""):

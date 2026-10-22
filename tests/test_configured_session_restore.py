@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from tests.test_available_subagents_runtime import _session_row, _settings, _snapshot
-from tests._stub_delegate_engines import stub_delegate_engines  # noqa: F401
+from tests._stub_delegate_engines import stub_delegate_engines as stub_delegate_engines
 
 pytestmark = pytest.mark.serial
 
