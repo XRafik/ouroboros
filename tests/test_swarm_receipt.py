@@ -56,7 +56,7 @@ def test_unresolved_start_keeps_receipt_provisional_until_custody_resolves(tmp_p
     actor = next(a for a in pending["actor_intervals"] if a["kind"] == "delegated_start")
     assert pending["state"] == "provisional" and actor["invocation_id"] == "pending-one"
     assert actor["terminal"] is False and actor["state"] == "pending"
-    assert actor["start"] is actor["end"] is actor["cost_usd"] is None
+    assert actor["start"] is actor["end"] is actor["accounted_upper_bound_usd"] is None
     if resolution == "refused":
         assert custody.emit(tmp_path, custody.START_FAILED,
             {"task_id": "root", "invocation_id": "pending-one", "definite": True})

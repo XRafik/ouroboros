@@ -51,7 +51,7 @@ def tree_inputs(root, root_id, *, task=None):
             actors["invocation:" + invocation_id] = {"id": "invocation:" + invocation_id,
                 "invocation_id": invocation_id, "task_id": request.get("task_id"),
                 "kind": "delegated_start", "state": "pending", "terminal": False,
-                "start": None, "end": None, "cost_usd": None, "basis": "retained_start_request"}
+                "start": None, "end": None, "accounted_upper_bound_usd": None, "basis": "retained_start_request"}
         expected = set((owner.get("swarm_fanout_rollup") or {}).get("child_ids") or ())
         if expected - set(ids):
             gaps.append("missing_child_results")

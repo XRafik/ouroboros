@@ -107,7 +107,7 @@ def fold_tree(root_task_id, actors, *, edges=(), waits=(), usage=(), coverage=No
             "actor_id": row.get("actor_id") or ("review:" + str(row["review_slot_id"]) if row.get("review_slot_id")
                                                 else "task:" + str(row.get("task_id") or "")),
             "kind": row.get("kind"), "provider": row.get("provider"), "model": row.get("model"),
-            "cost_usd": cost if number(cost) else None, "cost_final": known,
+            "accounted_upper_bound_usd": cost if number(cost) else None, "cost_final": known,
             "account": {key: copy.deepcopy(row[key]) for key in
                         ("credential_profile_id", "requested_profile", "observed_route", "subscription_route") if key in row},
             "account_coverage": "observed" if row.get("credential_profile_id") or row.get("observed_route") else "unknown"})

@@ -745,15 +745,25 @@ def recover_review_producer(root: Any, request: Any, slot: Any, row: dict) -> An
         outcome = payload.get("producer_outcome") if isinstance(payload, dict) else None
         if not manifest.get("producer_complete") or not isinstance(outcome, dict):
             return None  # Historical/partial blobs carry no completed-producer receipt.
-        original_request, original_slot = recorded_review_assignment(root, row=row, assignment=(request, slot))
+        try:
+            original_request, original_slot = recorded_review_assignment(root, row=row, assignment=(request, slot))
+        except FileNotFoundError:
+            if manifest.get("collection") != "attach_only_observation":
+                raise
+            original_request, original_slot = request, slot  # no retained prompt: the recorded assignment binds
         expected = review_operation_binding(original_request, original_slot, operation)
         binding = outcome.get("recovery_binding")
         if not isinstance(binding, dict) or manifest.get("review_operation_binding") != binding:
             raise ValueError("producer binding missing or inconsistent")
         if {k: v for k, v in binding.items() if k != "pending_invocation_id"} != expected:
             raise ValueError("operation/task/root/material/contract/roster binding mismatch")
-        _prompt_manifest, _prompt, prompt_ref = read_call_payload(
-            root, task_id=request.task_id or "review", call_id=f"{operation}_prompt")
+        try:
+            _prompt_manifest, _prompt, prompt_ref = read_call_payload(
+                root, task_id=request.task_id or "review", call_id=f"{operation}_prompt")
+        except FileNotFoundError:
+            if manifest.get("collection") != "attach_only_observation":
+                raise
+            prompt_ref = None  # an older invocation-only row observed cold: its assignment is the recorded one
         token = str(binding.get("pending_invocation_id") or "")
         frozen_tokens = recorded_invocation_tokens(row)
         if frozen_tokens and frozen_tokens != {token}:
@@ -975,6 +985,32 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     return retain_collected_outcome(root, request, slot, actor, transcript=text)
 
 
+def _observe_retained_observation_usage(root: Any, request: Any, slot: Any, actor: Any, usage_ctx: Any) -> None:
+    """A retained cold observation hands its usage to the first collector with an endpoint.
+
+    The observation itself was collected without one (or its endpoint already saw it);
+    the process-local once-per-run latch keeps the row single and the attribution is the
+    recorded invocation's, never the collector's scope."""
+    usage = actor.usage or {}
+    if usage_ctx is None or usage.get("collection") != "attach_only_observation":
+        return
+    from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
+    from ouroboros.delegate_custody import invocation_record
+    from ouroboros.delegate_custody_usage import observe_session_usage
+    from ouroboros.tools.review_helpers import emit_review_usage
+
+    token = str((actor.recovery_binding or {}).get("pending_invocation_id") or usage.get("invocation_id") or "")
+    invocation = (invocation_record(root, token) if token else None) or {}
+    observe_session_usage(lambda facts: emit_review_usage(
+        usage_ctx, model=str(facts.get("resolved_model") or ""), usage=facts,
+        source=f"review_substrate:{request.surface}", extra={
+            "task_id": request.task_id, "root_task_id": invocation.get("root_task_id") or request.task_id,
+            "parent_task_id": invocation.get("parent_task_id") or "",
+            "delegation_role": "subagent" if invocation.get("parent_task_id") else "",
+            **{key: str(invocation.get(key) or "") for key in REVIEW_ATTRIBUTION_KEYS},
+            "surface": request.surface, "slot_id": slot.slot_id}), usage)
+
+
 def _collect_pending_row(root: Any, request: Any, slot: Any, row: dict, usage_ctx: Any,
                          controller: Any) -> Tuple[Any, str]:
     from ouroboros.review_custody import (
@@ -1004,6 +1040,8 @@ def _collect_pending_row(root: Any, request: Any, slot: Any, row: dict, usage_ct
         return copy.deepcopy(cached), COLLECTED
     recovered = recover_review_producer(root, request, slot, row)
     if recovered is not None and recovered.operation_state != "in_flight":
+        if recovered.operation_state != "custody_lost":
+            _observe_retained_observation_usage(root, request, slot, recovered, usage_ctx)
         return recovered, UNAVAILABLE if recovered.operation_state == "custody_lost" else COLLECTED
     identity = controller if isinstance(controller, dict) else (row.get("usage") or {}).get("review_controller")
     # A row with no controller on record keeps the pre-operation reading (its
