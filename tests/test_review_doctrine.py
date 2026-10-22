@@ -208,8 +208,9 @@ def test_history_names_the_fact_only_when_it_was_claimed():
 
 def test_prompt_and_schema_do_not_depend_on_the_fact(monkeypatch):
     text = (REPO / "prompts" / "SYSTEM.md").read_text(encoding="utf-8")
-    assert "A helper I schedule is never a review seat." in text
-    assert "A helper I schedule never counts as a seat." not in text
+    # The owner-approved sentence (22.10) names the replacement check in words, never by the fact kind.
+    assert "A helper I schedule never counts as a seat." in text
+    assert "A helper I schedule is never a review seat." not in text
     assert FACT_KIND not in text
     from ouroboros.subagent_runtime import review_facts_block
 
