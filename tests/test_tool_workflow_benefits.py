@@ -13,16 +13,12 @@ from copy import deepcopy
 import pytest
 
 from ouroboros.contracts.task_constraint import TaskConstraint
-from ouroboros.observability import persist_call
-from ouroboros.task_results import write_task_result
 from ouroboros.tools import (
     control_task_results,
     github,
     github_pr_write,
     github_workflows,
-    join_ledger,
     media,
-    query_data,
 )
 from ouroboros.tools.registry import ToolContext, ToolRegistry
 from tests.test_github_pr_write import BASE_SHA, CREATE, SHA, FakeGitHub, _open_pr, _pr
@@ -50,69 +46,14 @@ def test_vcs_read_reaches_git_identity_with_old_readonly_access(tmp_path, monkey
     assert json.loads(answer.split("\n\nVCS target:", 1)[0])["worktree"] == str(repo)
 
 
-def test_query_sql_and_records_keep_old_answers_with_narrower_grammar(tmp_path):
-    from ouroboros import store, store_import
-
-    store_import.ensure_current_store(tmp_path, with_children=False)
-    store.update_task(tmp_path, "caller", lambda _old: {"task_id": "caller", "status": "completed", "result": "ok"})
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    ctx = ToolContext(repo_dir=repo, drive_root=tmp_path, task_id="caller")
-    args = {"db": "current", "query": "SELECT task_id,status FROM tasks ORDER BY task_id"}
-    old_sql = json.loads(query_data._query_data(ctx, op="sql", **args))
-    new_sql = json.loads(query_data._query_sql(ctx, **args))
-    assert new_sql == old_sql and new_sql["status"] == "ok"
-    document = tmp_path / "state/queue_snapshot.json"
-    document.parent.mkdir(parents=True, exist_ok=True)
-    document.write_text('{"rows":[{"safe":1,"hidden":"VALUE"}]}', encoding="utf-8")
-    old_doc = json.loads(query_data._query_data(ctx, op="json", kind="queue_snapshot", select="rows[0].safe"))
-    new_doc = json.loads(query_data._query_records(ctx, form="document", kind="queue_snapshot", select="rows[0].safe"))
-    assert new_doc == old_doc and new_doc["data"] == 1
-    missing = json.loads(query_data._query_records(ctx, form="document", kind="queue_snapshot", select="rows[0].missing"))
-    assert missing["status"] == "error" and "segment 'missing'" in missing["message"]
-    assert "VALUE" not in missing["message"]
-    old_schema, sql_schema, record_schema = [x.schema["parameters"] for x in query_data.get_tools()]
-    assert old_schema["required"] == ["op"]
-    assert sql_schema["required"] == ["query"] and sql_schema["additionalProperties"] is False
-    assert record_schema["required"] == ["form"] and record_schema["additionalProperties"] is False
-    assert "operation" in record_schema["properties"]  # typed task-trace route absent from the old op enum
-    assert "task_trace" not in old_schema["properties"]["op"]["enum"]
 
 
-def test_query_records_resolves_retained_prior_call_from_published_identity(tmp_path):
-    from tests.test_query_records_task_trace import _ctx
-
-    trace = persist_call(tmp_path, task_id="caller", call_id="call-1", call_type="tool_call",
-                         payload={"tool": "demo", "result": "published"}, keep_raw=True)
-    write_task_result(tmp_path, "caller", "completed", result="done", terminal_origin="model_final",
-                      trace_refs={"tool_call_refs": [{"manifest_ref": trace["manifest_ref"],
-                                                       "redacted_projection_ref": trace["redacted_projection_ref"]}]})
-    ctx = _ctx(tmp_path, task_id="caller")
-    old = json.loads(query_data._query_data(ctx, op="json", kind="task_result", ids=["caller"]))
-    assert old["status"] == "ok"
-    ref = old["data"]["trace_refs"]["tool_call_refs"][0]["redacted_projection_ref"]
-    old_blob = json.loads(query_data._query_data(
-        ctx, op="blob", sha256=ref["sha256"], blob_kind="json",
-    ))
-    assert old_blob["status"] == "ok" and "published" in json.dumps(old_blob["data"])
-    listed = json.loads(query_data._query_records(ctx, form="task_trace", task_id="caller", operation="list", stream="tools"))
-    assert listed["status"] == "ok"
-    call = next(row for row in listed["data"]["published_calls"] if row["call_id"] == "call-1")
-    read = json.loads(query_data._query_records(ctx, form="task_trace", task_id="caller", operation="read_call",
-                                                  call_id="call-1", manifest_sha256=call["manifest_sha256"]))
-    assert read["status"] == "ok" and read["data"]["source"]["complete_chars"] > 0
-    content = json.loads(query_data._query_records(
-        ctx, form="task_trace", task_id="caller", operation="read_call", call_id="call-1",
-        manifest_sha256=call["manifest_sha256"], source_start_char=0,
-        source_end_char=read["data"]["source"]["complete_chars"],
-    ))
-    assert content["status"] == "ok" and "published" in content["data"]["source"]["text"]
     # Both routes reach the redacted projection. The new route binds call_id plus
     # manifest digest and returns a typed source range instead of caller-followed refs.
 
 
 def test_result_views_keep_handoff_facts_in_fewer_answer_chars(tmp_path):
-    from tests.test_task_result_views_and_sleep_until import _ctx, _write
+    from tests.test_task_result_views import _ctx, _write
 
     _write(tmp_path, terminal_host_notice="Host still owns one limitation.")
     ctx = _ctx(tmp_path)
@@ -130,52 +71,8 @@ def test_result_views_keep_handoff_facts_in_fewer_answer_chars(tmp_path):
     assert evidence["projection_refs"] and all(x["kind"] == "current_reread_recipe" for x in evidence["projection_refs"])
 
 
-def test_sleep_until_enters_same_event_wait_without_old_in_slot_branch(tmp_path, monkeypatch):
-    from ouroboros import model_sleep
-    from tests.test_task_result_views_and_sleep_until import _ctx
-
-    monkeypatch.setattr(model_sleep, "selectors", lambda _ctx, **chosen: chosen)
-    monkeypatch.setattr(model_sleep, "request_sleep", lambda _ctx, selected, mode: {"selected": selected, "mode": mode})
-    ctx = _ctx(tmp_path)
-    old = control_task_results._await_messages(ctx, timeout_sec=0, tasks=["child"])
-    # The old in-slot route returns immediately. The old actual park requires a separate mode choice.
-    old_park = control_task_results._await_as_sleep(ctx, "warm", tasks=["child"])
-    new = control_task_results._sleep_until(ctx, tasks=["child"])
-    assert old != new and json.loads(new) == json.loads(old_park)
-    schema = control_task_results.sleep_until_entry().schema["parameters"]
-    assert "timeout_sec" not in schema["properties"] and schema["properties"]["mode"]["default"] == "warm"
 
 
-def test_decide_child_results_is_exact_old_decision_with_decision_only_schema(tmp_path):
-    from types import SimpleNamespace
-
-    from ouroboros.task_status import load_effective_task_result
-    from ouroboros.tools.join_ledger import _child_result_sha256
-    from ouroboros.tools.task_tree import _tree_note
-    from ouroboros.tools.task_tree import get_tools as tree_tools
-    from tests._delivery_candidate_shared import write_child
-
-    def fixture(label):
-        root = tmp_path / label
-        root.mkdir()
-        write_child(root)
-        ctx = SimpleNamespace(drive_root=root, budget_drive_root=root,
-                              task_id="parent1", task_metadata={"root_task_id": "parent1"})
-        row = {"child_task_id": "child1", "disposition": "integrated",
-               "child_result_sha256": _child_result_sha256(load_effective_task_result(root, "child1"))}
-        return ctx, row
-
-    old_ctx, old_row = fixture("old")
-    new_ctx, new_row = fixture("new")
-    old = _tree_note(old_ctx, "decision", "Used the findings",
-                     payload={"type": "child_result_disposition", "children": [old_row]})
-    new = join_ledger._decide_child_results(new_ctx, [new_row], "Used the findings")
-    assert "OK:" in old and "OK:" in new
-    assert "idempotent" not in old.lower() and "idempotent" not in new.lower()
-    schema = next(x.schema["parameters"] for x in join_ledger.get_tools() if x.name == "decide_child_results")
-    old_children = tree_tools()[0].schema["parameters"]["properties"]["payload"]["properties"]["children"]
-    assert schema["properties"]["children"] == old_children
-    assert set(schema["properties"]) == {"children", "reason"} and schema["required"] == ["children", "reason"]
 
 
 def test_extract_pdf_text_selects_late_page_and_discloses_recovery(tmp_path, monkeypatch):
@@ -383,29 +280,5 @@ def test_frozen_and_source_registries_advertise_same_contracts(tmp_path, monkeyp
         assert ordinary._base_catalog.entries[name].schema == frozen._base_catalog.entries[name].schema
 
 
-def test_query_sql_rejects_non_sql_parameters_at_contract_boundary():
-    from jsonschema import ValidationError, validate
-
-    old, sql, records = [entry.schema["parameters"] for entry in query_data.get_tools()]
-    validate({"op": "sql", "query": "SELECT 1", "ids": ["unrelated"]}, old)
-    with pytest.raises(ValidationError):
-        validate({"query": "SELECT 1", "ids": ["unrelated"]}, sql)
-    validate({"query": "SELECT 1"}, sql)
-    with pytest.raises(ValidationError):
-        validate({"form": "document", "kind": "queue_snapshot", "query": "SELECT 1"}, records)
 
 
-def test_decision_reason_limit_is_visible_before_dispatch():
-    from jsonschema import ValidationError, validate
-
-    from ouroboros.tools.task_tree import get_tools as tree_tools
-
-    reason = "x" * 501
-    row = {"child_task_id": "child", "child_result_sha256": "a" * 64, "disposition": "integrated"}
-    old = tree_tools()[0].schema["parameters"]
-    decision = next(entry for entry in join_ledger.get_tools() if entry.name == "decide_child_results")
-    validate({"kind": "decision", "text": reason,
-              "payload": {"type": "child_result_disposition", "children": [row]}}, old)
-    with pytest.raises(ValidationError):
-        validate({"children": [row], "reason": reason}, decision.schema["parameters"])
-    validate({"children": [row], "reason": "Used findings"}, decision.schema["parameters"])

@@ -419,7 +419,7 @@ def cold_blockers(ctx: Any, *, chosen: Dict[str, Any] | None = None,
                 blockers.append({"kind": "queued_member", "detail": task_id})
             own_sleep = ""
             if own:
-                sleep_tools = ("continue_in_background",) if detach else ("await_messages", "sleep_until")
+                sleep_tools = ("continue_in_background",) if detach else ("await_messages",)
                 own_sleep = next((operation for tool in sleep_tools
                                   if (operation := current_tool_operation(ctx, tool))), "")
             from ouroboros.tool_custody import retained_tool_custody

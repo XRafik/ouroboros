@@ -1,4 +1,4 @@
-"""Short result-view and purpose-named sleep consumer proofs."""
+"""Short result-view consumer proofs."""
 from __future__ import annotations
 
 import hashlib
@@ -178,24 +178,3 @@ def test_settled_wait_task_returns_requested_short_view(tmp_path):
     assert "Task wait completed" in text
     payload = json.loads(text.split("\n\n", 1)[1])
     assert payload["view"] == "answer" and payload["answer"] == "Exact authored answer."
-
-
-def test_sleep_until_schema_is_strict_and_effect_matches_existing_sleep_path(monkeypatch):
-    entry = results.sleep_until_entry()
-    params = entry.schema["parameters"]
-    assert params["additionalProperties"] is False
-    assert "timeout_sec" not in params["properties"]
-    assert params["properties"]["mode"]["enum"] == ["warm", "cold"]
-    assert params["properties"]["mode"]["default"] == "warm"
-    assert "mode" not in params.get("required", [])  # tasks=[...] needs no hidden mode argument
-
-    from ouroboros import model_sleep
-    ctx = _ctx("/tmp/not-read")
-    monkeypatch.setattr(model_sleep, "selectors", lambda _ctx, **chosen: {"chosen": chosen})
-    monkeypatch.setattr(model_sleep, "request_sleep", lambda _ctx, selected, mode: {
-        "status": "armed", "selected": selected, "mode": mode,
-    })
-    direct = results._await_as_sleep(ctx, "warm", tasks=["child"])
-    named = results._sleep_until(ctx, tasks=["child"])
-    assert json.loads(named) == json.loads(direct)
-    assert json.loads(named)["mode"] == "warm"

@@ -10,7 +10,6 @@ an id this tree never minted, and a prompt cache that expired while it waited.
 
 from __future__ import annotations
 
-from copy import deepcopy
 import json
 import time
 from pathlib import Path
@@ -960,7 +959,7 @@ def _await_messages(ctx: ToolContext, timeout_sec: int = 0, mode: str = "in_slot
     return json.dumps(out, ensure_ascii=False)
 
 
-def _await_as_sleep(ctx: ToolContext, mode: str, _tool_name: str = "await_messages", **chosen: Any) -> str:
+def _await_as_sleep(ctx: ToolContext, mode: str, **chosen: Any) -> str:
     """The model's own warm/cold SLEEP (``ouroboros/model_sleep.py``): validate the
     selected sources, answer at once when one is already ready, else arm the park
     that follows this tool batch."""
@@ -968,13 +967,13 @@ def _await_as_sleep(ctx: ToolContext, mode: str, _tool_name: str = "await_messag
 
     try:
         if mode not in (model_sleep.MODE_WARM, model_sleep.MODE_COLD):
-            raise ValueError("senders/tasks/runs/services/wake_at/wake_after_sec select a sleep: give mode warm or cold")
+            raise ValueError("senders/tasks/runs/services/wake_at/wake_after_sec select a sleep: requires mode=warm or cold; for example await_messages(mode=\"warm\", wake_after_sec=60)")
         if not callable(getattr(ctx, "owner_wait_callback", None)):
             raise ValueError("this task has no continuation owner to sleep under")
         outcome = model_sleep.request_sleep(ctx, model_sleep.selectors(ctx, **chosen), mode)
     except (TypeError, ValueError) as exc:
         return _publish_tool_result(ctx, ToolResult(
-            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR ({_tool_name}): {exc}",
+            status="error", code="TOOL_ARG_ERROR", text=f"⚠️ TOOL_ARG_ERROR (await_messages): {exc}",
             meta={"operation_outcome": "completed_no_effect"}))
     return _publish_tool_result(ctx, ToolResult(status="ok", code="OK",
         text=json.dumps(outcome, ensure_ascii=False), meta={"sleep_question_notice": bool(outcome.get("questions"))}))
@@ -988,7 +987,7 @@ def await_messages_entry() -> ToolEntry:
     return ToolEntry("await_messages", {
         "name": "await_messages",
         "description": (
-            "Wait without model rounds for this task's mail, or use mode=warm/cold for event-driven sleep (also exposed as sleep_until). In-slot, the default, waits until an unread message for THIS task exists "
+            "Wait without model rounds for this task's mail, or use mode=warm/cold for event-driven sleep. In-slot, the default, waits until an unread message for THIS task exists "
             "in your mailbox (an addressed contribution from a peer task, a parent's steering, "
             "an owner message, a child's escalation) or the window elapses. Use it when you have "
             "asked a peer or your parent for its next turn and have nothing useful to do until "
@@ -1021,47 +1020,21 @@ def await_messages_entry() -> ToolEntry:
             "mode": {"type": "string", "enum": ["in_slot", "warm", "cold"],
                      "description": "in_slot (default) holds your slot for timeout_sec; warm/cold is a sleep."},
             "senders": {"type": "array", "items": {"type": "string"},
-                        "description": "Sleep: task ids whose ordinary mail wakes you; owner input and descendant escalations bypass this filter."},
+                        "description": "Requires mode=warm or cold. Sleep: task ids whose ordinary mail wakes you; owner input and descendant escalations bypass this filter."},
             "tasks": {"type": "array", "items": {"type": "string"},
-                      "description": "Sleep: task ids whose terminal (any settled status) wakes you."},
+                      "description": "Requires mode=warm or cold. Sleep: task ids whose terminal (any settled status) wakes you."},
             "runs": {"type": "array", "items": {"type": "string"},
-                     "description": "Sleep: your delegated run ids whose terminal wakes you."},
+                     "description": "Requires mode=warm or cold. Sleep: your delegated run ids whose terminal wakes you."},
             "services": {"type": "array", "items": {"type": "string"},
-                         "description": "Warm sleep: names of your own running services whose exit wakes you."},
-            "wake_at": {"type": "string", "description": "Sleep: an absolute ISO-8601 wake time (with timezone)."},
-            "wake_after_sec": {"type": "integer", "description": "Sleep: wake after this many seconds."},
+                         "description": "Requires mode=warm or cold. Warm sleep: names of your own running services whose exit wakes you."},
+            "wake_at": {"type": "string", "description": "Requires mode=warm or cold. Sleep: an absolute ISO-8601 wake time (with timezone)."},
+            "wake_after_sec": {"type": "integer", "description": "Requires mode=warm or cold. Sleep: wake after this many seconds."},
         }},
     }, _await_messages, timeout_sec=get_per_call_timeout_ceiling_sec() + 60)
 
 
-def _sleep_until(ctx: ToolContext, mode: str = "warm", **chosen: Any) -> str:
-    """Purpose-named public adapter over the existing model-sleep path."""
-    return _await_as_sleep(ctx, mode, _tool_name="sleep_until", **chosen)
 
 
-def sleep_until_entry() -> ToolEntry:
-    """Sleep schema derived from await_messages without its in-slot branch."""
-    properties = deepcopy(await_messages_entry().schema["parameters"]["properties"])
-    properties.pop("timeout_sec", None)
-    properties["mode"] = {
-        "type": "string", "enum": ["warm", "cold"], "default": "warm",
-        "description": "warm keeps the process/browser and lends a pooled slot; cold saves continuation and releases the process after external-run custody is accepted.",
-    }
-    return ToolEntry("sleep_until", {
-        "name": "sleep_until",
-        "description": (
-            "Sleep without spending model rounds until selected mail, task/run settlement, a warm-only "
-            "owned-service exit, or a requested wake time. Use warm (default) to keep process/browser "
-            "state while lending a pooled slot; use cold to save continuation and release the process "
-            "after custody of bound external runs is accepted. Owner controls and descendant escalations "
-            "and owner messages still wake either mode; an already-ready source returns immediately. "
-            "With no selectors, any addressed mail wakes you. New questions from any ordinary run you "
-            "own also wake you; questions are delivered, never answered. A retained external writer "
-            "keeps its Project lane. Sleep time is excluded from execution time, not a calendar deadline. "
-            "Settlement is not success: read the result after waking."
-        ),
-        "parameters": {"type": "object", "additionalProperties": False, "properties": properties},
-    }, _sleep_until, safety_policy="skip")
 
 
 def _count_live_sibling_children(ctx: ToolContext, status_drive_root: Path, *, exclude_task_id: str) -> int:

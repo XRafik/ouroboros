@@ -1,6 +1,5 @@
 """New tool forms preserve dispatch authority and exact result decisions."""
 from copy import deepcopy
-from types import SimpleNamespace
 
 import pytest
 
@@ -20,48 +19,11 @@ def registry(tmp_path, monkeypatch):
     return result
 
 
-def test_child_decision_facade_uses_exact_existing_authority(tmp_path):
-    from ouroboros.task_status import load_effective_task_result
-    from ouroboros.task_tree_ledger import tree_ledger_rows
-    from ouroboros.tools.join_ledger import _child_result_sha256, _decide_child_results
-    from ouroboros.tools.task_tree import _tree_note
-    from tests._delivery_candidate_shared import write_child
-
-    write_child(tmp_path)
-    ctx = SimpleNamespace(drive_root=tmp_path, budget_drive_root=tmp_path,
-                          task_id="parent1", task_metadata={"root_task_id": "parent1"})
-    digest = _child_result_sha256(load_effective_task_result(tmp_path, "child1"))
-    row = {"child_task_id": "child1", "disposition": "integrated", "child_result_sha256": digest}
-    assert "OK:" in _decide_child_results(ctx, [row], "Used the findings")
-    before = tree_ledger_rows("parent1", data_root=tmp_path)
-    assert len(before) == 1 and before[0]["payload"] == {"type": "child_result_disposition", **row}
-    assert "idempotent" in _tree_note(ctx, "decision", "Used the findings",
-                                    payload={"type": "child_result_disposition", **row})
-    assert "INVALID" in _decide_child_results(ctx, [row], "x" * 501)
-    assert "STALE" in _decide_child_results(ctx, [{**row, "child_result_sha256": "0" * 64}], "stale")
-    foreign = SimpleNamespace(drive_root=tmp_path, budget_drive_root=tmp_path,
-                              task_id="other", task_metadata={"root_task_id": "other"})
-    assert "LINEAGE_FORBIDDEN" in _decide_child_results(foreign, [row], "foreign")
-    assert tree_ledger_rows("parent1", data_root=tmp_path) == before
 
 
-def test_child_decision_schema_exposes_the_actual_rationale_bound(registry):
-    schema = registry.get_schema_by_name("decide_child_results")["function"]["parameters"]
-    assert schema["properties"]["reason"]["maxLength"] == 500
-    assert set(schema["required"]) == {"children", "reason"}
-    item = schema["properties"]["children"]["items"]
-    assert set(item["required"]) == {"child_task_id", "child_result_sha256", "disposition"}
 
 
 @pytest.mark.parametrize("withheld,requested,args", [
-    ("tree_note", "decide_child_results", {"children": [], "reason": "no"}),
-    ("decide_child_results", "tree_note", {"kind": "decision", "text": "no", "payload": {"type": "child_result_disposition"}}),
-    ("query_data", "query_sql", {"query": "select 1"}),
-    ("query_data", "query_records", {"op": "json"}),
-    ("query_sql", "query_data", {"op": "sql", "query": "select 1"}),
-    ("query_records", "query_data", {"op": "json", "kind": "run"}),
-    ("await_messages", "sleep_until", {"wake_after_sec": 1}),
-    ("sleep_until", "await_messages", {"mode": "warm", "wake_after_sec": 1}),
     ("commit_reviewed", "vcs_commit_reviewed", {"commit_message": "no"}),
     ("vcs_commit_reviewed", "commit_reviewed", {"commit_message": "no"}),
 ])
@@ -71,13 +33,6 @@ def test_disabled_old_or_new_operation_cannot_be_bypassed(registry, withheld, re
     assert result.status == "blocked" and result.code == "RESOURCE_CONSTRAINT_BLOCKED"
 
 
-def test_narrow_facade_disables_leave_unrelated_legacy_operations(registry):
-    from ouroboros.tools.registry_guards import _capability_resource_guard_result
-
-    registry._ctx.task_contract = {"disabled_tools": ["query_sql", "sleep_until", "decide_child_results"]}
-    for name, args in [("query_data", {"op": "json"}), ("await_messages", {}),
-                       ("tree_note", {"kind": "note", "text": "still permitted"})]:
-        assert _capability_resource_guard_result(registry._ctx, name, args) is None
 
 
 def test_duplicate_commit_hidden_but_still_callable_without_new_grants(registry, monkeypatch):
@@ -152,33 +107,6 @@ def test_registered_short_result_reads_do_not_dispose_or_consume_children(regist
         assert load_effective_task_result(ctx.drive_root, "child1") == before
 
 
-def test_registered_query_forms_and_sleep_use_their_existing_consumers(registry, monkeypatch):
-    import json
-
-    from ouroboros import model_sleep
-    from ouroboros.task_results import write_task_result
-
-    ctx = registry._ctx
-    ctx.task_id = "parent1"
-    write_task_result(ctx.drive_root, "parent1", "completed", result="retained text")
-    old = registry.execute_result("query_data", {"op": "sql", "query": "SELECT task_id FROM tasks"})
-    new = registry.execute_result("query_sql", {"query": "SELECT task_id FROM tasks"})
-    assert old.status == new.status == "ok"
-    assert json.loads(old.text) == json.loads(new.text)
-    record = registry.execute_result("query_records", {
-        "form": "document", "kind": "task_result", "ids": ["parent1"], "select": "result",
-    })
-    assert record.status == "ok" and json.loads(record.text)["data"] == "retained text"
-    seen = []
-    ctx.owner_wait_callback = lambda *_a, **_k: None
-    monkeypatch.setattr(model_sleep, "selectors", lambda _ctx, **chosen: chosen)
-    monkeypatch.setattr(model_sleep, "request_sleep", lambda _ctx, chosen, mode:
-                        seen.append((chosen, mode)) or {"reason": "ready", "mode": mode})
-    sleep = registry.execute_result("sleep_until", {"tasks": ["parent1"]})
-    assert sleep.status == "ok" and seen == [({"tasks": ["parent1"]}, "warm")], sleep.text
-    rejected = registry.execute_result("sleep_until", {"mode": "in_slot"})
-    assert rejected.status != "ok"
-    assert len(seen) == 1
 
 
 @pytest.mark.parametrize("spelling", ["ocr_pdf", "extract_pdf_text"])

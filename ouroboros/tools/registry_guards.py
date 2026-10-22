@@ -336,14 +336,7 @@ def _disabled_tools(ctx: Any) -> frozenset:
         names.add("preflight_review")
     if "preflight_review" in names:
         names.add("advisory_review")
-    # Narrow new forms cannot bypass an older withheld capability. Positive
-    # Presence grants stay exact-name: none is migrated or broadened here.
-    if "query_data" in names:
-        names.update({"query_sql", "query_records"})
-    if "await_messages" in names:
-        names.add("sleep_until")
-    if "tree_note" in names:
-        names.add("decide_child_results")
+    # Exact aliases keep saved restrictions in both directions.
     for spellings in ({"commit_reviewed", "vcs_commit_reviewed"}, {"ocr_pdf", "extract_pdf_text"}):
         if names & spellings:
             names.update(spellings)
@@ -482,15 +475,7 @@ def _capability_resource_guard_result(
     if refusal := dispatch_refusal(ctx, name, args, ext_tool=ext_tool, is_mcp=is_mcp):
         return ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED", text=refusal)
     disabled = _disabled_tools(ctx)
-    operation_name = name
-    if name == "query_data":
-        operation_name = "query_sql" if args.get("op") == "sql" else "query_records"
-    elif name == "await_messages" and args.get("mode", "in_slot") in {"warm", "cold"}:
-        operation_name = "sleep_until"
-    elif name == "tree_note" and isinstance(args.get("payload"), dict):
-        if args["payload"].get("type") == "child_result_disposition":
-            operation_name = "decide_child_results"
-    if name in disabled or operation_name in disabled:
+    if name in disabled:
         return ToolResult(
             status="blocked",
             code="RESOURCE_CONSTRAINT_BLOCKED",

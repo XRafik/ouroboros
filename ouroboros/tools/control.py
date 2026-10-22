@@ -437,7 +437,6 @@ def get_tools() -> List[ToolEntry]:
             }},
         }, _wait_for_tasks, timeout_sec=_WAIT_TASKS_CLAMP_SEC + NESTED_SETTLEMENT_MARGIN_SEC),
         await_messages_entry(),
-        sleep_until_entry(),
     ]
 
 
@@ -517,10 +516,8 @@ from ouroboros.tools.control_task_results import (  # noqa: E402, F401 -- intent
     _WAIT_TASK_CLAMP_SEC,
     _WAIT_TASKS_CLAMP_SEC,
     _await_messages,
-    _sleep_until,
     _children_roster_projection,
     await_messages_entry,
-    sleep_until_entry,
     get_task_result_entry,
     _count_live_sibling_children,
     _get_task_result,

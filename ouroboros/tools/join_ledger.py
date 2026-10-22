@@ -820,38 +820,8 @@ def _cancel_task(ctx: ToolContext, task_id: str, reason: str = "", stop_action_i
     )
 
 
-def _decide_child_results(ctx: ToolContext, children: Any, reason: str) -> str:
-    """The explicit result-decision form; the existing ledger owns every check."""
-    return _record_child_result_disposition_batch(
-        ctx, {"type": CHILD_RESULT_DISPOSITION_TYPE, "children": children}, reason,
-    )
-
-
 def get_tools() -> list[ToolEntry]:
-    from copy import deepcopy
-    from ouroboros.tools.task_tree import get_tools as tree_tools
-
-    # Reuse the existing tagged payload schema, not a second disposition contract.
-    child_schema = deepcopy(tree_tools()[0].schema["parameters"]["properties"]
-                            ["payload"]["properties"]["children"])
     return [
-        ToolEntry("decide_child_results", {
-            "name": "decide_child_results",
-            "description": (
-                "Record how you used one or more direct children's exact results. "
-                "Supply the child_result_sha256 you read and one reason (at most 500 characters). "
-                "integrated means consumed, irrelevant means not needed here, deferred leaves work owed "
-                "and your ending best-effort. Each entry keeps the same lineage/hash checks as tree_note's "
-                "decision payload; entries settle independently and partial results name failures. "
-                "This neither applies patches nor stops children; discard_child_result separately "
-                "abandons work you no longer need. A changed result needs a new read and decision."
-            ),
-            "parameters": {"type": "object", "properties": {
-                "children": child_schema,
-                "reason": {"type": "string", "minLength": 1, "maxLength": 500,
-                           "description": "Why these exact results were consumed, not needed, or deferred."},
-            }, "required": ["children", "reason"]},
-        }, _decide_child_results, safety_policy="skip"),
         ToolEntry("resume_child_task", {
             "name": "resume_child_task",
             "description": "After the owner resumes your root from a pause or saved application-stop hold, select ONE held task: "
