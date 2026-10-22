@@ -506,12 +506,13 @@ def main_context_fit_refusal(request: AttemptRequest) -> Optional[Dict[str, Any]
     window = request.context_window_tokens_exact or physical.capacity_total_tokens
     if window is None:
         return None  # unknown capacity leaves the first full request admissible
-    reserve = context_mode_limits(physical.rendered_mode, "", request.max_completion_tokens)[1]
+    reserve = physical.response_reserve_tokens or context_mode_limits(
+        physical.rendered_mode, "", request.max_completion_tokens)[1]
     exact = request.prompt_tokens_exact is not None
     size = request.prompt_tokens_exact if exact else math.ceil(
         request.prompt_tokens_bounded_estimate * (physical.measurement_density or 1.0))
     free = window - reserve - size
-    if free > 0:
+    if free >= 0:
         return None  # only physical W gates; the owner target never vetoes a send
     return refused_candidate_facts(
         request, capacity_total_tokens=window, response_reserve_tokens=reserve, free_tokens=free,

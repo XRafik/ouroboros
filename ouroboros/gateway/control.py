@@ -566,13 +566,23 @@ def _stop_repo_writers(reason: str) -> list[str]:
 
 
 def _fence_failure(blockers: list[str], stash_note: str = "") -> JSONResponse:
-    restart_required = not all(str(item).startswith("active:") for item in blockers)
+    active_only = bool(blockers) and all(str(item).startswith("active:") for item in blockers)
+    restart_required = not active_only
+    if active_only:
+        names = ", ".join(str(item)[len("active:"):] for item in blockers)
+        error = (
+            f"Active work is still running or finishing review ({names}). "
+            "No work was stopped and the repository was not changed; wait for it to finish, "
+            "pause it, or restart Ouroboros to clear the blocker."
+        )
+    else:
+        error = (
+            "Could not prove every repository writer stopped. The repository was not "
+            "changed, but runtime shutdown may be incomplete."
+        )
     return JSONResponse(
         {
-            "error": (
-                "Could not prove every repository writer stopped. The repository was not "
-                "changed, but runtime shutdown may be incomplete."
-            ),
+            "error": error,
             "reason": "update_writer_fence_blocked",
             "blockers": blockers,
             "restart_required": restart_required,
