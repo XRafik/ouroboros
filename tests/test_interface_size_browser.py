@@ -105,6 +105,12 @@ def test_a_phone_lays_the_page_out_at_another_width(subscription_ui, monkeypatch
         facts = page.evaluate(FACTS)
         assert facts['meta'].startswith('width=325, initial-scale=1.2'), facts
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 1"), 'nothing scrolls sideways'
+        # A split screen: narrower, still portrait; 360 px allows 110 % at most, and 390 px brings back the owner's 120 %.
+        page.set_viewport_size({'width': 360, 'height': 844})
+        page.wait_for_function("document.documentElement.clientWidth === 327 && ouroViewportScale.percent === 110")
+        page.set_viewport_size({'width': 390, 'height': 844})
+        page.wait_for_function("document.documentElement.clientWidth === 325 && ouroViewportScale.percent === 120")
+        assert page.evaluate(FACTS)['value'] == '120'
         _slide_to(page, 80)  # smaller than 90 % (owner 23.10): 488 px laid out, all of them on the screen
         page.wait_for_function("document.documentElement.clientWidth === 488")
         _expect_room_fills_screen(page)

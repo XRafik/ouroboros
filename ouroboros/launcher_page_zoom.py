@@ -7,13 +7,16 @@ pixels, so its media queries, viewport units and measured lengths stay in one co
 the main thread, then the title band is measured again (``launcher_window_chrome`` divides by ``pageZoom``).
 Windows: the WebView2 control's ``ZoomFactor`` on the form's UI thread (a host value applies across navigations).
 Linux: WebKitGTK's zoom level on the GTK main loop. Another backend reports no capability, and the page says the
-window cannot change its size.
+window cannot change its size. On macOS the View menu carries Actual Size, Zoom In and Zoom Out (⌘0, ⌘+, ⌘−) as a
+browser's does; each runs the page's own step (``window.ouroInterfaceSize``), so one setter serves the menu, the keys
+and the slider.
 
 The app keeps the size in ``state/desktop_page_zoom.json`` so the next window opens at it before its first paint
 (``before_show``): here the app's value is the setting, and the page reads it through ``shell_info`` and changes it
 through the bridge. Bridge calls arrive on pywebview's worker threads, possibly out of order, so each carries when its
 document became the window's page and its count there, as the caption tint's do (``launcher_appearance``): only a
-request newer by that pair is kept.
+request newer by that pair is kept, and what is stored and applied is always the newest size: two calls that overlap
+on their threads cannot leave the older one in the file or on the screen.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ log = logging.getLogger("launcher.page_zoom")
 
 PERCENT_MIN, PERCENT_MAX, PERCENT_STEP = 50, 200, 5
 STATE_NAME = "desktop_page_zoom.json"
+VIEW_MENU_ITEMS = (("Actual Size", "0", "reset"), ("Zoom In", "+", "zoomIn"), ("Zoom Out", "-", "zoomOut"))
 
 
 def clamp_percent(value: Any) -> Optional[int]:
@@ -59,11 +63,12 @@ def _backend() -> str:
 class PageZoom:
     """One window's page zoom: stored by the app, applied by its engine, changed by its page."""
 
-    def __init__(self, state_dir: Callable[[], pathlib.Path] | None = None,
+    def __init__(self, data_dir: Callable[[], pathlib.Path] | None = None,
                  on_changed: Callable[[], None] | None = None) -> None:
-        self._state_dir = state_dir or _default_state_dir
+        self._data_dir = data_dir or _default_data_dir
         self._on_changed = on_changed  # macOS: the title band is measured again after a change
         self._lock = threading.Lock()
+        self._store_lock = threading.Lock()  # writers queue, and each writes the newest size
         self._window: Any = None
         self._view: Any = None   # the engine's web view, once before_show found it
         self._form: Any = None   # Windows: the form whose UI thread owns the control
@@ -71,6 +76,7 @@ class PageZoom:
         self._percent = 100
         self._order: tuple[float, int] = (-math.inf, 0)
         self._closed = False
+        self._menu_actions: list[Any] = []  # a menu item does not retain its target
 
     # -- lifecycle -------------------------------------------------------------------------------------------------
     def attach(self, window: Any) -> None:
@@ -81,6 +87,8 @@ class PageZoom:
         self._percent = self._load()
         window.events.before_show += self._before_show
         window.events.closed += self._close
+        if _backend() == "cocoa" and hasattr(window.events, "shown"):
+            window.events.shown += self._shown
 
     def _before_show(self) -> None:
         """pywebview ``before_show`` (synchronous, the GUI thread, before the first load): find the engine's view and
@@ -98,12 +106,53 @@ class PageZoom:
                 return
             self._view, self._form, self._kind, percent = view, form, kind, self._percent
         if percent != 100:
-            self._apply_now(kind, view, percent / 100)
+            self._apply_now(kind, view)
 
     def _close(self) -> None:
         with self._lock:
             self._closed = True
             self._view = self._form = None
+
+    # -- the View menu (macOS) -------------------------------------------------------------------------------------
+    def _shown(self) -> None:
+        """pywebview ``shown`` (a worker thread): pywebview builds the app's menus on the main thread right after it,
+        so the size's View items are queued behind that."""
+        with self._lock:
+            if self._closed or self._kind != "cocoa":
+                return
+        try:
+            from PyObjCTools import AppHelper
+
+            AppHelper.callAfter(self._add_view_items)
+        except Exception:
+            log.info("The View menu keeps only its own items.", exc_info=True)
+
+    def _add_view_items(self, main: Any = None) -> None:
+        """The View menu's size items (main thread), once per app: a later window finds them there."""
+        try:
+            import AppKit
+
+            menu = view_menu(main if main is not None else AppKit.NSApplication.sharedApplication().mainMenu())
+            if menu is None or menu.itemWithTitle_(VIEW_MENU_ITEMS[0][0]) is not None:
+                return
+            for index, (title, key, command) in enumerate(VIEW_MENU_ITEMS):
+                action = _MenuAction(lambda command=command: self._run_page(command))
+                item = AppKit.NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, action.selector, key)
+                item.setTarget_(action)
+                menu.insertItem_atIndex_(item, index)
+                self._menu_actions.append(action)
+            menu.insertItem_atIndex_(AppKit.NSMenuItem.separatorItem(), len(VIEW_MENU_ITEMS))
+        except Exception:
+            log.info("The View menu keeps only its own items.", exc_info=True)
+
+    def _run_page(self, command: str) -> None:
+        """A View item (main thread): the page takes the step through its own setter, as its keys do; a page without
+        one (an older page, the setup window) ignores it."""
+        with self._lock:
+            view = None if self._closed else self._view
+        if view is not None:
+            view.evaluateJavaScript_completionHandler_(
+                f"window.ouroInterfaceSize && window.ouroInterfaceSize.{command}()", None)
 
     # -- the bridge ------------------------------------------------------------------------------------------------
     def info(self) -> Dict[str, Any]:
@@ -133,26 +182,26 @@ class PageZoom:
                 return {"ok": True, "state": "stale", "percent": self._percent}
             self._order, self._percent = order, value
             kind, view, form = self._kind, self._view, self._form
-        self._store(value)
-        scheduled = self._post(kind, view, form, value / 100)
+        self._store()
+        scheduled = self._post(kind, view, form)
         return {"ok": scheduled, "state": "scheduled" if scheduled else "unavailable", "percent": value}
 
     # -- engines ---------------------------------------------------------------------------------------------------
-    def _post(self, kind: str, view: Any, form: Any, factor: float) -> bool:
+    def _post(self, kind: str, view: Any, form: Any) -> bool:
         """Run the engine's write on the thread that owns the view."""
         try:
             if kind == "cocoa":
                 from PyObjCTools import AppHelper
 
-                AppHelper.callAfter(self._apply_now, kind, view, factor)
+                AppHelper.callAfter(self._apply_now, kind, view)
             elif kind == "edgechromium":
                 from System import Action
 
-                form.BeginInvoke(Action(lambda: self._apply_now(kind, view, factor)))
+                form.BeginInvoke(Action(lambda: self._apply_now(kind, view)))
             elif kind == "gtk":
                 from gi.repository import GLib
 
-                GLib.idle_add(lambda: self._apply_now(kind, view, factor) and False)
+                GLib.idle_add(lambda: self._apply_now(kind, view) and False)
             else:
                 return False
             return True
@@ -160,11 +209,12 @@ class PageZoom:
             log.warning("The window's size change could not be scheduled.", exc_info=True)
             return False
 
-    def _apply_now(self, kind: str, view: Any, factor: float) -> bool:
-        """The engine's own page zoom (on its GUI thread)."""
+    def _apply_now(self, kind: str, view: Any) -> bool:
+        """The engine's own page zoom (on its GUI thread), at the newest size, whichever request queued this write."""
         with self._lock:
             if self._closed:
                 return False
+            factor = self._percent / 100
         try:
             if kind == "cocoa":
                 view.setPageZoom_(factor)
@@ -184,7 +234,7 @@ class PageZoom:
 
     # -- the stored size -------------------------------------------------------------------------------------------
     def _path(self) -> pathlib.Path:
-        return pathlib.Path(self._state_dir()) / STATE_NAME
+        return pathlib.Path(self._data_dir()) / "state" / STATE_NAME
 
     def _load(self) -> int:
         try:
@@ -193,21 +243,49 @@ class PageZoom:
             return 100
         return value if value is not None else 100
 
-    def _store(self, percent: int) -> None:
+    def _store(self) -> None:
+        with self._store_lock:
+            with self._lock:
+                percent = self._percent
+            try:
+                from ouroboros.utils import atomic_write_json
+
+                path = self._path()
+                path.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(path, {"percent": percent})
+            except Exception:
+                log.warning("The window's size is not kept for the next launch.", exc_info=True)
+
+
+def view_menu(main: Any) -> Any:
+    """The app's View menu: the one pywebview builds around Enter Full Screen (macOS)."""
+    for item in (main.itemArray() if main is not None else ()):
+        submenu = item.submenu()
+        if submenu is not None and any("toggleFullScreen" in str(entry.action()) for entry in submenu.itemArray()):
+            return submenu
+    return None
+
+
+class _MenuAction:
+    """A View item's target, a plain object with an ``objc.selector`` as pywebview's own menu actions are."""
+
+    def __init__(self, run: Callable[[], None]) -> None:
+        from objc import selector
+
+        self._run = run
+        self.selector = selector(self._call, signature=b"v@:")
+
+    def _call(self) -> None:
         try:
-            from ouroboros.utils import atomic_write_json
-
-            path = self._path()
-            path.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_json(path, {"percent": percent})
+            self._run()
         except Exception:
-            log.warning("The window's size is not kept for the next launch.", exc_info=True)
+            log.info("A View menu size item failed.", exc_info=True)
 
 
-def _default_state_dir() -> pathlib.Path:
+def _default_data_dir() -> pathlib.Path:
     from ouroboros.config import DATA_DIR
 
-    return pathlib.Path(DATA_DIR) / "state"
+    return pathlib.Path(DATA_DIR)
 
 
 def _find_view(kind: str, window: Any) -> tuple[Any, Any]:

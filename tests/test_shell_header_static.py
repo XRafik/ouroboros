@@ -116,8 +116,12 @@ def test_a_desk_bar_starts_with_its_pages_navigation_and_ends_with_its_actions()
     bar = _rule(css, 'html[data-layout="docked"] .app-page-header[data-lead] {')
     assert 'grid-template-areas: "title toolbar"' in bar and "padding-block: 0" in bar and "min-height: 50px" in bar
     # The band's height only where the shell measured it (tests/test_launcher_window_chrome.py: no phantom spacer).
+    # At every Interface size the row is the band and the tabs' top inset shrinks with it (10px at 100 %), so the
+    # tabs stay level with the traffic lights where a 50px floor left them below once the band shrank.
     band = _rule(css, ':root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-lead] {')
-    assert "min-height: max(50px, var(--window-chrome-top))" in band
+    assert "min-height: var(--window-chrome-top)" in band and "50px" not in band, band
+    inset = _rule(css, ':root[data-window-chrome="integrated"][data-layout="docked"] .app-page-lead .app-tab-strip {')
+    assert "padding-top: min(10px, max(0px, calc((var(--window-chrome-top) - var(--chrome-control-h)) / 2)))" in inset
     controls = _rule(css, 'html[data-layout="docked"] .app-page-header[data-lead] > .app-page-toolbar :is(.btn, button) {')
     tab = _rule(css, 'html[data-layout="docked"] .app-page-lead .app-tab {')
     assert "height: var(--chrome-control-h)" in controls and "height: var(--chrome-control-h)" in tab

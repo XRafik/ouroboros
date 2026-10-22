@@ -15,10 +15,15 @@ import { isTelegramHost } from './host_telegram.js';
 /** The desktop window's range; the keys move in tens, the slider in fives. */
 export const DESK = Object.freeze({ min: 50, max: 200, step: 5, key: 10 });
 
-/** The key the owner pressed, as a zoom command: ⌘ on a Mac, Ctrl elsewhere, no Alt; the physical key, so any
- * keyboard layout works ('in' | 'out' | 'reset' | ''). */
+/** The key the owner pressed, as a zoom command: ⌘ on a Mac, Ctrl elsewhere, no Alt ('in' | 'out' | 'reset' | '').
+ * The character first, as a browser reads its own zoom keys (+ is BracketRight on a German keyboard), then the US
+ * key position for a layout whose key gives another character there (0 is à on a French one). */
 export function zoomKey(event, { mac = false } = {}) {
     if (!event || event.altKey || !(mac ? event.metaKey : event.ctrlKey)) return '';
+    const key = String(event.key || '');
+    if (key === '+' || key === '=') return 'in';
+    if (key === '-' || key === '_') return 'out';
+    if (key === '0') return 'reset';
     if (event.code === 'Equal' || event.code === 'NumpadAdd') return 'in';
     if (event.code === 'Minus' || event.code === 'NumpadSubtract') return 'out';
     if (event.code === 'Digit0' || event.code === 'Numpad0') return 'reset';
@@ -44,6 +49,7 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
     const listeners = new Set();
     let native = null;  // the desktop bridge's answer: {min, max, percent}
     let nativeChecked = false;
+    let nativeKnown = false;  // the app answered for its window: an engine without a page zoom, not an older app
     let sequence = 0;
     const since = win?.performance?.timeOrigin ?? Date.now();
 
@@ -61,7 +67,7 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
         }
         const shell = Boolean(win?.pywebview);
         const topLevel = (() => { try { return win.top === win; } catch { return false; } })();
-        if (shell && nativeChecked) return { route: 'none', reason: 'app', percent: 100 };
+        if (shell && nativeChecked) return { route: 'none', reason: nativeKnown ? 'engine' : 'app', percent: 100 };
         if (isTelegramHost({ win, doc }) && topLevel) return { route: 'none', reason: 'telegram', percent: 100 };
         return { route: 'browser', percent: 100 };
     }
@@ -75,6 +81,7 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
         }
         try {
             const info = (await api.shell_info())?.interface_size;
+            nativeKnown = Boolean(info && typeof info === 'object');
             native = info && info.supported ? {
                 min: Number(info.min) || DESK.min, max: Number(info.max) || DESK.max,
                 percent: Number(info.percent) || 100,
@@ -91,11 +98,18 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
         const now = state();
         if (now.route === 'app') {
             const percent = Math.min(now.max, Math.max(now.min, Math.round(Number(value) / DESK.step) * DESK.step));
-            sequence += 1;
+            const mine = ++sequence;
+            native = { ...native, percent };  // the next key press steps on from here, not from a late answer
+            notify();
             try {
-                const answer = await bridgeOf(win)?.set_interface_size(percent, since, sequence);
-                if (answer?.ok && Number.isFinite(Number(answer.percent))) native = { ...native, percent: Number(answer.percent) };
-            } catch { /* the window keeps the size it has; the control shows what the app holds */ }
+                const answer = await bridgeOf(win)?.set_interface_size(percent, since, mine);
+                // Only the newest call's answer speaks: an older one arriving late never moves the control back.
+                if (mine === sequence && Number.isFinite(Number(answer?.percent))) {
+                    native = { ...native, percent: Number(answer.percent) };
+                }
+            } catch {
+                if (mine === sequence) await readNative();  // the control shows what the app holds
+            }
             notify();
             return state();
         }
@@ -137,25 +151,40 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
 }
 
 let shared = null;
-/** The page's one controller, created at boot (app.js). */
+/** The page's one controller, created at boot (app.js). The desktop app's View menu (launcher_page_zoom.py) steps it
+ * through `window.ouroInterfaceSize`, as the keys do. */
 export function getInterfaceSize() {
-    shared ||= createInterfaceSize();
+    if (!shared) {
+        shared = createInterfaceSize();
+        if (globalThis.window) {
+            globalThis.window.ouroInterfaceSize = Object.freeze({
+                zoomIn: () => shared.step(1), zoomOut: () => shared.step(-1), reset: () => shared.reset(),
+            });
+        }
+    }
     return shared;
 }
 
 /** The note under the slider, how the size works on this surface: [template, params] for `fmt`. */
 export function sizeNote(current, { mac = false } = {}) {
-    const keys = mac ? '⌘ +, ⌘ − and ⌘ 0' : 'Ctrl +, Ctrl − and Ctrl 0';
-    if (current.route === 'app') return ['For this window; the next one opens at the same size. {keys} work here too.', { keys }];
+    const modifier = mac ? '⌘' : 'Ctrl';
+    const keys = { zoomIn: `${modifier} +`, zoomOut: `${modifier} −`, reset: `${modifier} 0` };
+    if (current.route === 'app') {
+        return ['For this window; the next one opens at the same size. {zoomIn}, {zoomOut} and {reset} work here too.', keys];
+    }
     if (current.route === 'screen') return ['On this screen from {min}% to {max}%.', { min: current.min, max: current.max }];
     if (current.reason === 'app') {
         return ['This desktop app cannot change its size yet. Restart Ouroboros after updating to set it here.', {}];
+    }
+    if (current.reason === 'engine') {
+        return ['This window cannot change its size. Your system’s display size setting makes everything larger or '
+            + 'smaller.', {}];
     }
     if (current.reason === 'telegram') {
         return ['Telegram does not let a page change its size here. Your system’s display size setting makes everything '
             + 'larger or smaller.', {}];
     }
-    return ['This browser sets the size of the page: {keys}.', { keys }];
+    return ['This browser sets the size of the page: {zoomIn}, {zoomOut} and {reset}.', keys];
 }
 
 /** Paint and bind the Settings → Appearance block; returns its disposer. */

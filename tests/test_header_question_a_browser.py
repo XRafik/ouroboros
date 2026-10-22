@@ -461,6 +461,13 @@ def test_the_widgets_board_scrolls_with_crisp_edges_under_its_plain_band(engine_
         assert edges['empty'] and edges['band'] == 52 and edges['listTop'] == 0 and edges['cursor'] == 'auto', edges
         assert edges['padTop'] >= 52 + 16 - 0.5 and edges['under'], edges
         assert not edges['missed'] and edges['frame'] and edges['page'] <= 0, edges
+        # A dragged card: the band lets the pointer through to the board's top edge, where the engine scrolls a drag
+        # upward, and is the window's handle again once the card is dropped.
+        through = """dragging => { const card = document.querySelector('#widgets-list .widgets-card');
+            card.classList.toggle('dragging', dragging); const l = document.querySelector('#page-widgets .widgets-scroll');
+            return Boolean(document.elementFromPoint(l.getBoundingClientRect().left + 40, 10)?.closest('.widgets-scroll')); }"""
+        assert page.evaluate(through, True), 'a drag reaches the board under the band'
+        assert not page.evaluate(through, False), 'at rest the band is the handle'
         # Another page's scroll body keeps the shared fade.
         _goto(page, 'settings')
         settings = page.locator('#page-settings .settings-scroll').element_handle()

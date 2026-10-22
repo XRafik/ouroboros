@@ -170,14 +170,14 @@ browser, another OS or an older desktop app reserves nothing.
 **Interface size** (Settings → Appearance, under Theme) is one slider that makes
 everything larger or smaller, per device like the theme (owner 23.10). Whoever
 owns the viewport applies it, never the page by scaling itself: the desktop app
-zooms its own window as a browser's Cmd+ does (50–200 %, ⌘/Ctrl + − 0 in tens,
-and its next window opens at the same size); a touch screen lays the page out at
+zooms its own window as a browser's Cmd+ does (50–200 %, ⌘/Ctrl + − 0 in tens
+and, on a Mac, the View menu; its next window opens at the same size); a touch screen lays the page out at
 another width (from 75 % up to the size that still leaves 320 CSS px); a browser
 on a computer keeps its own zoom, which no page can set, and the control names
 its keys; where neither exists (a Mini App in Telegram for Android, Telegram
 Desktop) the size stays 100 % and the control says so. A size applies when the
-slider is let go. Ouroboros sees the size in the owner's surface fact and can say
-where to change it, never changes it.
+slider is let go; a size the device cannot keep lasts until the page closes. Ouroboros
+sees the size in the owner's surface fact and can say where to change it, never changes it.
 
 Appearance belongs to a browser profile or desktop client, not an account or
 server setting. Existing saved Light/Dark choices keep their meaning. Storage
@@ -2553,8 +2553,7 @@ other row hides whatever it is doing, the open one included, and the header keep
 its mark and unread count for them. The choice is remembered on the device; a row
 that hides while it or its menu holds focus closes its menu and hands focus to the
 header. No label is set in capitals. A short window first compacts rows (fine pointer only), then lets the
-whole column scroll with Main pinned and the foot as its last row, never laid
-over a row; a tool never becomes an unlabelled icon. One
+whole column scroll with Main pinned; a tool never becomes an unlabelled icon. One
 place is chosen at a time, and pressing a place opens it, never closes it.
 
 **The drawer.** In the stack layout the room is a card the drawer pushes aside.
@@ -2646,9 +2645,9 @@ location take that place and its actions the end, on Main's line, so the bar has
 two ends as Main's does; tabs or a location that do not fit scroll inside it (a
 location rests at the folder you are in, no folder wider than the bar's start),
 and in the macOS window its empty parts still move the window. A header with nothing to show draws
-no bar. The band under the macOS title bar belongs to the window, never to a page (owner 22.10): no page
-reserves a row for it, its first row starts below it, and scrolled content passes under it with crisp edges,
-as a room's feed does (owner 20.10, 21.10), while a plain press in the empty band still moves the window. A Project shows its name. In the stack
+no bar, and its page starts at the window's top edge: the band under the macOS title bar stays the
+window's (owner 22.10), the page's first row starts below it, and the Widgets board's cards pass under it with
+crisp edges (owner 20.10), as a room's feed does (owner 21.10), while a plain press in the empty band still moves the window. A Project shows its name. In the stack
 layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
 ⋯, with the page's tabs, or Files' location and its actions, under it
 (`bindPageHeader` moves those nodes); the name wins over the status word, which a short row

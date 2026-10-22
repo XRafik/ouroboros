@@ -251,10 +251,13 @@
    length, query and coordinate still in one CSS pixel (CSS `zoom` on the page instead pushed the composer off screen).
    Written here, before CSS, so the first layout already has the stored size. A host that ignores the meta (a Mini App
    in Telegram for Android, a desktop engine, a frame inside another page) keeps 100 %: a size is kept only once the
-   layout width really became the one asked for. Per device, like the theme. */
+   layout width really became the one asked for the first time; a later miss is a layout still moving (a rotation).
+   A new screen width (a rotation, a split screen) is read from the visual viewport where it reads true, without a
+   flash to 100 %, and the owner's choice reapplied as far as the narrower screen allows. Per device, like the theme. */
 (() => {
     'use strict';
     const KEY = 'ouroboros.interface-size';
+    const REFUSED = 'ouroboros.interface-size-refused';  // the user agent of a host that ignored the meta here
     const STEP = 5;
     const MIN = 75;      // smaller, a finger's targets fall far under their 44 px
     const FLOOR = 320;   // never laid out narrower than this many CSS px (WCAG 1.4.10's reflow width)
@@ -263,9 +266,18 @@
     const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
     const topLevel = (() => { try { return window.top === window; } catch { return false; } })();
     const listeners = new Set();
-    let base = 0;       // the layout width at 100 %, in CSS px
+    let base = 0;       // the layout width at 100 %, in CSS px: the screen's own width when it was measured
     let percent = 100;  // the size in effect
-    let state = meta && coarse && topLevel && typeof requestAnimationFrame === 'function' ? 'pending' : 'unavailable';
+    let chosen = 100;   // the owner's choice; a screen too narrow for it shows the largest size it allows
+    let honoured = false;  // the host has laid out a size other than 100 % once
+    let settling = 0;   // writes of ours still being laid out
+    let recheck = false;  // the window was resized while one of them was
+    let watching = true;  // the visual viewport reads as the screen's own width (checked on the first size)
+    const agent = () => { try { return String(navigator.userAgent || ''); } catch { return ''; } };
+    // A host that ignored the meta is not offered the size again until its user agent changes (an update may honour it).
+    const refusedHere = () => { try { return localStorage.getItem(REFUSED) === agent(); } catch { return false; } };
+    let state = meta && coarse && topLevel && typeof requestAnimationFrame === 'function' && !refusedHere()
+        ? 'pending' : 'unavailable';
     let generation = 0;
 
     const stored = () => {
@@ -283,6 +295,12 @@
     const clamp = (value) => Math.min(max(), Math.max(MIN, Math.round(Number(value) / STEP) * STEP));
     const asked = (value) => Math.round(base / (value / 100));
     const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    // The screen's own width in CSS px at 100 %: the visual viewport at its scale, which Chromium and WebKit report as
+    // the page's whole scale, so neither a pinch nor the meta moves it.
+    const shownWidth = () => {
+        const vv = window.visualViewport;
+        return vv && Number(vv.scale) > 0 ? Number(vv.width) * Number(vv.scale) : 0;
+    };
     const notify = () => { for (const listener of listeners) { try { listener(); } catch { /* one view's fault */ } } };
     const write = (value) => {
         // The scale is the ratio of the two widths, so the screen shows the whole layout width: 390 px at 80 % is
@@ -299,43 +317,71 @@
         if (state === 'unavailable') return state;
         const mine = ++generation;
         const next = clamp(value);
+        settling += 1;
         write(next);
         await frames();
+        settling -= 1;
         if (mine !== generation) return state;
-        if (next !== 100 && Math.abs(width() - asked(next)) > 2) {
+        const laidOut = next === 100 || Math.abs(width() - asked(next)) <= 2;
+        if (!laidOut && !honoured) {
             write(100);
             percent = 100;
             state = 'unavailable';  // this host ignores the meta: 100 % stays, and the control says so
+            try { localStorage.setItem(REFUSED, agent()); } catch { /* it is asked again next time */ }
         } else {
-            percent = next;
+            if (laidOut && next !== 100 && !honoured) {
+                honoured = true;
+                // An engine whose visual viewport reports only a pinch's scale reads the layout's width here.
+                watching = Math.abs(shownWidth() - asked(next)) > 2;
+            }
+            percent = next;  // a miss now is a layout still moving: the meta stands and the next resize reads it
             state = 'active';
         }
         notify();
+        if (recheck) watch();
         return state;
     };
 
-    /* A rotation or a new window width changes the width at 100 %: measure it again at 100 %, then reapply. */
+    /* A rotation or a new window width changes the width at 100 %: read it, or measure it at 100 %, then reapply. */
     const remeasure = async () => {
         if (state === 'unavailable') return;
-        const keep = percent;
         const mine = ++generation;
-        write(100);
-        await frames();
-        if (mine !== generation) return;
-        base = width();
-        if (keep !== 100) await apply(keep);
-        else notify();
+        const shown = watching ? shownWidth() : 0;
+        if (shown > 0) {
+            base = Math.round(shown);
+        } else {
+            settling += 1;
+            write(100);
+            await frames();
+            settling -= 1;
+            if (mine !== generation) return;
+            base = width();
+        }
+        if (chosen !== 100 || percent !== 100) {
+            await apply(chosen);
+        } else {
+            notify();
+            if (recheck) watch();
+        }
+    };
+
+    /* A split screen or a resized window keeps its orientation: a resize that moved the screen's own width measures
+       again, and one that arrives while a write of ours is being laid out is read once it is. */
+    const watch = () => {
+        if (state === 'unavailable' || !watching) return;
+        if (state === 'pending' || settling) { recheck = true; return; }
+        recheck = false;
+        const now = shownWidth();
+        if (now && Math.abs(now - base) > 2) remeasure();
     };
 
     if (state === 'pending') {
         base = width();
-        const wanted = stored();
-        if (wanted === 100) {
-            state = 'active';
-        } else {
-            apply(wanted);
-        }
+        chosen = stored();
+        if (chosen === 100) state = 'active';
+        else apply(chosen);
         window.matchMedia('(orientation: portrait)')?.addEventListener?.('change', () => { remeasure(); });
+        window.addEventListener?.('resize', watch);
     }
 
     window.ouroViewportScale = {
@@ -345,8 +391,10 @@
         get max() { return base ? max() : 100; },
         get step() { return STEP; },
         async set(value) {
-            const next = await apply(value);
-            if (next === 'active') store(percent);
+            if (state === 'unavailable') return state;
+            chosen = clamp(value);  // before the write: a new screen width read meanwhile reapplies this choice
+            const next = await apply(chosen);
+            if (next === 'active') { chosen = percent; store(percent); }
             return next;
         },
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

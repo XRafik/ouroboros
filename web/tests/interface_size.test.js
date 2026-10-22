@@ -53,6 +53,10 @@ test('a zoom key is the physical key with the platform modifier, never with Alt'
     assert.equal(zoomKey({ ctrlKey: true, code: 'Equal' }, { mac: true }), '', 'Ctrl on a Mac is not the zoom key');
     assert.equal(zoomKey({ metaKey: true, altKey: true, code: 'Equal' }, { mac: true }), '');
     assert.equal(zoomKey({ metaKey: true, code: 'KeyA' }, { mac: true }), '');
+    // A German keyboard: + and - sit where a US keyboard has ] and /; a French one types à on the 0 key.
+    assert.equal(zoomKey({ metaKey: true, key: '+', code: 'BracketRight' }, { mac: true }), 'in');
+    assert.equal(zoomKey({ metaKey: true, key: '-', code: 'Slash' }, { mac: true }), 'out');
+    assert.equal(zoomKey({ ctrlKey: true, key: 'à', code: 'Digit0' }, { mac: false }), 'reset');
 });
 
 test('the keys step to the next whole ten inside the range', () => {
@@ -85,6 +89,28 @@ test('the desktop app is the size: its bridge answers, the slider and the keys s
     size.dispose();
 });
 
+test('quick key presses step on from each other, and a late answer never moves the size back', async () => {
+    const answers = [];
+    const calls = [];
+    const bridge = {
+        shell_info: async () => ({ interface_size: { supported: true, min: 50, max: 200, step: 5, percent: 100 } }),
+        set_interface_size: (value) => new Promise((done) => { calls.push(value); answers.push(() => done({ ok: true, percent: value })); }),
+    };
+    const win = fakeWindow({ bridge });
+    const doc = fakeDocument();
+    const size = createInterfaceSize({ win, doc });
+    await tick();
+    const first = size.step(1);
+    const second = size.step(1);
+    assert.deepEqual(calls, [110, 120], 'the second press steps from the first, not from the answer it has not had');
+    answers[1]();
+    await second;
+    answers[0]();  // the older call's answer arrives last
+    await first;
+    assert.equal(size.state().percent, 120);
+    size.dispose();
+});
+
 test('a desktop app older than the bridge says it cannot change its size, and its keys stay the system\'s', async () => {
     const bridge = { shell_info: async () => ({}) };  // a launcher built before set_interface_size
     const win = fakeWindow({ bridge });
@@ -97,6 +123,16 @@ test('a desktop app older than the bridge says it cannot change its size, and it
     let prevented = false;
     doc.key({ metaKey: true, code: 'Equal', preventDefault: () => { prevented = true; } });
     assert.equal(prevented, false);
+    size.dispose();
+});
+
+test('a window whose engine has no page zoom says so, without promising a restart', async () => {
+    const bridge = desktopBridge({ supported: false });  // Linux Qt, macOS before 11, the legacy Windows control
+    const win = fakeWindow({ bridge });
+    const size = createInterfaceSize({ win, doc: fakeDocument() });
+    await tick();
+    assert.deepEqual(size.state(), { route: 'none', reason: 'engine', percent: 100 });
+    assert.doesNotMatch(sizeNote(size.state())[0], /Restart/);
     size.dispose();
 });
 
@@ -119,8 +155,9 @@ test('a touch screen sets the size through the viewport; a browser keeps its own
 });
 
 test('the note names this surface\'s way and keys', () => {
-    assert.match(sizeNote({ route: 'app' }, { mac: true })[1].keys, /⌘ \+/);
-    assert.match(sizeNote({ route: 'browser' }, { mac: false })[1].keys, /Ctrl \+/);
+    assert.match(sizeNote({ route: 'app' }, { mac: true })[1].zoomIn, /⌘ \+/);
+    assert.match(sizeNote({ route: 'browser' }, { mac: false })[1].zoomOut, /Ctrl −/);
+    assert.match(sizeNote({ route: 'app' })[0], /\{zoomIn\}, \{zoomOut\} and \{reset\}/, 'the "and" is the template\'s, so it is translated');
     assert.deepEqual(sizeNote({ route: 'screen', min: 75, max: 120 })[1], { min: 75, max: 120 });
     assert.match(sizeNote({ route: 'none', reason: 'telegram' })[0], /Telegram/);
 });
@@ -173,18 +210,31 @@ test('where the page cannot set the size the slider is hidden and the note says 
 });
 
 // theme.js's touch half, run as the page runs it: before CSS, with the viewport meta it rewrites.
-function bootViewport({ width = 390, stored = null, honoured = true, coarse = true } = {}) {
+const until = async (ok, ms = 2000) => {
+    const end = Date.now() + ms;
+    while (!ok() && Date.now() < end) await new Promise((done) => setTimeout(done, 5));
+};
+
+function bootViewport({ width = 390, stored = null, honoured = true, coarse = true, relativeScale = false,
+    storage: shared = null, agent = 'phone-test' } = {}) {
     let content = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
     let layoutWidth = width;
-    const storage = new Map(stored ? [['ouroboros.interface-size', String(stored)]] : []);
+    let writes = 0;
+    let lagging = false;  // a rotation still under way: the host lays out a new meta only when it settles
+    const contents = [];
+    const storage = shared || new Map(stored ? [['ouroboros.interface-size', String(stored)]] : []);
     const meta = {
         getAttribute: () => content,
         setAttribute: (_key, value) => {
+            writes += 1;
             content = value;
-            const asked = /width=(\d+)/.exec(value);
-            layoutWidth = honoured && asked ? Number(asked[1]) : width;
+            contents.push(value);
+            if (!lagging) layOut();
         },
     };
+    // The screen shows the whole layout width at the page's scale (Chromium, WebKit); an engine that reported only a
+    // pinch's own scale would make the layout width read as the screen's.
+    const visualViewport = { get width() { return layoutWidth; }, get scale() { return relativeScale ? 1 : width / layoutWidth; } };
     const props = {};
     const listeners = new Map();
     const doc = {
@@ -197,15 +247,27 @@ function bootViewport({ width = 390, stored = null, honoured = true, coarse = tr
         matchMedia: (query) => ({ matches: query.includes('coarse') ? coarse : false, addEventListener: () => {} }),
         addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {},
         get innerWidth() { return layoutWidth; },
+        visualViewport,
     };
     win.top = win;
     const context = {
         window: win, document: doc,
         localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
-        requestAnimationFrame: (fn) => setTimeout(fn, 0), CustomEvent: class {}, console,
+        requestAnimationFrame: (fn) => setTimeout(fn, 0), CustomEvent: class {}, console, navigator: { userAgent: agent },
     };
     vm.runInNewContext(fs.readFileSync(new URL('../theme.js', import.meta.url), 'utf8'), context);
-    return { scale: win.ouroViewportScale, content: () => content, props, storage };
+    const resize = (next) => {  // the screen's width changes and the window says so
+        width = next;
+        if (!/width=\d+/.test(content)) layoutWidth = next;
+        listeners.get('resize')?.();
+    };
+    function layOut() {
+        const asked = /width=(\d+)/.exec(content);
+        layoutWidth = honoured && asked ? Number(asked[1]) : width;
+    }
+    const lag = (on) => { lagging = on; if (!on) { layOut(); listeners.get('resize')?.(); } };
+    return { scale: win.ouroViewportScale, content: () => content, props, storage, resize, lag, contents,
+        writes: () => writes };
 }
 
 test('a phone lays the page out at another width and keeps the size the host honours', async () => {
@@ -224,18 +286,80 @@ test('a phone lays the page out at another width and keeps the size the host hon
     assert.equal(phone.scale.percent, 75, 'no smaller than 75 % under a finger');
 });
 
+test('a split screen keeps its orientation: a new screen width is measured again and the choice comes back', async () => {
+    const phone = bootViewport({ width: 390 });
+    await phone.scale.set(120);
+    phone.resize(360);  // narrower than 120 % allows (360 / 320 = 112 %)
+    await until(() => /^width=327,/.test(phone.content()) && phone.scale.percent === 110);
+    assert.equal(phone.scale.percent, 110, 'the largest size the narrower screen allows');
+    assert.match(phone.content(), /^width=327,/);
+    phone.resize(390);
+    await until(() => phone.scale.percent === 120);
+    assert.match(phone.content(), /^width=325, initial-scale=1.2,/, 'the owner\'s choice, not the narrow screen\'s');
+    assert.equal(phone.storage.get('ouroboros.interface-size'), '120');
+});
+
+test('a resize while a size is still being laid out is read once it is', async () => {
+    const phone = bootViewport({ width: 390 });
+    const setting = phone.scale.set(120);
+    phone.resize(360);  // before the 120 % write has settled
+    await setting;
+    await until(() => /^width=327,/.test(phone.content()) && phone.scale.percent === 110);
+    assert.match(phone.content(), /^width=327,/);
+    assert.equal(phone.scale.percent, 110);
+});
+
+test('an engine whose visual viewport moves with the page is not watched: only a rotation measures there', async () => {
+    const phone = bootViewport({ width: 390, relativeScale: true });
+    await phone.scale.set(120);
+    const writes = phone.writes();
+    for (let i = 0; i < 5; i += 1) phone.resize(390);
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(phone.writes(), writes, 'no measuring loop');
+    assert.equal(phone.scale.percent, 120);
+    assert.match(phone.content(), /^width=325,/);
+});
+
+test('a rotation keeps the size: a layout still moving is no refusal, and the page never flashes to 100 %', async () => {
+    const phone = bootViewport({ width: 390 });
+    await phone.scale.set(120);
+    const before = phone.contents.length;
+    phone.lag(true);
+    phone.resize(844);  // landscape: the host lays out the new meta only once the turn has settled
+    await until(() => /^width=703,/.test(phone.content()));
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(phone.scale.state, 'active', 'a moving layout is not a host that ignores the meta');
+    assert.equal(phone.scale.percent, 120);
+    phone.lag(false);
+    await until(() => phone.scale.max > 120);
+    assert.match(phone.content(), /^width=703, initial-scale=1.200569,/);
+    assert.ok(phone.contents.slice(before).every((value) => !value.startsWith('width=device-width')), 'no flash to 100 %');
+    assert.equal(phone.storage.get('ouroboros.interface-size'), '120');
+});
+
 test('a stored size is applied before the first layout; a host that ignores the meta keeps 100 %', async () => {
     const stored = bootViewport({ width: 400, stored: 110 });
-    await new Promise((done) => setTimeout(done, 20));
+    await until(() => stored.scale.state !== 'pending');
     assert.equal(stored.scale.percent, 110);
     assert.match(stored.content(), /^width=364, initial-scale=1.098901,/, 'the exact ratio of the two widths');
 
     const ignored = bootViewport({ width: 390, stored: 110, honoured: false });  // a Mini App in Telegram for Android
-    await new Promise((done) => setTimeout(done, 20));
+    await until(() => ignored.scale.state !== 'pending');
     assert.equal(ignored.scale.state, 'unavailable');
     assert.equal(ignored.scale.percent, 100);
     assert.match(ignored.content(), /^width=device-width/, 'the original meta is back');
 
     const desk = bootViewport({ coarse: false });
     assert.equal(desk.scale.state, 'unavailable', 'a fine pointer keeps the browser\'s own zoom');
+});
+
+test('a host that ignored the meta is not offered the size again, until its user agent changes', async () => {
+    const storage = new Map();
+    const first = bootViewport({ storage, honoured: false, agent: 'Telegram-Android/11.0' });
+    assert.equal(first.scale.state, 'active', 'nothing is known before the first try');
+    assert.equal(await first.scale.set(120), 'unavailable');
+    const again = bootViewport({ storage, honoured: false, agent: 'Telegram-Android/11.0' });
+    assert.equal(again.scale.state, 'unavailable', 'the next start knows');
+    const updated = bootViewport({ storage, honoured: true, agent: 'Telegram-Android/11.1' });
+    assert.equal(updated.scale.state, 'active', 'an updated host is tried again');
 });

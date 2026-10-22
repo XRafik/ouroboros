@@ -12,6 +12,10 @@ dialog { margin: auto; }
     display: none !important;
 }
 
+/* A page laid out wider than its screen (Interface size below 100 %, theme.js) keeps its type scale: a phone's
+   text inflation would enlarge long text against the owner's size. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
     background: var(--bg-primary);
@@ -150,7 +154,8 @@ html[data-layout="stack"] .shell-icon-control {
 }
 
 /* The tools follow the Projects; the box takes the column's free room, so its last row, the version and the update,
-   rests on the bottom edge (owner 22.10) whether the list is collapsed, short or scrolling. */
+   rests on the bottom edge (owner 22.10) whether the list is collapsed, short or scrolling. A window too short for
+   the zones scrolls the whole column instead, the foot its last row (the fallback above). */
 .sidebar-foot {
     flex: 1 0 auto;
     display: flex;
@@ -1111,6 +1116,11 @@ html[data-layout="docked"] .app-page-header[data-empty] {
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-empty] ~ .widgets-scroll {
     padding-top: calc(var(--space-4) + var(--window-chrome-top));
 }
+/* While a card is dragged the band lets the pointer through to the board, whose top edge is where the engine scrolls
+   a drag upward; at rest the band is the window's handle. */
+:root[data-window-chrome="integrated"][data-layout="docked"] #page-widgets:has(.widgets-card.dragging) .app-page-header[data-empty] {
+    pointer-events: none;
+}
 
 .app-page-toolbar,
 .app-page-actions,
@@ -1170,8 +1180,14 @@ html[data-layout="docked"] .app-page-header[data-lead] {
     min-height: 50px;
     padding-block: 0;
 }
+/* In the macOS window the row is the window's band, so its tabs sit level with the traffic lights at every Interface
+   size: a larger size shrinks the band in CSS px, and the strip's top inset shrinks with it (at 100 % it is the 10px
+   above, once the band is shorter than a control the row grows below the band). */
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-lead] {
-    min-height: max(50px, var(--window-chrome-top));
+    min-height: var(--window-chrome-top);
+}
+:root[data-window-chrome="integrated"][data-layout="docked"] .app-page-lead .app-tab-strip {
+    padding-top: min(10px, max(0px, calc((var(--window-chrome-top) - var(--chrome-control-h)) / 2)));
 }
 html[data-layout="docked"] .app-page-header[data-lead] > .app-page-leading { display: none; }
 html[data-layout="docked"] .app-page-header[data-lead] > .app-page-toolbar :is(.btn, button) {
@@ -3609,7 +3625,8 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 /* A touch keyboard zooms into a field under 16px: the guard follows the pointer, not a width. Below 100 % interface
    size (theme.js) the field keeps 16 device px, so a smaller page never makes the keyboard zoom in. */
 @media (pointer: coarse) {
-    textarea, input[type="text"], input[type="password"], input[type="email"], select {
+    textarea, select, input:not([type]), [contenteditable]:not([contenteditable="false"]),
+    input:is([type="text"], [type="search"], [type="email"], [type="url"], [type="tel"], [type="password"], [type="number"]) {
         font-size: max(16px, calc(16px / var(--interface-scale, 1))) !important;
     }
 }
@@ -7309,7 +7326,7 @@ body.keyboard-open .chat-instance-panel .chat-input-area {
     align-items: stretch;
     margin: var(--space-1) 0 var(--space-2);
     /* As tall as its rows, shrinking to scroll them when they do not fit: the tools follow it, so a short or
-       collapsed list leaves its room under the last row, never between the zones. */
+       collapsed list leaves its room above the foot, never between the list and the tools. */
     flex: 0 1 auto;
     min-height: 0;
 }
