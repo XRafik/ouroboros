@@ -256,7 +256,7 @@ class SkillReviewResponse(TypedDict, total=False):
     error: str
     ok: bool  # attest only
     status_code: int  # attest refusal only
-    pending: bool  # attest only: the job outlasted the answer bound; job_id and message name it
+    pending: bool  # attest: the job outlasted the answer bound; review: the wave is still open (author left)
     message: str  # attest only, with pending
     reviewer_models: List[str]
     review_profile: str
@@ -278,7 +278,11 @@ class SkillReviewResponse(TypedDict, total=False):
     extension_server_reconcile: str
     extension_load_error: Optional[str]
     extension_live_loaded: Optional[bool]
-    convergence_hint: Any
+    record_id: str  # the review's ledger record
+    reused: bool  # a settled record of the same subject answered at $0
+    paid: bool
+    seats: List[Dict[str, Any]]
+    governance: Dict[str, Any]
     job_id: str
     job_status: str
     group_id: str

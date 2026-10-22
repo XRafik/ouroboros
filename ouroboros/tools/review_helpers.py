@@ -101,13 +101,6 @@ def calibrated_input_token_limit(
     )
 
 
-SKILL_HOST_CONTEXT_FILES = (
-    ("docs/CREATING_SKILLS.md", "markdown"),
-    ("ouroboros/contracts/plugin_api.py", "python"),
-    ("ouroboros/extension_ui_validation.py", "python"),
-)
-
-
 def review_drive_root(ctx: Any) -> pathlib.Path:
     """Resolve the drive root for review surfaces (ctx → DATA_DIR → ../data)."""
     if ctx is not None:
@@ -360,22 +353,6 @@ def cached_prompt_blocks(stable_text: str, dynamic_text: str = "", *, ttl: str |
     if str(dynamic_text or "").strip():
         blocks.append({"type": "text", "text": dynamic_text})
     return blocks
-
-
-def build_skill_host_context(repo_dir: Path | None = None) -> str:
-    """Return compact host-side skill/widget contract context for reviewers."""
-    root = Path(repo_dir) if repo_dir is not None else REPO_ROOT
-    parts = [
-        "## Host skill/widget contract context\n",
-        (
-            "These files are host-side contracts and guidelines used to judge the "
-            "skill payload. They are not part of the reviewed skill package.\n"
-        ),
-    ]
-    for rel_path, language in SKILL_HOST_CONTEXT_FILES:
-        text = load_governance_doc(root, rel_path, on_missing="explicit")
-        parts.append(f"### {rel_path}\n\n{format_prompt_code_block(text, language)}")
-    return "\n\n".join(parts)
 
 
 # The canonical governance corpus a packed review surface owes IN FULL. Two of
