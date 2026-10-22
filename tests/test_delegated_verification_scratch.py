@@ -490,9 +490,14 @@ def test_baseline_evidence_symlinks_are_product_and_do_not_block_unrelated_work(
         assert (target / "feature.py").exists() is (decision == "apply")
         assert not copy.exists() and _retained(capture) == expected
         link = target / ".review-evidence" if baseline_link == "root" else target / ".review-evidence/project-link"
-        assert link.is_symlink()
+        # With core.symlinks=false (Git for Windows' default on hosted runners) Git writes an
+        # applied link edit as a plain file holding its target; the edit is still product.
+        plain = (decision == "apply" and baseline_link == "entry" and _git(
+            target, "config", "--type=bool", "--get", "core.symlinks", check=False).stdout.strip() == "false")
+        assert link.is_symlink() is not plain
         if baseline_link == "entry":
-            assert link.readlink().as_posix() == ("../feature.py" if decision == "apply" else "../tracked.txt")
+            text = link.read_text(encoding="utf-8") if plain else link.readlink().as_posix()
+            assert text == ("../feature.py" if decision == "apply" else "../tracked.txt")
     finally:
         custody._CUSTODY.clear()
 
