@@ -223,12 +223,12 @@ def get_task_result_entry() -> ToolEntry:
     """The result/source reader schema lives beside its scoped handler."""
     return ToolEntry("get_task_result", {
         "name": "get_task_result",
-        "description": "Read a task's selected answer, current outcome and evidence (view=answer/summary/evidence/full), or its exact authority/source ranges. Omitted/full keeps the legacy complete response; short views name their omissions and do not count as reading those sources.",
+        "description": "Read a task's selected answer, current outcome and evidence (view=answer/summary/evidence/full), or its exact authority/source ranges. Omitted/full returns the complete response; short views do not count as reading authority or sources.",
         "parameters": {"type": "object", "required": ["task_id"], "properties": {
             "task_id": {"type": "string", "description": "Task ID returned by scheduling or exposed by the host routing manifest."},
             "call_id": {"type": "string", "description": "With manifest_sha256: read one retained redacted tool call or script dispatch of this task. Uses the source range and presence scope parameters."},
             "manifest_sha256": {"type": "string", "description": "Exact retained manifest digest for call_id. Omit ranges for source length/hash; provide both bounds for text."},
-            "known_result_sha256": {"type": "string", "description": "Conditional identity. With answer/summary/evidence it is the exact answer_sha256 (summary/evidence still refresh dynamic facts); with the legacy full view it retains the existing child_result_sha256 behavior."},
+            "known_result_sha256": {"type": "string", "description": "Conditional child_result_sha256 identity in every view; summary/evidence still refresh dynamic facts."},
             "view": {"type": "string", "enum": ["answer", "summary", "evidence", "full"], "description": "Optional semantic result view. Omitted/full preserves the legacy response exactly. Short views retain answer identity, terminal origin, outcome, host notice, and capability facts; summary adds current cost/custody/retry; evidence adds only authorized current-projection recipes."},
             "include_authority": {"type": "boolean", "default": False, "description": "Return the exact selected result, task contract, origin, artifact references, and current plan-review authority."},
             "include_work_order_source": {"type": "boolean", "default": False, "description": "Return the canonical work-order source projection; provide both source_start_char and source_end_char for the exact bounded range."},

@@ -152,7 +152,7 @@ def render_result_view(
 ) -> str:
     """Render a short view without projecting the stored envelope itself.
 
-    ``known_result_sha256`` is an answer identity on these new views.  Summary
+    ``known_result_sha256`` is the child-result identity in every view.  Summary
     and evidence are always rebuilt because cost/custody/retry/authority facts
     can change while the authored answer stays byte-identical.
     """
@@ -178,6 +178,21 @@ def render_result_view(
     if capability_delta:
         payload["capability_delta"] = dict(capability_delta)
 
+    from ouroboros.task_custody import unread_mail_notice
+    from ouroboros.tools.control_task_results import disclosable_effort_fact
+
+    if isinstance(data.get("cancel_origin"), dict):
+        payload["cancel_origin"] = data["cancel_origin"]
+    if data.get("retired_tool_invocations"):
+        payload["interrupted_tool_calls"] = {
+            "warning": "Local execution ended; external effects remain unknown.",
+            "invocations": data["retired_tool_invocations"],
+        }
+    if unread := unread_mail_notice(data.get("unread_mailbox")):
+        payload["unread_mail_notice"] = unread
+    if effort := disclosable_effort_fact(dict(data)):
+        payload["effort"] = effort
+
     reread_arguments = {"task_id": task_id, "view": "answer"}
     authority_arguments = {"task_id": task_id, "include_authority": True}
     if presence_scope:
@@ -194,7 +209,7 @@ def render_result_view(
         "answer_sha256": answer_sha,
     }
     if view == "answer":
-        if isinstance(known_result_sha256, str) and known_result_sha256 == answer_sha:
+        if isinstance(known_result_sha256, str) and known_result_sha256 == child_result_sha256:
             payload["result_unchanged"] = True
             payload["result_source"] = current_answer
         else:
@@ -202,8 +217,8 @@ def render_result_view(
         return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
     # Dynamic views deliberately do not take the unchanged-body branch.
-    payload["known_answer_matches"] = bool(
-        isinstance(known_result_sha256, str) and known_result_sha256 == answer_sha
+    payload["known_result_matches"] = bool(
+        isinstance(known_result_sha256, str) and known_result_sha256 == child_result_sha256
     )
     summary = _add_dynamic_summary(payload, data, outcome_summary)
     if view == "summary":

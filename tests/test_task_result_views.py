@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pytest
 from types import SimpleNamespace
 
 from ouroboros.task_results import write_task_result
@@ -44,11 +45,12 @@ def test_omitted_and_explicit_full_are_byte_identical(tmp_path):
     assert json.loads(answer)["answer"] == "Exact authored answer."
 
 
-def test_answer_view_keeps_core_handoff_facts_and_uses_answer_identity(tmp_path):
+def test_answer_view_keeps_core_handoff_facts_and_uses_child_result_identity(tmp_path):
     _write(tmp_path, terminal_host_notice="Host retained a non-clean terminal limitation.")
     ctx = _ctx(tmp_path)
     first = json.loads(results._get_task_result(ctx, "child", view="answer"))
     answer_sha = hashlib.sha256("Exact authored answer.".encode()).hexdigest()
+    result_sha = first["child_result_sha256"]
     assert first["answer"] == "Exact authored answer."
     assert first["answer_sha256"] == answer_sha
     assert first["terminal_origin"] == "model_final"
@@ -57,13 +59,13 @@ def test_answer_view_keeps_core_handoff_facts_and_uses_answer_identity(tmp_path)
     assert first["capability_delta"]["reduced"] is True
 
     unchanged = json.loads(results._get_task_result(
-        ctx, "child", view="answer", known_result_sha256=answer_sha,
+        ctx, "child", view="answer", known_result_sha256=result_sha,
     ))
     assert unchanged["result_unchanged"] is True and "answer" not in unchanged
     assert unchanged["result_source"]["immutable"] is False
 
 
-def test_summary_and_evidence_refresh_when_answer_hash_matches(tmp_path, monkeypatch):
+def test_summary_and_evidence_refresh_when_result_hash_matches(tmp_path, monkeypatch):
     ledger = {
         "schema_version": 1,
         "summary": {"entry_count": 2, "passed": 1, "failed": 1},
@@ -88,10 +90,11 @@ def test_summary_and_evidence_refresh_when_answer_hash_matches(tmp_path, monkeyp
     )
     ctx = _ctx(tmp_path)
     answer_sha = hashlib.sha256("Exact authored answer.".encode()).hexdigest()
+    result_sha = json.loads(results._get_task_result(ctx, "child", view="answer"))["child_result_sha256"]
     summary = json.loads(results._get_task_result(
-        ctx, "child", view="summary", known_result_sha256=answer_sha,
+        ctx, "child", view="summary", known_result_sha256=result_sha,
     ))
-    assert summary["known_answer_matches"] is True
+    assert summary["known_result_matches"] is True
     assert summary["cost"]["accounted_upper_bound_usd"] == 1.25
     assert summary["delegated_custody"]["open_run_ids"] == ["run-a"]
     assert summary["retry"]["lineage"][0]["task_id"] == "older"
@@ -102,7 +105,7 @@ def test_summary_and_evidence_refresh_when_answer_hash_matches(tmp_path, monkeyp
            artifact_bundle=bundle,
            delegate_terminal_reconciliation={"audit_status": "pending", "open_run_ids": ["run-b"]})
     refreshed = json.loads(results._get_task_result(
-        ctx, "child", view="summary", known_result_sha256=answer_sha,
+        ctx, "child", view="summary", known_result_sha256=result_sha,
     ))
     assert refreshed["answer_sha256"] == answer_sha
     assert refreshed["cost"]["accounted_upper_bound_usd"] == 2.5
@@ -114,10 +117,10 @@ def test_summary_and_evidence_refresh_when_answer_hash_matches(tmp_path, monkeyp
            artifact_bundle=bundle,
            delegate_terminal_reconciliation={"audit_status": "pending", "open_run_ids": ["run-c"]})
     evidence = json.loads(results._get_task_result(
-        ctx, "child", view="evidence", known_result_sha256=answer_sha,
+        ctx, "child", view="evidence", known_result_sha256=result_sha,
     ))
     encoded = json.dumps(evidence)
-    assert evidence["known_answer_matches"] is True
+    assert evidence["known_result_matches"] is True
     assert evidence["cost"]["accounted_upper_bound_usd"] == 3.5
     assert evidence["delegated_custody"]["open_run_ids"] == ["run-c"]
     assert evidence["retry"]["lineage"][0]["task_id"] == "older"
@@ -178,3 +181,25 @@ def test_settled_wait_task_returns_requested_short_view(tmp_path):
     assert "Task wait completed" in text
     payload = json.loads(text.split("\n\n", 1)[1])
     assert payload["view"] == "answer" and payload["answer"] == "Exact authored answer."
+
+
+@pytest.mark.parametrize("view", ["answer", "summary", "evidence"])
+@pytest.mark.parametrize("unchanged", [False, True])
+def test_every_short_view_keeps_current_handoff_disclosures(tmp_path, view, unchanged):
+    _write(tmp_path, cancel_origin={"actor": "owner"}, retired_tool_invocations=[{"tool": "send_file"}],
+           unread_mailbox={"rows": [json.dumps({"text": "owner correction"})], "read_complete": True},
+           effort_requested="high", effort_level="low", effort_source="pin")
+    ctx = _ctx(tmp_path)
+    identity = json.loads(results._get_task_result(ctx, "child", view="answer"))["child_result_sha256"]
+    value = json.loads(results._get_task_result(ctx, "child", view=view,
+                                              known_result_sha256=identity if unchanged else ""))
+    assert value["cancel_origin"] == {"actor": "owner"}
+    assert "external effects remain unknown" in value["interrupted_tool_calls"]["warning"]
+    assert value["interrupted_tool_calls"]["invocations"] == [{"tool": "send_file"}]
+    assert "owner correction" in value["unread_mail_notice"]
+    assert value["effort"] == {"requested": "high", "level": "low", "source": "pin"}
+    if view == "answer" and unchanged:
+        assert value["result_unchanged"] and "answer" not in value
+    answer_hash = value["answer_sha256"]
+    answer = json.loads(results._get_task_result(ctx, "child", view="answer", known_result_sha256=answer_hash))
+    assert "answer" in answer and not answer.get("result_unchanged")
