@@ -1,4 +1,4 @@
-/** Dependency-free JSDoc mirror of `ouroboros.gateway.contracts`; the interface-language envelopes (`UiI18n*`) sit in ./ui_i18n_types.js, the model-route previews in ./model_route_types.js, the Dashboard storage envelopes (`Storage*`) in ./storage_types.js, the MCP import preview in ./mcp_import_types.js, the replaceable-client envelopes (`ServedUiState`, setup bootstrap, `/api/contract`, chat history rows, journey request bodies) in ./client_contract_types.js, the product-management envelopes (skills, marketplaces, accounts, local model, MCP, update status) in ./management_contract_types.js, the owner-decision ingress in ./decision_types.js. */
+/** Dependency-free JSDoc mirror of `ouroboros.gateway.contracts`; the interface-language envelopes (`UiI18n*`) sit in ./ui_i18n_types.js, the model-route previews in ./model_route_types.js, the Dashboard storage envelopes (`Storage*`) in ./storage_types.js, the Dashboard Evolution history (`Evolution*`) in ./evolution_types.js, the MCP import preview in ./mcp_import_types.js, the replaceable-client envelopes (`ServedUiState`, setup bootstrap, `/api/contract`, chat history rows, journey request bodies) in ./client_contract_types.js, the product-management envelopes (skills, marketplaces, accounts, local model, MCP, update status) in ./management_contract_types.js, the owner-decision ingress in ./decision_types.js. */
 /**
  * @typedef {Object} CostPresentation
  * @property {'own'|'root_tree'} scope
@@ -93,13 +93,8 @@
 /** @typedef {import('./task_activity_types.js').ActiveDirectTurn} ActiveDirectTurn */
 /** @typedef {import('./task_activity_types.js').ActiveChatActivity} ActiveChatActivity */
 /** @typedef {import('./task_activity_types.js').ToolVerificationFact} ToolVerificationFact */
-/**
- * @typedef {Object} EvolutionDataResponse
- * @property {Object[]} points
- * @property {Object[]=} checkpoints
- * @property {string} generated_at
- * @property {boolean} cached
- */
+/** @typedef {import('./evolution_types.js').EvolutionRefresh} EvolutionRefresh */
+/** @typedef {import('./evolution_types.js').EvolutionDataResponse} EvolutionDataResponse */
 /**
  * @typedef {Object} HealthResponse
  * @property {"ok"} status
@@ -456,6 +451,7 @@
  *   A host-stamped placement fact for a task-keyed System row: "timeline" = a timeline item of the task's card, "reviews" = the card's Reviews group carries the fact (the row is still attached to the card); absent = an ordinary row.
  * @property {string=} card_row_id  // the row's stable identity across live delivery, outbox replay and history
  * @property {number=} card_row_revision  // canonical source order, independent of delivery timestamp
+ * @property {"retained_work"=} terminal_receipt  // a placed row the host types as a terminal receipt (Wrap up's saved work), not progress
  * @property {Object=} late_evidence
  *   Late-review identity, reviewed revision and exact applied source_ref served by
  *   taskSourceDownloadUrl; not an original reviewer transcript or a copy of the row.
@@ -962,54 +958,7 @@
  * @property {string} repair_hint
  */
 
-/**
- * Skill review and owner attestation outcome (`gateway/management_contracts.py::SkillReviewResponse`).
- * @typedef {Object} SkillReviewResponse
- * @property {string} skill
- * @property {string} status  // clean | warnings | blockers | pending
- * @property {string=} content_hash
- * @property {string=} error
- * @property {boolean=} ok  // attest only
- * @property {number=} status_code  // attest refusal only
- * @property {boolean=} pending  // attest only: the job outlasted the answer bound; job_id and message name it
- * @property {string=} message  // attest only, with pending
- * @property {string[]=} reviewer_models
- * @property {string=} review_profile
- * @property {Object[]=} findings
- * @property {Object[]=} raw_actor_records
- * @property {*=} advisory_result
- * @property {Object=} review_gate
- * @property {boolean=} executable_review
- * @property {*=} auto_flow
- * @property {string[]=} auto_granted_keys
- * @property {string[]=} requested_keys
- * @property {string[]=} auto_granted_permissions
- * @property {string[]=} requested_permissions
- * @property {string=} deps_status
- * @property {string=} deps_error
- * @property {string=} extension_action
- * @property {string=} extension_reason
- * @property {string=} extension_process
- * @property {string=} extension_server_reconcile
- * @property {string|null=} extension_load_error
- * @property {boolean|null=} extension_live_loaded
- * @property {*=} convergence_hint
- * @property {string=} job_id
- * @property {string=} job_status
- * @property {string=} group_id
- * @property {number=} review_round
- * @property {number=} snapshot_attempt
- * @property {boolean=} snapshot_revised
- * @property {string=} task_id
- * @property {string=} root_task_id
- * @property {string=} origin_task_id
- * @property {string=} origin_root_task_id
- * @property {string=} presentation_owner_task_id
- * @property {number=} chat_id
- * @property {string=} source
- * @property {string=} terminal_reason
- * @property {Object[]=} executions
- */
+/** @typedef {import('./management_contract_types.js').SkillReviewResponse} SkillReviewResponse */
 
 /**
  * `POST /api/skills/{skill}/grants`; refusals use `SkillActionRefusal`, slow setup {ok, pending: true, job_id, message}.
@@ -1201,6 +1150,9 @@
  * @property {Object.<string, {name:string, files:number, size:number, excluded:number, available:boolean}>=} artifact_archives
  *   Per top-level result directory, what `?archive=<dir>` would stream now (members from one
  *   confined stat each, rows left out counted); a folder offers its `.zip` only when `available`.
+ * @property {{name:string, request_id:string}=} wrap_up_document
+ *   Wrap up's saved-work document, written on read by `?wrap_up=<request_id>` on the task-file
+ *   route (`taskWrapUpDocumentUrl`); no size or digest exists before it is downloaded.
  * @property {Object.<string,Object>=} model_waits
  * @property {TaskCostBreakdown=} cost_breakdown
  * @property {{status: 'pending'|'problem'|'complete', pending_count: number, problem_count: number, promoted_ref_count: number, promoted_source_handle_count: number, problem_reasons?: Array<{reason:string,count:number}>}=} history_retention
@@ -1353,7 +1305,7 @@
  */
 /**
  * @typedef {Object} ScheduleActionResponse
- * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed (restored_not_ready: changed, not ok)
+ * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed
  * @property {boolean} changed  // the durable fact, whatever the audit did
  * @property {string} status
  * @property {string} schedule_id
@@ -1524,6 +1476,7 @@
  * @property {string=} task_id
  * @property {UpdateMergePlan=} merge_plan
  * @property {string=} error
+ * @property {string=} keep_branch
  */
 
 /**
@@ -1586,7 +1539,7 @@ export const MAX_QUIZ_OPTIONS = 6;
 // Mirror task_decision._COMMENT_MAX: ingress refuses longer comments, never
 // truncates; cards must offer only comments the ingress can deliver verbatim.
 export const MAX_DECISION_COMMENT = 2000;
-export const GATEWAY_CONTRACT_VERSION = '7.7.1';
+export const GATEWAY_CONTRACT_VERSION = '7.8.0';
 /** @typedef {import('./client_contract_types.js').ChatHistoryPosition} ChatHistoryPosition */
 /** @typedef {import('./client_contract_types.js').ChatHistoryResponse} ChatHistoryResponse */
 

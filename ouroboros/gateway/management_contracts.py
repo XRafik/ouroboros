@@ -256,7 +256,7 @@ class SkillReviewResponse(TypedDict, total=False):
     error: str
     ok: bool  # attest only
     status_code: int  # attest refusal only
-    pending: bool  # attest only: the job outlasted the answer bound; job_id and message name it
+    pending: bool  # attest: the job outlasted the answer bound; review: the wave is still open (author left)
     message: str  # attest only, with pending
     reviewer_models: List[str]
     review_profile: str
@@ -278,7 +278,11 @@ class SkillReviewResponse(TypedDict, total=False):
     extension_server_reconcile: str
     extension_load_error: Optional[str]
     extension_live_loaded: Optional[bool]
-    convergence_hint: Any
+    record_id: str  # the review's ledger record
+    reused: bool  # a settled record of the same subject answered at $0
+    paid: bool
+    seats: List[Dict[str, Any]]
+    governance: Dict[str, Any]
     job_id: str
     job_status: str
     group_id: str
@@ -715,6 +719,15 @@ class LocalModelTestResponse(TypedDict):
     tokens_per_sec: Any
 
 
+class McpListingAttempt(TypedDict):
+    """The latest listing attempt, independent of any retained successful listing."""
+
+    at: str
+    ok: bool
+    error: str
+    partial: bool
+
+
 class McpServerStatus(TypedDict, total=False):
     """One configured MCP server. A configuration error row has only ``id``, ``enabled``,
     ``tool_count``, ``last_error`` and ``code`` (MCP_CONFIG_ERROR or MCP_ID_AMBIGUOUS)."""
@@ -737,6 +750,10 @@ class McpServerStatus(TypedDict, total=False):
     last_error: Required[Optional[str]]
     last_refreshed: Any
     last_attempted: Any
+    listed_at: Optional[str]
+    latest_attempt: Optional[McpListingAttempt]
+    complete: bool
+    publication_error: str
     code: str
 
 
@@ -763,6 +780,8 @@ class McpRefreshResponse(TypedDict, total=False):
 
     server_id: str
     ok: bool
+    published: bool
+    publication_error: str
     tool_count: int
     configuration_warnings: List[str]
     tool_name_collisions: List[Dict[str, Any]]
@@ -797,11 +816,17 @@ class McpTestResponse(TypedDict, total=False):
 # --- Updates and core control ------------------------------------------------------------------
 
 class UpdateProgress(TypedDict, total=False):
-    """The update this process is applying, kept in memory only; ``{}`` when there is none. It is an
-    observation, never proof that the update finished: compare ``running_sha`` after reconnecting."""
+    """The last admitted apply attempt, kept across restarts; ``{}`` when there is none, a named ``unknown``
+    when it cannot be read. An observation, never authority. ``active`` is true only while THIS server
+    executes it. ``outcome`` stays empty until concluded: ``applied`` only after a later server's startup
+    checks passed while serving the landed commit; ``not_applied``, ``rolled_back``, ``failed`` or
+    ``unknown`` (``reason`` names the missing evidence). ``work_stop`` appears only on the executor's own
+    conclusion; ``none`` means it reached no worker or service teardown. A version, SHA or reconnect
+    alone proves nothing."""
 
     operation_id: str
     generation: str
+    current_generation: bool
     stage: str
     started_at: str
     stage_started_at: str
@@ -809,6 +834,19 @@ class UpdateProgress(TypedDict, total=False):
     result: str
     error: str
     restart_required: bool
+    outcome: Literal["", "applied", "not_applied", "rolled_back", "failed", "unknown"]
+    outcome_at: str
+    concluded_by: Literal["executor", "boot"]
+    reason: str
+    blockers: List[str]
+    work_stop: Literal["", "none", "invoked"]
+    base_sha: str
+    target_sha: str
+    tx_attempt_id: str
+    keep_branch: str
+    stash_note: str
+
+    retention_unconfirmed: bool  # live only: saving this observation failed, not the update itself
 
 
 class UpdateLetter(TypedDict):
@@ -973,7 +1011,7 @@ __all__ = [
     "ClaudexorProfileEnabledResponse", "ReviewPoolResponse",
     "ModelCatalogItem", "ModelCatalogResponse", "OpenAICompatibleModelsRequest", "LocalModelStartRequest",
     "LocalModelStartResponse", "LocalModelRuntimeMissingResponse", "LocalModelStatusResponse",
-    "LocalModelTestResponse", "McpServerStatus", "McpStatusResponse", "McpRefreshRequest",
+    "LocalModelTestResponse", "McpListingAttempt", "McpServerStatus", "McpStatusResponse", "McpRefreshRequest",
     "McpRefreshResponse", "McpTestRequest", "McpTestResponse",
     "UpdateProgress", "UpdateLetter", "UpdateTransactionState", "UpdateStatusResponse",
     "CommandRequest", "CommandResponse", "GitRollbackRequest", "GitRollbackResponse", "GitPromoteResponse",

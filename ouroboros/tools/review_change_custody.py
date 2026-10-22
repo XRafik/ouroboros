@@ -300,6 +300,11 @@ def recorded_commit_plan(ctx) -> dict:
                 parts=[tuple(row.get("parts") or seat_parts(slot)) for slot, row in zip(slots, composition)],
                 additional=[bool(row.get("additional")) for row in composition],
                 brief_shas=[str(row.get("brief_sha") or "") for row in composition])
+    # The record's declared per-item severity policy (a skill wave's checklist rule) rides the rejoin plan as
+    # it rode the dispatching one: fresh, explicit-rejoin and background settlement read the same policy.
+    policy = ((recorded.get("brief") or {}).get("checklist") or {}).get("severity_policy")
+    if isinstance(policy, dict) and policy:
+        plan["severity_policy"] = dict(policy)
     return plan
 
 

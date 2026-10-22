@@ -257,6 +257,7 @@ class _RetryBinding(NamedTuple):
     execution_binding_fingerprint: str
     max_seconds_basis: str
     continuation: Any   # delegate_continuation.ContinuationStart: the recorded lineage
+    prompt_cache_ttl: Dict[str, Any]
 
 
 def _resolve_retry_invocation(ctx: ToolContext, drive: pathlib.Path, retry_token: str, text: str, *,
@@ -388,6 +389,7 @@ def _resolve_retry_invocation(ctx: ToolContext, drive: pathlib.Path, retry_token
         # too, never re-derived from today's clocks.
         max_seconds_basis=str(record.get("max_seconds_basis") or ""),
         continuation=replayed_custody(record),
+        prompt_cache_ttl=deepcopy(record.get("prompt_cache_ttl") if isinstance(record.get("prompt_cache_ttl"), dict) else {}),
     ), None
 
 
@@ -631,10 +633,10 @@ def capture_terminal_patch_for_drive(drive: Any, entry: _RunCustody, *, gateway=
     retry point stays open), and a pre-R3 row over a failed manifest falls through to a fresh capture.
     """
     from ouroboros.delegate_directory import is_directory_run, capture_directory_result, directory_capture_block
-    from ouroboros.tools.subagent_integration_delegated import retain_investigation_evidence
+    from ouroboros.tools.subagent_integration_delegated import retain_run_evidence
 
     def finish(block, transport=None):
-        return retain_investigation_evidence(drive, entry, block, transport) if retain_investigation else block
+        return retain_run_evidence(drive, entry, block, transport) if retain_investigation else block
 
     if is_directory_run(entry):
         owned_gateway = None
@@ -700,14 +702,22 @@ def capture_terminal_patch_for_drive(drive: Any, entry: _RunCustody, *, gateway=
             # The preflight-head shape pins the capture BASE to the snapshot's baseline
             # commit (never a moved HEAD), reusing the one existing capture primitive —
             # sensitive veto, binary handling, sha256 manifest and all.
+            from ouroboros.delegate_start_instructions import EVIDENCE_DIRNAME
             from ouroboros.subagent_worktrees import find_execution_snapshot
             snapshot = find_execution_snapshot(entry.snapshot_id) or {}
             # A Git-subdirectory investigation runs in a folder of its clone; the
-            # capture always diffs the whole registered clone.
+            # capture always diffs the whole registered clone. The run's untracked
+            # named evidence is retained beside the capture, never carried in it (#2070).
+            clone = pathlib.Path(str(snapshot.get("path") or exec_root))
+            try:
+                evidence = (exec_root.resolve().relative_to(clone.resolve()) / EVIDENCE_DIRNAME).as_posix()
+            except ValueError:
+                evidence = ""
             _, manifest = write_workspace_patch_artifacts(
-                pathlib.Path(str(snapshot.get("path") or exec_root)), cap_dir,
+                clone, cap_dir,
                 task={"metadata": {"workspace_preflight": {"git": {"head": entry.baseline_sha}},
-                                   "file_baseline": snapshot.get("file_baseline") or {}}},
+                                   "file_baseline": snapshot.get("file_baseline") or {},
+                                   "host_evidence": evidence}},
             )
     except Exception as exc:
         log.warning("Delegated run patch capture failed for %s", entry.run_id, exc_info=True)

@@ -743,6 +743,15 @@ def reviewer_slot_execution_rows(surface: str, actors: Any, slots_by_id: Dict[st
             effective["processing"] = dict(usage["processing"])
         if isinstance(usage.get("effort_resolution"), dict):
             effective["effort_resolution"] = dict(usage["effort_resolution"])
+        if session:
+            from ouroboros.effort_evidence import terminal_prompt_cache_ttl
+
+            ttl_receipt = terminal_prompt_cache_ttl(
+                usage.get("observed_attempt"),
+                (usage.get("review_source_delivery") or {}).get("prompt_cache_ttl"),
+            )
+            if isinstance(ttl_receipt, dict):
+                effective["prompt_cache_ttl"] = ttl_receipt
         # D29 applied account/access, verbatim from the engine receipt; absent
         # keys mean the telemetry predates the receipt — shown as absence.
         if usage.get("applied_profile"):

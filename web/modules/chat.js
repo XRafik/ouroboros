@@ -1219,7 +1219,8 @@ export function createChatInstance({
             : Boolean(options.isSubagent && nestedSubagentsExpanded);
         root.dataset.expanded = initialExpanded ? '1' : '0';
         // The summary band is reading content (selectable, never a control); its one disclosure is the
-        // "N notes · Show details" button (DESIGN §5 "A task card's summary outranks its details").
+        // "Details" button, its notes count kept in the button's name (DESIGN §5 "A task card's summary
+        // outranks its details").
         root.innerHTML = `
             <div class="chat-live-summary-button" data-live-summary-button>
                 <div class="chat-live-summary">
@@ -1231,7 +1232,7 @@ export function createChatInstance({
                     <span class="chat-live-title" data-live-title>Waiting for work</span>
                     <button type="button" class="chat-live-summary-side ui-hit-area" data-live-disclosure aria-expanded="false" aria-controls="${escapeHtmlAttr(timelineId)}">
                         <span class="chat-live-count" data-live-count hidden></span>
-                        <span class="chat-live-toggle" data-live-toggle>Show details</span>
+                        <span class="chat-live-toggle" data-live-toggle>Details</span>
                         <svg class="chat-live-chevron" width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
                             <path d="M5 7.5 10 12.5 15 7.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
                         </svg>
@@ -1248,6 +1249,7 @@ export function createChatInstance({
             </div>
             <div class="chat-live-details">
                 <div data-live-phase-detail hidden></div>
+                <dl class="chat-live-facts" data-live-facts hidden></dl>
                 <div data-live-cost-detail hidden></div>
             </div>
             <div class="chat-live-timeline" data-live-timeline id="${escapeHtmlAttr(timelineId)}"></div>
@@ -1651,6 +1653,7 @@ export function createChatInstance({
         }
         record.updates += 1;
         const wasFinished = record.finished;
+        if (summary.terminal && typeof summary.quietEffective === 'boolean') record.quietEffective = summary.quietEffective;
         // Empty frames name nothing (#1369).
         const headline = summary.headline || record.lastHumanHeadline || '';
         const syntheticKey = summary.dedupeKey || dedupeKey || `${summary.phase || 'working'}|${headline}|${summary.body || ''}`;
@@ -1782,7 +1785,7 @@ export function createChatInstance({
         const wasFinished = record.finished;
         record.finished = true;
         record.finalizingHold = false;
-        const presentation = taskPresentation(phase || 'done');
+        const presentation = taskPresentation(phase || 'done', record.quietEffective ?? record.historicalTerminal?.quiet_effective);
         const activePhase = presentation.phase;
         setLiveCardPhase(record, activePhase, presentation.headline);
         if (record.isSubagent) record.titleEl.textContent = childTitle(record);
@@ -1807,13 +1810,12 @@ export function createChatInstance({
         }
         let changed = false;
         // Restore historical task name.
-        if (msg?.suggested_name) {
-            changed = applySuggestedName(taskId, msg.suggested_name) || changed;
-        }
+        if (msg?.suggested_name) changed = applySuggestedName(taskId, msg.suggested_name) || changed;
         const finalizing = msg?.task_phase === 'finalizing' || msg?.outcome_final === false;
         changed = noteToolMetrics(taskId, msg, rawTs, { suppressDomInsert }) || changed;
-        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         const record = getLiveCardRecord(taskId);
+        msg = { quiet_effective: record.quietEffective ?? record.historicalTerminal?.quiet_effective, ...msg };
+        const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         changed = noteTaskDetails(record, msg) || changed;
         syncSettledItems(record, msg);
         changed = Boolean(record.reviewController?.updateMany(reviewGroupsFromTaskDetail(msg, taskId))) || changed;
@@ -2489,7 +2491,7 @@ export function createChatInstance({
                         originId: msg.origin_id || '',
                         chatAnnotation: msg.chat_annotation || null,
                         skillReview: msg.system_type === 'skill_review' && msg.skill && msg.job_id
-                            ? { skill: msg.skill, jobId: msg.job_id }
+                            ? { skill: msg.skill, jobId: msg.job_id, ...(msg.record_id ? { recordId: msg.record_id } : {}) }
                             : null,
                     });
                     if (msg.role === 'user') { markIngressSaved(messagesDiv, msg); replies.adopt(msg); unconfirmed.settle(msg); }

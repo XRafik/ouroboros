@@ -200,7 +200,7 @@ def self_change_tool_entries() -> list:
                 "restart, after the running generation's readers have stopped."),
             "parameters": {"type": "object", "properties": {
                 "reason": {"type": "string"},
-                "adopt_commit": {"type": "string", "description": "Exact reviewed candidate commit SHA to adopt at this restart; it needs a full green test run of that commit on record (commit it with full_tests=true)."},
+                "adopt_commit": {"type": "string", "description": "Exact reviewed candidate commit SHA to adopt at this restart; it needs that commit's passing post-commit run on record: selected over the whole candidate delta, or full (verifier, cutover or broad changes, Cyber Pro's unreviewed commits). Only full evidence permits this adoption's automatic branch/tag push."},
             }, "required": ["reason"]},
         }, _request_restart),
     ]
@@ -828,21 +828,28 @@ def _finish_task(ctx: ToolContext, action: str, answer: str | None = None,
                  answer_sha256: str | None = None, rationale: str = "",
                  acceptance_subject: dict | None = None, pending_review: str | None = None,
                  silent: bool = False) -> str:
-    """Stage an author act; an own-clock or focused direct turn may choose silence."""
+    """Stage an author act; an own-clock or focused wake, or a schedule-born root, may choose silence."""
     allow_empty = False
     if silent:
         if action != "finish":
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent requires action=finish"))
         from ouroboros.consciousness_authority import is_focus_wake, is_own_clock_wake
-        metadata = getattr(ctx, "task_metadata", None)
-        if not bool(getattr(ctx, "is_direct_chat", False)):
-            return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
-                text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn"))
-        if not (is_own_clock_wake(metadata) or is_focus_wake(metadata)):
+        from ouroboros.dialogue_provenance import presence_caller_binding
+        from ouroboros.task_results import resolve_ctx_lineage
+
+        metadata = getattr(ctx, "task_metadata", None) or {}
+        wake = bool(getattr(ctx, "is_direct_chat", False)) and (is_own_clock_wake(metadata) or is_focus_wake(metadata))
+        occurrence = metadata.get("schedule_occurrence")
+        scheduled_root = (isinstance(occurrence, dict)
+                          and str(occurrence.get("schedule_id") or "").strip()
+                          and str(occurrence.get("token") or "").strip()
+                          and resolve_ctx_lineage(ctx)["is_root_task"]
+                          and presence_caller_binding(ctx) is None)
+        if not (wake or scheduled_root):
             return publish_no_effect(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR",
                 text="ERROR: COMPLETION_ARGUMENT: silent is available only on a consciousness wake's own turn, "
-                     "not on the tasks it started or any other turn"))
+                     "or a schedule-born root without a Presence binding"))
         allow_empty = True
         if answer is None and not answer_sha256:
             answer = ""  # silence needs no words; complete bytes given anyway stay an internal result
