@@ -1,6 +1,8 @@
 """Retired action restrictions, bounded history, and configured comparisons."""
 import pytest
-from tests.test_vcs_read_slice import world, git  # noqa: F401
+from tests.test_vcs_read_slice import world as _world, git
+
+world = _world
 
 
 @pytest.mark.parametrize("retired,action,other", [("vcs_status", "status", "diff"), ("vcs_diff", "diff", "status")])
