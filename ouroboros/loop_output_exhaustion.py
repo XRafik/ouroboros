@@ -193,13 +193,17 @@ def _send_smaller(ctx: Any, cost: Any) -> tuple:
     except PhysicalAttemptPreconditionFailed:
         msg, retry_cost = None, None
         record.update(stage="fallback", reclaim="candidate_not_smaller")
-    refused = _loop().last_physical_attempt_capture() if msg is None else None
-    if (str(usage.get("_last_llm_error_kind") or "") == "context_overflow"
-            and refused is not None and getattr(refused, "predicted_free_tokens", None) is None):
-        # The smaller send's own provider refusal is window evidence like any other; empty replies are not.
-        from ouroboros.context_anchor import record_refused_input
-        from ouroboros.loop_model_call import _refusal_window
-        record_refused_input(usage, ctx.context_fit_plan, _refusal_window(ctx, fit, refused)[1])
+    if msg is None and str(usage.get("_last_llm_error_kind") or "") == "context_overflow":
+        from ouroboros.loop_llm_call import REFUSED_CANDIDATE_KEY
+        from ouroboros.loop_model_call import _refused_candidate, _refusal_window
+
+        # The same reading as the context-size path: a pre-send prediction leaves its candidate, never a capture.
+        candidate = usage.get(REFUSED_CANDIDATE_KEY)
+        refused = _refused_candidate(candidate) if candidate else _loop().last_physical_attempt_capture()
+        if refused is not None and getattr(refused, "predicted_free_tokens", None) is None:
+            # The smaller send's own provider refusal is window evidence like any other; empty replies are not.
+            from ouroboros.context_anchor import record_refused_input
+            record_refused_input(usage, ctx.context_fit_plan, _refusal_window(ctx, fit, refused)[1])
     if msg is not None:
         usage.pop(KEY, None)
     _save(ctx)

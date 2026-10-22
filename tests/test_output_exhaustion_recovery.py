@@ -184,6 +184,46 @@ def test_a_numbered_refusal_caps_the_route_on_either_send(tmp_path, monkeypatch,
     assert final.usable == 134_464 and final.source.startswith("refusal")  # the provider's stated 200,000
 
 
+@pytest.mark.parametrize("predicted", [False, True], ids=["empty_replies", "predicted_smaller_send"])
+def test_empty_replies_and_a_predicted_smaller_send_record_no_refusal(tmp_path, monkeypatch, isolated, endpoint,
+                                                                       predicted):
+    from ouroboros import capability_evidence as ce, context_fit as cf
+    from ouroboros.context_anchor import REFUSED_INPUTS_KEY
+    from ouroboros.context_window import record_observation
+    from ouroboros.loop_llm_call import REFUSED_CANDIDATE_KEY
+
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    client, sent = endpoint(["empty", "empty", "empty"])
+    kw, _notes = configured_loop(tmp_path, monkeypatch, client, sources=True)
+    monkeypatch.setattr(cf, "_route_calibration_ratio", lambda *_a, **_kw: 1.0)
+    monkeypatch.setattr(ce, "resolve_main_token_density", lambda *_a, **_kw: (1.0, "cold_estimate"))
+    monkeypatch.setattr(ce, "probe", lambda _root, **k: ce.CapabilityEvidence(1_000_000, "confirmed", "metadata",
+        ce.route_fingerprint(**{name: k[name] for name in ("provider", "model", "base_url", "options")})))
+    core = cf.ContextCore("Required memory and books: KEEP.", "", "", "", "", "", '"Assignment"', False)
+    plan = cf.build_context_fit_plan(None, core, {}, preferred_mode="max", route_resolver=cf.resolve_context_fit_route)
+    kw["tools"]._ctx.context_fit_plan = plan
+    send_smaller = recovery._send_smaller
+
+    class Inspected(BaseException):
+        pass
+
+    def inspect(ctx, cost):
+        if predicted:  # another task on this route and account learned a tighter ceiling before this send
+            record_observation(tmp_path, plan.window_record.route_fp, refused=70_000)
+        send_smaller(ctx, cost)
+        rows = ce._load(tmp_path).get("main_windows", {}).get(plan.window_record.route_fp, {}).get("observations", [])
+        assert len(sent) == (2 if predicted else 3)
+        assert [r["refused"] for r in rows if r.get("refused")] == ([70_000] if predicted else [])
+        if predicted:
+            assert ctx.accumulated_usage[REFUSED_CANDIDATE_KEY]["predicted_free_tokens"] < 0
+        assert REFUSED_INPUTS_KEY not in ctx.accumulated_usage  # neither is a provider-refused input
+        raise Inspected
+
+    monkeypatch.setattr(recovery, "_send_smaller", inspect)
+    with pytest.raises(Inspected):
+        loop.run_llm_loop(**kw)
+
+
 @pytest.mark.parametrize("stage", ["informed", "fallback", "exhausted"])
 def test_only_new_owner_input_resets_episode(tmp_path, monkeypatch, stage):
     from tests.test_loop_compaction import _ctx
