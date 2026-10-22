@@ -20,7 +20,7 @@ export const REPLY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill=
 const TARGET_MS = 1600;
 const HEADER_CLEARANCE = 72;
 const ROLE_NAMES = ['user', 'assistant', 'system'];
-const ROWS = '.chat-bubble, .chat-live-card, .chat-relay-deck';
+const ROWS = '.chat-bubble, .chat-live-card';
 
 /** The row a host-derived quote would repeat: the visible row right above `node` (its own work card is part of it). */
 function rowAbove(node) {
@@ -66,9 +66,8 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     let strip = null;
     let targetTimer = 0;
     const bubbleActions = bindBubbleActions({ feed, registry: actions, onDomWrite });
-    // Notes between works draw over their relay rows (chat_relay_deck.js); a note's Reply is its row's own.
-    const decks = createRelayDecks({ feed, onDomWrite, relayQuote: (relay) => createRelayQuote(relay, { onDomWrite }),
-        reply: (bubble) => start(bubbleRef(bubble)) });
+    // Notes between works: a relay row's bubble is dressed as a note card and grouped into decks (chat_relay_deck.js).
+    const decks = createRelayDecks({ feed, onDomWrite });
     let destroyed = false;
     // `held`: the reader's own live-edge intent while a reveal is pending (a reveal sets stick false itself).
     let revealGeneration = 0, revealing = 0, held = null;
@@ -129,7 +128,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
             target = result.target;
         }
         if (!wanted()) return null;
-        target = decks.surface(target) || target;  // a note's row is hidden: its card is what the reader sees
+        target = decks.surface(target) || target;  // a tucked note's deck opens, so the row it lands on shows
         const header = feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
         const clearance = Math.max(HEADER_CLEARANCE,
             (header?.getBoundingClientRect().bottom || 0) - feed.getBoundingClientRect().top + 12);
