@@ -186,6 +186,7 @@ class CapabilityEvidence:
     provenance: str = ""
     response_limit: Dict[str, Any] = field(default_factory=dict)
     window_kind: str = "total"  # metadata may explicitly state an input-only limit
+    retired_ack: Dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -204,6 +205,7 @@ class CapabilityEvidence:
             "provenance": self.provenance,
             "response_limit": self.response_limit,
             "window_kind": self.window_kind,
+            "retired_ack": self.retired_ack,
         }
 
 
@@ -920,8 +922,15 @@ def record_owner_ack(
     return record
 
 
+def retired_owner_ack(record: Any) -> bool:
+    """Exact provenance of the removed dialogs, which could only assert 1M."""
+    return isinstance(record, dict) and record.get("window_tokens") == 1_000_000 and record.get("note") in {
+        "owner-confirmed via settings save", "owner-confirmed via context-mode toggle",
+    }
+
+
 def list_owner_acks(drive_root: Any) -> List[Dict[str, Any]]:
-    return list(_load(drive_root).get("owner_acks", {}).values())
+    return [{**row, "retired": retired_owner_ack(row)} for row in _load(drive_root).get("owner_acks", {}).values()]
 
 
 def revoke_owner_ack(drive_root: Any, route_fp: str) -> bool:
@@ -1195,7 +1204,7 @@ def _probe_window(
 
     # Owner-ack always wins as ASSERTED evidence for its exact route.
     ack = data.get("owner_acks", {}).get(fp)
-    if ack and (not subscription or account_bound):
+    if ack and not retired_owner_ack(ack) and (not subscription or account_bound):
         return CapabilityEvidence(
             window_tokens=int(ack.get("window_tokens") or 0), status=STATUS_ASSERTED,
             source=SOURCE_OWNER_ACK, route_fp=fp, model=model, provider=provider,
@@ -1316,6 +1325,9 @@ def probe(drive_root: Any, **route) -> CapabilityEvidence:
     from ouroboros.response_limits import probe_response_limit
 
     evidence = _probe_window(drive_root, **route)
+    ack = _load(drive_root).get("owner_acks", {}).get(evidence.route_fp)
+    if retired_owner_ack(ack):
+        evidence.retired_ack = {key: ack.get(key) for key in ("window_tokens", "ts", "note")}
     evidence.response_limit = asdict(probe_response_limit(drive_root, evidence, route))
     return evidence
 
