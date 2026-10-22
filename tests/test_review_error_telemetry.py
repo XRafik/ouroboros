@@ -308,10 +308,10 @@ def test_awaited_valid_and_report_answers_write_no_error(tmp_path, monkeypatch):
     assert _rows(tmp_path) == []
 
 
-@pytest.mark.parametrize("text,status", [("unparseable", "parse_failure"), ("[]", "partial")])
+@pytest.mark.parametrize("text,status", [("unparseable", "parse_failure"), ("I cannot review this. []", "parse_failure")])
 def test_the_skill_parser_records_its_specific_failure_without_invented_ids(tmp_path, monkeypatch, text, status):
     monkeypatch.setattr(utils, "_log_sink", None)
-    parsed = triad_review.parse_model_review_results({"results": [{"model": "m", "text": text}]}, required_items=["a"])
+    parsed = triad_review.parse_seat_answers({"results": [{"model": "m", "text": text}]}, {"": ("skill",)})
     ctx = SimpleNamespace(drive_logs=lambda: tmp_path / "logs")  # a context exposing only its log dir
     triad_review.emit_review_model_error_events(ctx, parsed, source="skill_review", skill_name="demo")
     [row] = _rows(tmp_path)
@@ -323,8 +323,8 @@ def test_the_recorded_operation_binding_outranks_the_collecting_context(tmp_path
     """A result collected under another context keeps its producer's lineage (``review_operation_binding``)."""
     monkeypatch.setattr(utils, "_log_sink", None)
     binding = {"task_id": "producer-child", "root_task_id": "producer-root", "parent_task_id": "producer-parent"}
-    parsed = triad_review.parse_model_review_results({"results": [{
-        "model": "m", "text": "provider refused", "verdict": "ERROR", "recovery_binding": binding}]})
+    parsed = triad_review.parse_seat_answers({"results": [{
+        "model": "m", "text": "provider refused", "verdict": "ERROR", "recovery_binding": binding}]}, {})
     triad_review.emit_review_model_error_events(_ctx(tmp_path), parsed, source="multi_model_review")
     [row] = _rows(tmp_path)
     assert all(row[key] == value for key, value in binding.items())

@@ -309,14 +309,17 @@ def run_parallel_review(
     # ---- Phase 1 (Q25=A): prepare every seat; dispatch NOTHING yet. ----
     prepared, early, exited = None, None, True
     try:
-        if (subject is not None and str(getattr(subject.spec, "kind", "") or "") == "result"
-                and not bool(getattr(ctx, "_review_reconcile_only", False))):
-            # A result subject: the one result question for every seat (review_result); a rejoin
-            # restores its recorded plan through the gate's own reconcile path below.
-            from ouroboros.tools.review_result import prepare_result_review
+        kind = str(getattr(subject.spec, "kind", "") or "") if subject is not None else ""
+        if kind in ("result", "skill") and not bool(getattr(ctx, "_review_reconcile_only", False)):
+            # A single-question subject (a task result, a skill payload): its own module composes the
+            # one question for every seat; a rejoin restores its recorded plan through the gate's own
+            # reconcile path below.
+            if kind == "result":
+                from ouroboros.tools.review_result import prepare_result_review as prepare
+            else:
+                from ouroboros.tools.review_skill import prepare_skill_review as prepare
 
-            prepared, early, exited = prepare_result_review(
-                ctx, subject, goal=goal, scope=scope, review_rebuttal=review_rebuttal)
+            prepared, early, exited = prepare(ctx, subject, goal=goal, scope=scope, review_rebuttal=review_rebuttal)
         else:
             prepared, early, exited = _prepare_unified_review(
                 ctx, commit_message, review_rebuttal=review_rebuttal, goal=goal, scope=scope, subject=subject)
