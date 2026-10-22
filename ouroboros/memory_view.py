@@ -959,10 +959,17 @@ def _rooms_line(rooms: List[Dict[str, Any]]) -> str:
     return f"{len(rooms)} open rooms; {_facts_text(summed, 'these rooms')}; memory_read(room_id='*', start=0)"
 
 
+def _place_pointer(place: Mapping[str, Any], notes: List[Dict[str, Any]]) -> List[str]:
+    """A place room stays a pointer: its standing facts and one exact reader per note, never their words."""
+    return [f"Place {place.get('place_id') or '?'}; conversation {place.get('conversation_key') or '?'}; "
+            f"answered events {place.get('answered_events', 0)}; last row {place.get('last_address') or '?'}",
+            *(f"note {note['id']}: memory_read(node_id='{note['id']}')" for note in notes)]
+
+
 def _directory_room(room: Mapping[str, Any]) -> str:
     focus = str(room.get("focus") or "")
-    place = room["facts"].get("place") or {}
-    extra = (f"; place {place.get('place_id', '?')}; last row {place.get('last_address', '?')}" if place else "")
+    place = room["facts"].get("place")
+    extra = "; " + "; ".join(_place_pointer(place, room["notes"])) if place else ""
     return " ".join((f"- {room['label']}; {_facts_text(room['facts'])}; last activity {_minute(room['facts'].get('latest'))}"
             f"{'; authored focus: ' + focus if focus else ''}{extra}; memory_read(room_id='{room['room_id']}', rows=true)").split())
 
@@ -980,9 +987,7 @@ def _live_room(room: Mapping[str, Any], spoken: Any = frozenset()) -> List[str]:
     lines = [f"### {room['label']} — {_facts_text(room['facts'])}",
              f"memory_read(room_id='{room['room_id']}'{', rows=true' if room['facts']['rows'] else ''})"]
     if place := room["facts"].get("place"):
-        lines.append(f"Place {place['place_id'] or '?'}; conversation {place['conversation_key'] or '?'}; "
-                     f"answered events {place['answered_events']}; last row {place['last_address']}")
-        return lines + [f"note {note['id']}: memory_read(node_id='{note['id']}')" for note in room["notes"]]
+        return lines + _place_pointer(place, room["notes"])
     return lines + _note_lines(room["notes"]) + [
         _row_pointer(word, "words") if word["address"] in spoken else word["line"] for word in room["words"]]
 
