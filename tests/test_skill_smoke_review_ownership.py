@@ -178,7 +178,8 @@ def test_an_outage_is_waited_out_but_an_answered_failure_keeps_its_one_retry(mon
     monkeypatch.setattr(smoke.time, "sleep", sleeps.append)
     monkeypatch.setattr(smoke, "_smoke_retry_refusal", lambda *_a: "" if history else "no recorded wave")
     monkeypatch.setattr(smoke, "_review_diag", lambda *_a: "")
-    monkeypatch.setattr(smoke, "load_history", lambda *_a, **_k: history[-1:])
+    # The latest recorded wave of the skill (the fold reads its ledger record; the test hands it the rows).
+    monkeypatch.setattr(smoke, "_latest_wave", lambda *_a, **_k: history[-1] if history else None)
     pending, clean = ("pending", "quorum failure", "not_required", {}), ("clean", "", "not_required", {})
     outage, answered, crash = (pending, _REFUSED), (pending, _ANSWERED), (pending, None)
 

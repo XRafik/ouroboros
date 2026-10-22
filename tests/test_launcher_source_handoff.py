@@ -22,7 +22,7 @@ import pytest
 
 import ouroboros.launcher_bootstrap as bootstrap_module
 from ouroboros import platform_layer
-from tests.test_launcher_handoff_stop import native_guard  # noqa: F401
+from tests.test_launcher_handoff_stop import native_guard as native_guard
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 MARK = bootstrap_module.LAUNCHER_HANDOFF_ENV

@@ -963,54 +963,7 @@
  * @property {string} repair_hint
  */
 
-/**
- * Skill review and owner attestation outcome (`gateway/management_contracts.py::SkillReviewResponse`).
- * @typedef {Object} SkillReviewResponse
- * @property {string} skill
- * @property {string} status  // clean | warnings | blockers | pending
- * @property {string=} content_hash
- * @property {string=} error
- * @property {boolean=} ok  // attest only
- * @property {number=} status_code  // attest refusal only
- * @property {boolean=} pending  // attest only: the job outlasted the answer bound; job_id and message name it
- * @property {string=} message  // attest only, with pending
- * @property {string[]=} reviewer_models
- * @property {string=} review_profile
- * @property {Object[]=} findings
- * @property {Object[]=} raw_actor_records
- * @property {*=} advisory_result
- * @property {Object=} review_gate
- * @property {boolean=} executable_review
- * @property {*=} auto_flow
- * @property {string[]=} auto_granted_keys
- * @property {string[]=} requested_keys
- * @property {string[]=} auto_granted_permissions
- * @property {string[]=} requested_permissions
- * @property {string=} deps_status
- * @property {string=} deps_error
- * @property {string=} extension_action
- * @property {string=} extension_reason
- * @property {string=} extension_process
- * @property {string=} extension_server_reconcile
- * @property {string|null=} extension_load_error
- * @property {boolean|null=} extension_live_loaded
- * @property {*=} convergence_hint
- * @property {string=} job_id
- * @property {string=} job_status
- * @property {string=} group_id
- * @property {number=} review_round
- * @property {number=} snapshot_attempt
- * @property {boolean=} snapshot_revised
- * @property {string=} task_id
- * @property {string=} root_task_id
- * @property {string=} origin_task_id
- * @property {string=} origin_root_task_id
- * @property {string=} presentation_owner_task_id
- * @property {number=} chat_id
- * @property {string=} source
- * @property {string=} terminal_reason
- * @property {Object[]=} executions
- */
+/** @typedef {import('./management_contract_types.js').SkillReviewResponse} SkillReviewResponse */
 
 /**
  * `POST /api/skills/{skill}/grants`; refusals use `SkillActionRefusal`, slow setup {ok, pending: true, job_id, message}.
@@ -1357,7 +1310,7 @@
  */
 /**
  * @typedef {Object} ScheduleActionResponse
- * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed (restored_not_ready: changed, not ok)
+ * @property {boolean} ok  // the requested state was ACHIEVED and both audit records landed
  * @property {boolean} changed  // the durable fact, whatever the audit did
  * @property {string} status
  * @property {string} schedule_id
@@ -1528,6 +1481,7 @@
  * @property {string=} task_id
  * @property {UpdateMergePlan=} merge_plan
  * @property {string=} error
+ * @property {string=} keep_branch
  */
 
 /**

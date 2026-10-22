@@ -243,7 +243,7 @@ def test_a_committed_mark_never_replays_after_a_crash(world, monkeypatch):
 
 def test_project_rows_keep_their_project_custody_after_a_stale_commit(tmp_path, monkeypatch):
     from tests.test_schedule_occurrence import _project, _row
-    from supervisor import queue as queue_module, queue_schedules, state, workers
+    from supervisor import queue as queue_module, state, workers
     from supervisor.task_admission import revalidate_project_holds
 
     root = tmp_path / "data"
@@ -255,7 +255,6 @@ def test_project_rows_keep_their_project_custody_after_a_stale_commit(tmp_path, 
     queue_module.init_queue_refs(pending, {}, {"value": 0})
     monkeypatch.setattr(workers, "REPO_DIR", tmp_path / "repo")
     (tmp_path / "repo").mkdir()
-    monkeypatch.setattr(queue_schedules, "resync_skill_schedules", lambda *_a: {})
     q = SimpleNamespace(queue=queue_module, pending=pending, root=root)
     _project(q, "proj")
     _row(q, "s1", intent={"kind": "room_default"}, project_id="proj", chat_id=None)

@@ -35,7 +35,7 @@ import httpx
 
 from ouroboros.gateways.claudexor_maintenance import ClaudexorMaintenanceGateway
 from ouroboros.gateways import claudexor_metadata as metadata
-from ouroboros.effort_evidence import validated_effort_resolution
+from ouroboros.effort_evidence import validated_effort_resolution, validated_prompt_cache_ttl
 from ouroboros.observability import timed_phase
 
 from ouroboros.config import (
@@ -139,12 +139,10 @@ class ClaudexorUnavailable(RuntimeError):
 
 
 # Cross-repo contract (B1): the engine's window-exhausted RunFailure codes. A
-# newer engine (rotation PR-A) reports a spent credential POOL under its own
-# code. A spent subscription window always heals on a timer (the engine always
-# dates it); a pool heals on a timer only when the engine DATED it (`resetsAt`),
-# an undated pool (every enabled account refused the model, every account
-# disabled) is structural. `_window_exhausted_refusal` is the one reader; the
-# ORIGINAL code is preserved either way. Any other code stays a generic
+# spent window always heals on a timer (the engine dates it); a pool maps only
+# when dated (`resetsAt`): an undated pool (every enabled account refused the
+# model, or every account is disabled) is structural. `_window_exhausted_refusal`
+# is the one reader; original codes stay intact. Any other code stays a generic
 # ClaudexorUnavailable: fail-open, old engines emitting code:null included.
 WINDOW_EXHAUSTED_CODES = ("subscription_window_exhausted", "credential_pool_exhausted")
 
@@ -1577,6 +1575,8 @@ def final_attempt_facts(detail: Dict[str, Any], run_id: str) -> Dict[str, Any]:
     }
     if "effort_resolution" in row:
         facts["effort_resolution"] = validated_effort_resolution(row["effort_resolution"])
+    if "prompt_cache_ttl" in row:
+        facts["prompt_cache_ttl"] = validated_prompt_cache_ttl(row["prompt_cache_ttl"])
     return facts
 
 

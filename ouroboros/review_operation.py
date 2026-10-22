@@ -918,6 +918,8 @@ def _attach_only_run(root: Any, request: Any, slot: Any, operation_id: str, run_
     # or the summary's request echoes. Absent final-attempt facts stay unknown.
     routes = (invocation.get("request") or {}).get("harnesses") or []
     requested_route = str(routes[0]) if len(routes) == 1 else ""
+    if invocation.get("prompt_cache_ttl"):  # its recorded TTL intent, where a live seat's rides
+        usage["review_source_delivery"] = {"prompt_cache_ttl": copy.deepcopy(invocation["prompt_cache_ttl"])}
     from ouroboros.review_session_usage import session_usage_facts  # #1578: one session usage projection
 
     usage.update(session_usage_facts(run_id, requested_route=requested_route, observed_attempt=observed, summary=summary))

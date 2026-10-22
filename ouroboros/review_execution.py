@@ -22,6 +22,7 @@ from ouroboros.config import runtime_setting
 from ouroboros.model_wait import current_model_wait, monotonic_now, operation_wait_scope
 
 import asyncio
+import copy
 import hashlib
 import json
 import logging
@@ -773,7 +774,7 @@ def run_delegated_review_session(
                 thread_id=thread_id, schema_asked=schema_asked,
                 shape=shape, execution=checking.get("execution"), instructions=checking.get("instructions", ""),
                 input_limit=(getattr(gateway, "ask_input_limits", lambda: {})() or {}).get(route.route_id),
-                source_root=custody_drive, delivery_facts=delivery_facts)
+                source_root=custody_drive, delivery_facts=delivery_facts, gateway=gateway)
         if not run_id:
             from ouroboros.budget_pause import dispatch_fenced
 
@@ -803,6 +804,7 @@ def run_delegated_review_session(
                     root_task_id=root_task_id, parent_task_id=parent_task_id,
                     review_source_delivery=delivery_facts,
                     work_order_source_request=delivery_facts,
+                    prompt_cache_ttl=delivery_facts.get("prompt_cache_ttl"),
                     **usage_custody, **checking.get("custody", {}),
                 )
             except BillingAuthorityUnavailable as exc:  # Outer pre-start boundary owns cleanup; nothing sent.
@@ -849,6 +851,8 @@ def run_delegated_review_session(
             entry = custody.RunCustody(
                 run_id=run_id, task_id=task_id, route_id=route.route_id, model=str(route.model or ""),
                 profile_id=str(getattr(route, "profile_id", "") or ""),
+                prompt_cache_ttl=(delivery_facts.get("prompt_cache_ttl")
+                                  if isinstance(delivery_facts.get("prompt_cache_ttl"), dict) else None),
                 project_id=project_id, project_owned=bool(project_id) and not existing_project,
                 root_task_id=root_task_id, parent_task_id=parent_task_id, **usage_custody,
                 ledger_root=str(custody_drive), idempotency_key=key, invocation_id=invocation_id or retry_token,
@@ -949,6 +953,7 @@ def run_delegated_review_session(
             exc.delegated_run_started, exc.delegated_run_id = True, run_id
             exc.delegated_usage = session_usage_facts(run_id, requested_route=str(getattr(route, "route_id", "") or ""),
                                                       observed_attempt=observed, summary=summary)  # #1578
+            exc.delegated_usage["review_source_delivery"] = copy.deepcopy(delivery_facts)
             if continuations:
                 exc.delegated_usage["review_continuations"] = continuations
         if checking.get("evidence"):

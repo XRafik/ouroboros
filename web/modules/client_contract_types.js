@@ -384,7 +384,8 @@
  * Additive /api/chat/history row fields on `system_type: "skill_review"` rows:
  * the exact-job reference the producer already writes into chat.jsonl. A row
  * carrying a non-empty `job_id` lets the Chat card lazily fetch the rendered
- * review via GET /api/skills/{skill}/review-history/{job_id}; rows without it
+ * review via GET /api/skills/{skill}/review-history/{record_id or job_id} (the
+ * review record when the row names one, else the job); rows without either
  * (legacy full-text rows) keep local expansion. All fields are additive and
  * safely ignorable by renderers.
  * @typedef {Object} SkillReviewHistoryRowFields
@@ -392,6 +393,7 @@
  * @property {string=} status
  * @property {string=} content_hash
  * @property {string=} job_id
+ * @property {string=} record_id
  * @property {number=} review_round
  * @property {number=} snapshot_attempt
  */
