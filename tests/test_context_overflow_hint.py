@@ -46,6 +46,7 @@ def test_untyped_context_scan_excludes_rate_and_output_size_errors():
     "1004290 tokens > 1000000 maximum",
     "250000 tokens > 200000 maximum (request id: xtpmx)",
     "250000 tokens > 200000 maximum (request id: xrpmx)",
+    "250000 tokens > 200000 maximum (request id: req_1f429ab0)",
 ])
 @pytest.mark.parametrize("body_error", [False, True], ids=["text", "http400-body"])
 def test_textual_overflow_does_not_match_embedded_rate_markers(detail, body_error):
@@ -66,6 +67,7 @@ def test_textual_overflow_does_not_match_embedded_rate_markers(detail, body_erro
     "Error code: 429", "HTTP 429: throttled", "(429)",
     "TPM exceeded", "tpm exceeded", "RPM exceeded", "rpm exceeded",
     "rate_limit_exceeded", "too many tokens per minute",
+    "HTTP_429", "tpm_limit_exceeded", "429 Too Many Requests",
 ])
 def test_standalone_rate_markers_remain_retryable(text):
     classified = classify_llm_exception(RuntimeError(text))

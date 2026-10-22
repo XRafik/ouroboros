@@ -579,7 +579,8 @@ _RATE_LIMIT_TEXT_MARKERS = (
     "token per minute",
     "request per minute",
 )
-_RATE_LIMIT_TEXT_PATTERN = re.compile(r"(?<!\d)429(?!\d)|\b(?:tpm|rpm)\b")
+# Short markers count only as whole tokens, so "1004290 tokens" or "req_1f429ab0" is not a rate limit.
+_RATE_LIMIT_TEXT_PATTERN = re.compile(r"(?<![a-z0-9])(?:429|tpm|rpm)(?![a-z0-9])")
 _RETRYABLE_PROVIDER_CODES = frozenset({"rate_limit_exceeded"})
 
 
