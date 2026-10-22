@@ -29,8 +29,12 @@ jobs:
           archive, out = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
           selected = {}
           with zipfile.ZipFile(archive) as z:
+              (out / 'input-members.json').write_text(json.dumps(z.namelist(), indent=2))
               for info in z.infolist():
-                  name = pathlib.PurePosixPath(info.filename).name
+                  member = pathlib.PurePosixPath(info.filename)
+                  if len(member.parts) != 1 or info.is_dir():
+                      continue
+                  name = member.name
                   if name.endswith('.AppImage') or name in ('appimage.sha256', 'gtk-manifest.json', 'repo_bundle_manifest.json', 'source-sha.txt', 'source-tree.txt', 'focused-tests.xml'):
                       assert name not in selected, name
                       with z.open(info) as src, (out / name).open('wb') as dst:
