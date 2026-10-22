@@ -246,10 +246,10 @@ def create(root: Any, *, tier: Optional[str] = None) -> pathlib.Path:
         tmp = target.with_name(f"{target.name}.import-{os.getpid()}-{uuid.uuid4().hex[:8]}")
         try:
             with contextlib.closing(store.connect(tmp, tier, create=True)) as conn:
-                conn.executescript(_SCHEMA)
+                # Keep DDL, header and seed rows in the same durable commit.
+                conn.executescript("BEGIN IMMEDIATE;\n" + _SCHEMA)
                 conn.execute(f"PRAGMA application_id = {_APPLICATION_ID[tier]}")
                 conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
-                conn.execute("BEGIN IMMEDIATE")
                 for stream in STREAMS:
                     # The stream's live unit: every row stored after the cutover counts in it.
                     live = conn.execute("INSERT INTO import_ledger (stream, name, base, size, state) VALUES (?, ?, 0, 0, 'live')",

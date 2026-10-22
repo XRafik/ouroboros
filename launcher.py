@@ -243,6 +243,7 @@ def _install_deps() -> bool:
 _agent_proc: Optional[subprocess.Popen] = None
 _agent_job: Optional[object] = None
 _agent_lock = threading.Lock()
+_server_record_retire_lock = threading.Lock()  # the two retirers of state/server_process.json
 _shutdown_event = threading.Event()
 # Set by _request_agent_restart(): the next agent exit is a REQUESTED recycle
 # (first-run configuration adopted), not a crash — same shape as the exit-code-42
@@ -407,24 +408,23 @@ def _cleanup_recorded_server_group_for_pid(pid: int, reason: str = "agent_exit")
     Nothing is signalled: once the root is reaped, its PID and group id are names a later process may
     hold, so a group that still has members is reported, never killed. Workers end through their parent
     lifeline, ledgered children through the next generation's custody sweep."""
-    try:
-        record_path = _server_process_record_path()
-        if not record_path.exists():
-            return True
-        record = json.loads(record_path.read_text(encoding="utf-8"))
-        if not isinstance(record, dict) or int(record.get("pid") or 0) != int(pid):
-            return True
-        pgid = int(record.get("pgid") or 0)
-        if not IS_WINDOWS and pgid > 0:
-            from ouroboros.process_containment import process_group_has_live_members
-
-            if process_group_has_live_members(pgid):
-                log.warning("Server pid=%d exited while its former process group %d still has members; "
-                            "not signalled after the reap (%s)", pid, pgid, reason)
-        record_path.unlink(missing_ok=True)
-    except Exception:
-        log.warning("Failed to retire the recorded server process (%s)", reason, exc_info=True)
-        return False
+    with _server_record_retire_lock:  # stop_agent and the lifecycle thread: Windows refuses a delete beside a read
+        try:
+            record_path = _server_process_record_path()
+            if not record_path.exists():
+                return True  # the other caller already retired it
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            if not isinstance(record, dict) or int(record.get("pid") or 0) != int(pid):
+                return True
+            if not IS_WINDOWS and (pgid := int(record.get("pgid") or 0)) > 0:
+                from ouroboros.process_containment import process_group_has_live_members
+                if process_group_has_live_members(pgid):
+                    log.warning("Server pid=%d exited while its former process group %d still has members; "
+                                "not signalled after the reap (%s)", pid, pgid, reason)
+            record_path.unlink(missing_ok=True)
+        except Exception:
+            log.warning("Failed to retire the recorded server process (%s)", reason, exc_info=True)
+            return False
     return True
 
 
