@@ -218,7 +218,7 @@ ouroboros/ — agent core and shared runtime (§6)
   memory_fallback.py — one signed Light helper draft per root task while consciousness is off; a refusal on the same input and Light route is a receipt, never a repeat (§6)
   memory.py — scratchpad, identity, chat history
   knowledge.py — linked-Markdown notes with shelf indexes and revision-checked writes, so concurrent cognition cannot silently overwrite a newer note (§6 Durable memory)
-  memory_publication.py — per-file revision-checked identity/registry publication, atomic source replacement and origin-stamped history (§6 Durable memory)
+  memory_publication.py — per-file revision-checked identity/world-map/registry publication, atomic source replacement and origin-stamped history (§6 Durable memory)
   memory_journal_compaction.py — compatibility entry point that only measures journal sizes (`server_maintenance.py` emits `memory_journal_observation`); history stays complete
   project_facts.py — project_id resolution and per-project knowledge under `projects/<id>/knowledge`, isolated from `memory/knowledge`
   task_tree_ledger.py — append-only `data/task_trees/<root>/blackboard.jsonl`: ephemeral swarm coordination (`tree_note`/`tree_read`), mirrored into the project journal at root completion
@@ -397,7 +397,7 @@ ouroboros/ — agent core and shared runtime (§6)
   utils.py — SSOT for atomic JSON, timestamps, hashes, sanitization, subprocess helpers, `truncate_review_artifact`
   jsonl_tail.py — `JsonlChainSnapshot` (captured byte reads of a file chain; the swarm rollup) and the bounded filtered tail over the rotated file logs
   markdown_source.py — byte-preserving Markdown structure shared by books and knowledge notes; physical ranges tied to source SHA; `MarkdownSourceError` keeps a missing grammar or malformed YAML visible
-  world_profiler.py — Generates WORLD.md
+  world_profiler.py — WORLD.md's measured block (system, roots, a probe of common binaries), generated on first boot and refreshed in place at every start by `agent_startup_checks`; the rest of the file is the mind's map of its world, published through `update_world` (WHY: the environment is part of what every session recovers (P1), so what the mind learns about its world needs a home that is loaded whole and survives a forked drive, like identity)
   contracts/ — Frozen ABI package (§11)
     tool_context.py — ToolContextProtocol
     tool_abi.py — ToolEntryProtocol + GetToolsProtocol
@@ -720,7 +720,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   │   ├── dialogue_blocks.json   ← chronicle import source, with dialogue_summary.md
 │   │   ├── dialogue_meta.json     ← chronicle import cursor and nomination source
 │   │   ├── chronicle/             ← records.jsonl (append-only authority), index.sqlite3 (disposable)
-│   │   ├── WORLD.md               ← host profile from first run
+│   │   ├── WORLD.md               ← my map of my world: measured block + my notes
 │   │   ├── knowledge/             ← topic files, patterns.md (Pattern Register), improvement-backlog.md
 │   │   ├── deep_review.md         ← deep-self-review output
 │   │   ├── registry.md            ← memory awareness map

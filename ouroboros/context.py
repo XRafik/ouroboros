@@ -17,6 +17,7 @@ from ouroboros.context_budget import (
     LARGE_CONTEXT_SECTION_CHARS,
     SCRATCHPAD_SECTION_BUDGET_CHARS,
 )
+from ouroboros.world_profiler import WORLD_SECTION_BUDGET_CHARS
 from ouroboros.context_fit import (
     ContextCore as _ContextCore,
 )
@@ -725,7 +726,8 @@ def build_knowledge_sections(
     return sections
 
 
-_SECTION_BUDGETS = {"scratchpad": SCRATCHPAD_SECTION_BUDGET_CHARS, "identity": 80_000, "registry": 30_000, "world": 16_000}
+_SECTION_BUDGETS = {"scratchpad": SCRATCHPAD_SECTION_BUDGET_CHARS, "identity": 80_000, "registry": 30_000,
+                    "world": WORLD_SECTION_BUDGET_CHARS}
 
 
 def _warn_if_over_budget(name: str, content: str) -> None:
@@ -837,9 +839,9 @@ def build_memory_sections(memory: Memory, partition: str = "all", *, include_scr
         sections.append("## Identity (from `memory/identity.md` — already loaded; do not re-read via read_file(root='runtime_data', path='memory/identity.md'))\n\n" + identity_raw)
         world_raw = memory.load_world_profile().strip()
         if world_raw:
-            # Generated profile is full; oversize is a generation-discipline bug.
+            # The map loads whole; oversize is the mind's to compact (detail to knowledge).
             _warn_if_over_budget("world", world_raw)
-            sections.append("## Environment Profile (from `memory/WORLD.md` — already loaded; delete WORLD.md and restart to regenerate if the host environment changes)\n\n" + world_raw)
+            sections.append("## My World (from `memory/WORLD.md` — already loaded; the measured block refreshes at startup, the rest is mine to keep current with update_world; compact, detail in knowledge)\n\n" + world_raw)
 
     if partition == "all":
         registry_path = memory.drive_root / "memory" / "registry.md"

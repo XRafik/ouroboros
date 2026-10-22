@@ -531,6 +531,40 @@ def _update_identity(ctx: ToolContext, content: str, expected_revision: str | No
     return result
 
 
+def _update_world(ctx: ToolContext, content: str, expected_revision: str | None = None) -> str:
+    """Publish my map of my world; the host's measured block is kept or restored."""
+    if not isinstance(content, str) or not content.strip():
+        return _publish_tool_result(ctx, ToolResult(status="error", code="TOOL_ARG_ERROR", text=(
+            "⚠️ REJECTED: content is empty. Read memory/WORLD.md, revise the map and send the whole file.")))
+    from ouroboros.memory import Memory
+    from ouroboros.tool_access import canonical_data_root
+    from ouroboros.world_profiler import WORLD_SECTION_BUDGET_CHARS, with_measured_block
+
+    # One map, every room and every drive (P1): like identity, the canonical root
+    # is the one the context reads back, so a forked child drive or Light mode
+    # keeps what it learned instead of writing a copy that dies with the task.
+    mem = Memory(drive_root=canonical_data_root(ctx))
+
+    from ouroboros.knowledge import focus_signature
+    from ouroboros.memory_publication import publish_memory_file, publication_refusal
+
+    publication = publish_memory_file(
+        mem.world_path(), expected_revision, lambda old: with_measured_block(content, old),
+        journal=mem.world_journal_path(), author=focus_signature(ctx),
+        source_type=str((getattr(ctx, "task_metadata", {}) or {}).get("delegation_role") or "task"))
+    if not publication.ok:
+        return _publish_tool_result(ctx, ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED",
+            text=publication_refusal(publication, "memory/WORLD.md")))
+    size = len(publication.content)
+    result = f"OK: world map updated ({size} chars); revision={publication.revision}"
+    if size > WORLD_SECTION_BUDGET_CHARS:
+        result += (
+            f"\n⚠️ WORLD_SIZE_NOTICE: the map is {size} chars, above the {WORLD_SECTION_BUDGET_CHARS}-char "
+            "context budget. It still loads whole; move detail to knowledge_write and keep the map compact."
+        )
+    return result
+
+
 def _toggle_evolution(ctx: ToolContext, enabled: bool, objective: str = "") -> str:
     """Toggle evolution mode on/off via supervisor event."""
     if bool(enabled):
