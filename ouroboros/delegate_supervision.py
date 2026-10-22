@@ -1120,15 +1120,10 @@ def supervised_wait(
 ) -> ToolResult:
     """Renew quiet windows internally and return only a meaningful wake batch.
 
-    The journal cursor is durable, so it survives worker restarts. ``cache_horizon_note``
-    is attached once per wake, only when the time since the last model response exceeds
-    the applied cache horizon. ``checkpoint_after_sec`` is a one-shot wake: an earlier
-    real event consumes it, and it never repeats. Renewal runs on a fixed three-second
-    tick with no backoff and no durable outage latch. A read that delivered no daemon
-    answer is a quiet renewal: ``observation_read_timeout`` is our own read bound
-    expiring, ``daemon_unreachable`` a socket that carried nothing, an engine busy code a
-    GET the daemon could not serve; only ``daemon_unreachable`` opens an outage episode
-    (one owner line, plus one line when a read is answered again).
+    The journal cursor survives restart. A checkpoint wakes once; any earlier event
+    consumes it. The existing three-second renewal keeps unanswered reads quiet;
+    only daemon_unreachable opens an outage episode, closed by an answered read.
+    The applied cache horizon is disclosed once per wake when exceeded.
     """
 
     reason_text = str(checkpoint_reason or "").strip()
@@ -1279,6 +1274,15 @@ def supervised_wait(
                 and float(checkpoint.get("due_at_unix") or 0) <= time.time()
             )
             meaningful = str(payload.get("status") or "") not in _QUIET_STATUSES
+            try:
+                from ouroboros.store import acquisition_budget
+                with acquisition_budget(0):
+                    terminal = [] if meaningful or wakes else model_sleep.terminal_readiness(ctx, {"runs": [str(run_id)]})
+            except Exception:
+                terminal = []  # An unreadable custody source cannot hide observed controls or answers.
+            if terminal and not meaningful and not wakes:
+                payload.update(status="terminal_custody", terminal_facts=terminal)
+                meaningful = True
             if meaningful or wakes or due:
                 if checkpoint and not checkpoint.get("consumed"):
                     checkpoint["consumed"] = True

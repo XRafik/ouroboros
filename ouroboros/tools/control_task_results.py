@@ -627,6 +627,16 @@ def _wait_early_return_note(early) -> str:
     return "A child attention beacon interrupted this wait. Inspect early_return; the children keep running."
 
 
+def _terminal_probe(ctx: ToolContext, ids: list) -> Callable:
+    """Adapt the existing status poll to the common, non-consuming readiness predicate."""
+    from ouroboros.model_sleep import terminal_readiness
+
+    def probe(results):
+        ready = {row["id"] for row in terminal_readiness(ctx, {"tasks": ids}, task_results=results)}
+        return {tid: f"task:{tid}" in ready for tid in ids}
+    return probe
+
+
 def _wait_for_task(
     ctx: ToolContext, task_id: str, timeout_sec: int = 180, known_result_sha256: str = "",
 ) -> str:
@@ -649,6 +659,7 @@ def _wait_for_task(
     with in_slot_wait(ctx, timeout, "tasks"):
         waited = wait_for_effective_tasks(
             status_drive_root, [tid], timeout_sec=timeout,
+            terminal_probe=_terminal_probe(ctx, [tid]),
             on_poll=_wait_attention_poll(ctx, "", [tid]), poll_interval_sec=2.0,
         )
     early = waited.get("early_return")
@@ -844,8 +855,7 @@ def _await_messages(ctx: ToolContext, timeout_sec: int = 0, mode: str = "in_slot
     the wait for reply-preparation readers, adds no idle exemption and lends no
     slot; tests/test_await_messages.py drives that lifecycle.
     """
-    from ouroboros.loop_transport import _owner_signal_pending
-    from ouroboros.owner_mailbox import OwnerMailboxPeek
+    from ouroboros.model_sleep import wake_reason
 
     if mode != "in_slot" or senders or tasks or runs or services or wake_at or wake_after_sec:
         return _await_as_sleep(ctx, mode, senders=senders, tasks=tasks, runs=runs, services=services,
@@ -861,23 +871,19 @@ def _await_messages(ctx: ToolContext, timeout_sec: int = 0, mode: str = "in_slot
 
     window, bound = _wait_window(ctx, requested, clamp=int(get_per_call_timeout_ceiling_sec()),
                                  minimum=1, margin=1)
-    peek = OwnerMailboxPeek()
-    drive_root = getattr(ctx, "drive_root", None)
-    task_id = str(getattr(ctx, "task_id", "") or "")
-    seen = getattr(ctx, "_loop_mailbox_seen_ids", None)
-    attempt = getattr(ctx, "task_attempt", None) or 1
     start = time.monotonic()
     with in_slot_wait(ctx, window):
         while True:
             # The transport wait's non-destructive peek over a COPY of the seen
             # set; the mailbox and its acknowledgements are untouched.
-            pending = bool(_owner_signal_pending(None, drive_root, task_id, seen, attempt, peek))
+            observed = wake_reason(ctx, {"any_mail": True})
+            pending = bool(observed)
             elapsed = time.monotonic() - start
             if pending or elapsed >= window:
                 break
             time.sleep(min(_AWAIT_MESSAGES_POLL_SEC, max(0.0, window - elapsed)))
     if pending:
-        reason = "owner_mailbox_pending"
+        reason = observed if observed.startswith("run_question:") else "owner_mailbox_pending"
     else:
         reason = "deadline" if bound == "deadline" else "timeout"
     out: Dict[str, Any] = {
@@ -1260,6 +1266,7 @@ def _wait_for_tasks(
     with in_slot_wait(ctx, first_window, "tasks"):
         waited = wait_for_effective_tasks(
             status_drive_root, normalized_ids, timeout_sec=first_window, mode=normalized_mode,
+            terminal_probe=_terminal_probe(ctx, normalized_ids),
             on_poll=_wait_attention_poll(ctx, _wait_since, normalized_ids), poll_interval_sec=2.0,
         )
     if _phantom_only and first_window < float(timeout) and waited.get("early_return") is None:
@@ -1269,6 +1276,7 @@ def _wait_for_tasks(
             with in_slot_wait(ctx, max(0.0, float(timeout) - elapsed), "tasks"):
                 resumed = wait_for_effective_tasks(
                     status_drive_root, normalized_ids,
+                    terminal_probe=_terminal_probe(ctx, normalized_ids),
                     timeout_sec=max(0.0, float(timeout) - elapsed), mode=normalized_mode,
                     on_poll=_wait_attention_poll(ctx, _wait_since, normalized_ids), poll_interval_sec=2.0,
                 )
