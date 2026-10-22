@@ -800,8 +800,10 @@ export function createRoomWork({
 
     function scrollToNode(node) {
         reading.cancel();
-        // Both headers float; a keyboard-in-flow header already lies above the feed.
-        const reserve = Math.max(0, (bar?.getBoundingClientRect().bottom || 0) - messagesDiv.getBoundingClientRect().top);
+        // Main's measured reserve includes its error note; Project's in-flow bars already clear the feed.
+        const reserve = asPanel
+            ? Math.max(0, (bar?.getBoundingClientRect().bottom || 0) - messagesDiv.getBoundingClientRect().top)
+            : parseFloat(page.style?.getPropertyValue?.('--chat-header-reserve')) || 0;
         messagesDiv.scrollTop += node.getBoundingClientRect().top - messagesDiv.getBoundingClientRect().top - reserve;
         reading.stick = false;
         reading.scroll();

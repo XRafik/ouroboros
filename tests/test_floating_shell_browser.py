@@ -7,7 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from tests.test_room_work_browser import PROJECT, Transport, activity, reading
+from tests.test_room_work_browser import PROJECT, Transport, activity, progress, reading
 from tests.test_subscription_setup_browser import capture, subscription_ui as subscription_ui
 from tests.test_window_chrome_browser import record
 
@@ -164,18 +164,55 @@ def test_hidden_main_does_not_take_visible_projects_notice(shell_ui):
     assert page.locator(".toast-stack--room .toast").count() == 0
 
 
+@pytest.mark.parametrize("chat_id,keyboard", [(1, False), (1, True), (42, False), (42, True)])
+def test_work_navigation_clears_persistent_history_error(shell_ui, chat_id, keyboard):
+    page = shell_ui["new_page"](viewport={"width": 390, "height": 844}, has_touch=True)
+    rows = [*reading(14), progress("gap-work", "Comparing sources.", 30, suggested_name="Compare sources"),
+            *reading(14, minute=35)]
+    Transport(page, projects=[PROJECT], history={1: rows, 42: rows},
+              activities=[activity("gap-work", chat_id=chat_id, **({"project_id": PROJECT["id"]} if chat_id == 42 else {}))])
+
+    def history(route):
+        query = parse_qs(urlparse(route.request.url).query)
+        if query.get("cursor"):
+            route.fulfill(status=503, json={"error": "History read failed"})
+        else:
+            route.fulfill(json={"messages": rows, "progress": [], "has_more": True,
+                                "page_cursor": "recent", "next_cursor": "older"})
+
+    page.route("**/api/chat/history*", history)
+    page.goto(shell_ui["url"])
+    page.wait_for_selector("#chat-input")
+    host = "#page-chat" if chat_id == 1 else "#project-panel"
+    if chat_id == 42:
+        page.evaluate("p => window.dispatchEvent(new CustomEvent('ouro:open-project', {detail: {project: p}}))", PROJECT)
+        page.wait_for_selector("#project-panel.open .chat-input")
+    if keyboard:
+        page.evaluate("document.body.classList.add('keyboard-open')")
+    page.locator(f"{host} .chat-load-older-btn").click()
+    page.locator(f"{host} .chat-history-status").wait_for(state="visible")
+    page.locator(f"{host} .rw-trigger").click()
+    page.locator(f'{host} .rw-row[data-id="gap-work"] .rw-main').click()
+    page.wait_for_function("host => document.querySelector(host + ' .rw-shade').hidden", arg=host)
+    facts = page.evaluate("""host => {
+        const root = document.querySelector(host);
+        return {card: root.querySelector('.chat-live-card[data-task-id="gap-work"]').getBoundingClientRect().top,
+                error: root.querySelector('.chat-history-status').getBoundingClientRect().bottom};
+    }""", host)
+    record(f"work-navigation-error-{chat_id}-{keyboard}-{shell_ui['engine']}", facts)
+    capture(page, f"work-navigation-error-{chat_id}-{keyboard}-{shell_ui['engine']}")
+    assert facts["card"] >= facts["error"], facts
+
+
 def test_gap_translation_reaches_both_in_feed_copies(shell_ui):
     page = shell_ui["page"]
     transport = Transport(page, history={1: reading(14)})
     _gap_history(page, transport)
+    translated = "Часть сохранённой истории не загружена. В показанных сообщениях могут быть пропуски."
+    payload = {"language": "ru", "english": False, "entries": {"code:history.gap": {"text": translated}}}
+    page.route("**/api/ui/i18n*", lambda route: route.fulfill(json=payload))
     page.goto(shell_ui["url"])
     page.wait_for_selector("#page-chat .chat-load-older-note")
-    translated = "Часть сохранённой истории не загружена. В показанных сообщениях могут быть пропуски."
-    page.evaluate("""async text => {
-        const {applyPayload, pendingBootRead} = await import('/static/modules/i18n.js');
-        await pendingBootRead();
-        applyPayload({language: 'ru', english: false, entries: {'code:history.gap': {text}}});
-    }""", translated)
     page.wait_for_function("text => document.querySelector('#page-chat .chat-load-older-note').textContent === text",
                            arg=translated, timeout=3000)
     # Exercise the simultaneous read-error/approximation copy through the real producer in the skipped feed.
