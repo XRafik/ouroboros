@@ -246,7 +246,7 @@ def test_run_log_tail_is_bounded_by_the_result_limit_and_clips_long_lines(fake, 
 
 
 @pytest.mark.parametrize("kwargs,fragment", [
-    ({"run_id": 0}, "run_id names the workflow run"),
+    ({"run_id": 0}, "target names the workflow run"),
     ({"run_id": "eleven"}, "whole numbers"),
     ({"run_id": 11, "failed_only": "yes"}, "failed_only is a boolean"),
     ({"run_id": 11, "max_bytes": 0}, "max_bytes is 1.."),

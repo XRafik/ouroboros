@@ -450,10 +450,7 @@ _TREE_ORDER = ("breadth-first live walk, not a snapshot; each directory's examin
 
 def _tree_list(ctx: ToolContext, binding: ResolvedResourceBinding, depth: int, include: str,
                max_entries: int, max_scan: int) -> str:
-    """Opt-in breadth-first listing; streamed enumeration itself stops at ``max_scan`` entries
-    (plus one never-examined look-ahead telling a cut directory from a finished one), and
-    only that bounded subset is sorted. Per-entry list policy is the single-level one; each
-    boundary is a named gap, and ``complete`` holds only if every entry within depth was examined."""
+    """Bounded BFS: max_scan examined + one look-ahead, sorted within the bound; ordinary per-entry policy and named gaps."""
     from ouroboros.code_intelligence import SKIP_DIRS
     from ouroboros.code_search_rg import matches_include
     from ouroboros.evidence_packs import _checkpoint_path

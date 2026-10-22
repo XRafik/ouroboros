@@ -357,12 +357,7 @@ def disabled_tools_dispatch_only(ctx: Any) -> bool:
     return is_consciousness_origin(getattr(ctx, "task_metadata", None))
 
 
-_GITHUB_TOKEN_TOOLS = frozenset({
-    "github_read",
-    "github_write",
-    "pr_merge",
-    "submit_skill_to_hub",
-})
+_GITHUB_TOKEN_TOOLS = frozenset({"github_read", "github_write", "pr_merge", "submit_skill_to_hub"})
 _NETWORK_BUILTIN_TOOLS = _WEB_TOOLS | _GITHUB_TOKEN_TOOLS | {
     "vcs_pull_ff", "generate_image", "list_image_models", "recover_image",
 }
@@ -372,16 +367,10 @@ def _builtin_network_allowed(ctx: Any, name: str) -> bool:
     """Whether a built-in's network resource gate permits this task's call."""
     return name not in _NETWORK_BUILTIN_TOOLS or _resource_allowed(ctx, "network")
 
-# Consolidation compatibility (2026-10-22): the nine narrow GitHub tools became methods of
-# `github_read` / `github_write`. A saved contract or metadata that withheld a retired name keeps
-# withholding the method(s) that name covered; the successor's `api` hatch goes with it because it
-# reaches every capability, and `search` goes with a retired list tool because it enumerates the
-# same objects. `comment_on_issue` withholds the whole comment method: an issue and a pull request
-# share one number space, so the one verb cannot be split without a read. Each row:
-# retired name -> (successor, ((method, {argument: value}), ...)); an empty constraint withholds
-# every call of that method; target='*' means a positive issue/PR target, never a repo-wide sweep.
-# Other '*' fields mean present and non-null (including empty body / false draft); include matches a facet.
-# The dead name stays in the set too (harmless: nothing registers it).
+# Retired names withhold covered methods and api; list disables also cover search.
+# Issue/PR numbers share routes, so comment/title/body restrictions cannot split without a read.
+# Rows: successor, ((method, constraints), ...); empty constraints match the whole method.
+# '*' target is positive; other fields are non-null (including ""/False). include matches a facet.
 _RETIRED_GITHUB_TOOLS: dict[str, tuple[str, tuple[tuple[str, dict[str, str]], ...]]] = {
     "list_github_issues": ("github_read", (("list", {"kind": "issue"}), ("search", {}), ("api", {}))),
     "get_github_issue": ("github_read", (("get", {"kind": "issue"}), ("list", {"kind": "comment", "target": "*"}), ("api", {}))),

@@ -113,10 +113,10 @@ def get_run(read) -> str:
         return read.refuse("⚠️ TOOL_ARG_ERROR: a run supports include=['log']; page retained log text with read_file, not cursor.")
     run_id, job_id, attempt, cap, tail = (_whole(value) for value in (run_id, job_id, attempt, max_bytes, tail_lines))
     if None in (run_id, job_id, attempt, cap, tail) or not isinstance(failed_only, bool):
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: run_id, job_id, attempt, max_bytes and tail_lines are whole numbers; "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target, job_id, attempt, max_bytes and tail_lines are whole numbers; "
                             "failed_only is a boolean.", no_effect=True)
     if run_id <= 0:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: run_id names the workflow run (the number in …/actions/runs/<run_id>; "
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target names the workflow run (the number in …/actions/runs/<run_id>; "
                             "github_read(method='checks') lists the runs of a commit).", no_effect=True)
     if job_id < 0 or attempt < 0:
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: job_id and attempt are 0 (omitted) or positive.", no_effect=True)
@@ -278,7 +278,7 @@ def download(read) -> str:
         return read.refuse("⚠️ TOOL_ARG_ERROR: download requires kind=artifact.")
     artifact_id, cap = _whole(read.args.get("target")), _whole(read.args.get("max_bytes"))
     if artifact_id is None or cap is None:
-        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: artifact_id and max_bytes are whole numbers.", no_effect=True)
+        return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target and max_bytes are whole numbers.", no_effect=True)
     if artifact_id <= 0:
         return _refuse(ctx, "⚠️ TOOL_ARG_ERROR: target is the id github_read(method='list', kind='artifact', target=run_id) shows.", no_effect=True)
     if not 1 <= cap <= ARTIFACT_MAX_BYTES_CEILING:
