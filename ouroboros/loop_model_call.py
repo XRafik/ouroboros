@@ -1391,7 +1391,7 @@ def _call_round_model(ctx: _RoundModelCallContext) -> Tuple[Any, float, str]:
 # typed size refusal starts two model-free passes, each earning one strictly smaller check/retry: the
 # first replaces superseded host state and bodies a usable turn already showed; the second, only after a
 # further failed check/refusal, lowers memory granularity (books too when memory falls short of the excess), then
-# changes books before addressing eligible unseen bodies. Chosen bodies that fit alone stay whole. Each pass runs once
+# changes books before addressing eligible unseen bodies, a just-chosen one last. Each pass runs once
 # per round whatever the route, so a configured fallback receives the view as applied and walks nothing
 # again. The fallback chain and the end of the path follow in the caller.
 REFUSAL_PASSES: Tuple[Tuple[str, ...], ...] = (("host_copies", "bodies"), ("floor", "books", "unseen_bodies"))
@@ -1483,7 +1483,8 @@ def _recover_context_overflow(ctx: _RoundModelCallContext, failed_capture: Any, 
             if key in done:
                 continue
             done.add(key)
-            if not _apply_refusal_pass(ctx, steps, fit, target, slack):
+            real = getattr(failed_capture, "predicted_free_tokens", None) is None  # a provider's, never an estimate
+            if not _apply_refusal_pass(ctx, steps, fit, target, slack, real):
                 continue
         fit = _loop()._measure_round_main_fit(ctx, automatic_pass_used=True)
         if fit is None:
@@ -1513,13 +1514,15 @@ def _recover_context_overflow(ctx: _RoundModelCallContext, failed_capture: Any, 
 
 
 def _apply_refusal_pass(ctx: _RoundModelCallContext, steps: Tuple[str, ...], fit: Any,
-                        target: Optional[int], slack: Optional[int] = None) -> bool:
+                        target: Optional[int], slack: Optional[int] = None, refused: bool = False) -> bool:
     """Apply a pass's steps in order until together they shed ``target``; True when the candidate changed.
 
     Each step is sized by what the earlier steps of the pass left of the target: host copies that
     already freed the room leave every body in place, and memory the floor narrowed enough addresses
     no unseen body (the gradual order the owner asked for). An unknown target lets each step take its
-    whole category.
+    whole category. A just-chosen body that fits alone goes last, only for a provider's ``refused``
+    request the late rescue's other steps could not answer: the measured target left, or nothing
+    changed against an unknown one (owner 2A).
     """
     changed, remaining = False, target
     for step in steps:
@@ -1531,6 +1534,8 @@ def _apply_refusal_pass(ctx: _RoundModelCallContext, steps: Tuple[str, ...], fit
         if shed is not None:
             changed = True
             remaining = None if remaining is None else remaining - shed
+    if refused and "unseen_bodies" in steps and (not changed if remaining is None else remaining > 0):
+        changed |= _run_emergency_address_pass(ctx, fit, rung="chosen_bodies", goal_tokens=remaining).status == "applied"
     return changed
 
 
@@ -1542,7 +1547,7 @@ def _apply_refusal_step(ctx: _RoundModelCallContext, step: str, fit: Any, target
     narrows memory by the measured excess only, never by the return-after-fold slack: memory is continuity
     (BIBLE P1), and narrowing it for slack showed this room's own rows by address. Without a target it
     narrows by the deficit against a known window, and only with neither by everything it can give. Books
-    become navigation before any eligible unseen body leaves; chosen bodies that fit alone remain whole.
+    become navigation before any eligible unseen body leaves; a just-chosen body leaves last.
     Memory alone satisfying the whole goal leaves the books and bodies untouched.
     """
     if step in ("host_copies", "bodies", "unseen_bodies"):

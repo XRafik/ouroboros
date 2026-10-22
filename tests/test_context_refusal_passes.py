@@ -233,6 +233,27 @@ def test_books_pay_remaining_room_before_any_unseen_body(monkeypatch):
     assert paid.active_context_mode == "max"
 
 
+@pytest.mark.parametrize("refused", [False, True])
+def test_a_just_chosen_body_pays_last_and_only_what_a_providers_refusal_left(monkeypatch, refused):
+    """Owner 2A: an estimate never cuts a chosen read. After a provider's refusal memory, books and unasked
+    bodies go first; a chosen body that fits alone pays only what they left (everything when nothing measures it)."""
+    shed, chosen = {}, []
+    monkeypatch.setattr(lmc, "_apply_refusal_step", lambda _ctx, step, _fit, _target, _slack=None: shed.get(step))
+    monkeypatch.setattr(lmc, "_run_emergency_address_pass", lambda _ctx, _fit, *, rung, goal_tokens=None: (
+        chosen.append((rung, goal_tokens)) or SimpleNamespace(status="applied", reclaimed_tokens=1)))
+    first, second = lmc.REFUSAL_PASSES
+    for steps, target, paid, expected in (
+            (second, None, {}, [("chosen_bodies", None)]),  # nothing else changed an unmeasured refusal
+            (second, None, {"floor": 0}, []),  # memory changed the candidate: its retry answers first
+            (second, 100_000, {"floor": 30_000, "unseen_bodies": 10_000}, [("chosen_bodies", 60_000)]),
+            (second, 100_000, {"floor": 100_000}, []),  # memory paid the whole measured target
+            (first, None, {}, [])):  # the first pass never reaches a chosen body
+        shed.clear(), shed.update(paid), chosen.clear()
+        changed = lmc._apply_refusal_pass(_ctx(), steps, _fit(1), target, None, refused)
+        assert chosen == (expected if refused else [])
+        assert changed is bool(paid or chosen)
+
+
 @pytest.mark.parametrize("ceiling,mode", [(0, "low"), (200_000, "low"), (50_000, "nano")])
 def test_books_recovery_keeps_the_current_refusal_frame_and_selected_mode(tmp_path, monkeypatch, ceiling, mode):
     from ouroboros import capability_evidence as ce, context_fit as cf, memory_view as mv

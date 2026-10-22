@@ -17,7 +17,7 @@ from ouroboros.context_budget import (HOST_CONTEXT_KIND_KEY, ContextReclaimReque
                                       _Selection, host_row_intact)
 from ouroboros.tool_result_record import read_tool_result_record
 
-EmergencyRung = Literal["host_copies", "bodies", "unseen_bodies"]
+EmergencyRung = Literal["host_copies", "bodies", "unseen_bodies", "chosen_bodies"]
 _EMERGENCY_LABELS = {  # the record's honest heading: no summary, exact rows retained by checkpoint
     "host_copies": ("Emergency host record during context-size recovery: obsolete host rows "
                     "replaced by typed state and exact addresses; nothing summarized; exact rows retained by checkpoint"),
@@ -26,7 +26,10 @@ _EMERGENCY_LABELS = {  # the record's honest heading: no summary, exact rows ret
                "nothing summarized; exact rows retained by checkpoint"),
     "unseen_bodies": ("Late source-only rescue after other same-model recovery: tool bodies replaced by typed facts "
                       "and exact addresses; usable Main exposure is UNCONFIRMED, not proof of understanding; "
-                      "nothing summarized; exact rows retained by checkpoint")}
+                      "nothing summarized; exact rows retained by checkpoint"),
+    "chosen_bodies": ("Late source-only rescue of a just-chosen body after a real refusal that memory and books could "
+                      "not answer: the body replaced by typed facts and its exact address; usable Main exposure is "
+                      "UNCONFIRMED; nothing summarized; exact rows retained by checkpoint")}
 _FACT_ARGUMENTS_CHARS = 400
 
 
@@ -156,7 +159,7 @@ def _unit_facts(messages: Sequence[Mapping[str, Any]], unit: _AtomicUnit) -> str
 
 
 def chosen_read_units(messages, units, *, usable_input=None, density=1.0):
-    """Explicitly chosen bodies stay whole unless one alone exceeds known usable input."""
+    """Explicitly chosen bodies that fit known usable input alone (every chosen body when it is unknown)."""
     from ouroboros.tool_capabilities import requested_result_view
 
     protected = set()
@@ -195,7 +198,8 @@ def emergency_address_view(
     Obsolete host rows share one exact original-checkpoint pointer; review indexes
     have no invented selectable unit IDs. ``bodies`` takes confirmed exposed complete
     tool units oldest first, stopping at the measured goal. ``unseen_bodies`` is the
-    separately disclosed late rescue of units whose exposure is unconfirmed. Exact
+    separately disclosed late rescue of units whose exposure is unconfirmed;
+    ``chosen_bodies`` alone reaches such a just-chosen body that fits by itself. Exact
     body units remain restorable; no view claims understanding. ``measure_candidate``
     measures the complete final request, including the seal and fresh host facts.
     """
@@ -207,16 +211,18 @@ def emergency_address_view(
     units = compaction.context_units(messages, scope="dialogue", trace_refs_by_tool_call_id=trace_refs,
                           measurement_density=density)
     protected = compaction.owner_protected_unit_ids(messages, units)
-    protected |= chosen_read_units(messages, units, usable_input=usable_input, density=density)
+    fitting = chosen_read_units(messages, units, usable_input=usable_input, density=density)
+    protected |= set() if rung == "chosen_bodies" else fitting
     obsolete = _obsolete_host_rows(messages) if rung == "host_copies" else set()
     first_user = next((i for i, row in enumerate(messages) if row.get("role") == "user"), -1)
     obsolete = {i for i in obsolete if i != first_user and not messages[i].get("function_call")
                 and compaction._plain_text(messages[i].get("content")) is not None}
     raw = [u for u in units if compaction.unit_kind(messages, u) == "tool" and u.generation == 0
            and u.unit_id not in protected]
-    oversized = chosen_read_units(messages, raw)  # every remaining chosen body exceeded usable input
+    oversized = chosen_read_units(messages, raw) - fitting  # chosen bodies that alone exceed usable input
     exposed = _exposed_units(messages, raw, observation or {})
-    eligible = [u for u in raw if (u.unit_id in exposed) == (rung == "bodies")] if rung != "host_copies" else []
+    eligible = [u for u in raw if (u.unit_id in exposed) == (rung == "bodies")
+                and (u.unit_id in fitting) == (rung == "chosen_bodies")] if rung != "host_copies" else []
     if not eligible and not obsolete:
         return messages, compaction._receipt("no_eligible", before_sha=before_sha)
     fingerprint = compaction._sha256(compaction._canonical_bytes({"rung": rung, "transcript": before_sha,

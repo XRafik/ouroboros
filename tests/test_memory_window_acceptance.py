@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 from ouroboros import context_fit as cf, memory_floor as mf, memory_view as mv, capability_evidence as ce
-from ouroboros.context_budget import ContextReclaimRequest
+from ouroboros.context_budget import ContextReclaimRequest, WHOLE_CATEGORY
 from ouroboros import context_compaction as cc
 from ouroboros.context_compaction import emergency_address_view
 from ouroboros.context_renewal import renewal_seed
@@ -59,25 +59,41 @@ def test_fresh_and_mature_envelopes_leave_one_work_room(window, density, mature,
     assert other.initial_mode != plan.initial_mode
 
 
-@pytest.mark.parametrize("usable,cut", [(50_000, False), (1_000, True), (None, False)])
-def test_a_real_refusal_cannot_address_a_chosen_body_that_fits_alone(tmp_path, usable, cut):
-    body = "Chosen exact source. " * 2_000
+@pytest.mark.parametrize("usable", [50_000, None, 1_000])
+def test_only_the_late_chosen_rung_addresses_a_chosen_body_that_fits_alone(tmp_path, usable):
+    """Owner 2A: host copies, bodies and unasked unseen bodies never take a chosen body that fits alone; only the
+    ``chosen_bodies`` rung does (``loop_model_call._apply_refusal_pass`` runs it last, for a provider's refusal).
+    A body that alone exceeds usable input leaves with the unasked ones, under its named receipt."""
+    body, other = "Chosen exact source. " * 2_000, "Unasked shell output. " * 2_000
+    fits = usable != 1_000
     messages = [{"role": "system", "content": "Core"}, {"role": "user", "content": "Assignment"},
         {"role": "assistant", "tool_calls": [{"id": "read", "type": "function", "function": {
             "name": "memory_read", "arguments": '{"from":"row-a","to":"row-b"}'}}]},
-        {"role": "tool", "tool_call_id": "read", "content": body}]
+        {"role": "tool", "tool_call_id": "read", "content": body},
+        {"role": "assistant", "tool_calls": [{"id": "shell", "type": "function", "function": {
+            "name": "run_shell", "arguments": '{"cmd":"ls"}'}}]},
+        {"role": "tool", "tool_call_id": "shell", "content": other}]
     request = ContextReclaimRequest(route_fp="refused-route", round_id="2",
         transcript_sha256=cc.context_reclaim_transcript_sha256(messages), measurement_basis="fresh_route_usage",
-        measurement_density=1.0, reclaim_goal_tokens=1, allow_partial_shrink=True)
-    rebuilt, receipt = emergency_address_view(messages, request, rung="unseen_bodies", observation={},
-        drive_root=tmp_path, task_id="refusal01", usable_input=usable)
-    assert (receipt.status == "applied") is cut
-    assert (body in json.dumps(rebuilt)) is not cut
-    if cut:
-        assert "chosen_body_exceeds_usable_input" in json.dumps(rebuilt)
-    else:
-        seed, left = renewal_seed(rebuilt)
-        assert messages[-2:] == seed[-2:] and left["tool_rows"] == 0
+        measurement_density=1.0, reclaim_goal_tokens=WHOLE_CATEGORY, allow_partial_shrink=True)
+
+    def view(rung):
+        return emergency_address_view(messages, request, rung=rung, observation={}, drive_root=tmp_path,
+                                      task_id="refusal01", usable_input=usable)
+    for rung in ("host_copies", "bodies", "unseen_bodies"):
+        rebuilt, _receipt = view(rung)
+        shown = json.dumps(rebuilt)
+        assert (body in shown) is (fits or rung != "unseen_bodies")
+        assert (other in shown) is (rung != "unseen_bodies")
+        assert ("chosen_body_exceeds_usable_input" in shown) is (not fits and rung == "unseen_bodies")
+    if fits:
+        seed, _left = renewal_seed(view("unseen_bodies")[0])
+        assert messages[2:4] == [row for row in seed if row in messages[2:4]]
+    rebuilt, receipt = view("chosen_bodies")
+    shown = json.dumps(rebuilt)
+    assert receipt.status == ("applied" if fits else "no_eligible")
+    assert (body in shown) is (not fits) and other in shown
+    assert ("just-chosen body after a real refusal" in shown) is fits
 
 
 @pytest.mark.parametrize("size,refused", [(100_000, False), (140_000, True)])
