@@ -656,8 +656,10 @@ def _list(read: _Read) -> str:
         if prs:
             read.omitted.append(f"{prs} pull request(s) on this page not shown; list(kind='pr') reads them")
         rows = [r for r in rows if "pull_request" not in r]
+    since_filtered = bool(params.get("since"))  # The successful request applied a server-side filter.
     if kind in ("pr", "review", "release") and read.since and key:
         rows = read.since_filter(rows, key, facts, newest_first=kind == "pr")
+        since_filtered = True
     payload: Dict[str, Any] = {"target": number} if number else {}
     if kind == "pr" and rows:
         payload["items"], error = _pr_items(read, rows)
@@ -666,12 +668,14 @@ def _list(read: _Read) -> str:
     else:
         payload["items"] = read.rows(rows, shape)
     payload.update(facts)
+    if read.since and not since_filtered:
+        payload["note"] = "The labels endpoint has no since filter; this page is unfiltered."
     if kind == "notification" and not payload["items"] and facts["complete"]:
         read.omitted.append("an empty notification list under a fine-grained token or GitHub App is a permission gap: notifications need a classic PAT with the notifications scope")
     repo = _repo_of((rows[0].get("html_url") if rows else "") or (rows[0].get("url") if rows else "")) or read.repo or "selected Project"
     more = f", more: cursor={facts['next_cursor']!r}" if not facts["complete"] else ", complete"
     return read.deliver(f"github_read list {label} in {repo}: {len(payload['items'])} item(s)"
-                        + (f" since {read.since}" if read.since else "") + more, payload)
+                        + (f" since {read.since}" if since_filtered else "") + more, payload)
 
 
 def _list_discussions(read: _Read, number: Optional[int]) -> str:
@@ -840,7 +844,7 @@ SCHEMA: Dict[str, Any] = {
         "include": {"type": "array", "items": {"type": "string", "enum": list(FACETS)}, "default": [],
                     "description": "get facets, first page each: comments, review_comments, reviews, threads (review threads with ids "
                                    "for github_write resolve_thread), files, diff, commits"},
-        "since": {"type": "string", "default": "", "description": "ISO-8601 UTC instant; list/facet rows updated at or after it"},
+        "since": {"type": "string", "default": "", "description": "ISO-8601 UTC instant for supported list/facet timestamps; labels have no since filter"},
         "cursor": {"type": "string", "default": "", "description": "next_cursor of the previous page (list, search, or get with one facet)"},
         "limit": {"type": "integer", "default": _LIMIT_DEFAULT, "minimum": 1, "maximum": _LIMIT_MAX, "description": "Page size, 1–100"},
         "detail": {"type": "string", "enum": ["concise", "full"], "default": "concise",

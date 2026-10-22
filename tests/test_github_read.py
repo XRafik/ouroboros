@@ -412,13 +412,31 @@ def test_list_kinds_take_since_and_target_on_the_matching_route(gh, kind, target
         args["target"] = target
     line, payload = _payload(gh.read(**args))
     assert gh.routes()[0] == route.replace("?S", "?since=S") + ("&" if not route.endswith("?") else "") + "per_page=30&page=1"
-    assert line.startswith(f"github_read list {label} in selected Project: 0 item(s) since S, complete") and payload["complete"]
+    since = " since S" if kind != "label" else ""
+    assert line.startswith(f"github_read list {label} in selected Project: 0 item(s){since}, complete") and payload["complete"]
     if kind == "notification":
         assert any("classic PAT" in note for note in payload["omitted"])
 
 
 def test_list_reviews_need_a_pull_request(gh):
     assert gh.read(method="list", kind="review").startswith("⚠️ TOOL_ARG_ERROR: list(kind='review') needs target") and not gh.calls
+
+
+@pytest.mark.parametrize("detail", ["concise", "full"])
+@pytest.mark.parametrize("since", ["", "2026-10-01T00:00:00Z"])
+def test_label_list_discloses_unsupported_since_without_claiming_a_filter(gh, detail, since):
+    # A synthetic old timestamp makes this nonempty fixture distinguish an applied filter from an ignored one.
+    label = {"id": 1, "name": "bug", "color": "ff0000", "updated_at": "2026-09-01T00:00:00Z"}
+    gh.answer = lambda p, argv, kw: _rest([label], link_next=f"{API}/repos/owner/selected/labels?page=2")
+    line, payload = _payload(gh.read(method="list", kind="label", since=since, detail=detail))
+    assert [row["name"] for row in payload["items"]] == ["bug"]
+    assert "item(s), more:" in line and "since=" not in gh.routes()[0]
+    assert "since" not in payload and (payload["complete"], payload["next_cursor"]) == (False, "2")
+    if since:
+        assert since not in line and "labels endpoint has no since filter" in payload["note"]
+        assert "unfiltered" in payload["note"]
+    else:
+        assert "note" not in payload
 
 
 def test_list_discussions_and_their_comments_with_replies_are_graphql_pages(gh):
