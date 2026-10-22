@@ -206,7 +206,7 @@ _NATIVE_SURFACE_KINDS = {
 MARKER_SOURCES = {
     REVIEWER_SLOT_MARKER: "ouroboros/review_execution.py",
     TRIAD_USER_MARKER: "ouroboros/tools/review_multi_model.py",   # TRIAD_USER_TURN: the one literal the send and the admission share
-    SKILL_REVIEW_MARKER: "ouroboros/skill_review_prompt.py",
+    SKILL_REVIEW_MARKER: "ouroboros/tools/review_skill.py",
     PLAN_REVIEW_MARKER: "ouroboros/tools/plan_packet.py",
     NATIVE_EPISODE_MARKER: "ouroboros/review_native_episode.py",
 }
@@ -347,13 +347,13 @@ def canned_review_answer(kind: str) -> dict | None:
 def skill_review_clean_text() -> str:
     """All-PASS skill-review verdict over the tree's OWN checklist items.
 
-    The item list is imported from the prompt module (its ``_SKILL_REVIEW_ITEMS``
-    is both the prompt's expected-items contract and the parser's required set),
+    The item list is imported from the skill subject module (its ``SKILL_REVIEW_ITEMS``
+    is the closed list a finding may name),
     so an upstream checklist change re-derives the canned verdict instead of
     silently failing coverage. Lazy import: the skill-review module tree is heavy
     and only skill scenarios pay for it.
     """
-    from ouroboros.skill_review_prompt import _SKILL_REVIEW_ITEMS
+    from ouroboros.tools.review_skill import SKILL_REVIEW_ITEMS
 
     return json.dumps([
         {
@@ -362,7 +362,7 @@ def skill_review_clean_text() -> str:
             "severity": "advisory",
             "reason": "Stub skill reviewer: checked and clean for the scripted E2E payload.",
         }
-        for item in _SKILL_REVIEW_ITEMS
+        for item in SKILL_REVIEW_ITEMS
     ])
 
 
