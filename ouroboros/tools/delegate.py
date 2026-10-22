@@ -404,7 +404,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
         if bound.refusal_code:
             return _fail("delegate_start", bound.refusal_code, bound.refusal_detail, definitely_unrun=True)
         seconds_basis = bound.basis
-
     drive = custody.custody_root(ctx)
     owned_project_id, project_persistent, readonly_root = "", False, ""
     invocation_id = snapshot_id = baseline_sha = target_root = authority_source = ""
@@ -440,7 +439,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
             payload_auth = None
             if refusal := _presence_delegate_read_refusal(ctx):
                 return refusal
-
     if refusal := blocked_geometry_refusal(ctx, authority, selector_root, directory_strategy, scope_paths):
         return refusal
     ceiling_authority = authority
@@ -452,7 +450,6 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
         instructions = _host_instructions(
             authority, assignment, payload_skill=payload_skill, coordination_context="" if continuation_token else _coordination_context,
         )
-
     access = authority.access
     start_attempted = recovering  # Recovery may already own a physical run.
     try:
