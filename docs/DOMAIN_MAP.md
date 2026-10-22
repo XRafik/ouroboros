@@ -17,18 +17,18 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D07 | Delegation, subagents & Claudexor | 74 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
-| D10 | Git, update & release machinery | 33 | 0 |
+| D10 | Git, update & release machinery | 35 | 0 |
 | D11 | Gateway, server & Web UI | 101 | 0 |
 | D12 | Settings & configuration | 22 | 0 |
 | D13 | Safety, guards & runtime mode | 11 | 0 |
 | D14 | Skills & extensions | 69 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 31 | 0 |
 | D16 | Observability, usage accounting & cost | 24 | 0 |
-| D17 | Projects, workspaces & task results | 47 | 0 |
+| D17 | Projects, workspaces & task results | 48 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **846** | **0** |
+| **total** | | **849** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -691,6 +691,8 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/tools/git_vcs_ops.py`
 - `ouroboros/tools/github.py`
 - `ouroboros/tools/github_checks.py`
+- `ouroboros/tools/github_read.py`
+- `ouroboros/tools/github_write.py`
 - `ouroboros/tools/release_sync.py`
 - `ouroboros/tools/review_revalidation.py`
 - `ouroboros/version.py`
@@ -1015,6 +1017,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/store.py`
 - `ouroboros/store_hot_facts.py`
 - `ouroboros/store_import.py`
+- `ouroboros/store_journal.py`
 - `ouroboros/store_task_cards.py`
 - `ouroboros/store_timing.py`
 - `ouroboros/task_custody.py`

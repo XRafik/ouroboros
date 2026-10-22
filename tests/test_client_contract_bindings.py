@@ -300,7 +300,8 @@ def test_every_request_and_header_fact_is_published_for_the_journeys():
     requests = {token: entry.get("request", {}).get("schemas") for token, entry in BY_TOKEN.items()}
     for token in ("POST /api/files/write", "POST /api/projects/from-task", "POST /api/skills/{skill}/toggle",
                   "POST /api/claudexor/login", "POST /api/skill-catalog/install", "POST /api/command",
-                  "POST /api/schedules", "POST /api/owner/context-mode", "DELETE /api/chat/upload"):
+                  "POST /api/schedules", "POST /api/owner/context-mode", "DELETE /api/chat/upload",
+                  "POST /api/places", "POST /api/places/{place_id}"):
         assert requests[token] and requests[token] != [], token
     assert BY_TOKEN["POST /api/claudexor/maintenance/operations"]["headers"] == ["Idempotency-Key!"]
     assert BY_TOKEN["GET /api/tasks/{task_id}/artifacts/{name}"]["headers"] == ["Range"]
@@ -308,3 +309,47 @@ def test_every_request_and_header_fact_is_published_for_the_journeys():
              if entry.get("request", {}).get("content_type") == "application/json" and not entry["request"]["schemas"]]
     # The only bodies still published as plain JSON are documents of setting keys.
     assert sorted(plain) == ["POST /api/settings", "POST /api/ui/preferences"], plain
+
+
+def test_place_request_shapes_cover_the_owner_journey(client, monkeypatch):
+    monkeypatch.setattr("ouroboros.place_projection.place_declarations", lambda _root: [{
+        "skill": "bridge", "id": "chat", "destination": "vendor:chat", "label": "Test chat", "wakes": ["mention"],
+    }])
+    connect = {"connector": "bridge", "account_id": "account", "conversation_id": "room"}
+    assert BY_TOKEN["POST /api/places"]["request"]["schemas"] == ["PlaceConnectRequest"]
+    assert _declared("PlaceConnectRequest") == set(connect)
+    connect_type = contract_typed_dict("PlaceConnectRequest")
+    assert not validate_ingress(connect, connect_type)
+    assert not validate_ingress({"connector": "bridge"}, connect_type)
+    assert validate_ingress({}, connect_type)  # connector is required
+    connected = client.post("/api/places", json=connect)
+    assert connected.status_code == 200, connected.text
+    place = connected.json()["place"]
+    path = f"/api/places/{place['place_id']}"
+    change = {
+        "state": "silent", "wakes": ["direct_message"], "add_note": "Owner choice",
+        "working_folder": str(client.files_root), "model": "test-model",
+        "confirm_owner_account": {"platform_actor_id": "person", "label": "Me", "account_id": "account"},
+        "expected_revision": place["revision"],
+    }
+    assert BY_TOKEN["POST /api/places/{place_id}"]["request"]["schemas"] == ["PlaceUpdateRequest"]
+    update_type = contract_typed_dict("PlaceUpdateRequest")
+    assert not validate_ingress(change, update_type)
+    assert _declared("PlaceOwnerAccountRequest") == set(change["confirm_owner_account"])
+    assert validate_ingress({"confirm_owner_account": {}}, update_type)
+    changed = client.post(path, json=change)
+    assert changed.status_code == 200, changed.text
+    place = changed.json()["place"]
+    assert place["state"] == "silent" and place["wakes"] == [{"fact": "direct_message", "author": "owner"}]
+    assert place["notes"][0]["text"] == "Owner choice" and place["notes"][0]["author"] == "owner"
+    assert place["working_folder"] == change["working_folder"] and place["model"] == change["model"]
+    assert place["owner_accounts"][0]["platform_actor_id"] == "person"
+    remove = {"remove_note": place["notes"][0]["note_id"], "revoke_owner_account": "person",
+              "expected_revision": place["revision"]}
+    assert _declared("PlaceUpdateRequest") == set(change) | set(remove)
+    assert not validate_ingress(remove, update_type)
+    removed = client.post(path, json=remove)
+    assert removed.status_code == 200, removed.text
+    assert removed.json()["place"]["notes"] == removed.json()["place"]["owner_accounts"] == []
+    conflict = client.post(path, json=change)
+    assert conflict.status_code == 409 and conflict.json()["code"] == "place_revision_conflict"

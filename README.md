@@ -389,6 +389,8 @@ Output: `dist/Ouroboros-<VERSION>.dmg`, containing `Ouroboros.app`, an `Applicat
 
 ### Linux (.AppImage and .tar.gz)
 
+The bundled GTK3/WebKitGTK window targets **Ubuntu 22.04 (Jammy) x86_64, glibc 2.35 and its graphics stack**, with the build packages and authenticated `deb-src` indices described in [the Linux packaging notes](packaging/appimage/README.md). Native window qualification is still pending. This is a target, not a minimum-distribution promise: older glibc systems and newer host drivers are not qualified. Existing `--no-ui` selects an external UI host; launching with both `DISPLAY` and `WAYLAND_DISPLAY` unset takes the existing browser/headless path instead of attempting the native backend. A native graphics-library abort is not a recoverable browser fallback.
+
 ```bash
 bash scripts/download_python_standalone.sh
 bash build_linux.sh
@@ -398,16 +400,18 @@ Outputs: `dist/Ouroboros-<VERSION>-linux-<arch>.AppImage` and the extraction-fri
 
 On a build host where system packages are managed separately, set `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1`; Chromium and WebKit are still downloaded and bundled, but the build does not invoke `sudo` to install host libraries.
 
+`OUROBOROS_BUNDLE_LINUX_GTK=auto` (default) selects the bundled closure on Ubuntu 22.04 x86_64. Other Linux builders, including aarch64, retain the previous host-backend build and browser fallback, without a self-contained window claim. Set `=0` explicitly for that path or `=1` to require the closure and fail on missing/unsupported inputs; release CI requires `=1`. Native builds also produce `dist/native-sources-linux-<VERSION>.tar.gz` and its SHA-256. Keep these with the binaries; recipient source delivery remains a distribution obligation.
+
 ### Linux (.deb and .rpm)
 
-Wraps the payload `build_linux.sh` just produced, so run it afterwards:
+Wraps the payload `build_linux.sh` just produced, so run it afterwards: The native packages and tarball use the same `Ouroboros` entry wrapper as the AppImage, including caller-environment preservation. Package smoke is headless; it does not qualify a native window or graphics-driver compatibility on those distributions.
 
 ```bash
 sudo apt-get install -y dpkg-dev rpm   # rpm provides rpmbuild
 bash scripts/build_linux_packages.sh
 ```
 
-Output: `dist/ouroboros_<VERSION>_amd64.deb`, `dist/ouroboros-<VERSION>-1.x86_64.rpm` and `dist/ouroboros-<VERSION>-1.red80.x86_64.rpm` (RED OS 8). All three declare Git as a runtime dependency and install to `/opt/ouroboros` with a `/usr/bin/ouroboros` symlink, a desktop entry, and an opt-in systemd user unit. The Linux launcher is built by the bundled portable Python so the build runner cannot raise its glibc floor. `bash scripts/smoke_linux_packages.sh official <deb> <rpm> <red80-rpm>` installs all three through `apt` or `dnf` in Ubuntu 22.04 and Fedora 42 containers, resolves Git, verifies the installed unit, and checks both the real CLI and a bounded desktop-launcher start; this lane gates the release. Swap `official` for `vendor` to repeat the check on Astra Linux 1.8 and RED OS 8 images from the vendors' own registries — that lane runs informationally in CI, so an outage at a third-party registry cannot block a tagged release.
+Output: `dist/ouroboros_<VERSION>_amd64.deb`, `dist/ouroboros-<VERSION>-1.x86_64.rpm` and `dist/ouroboros-<VERSION>-1.red80.x86_64.rpm` (RED OS 8). All three declare Git as a runtime dependency and install to `/opt/ouroboros` with a `/usr/bin/ouroboros` symlink, a desktop entry, and an opt-in systemd user unit. Portable Python builds the launcher, but the bundled native payload also carries Jammy libraries: its native-window and launcher-side behaviour targets glibc 2.35 and the Jammy graphics stack, not an invariant portable-Python glibc floor. `bash scripts/smoke_linux_packages.sh official <deb> <rpm> <red80-rpm>` installs all three through `apt` or `dnf` in Ubuntu 22.04 and Fedora 42 containers, resolves Git, verifies the installed unit, and checks both the real CLI and a bounded desktop-launcher start; this lane gates the release. Swap `official` for `vendor` to repeat the check on Astra Linux 1.8 and RED OS 8 images from the vendors' own registries — that lane runs informationally in CI, so an outage at a third-party registry cannot block a tagged release.
 
 ### Windows (.zip)
 

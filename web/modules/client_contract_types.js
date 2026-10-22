@@ -489,6 +489,36 @@
  */
 
 /**
+ * Connect an installed connector; omitted account and conversation ids default to empty.
+ * @typedef {Object} PlaceConnectRequest
+ * @property {string} connector
+ * @property {string=} account_id
+ * @property {string=} conversation_id
+ */
+
+/**
+ * Confirm a person; omitted account_id uses the place's account.
+ * @typedef {Object} PlaceOwnerAccountRequest
+ * @property {string} platform_actor_id
+ * @property {string=} label
+ * @property {string=} account_id
+ */
+
+/**
+ * Atomic owner choices. Send a nonempty body; expected_revision compares before writing.
+ * @typedef {Object} PlaceUpdateRequest
+ * @property {'active'|'silent'|'paused'=} state
+ * @property {Array<string>=} wakes
+ * @property {string=} add_note
+ * @property {string=} remove_note
+ * @property {string=} working_folder
+ * @property {string=} model
+ * @property {PlaceOwnerAccountRequest=} confirm_owner_account
+ * @property {string=} revoke_owner_account
+ * @property {number=} expected_revision
+ */
+
+/**
  * `POST /api/settings/secret`: exactly one selector, `{key}`, `{mcp_server_id}` or `{mcp_server_id,
  * header_name}`.
  * @typedef {Object} SettingsSecretRequest

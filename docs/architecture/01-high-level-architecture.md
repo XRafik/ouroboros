@@ -175,7 +175,7 @@ ouroboros/ — agent core and shared runtime (§6)
   _usage_rows.py, _usage_money.py, _usage_response.py, usage_ledger.py — the reducer, Decimal cash, the usage normalizer, row rules and the money lock (§6 Usage ledger substrate vs. accounting policy)
   _usage_cache_splits.py — process-local cache split by task/provider/route/review; a missing entry prices a full cache write (§6)
   usage_store.py, usage_journal.py, openrouter_cost.py — `state/usage.sqlite`, its journal import and explicit OpenRouter price receipts (docs/USAGE_STORE.md)
-  store.py, store_task_cards.py, store_timing.py, store_import.py, store_switch.py, install_identity.py, dialogue_store.py, dialogue_retry.py, dialogue_import.py, dialogue_positions.py — the shared SQLite core (docs/USAGE_STORE.md): `state/current.sqlite` (atomic `meta.commit_seq`; boot import/reconcile §2, export before storeless switches §9) and `state/dialog.sqlite` (chat/progress rows by chain coordinate, ordinals and import intervals; one `append` seam; cutover, archive-import job, rollback export; PERSISTENCE.md)
+  store.py, store_journal.py, store_task_cards.py, store_timing.py, store_import.py, store_switch.py, install_identity.py, dialogue_store.py, dialogue_retry.py, dialogue_import.py, dialogue_positions.py — the shared SQLite core (docs/USAGE_STORE.md): `state/current.sqlite` (atomic `meta.commit_seq`; boot import/reconcile §2, export before storeless switches §9) and `state/dialog.sqlite` (chat/progress rows by chain coordinate, ordinals and import intervals; one `append` seam; cutover, archive-import job, rollback export; PERSISTENCE.md)
   cost_projection.py — the one task-cost projection for every producer: `accounted_upper_bound_usd`, null as None and never $0.00 (§6 Budget tracking)
   storage.py, storage_free.py — Dashboard counts and temporary-space actions (§3)
   delegate_custody.py, delegate_custody_reconcile.py, delegate_collection.py, delegate_state_sweep.py, delegate_custody_usage.py — run custody, observation, collection and usage; OWNED/FOREIGN/UNKNOWN (§6 Nanny, transport and custody)
@@ -516,8 +516,8 @@ ouroboros/ — agent core and shared runtime (§6)
     commit_gate.py — Commit gate: LLM claim synthesis, block classification, the free identical-verdict refusal, paid review-cycle counting and ceiling, the review-contract fingerprint
     git_rollback.py — Emits `rollback_request`; the supervisor runs the UI Rollback door's procedure (P4-S)
     git_pr.py — Five PR tools (non-core)
-    github.py — Issue, PR and checks tools (frozen tool module): the shared process binding selects the active Project; discovery reads token sources or native CLI configuration without an authentication probe; a refusal before the first `gh` launch is `completed_no_effect`
-    github_checks.py — the reader behind `get_github_checks`: one commit's runs, jobs, annotations and PR rollup as facts and named unavailable sources under one deadline
+    github.py, github_read.py, github_write.py — `github_read`, `github_write`, `pr_merge` (frozen tool module), one `gh` transport bound to the active Project; discovery reads token sources or native CLI config unprobed; a refusal before its first `gh` launch is `completed_no_effect`
+    github_checks.py — checks reader: a commit's runs, jobs, annotations, PR rollup as facts, unavailable sources named, one deadline
     parallel_review.py — Prepares and admits every seat before the review wave sends (§6 Surfaces and money admission)
     plan_review_references.py — Reference projection with its own provenance rows (progress stream); no plan authority
     plan_review.py — `plan_task` entry: free write and read, the paid ask, typed `PLAN_*` refusals (§6 Plan construction and review)

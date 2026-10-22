@@ -124,12 +124,13 @@ Anyone can check a downloaded ZIP with `scripts/verify_windows_signature.ps1 -Ex
 
 ### Release proof capsule
 
-The artifact pipeline lives in ARCHITECTURE §8 and `.github/workflows/ci.yml`. The honesty invariants a change must preserve:
+ARCHITECTURE §8 and `.github/workflows/ci.yml` own the artifact pipeline. Preserve these invariants:
 
-- Builds and configured signing start beside the tests once the tag is valid; a tag with red tests still spends notarization and one eSigner signing and records attestations, but publishes no Release.
-- Proof and notes carry each consumed job's actual conclusion and the run's FLAKY and ACCEPTED tests; no tag waives a lane.
-- Publication is draft-first under a per-tag concurrency group; the remote annotated tag is revalidated against the event SHA before the draft and again before publishing, and a rerun never overwrites a published release.
-- Vendor-distribution smokes (Astra, RED OS) are reported evidence, never release authority: third-party registry reachability is outside the pipeline's control.
-- The AppImage smoke makes no native GTK/Qt claim; packaged native webview coverage is a separate Linux distribution contract.
-- `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1` is a local-builder escape hatch only: it skips Playwright's host-library installation, not browser-binary bundling, and a build using it must disclose that browser host compatibility was not locally proven.
-- Never represent a later checksum inventory as build-time provenance, an SBOM, or packaged smoke evidence that the original build did not create.
+- Valid tags start builds and configured signing beside tests. Red tests still spend notarization and one eSigner signing and record attestations, but publish no Release.
+- Proof/notes carry each job's actual conclusion and the run's FLAKY and ACCEPTED tests; no tag waives a lane.
+- Publication is draft-first with per-tag concurrency. Revalidate the remote annotated tag against the event SHA before drafting and publishing; reruns never overwrite published releases.
+- Astra/RED OS smokes are evidence, not release authority: third-party registry reachability is outside pipeline control.
+- Native Linux requires Jammy x86_64 and authenticated source indices; missing exact sources fail capture. Other builders keep the host backend. CI retains complete/partial sources for 30 days; recipient delivery remains a release obligation.
+- Release AppImage smoke stays headless. [Native GTK qualification](../../packaging/appimage/README.md) is separate.
+- Local-only `OUROBOROS_SKIP_PLAYWRIGHT_INSTALL_DEPS=1` skips host-library installation, not browser bundling; disclose unproven host compatibility.
+- Later checksum inventories are not build-time provenance, an SBOM, or original packaged smoke evidence.
