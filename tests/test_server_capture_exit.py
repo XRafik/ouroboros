@@ -35,11 +35,13 @@ def wait_for(predicate, proc, timeout=20):
 
 
 @contextmanager
-def running(scratch, generation, entrypoint="script", ingress="pipe"):
+def running(scratch, generation, entrypoint="script", ingress="pipe", broken_stream=""):
     gates = scratch / generation
     gates.mkdir()
     env = isolated_environment(scratch, REPO)
     env["OUROBOROS_HOST_SERVICE_PORT"] = "0"
+    if broken_stream:
+        env["OUROBOROS_TEST_BROKEN_STREAM"] = broken_stream
     if ingress in ("pipe", "eof"):
         env["OUROBOROS_LAUNCHER_STOP_STDIN"] = "1"
     elif ingress.startswith("early-"):
@@ -87,7 +89,7 @@ def request_stop(proc, ingress):
         proc.send_signal(signal.SIGINT if ingress == "sigint" else signal.SIGTERM)
 
 
-def stop_before_release(proc, gates, ingress, *, imported=False):
+def stop_before_release(proc, gates, ingress, *, imported=False, expected_code=None):
     assert not (gates / "release").exists()
     started = time.monotonic()
     request_stop(proc, ingress)
@@ -112,7 +114,8 @@ def stop_before_release(proc, gates, ingress, *, imported=False):
     assert stopped["outcome"]["confirmed"] >= 1
     assert stopped["children"] and all(row["code"] is not None for row in stopped["children"])
     assert stopped["records"] == []
-    expected = 130 if ingress == "sigint" else 143 if ingress == "sigterm" else 0
+    expected = expected_code if expected_code is not None else (
+        130 if ingress == "sigint" else 143 if ingress == "sigterm" else 0)
     if imported:
         assert code is None, "imported main must leave process exit to its caller"
     else:
@@ -211,6 +214,21 @@ def test_executable_quit_preserves_owed_capture_for_next_generation(tmp_path, en
         save_evidence(tmp_path, f"{entrypoint}-{ingress}")
 
 
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_closed_output_stream_cannot_hold_executable_capture(tmp_path, stream):
+    _, _, areas, _, _ = prepare_capture(tmp_path)
+    try:
+        with running(tmp_path, "held", "console", broken_stream=stream) as (proc, gates):
+            wait_for(lambda: all((gates / name).exists() for name in (
+                "ready.json", "ordinary-entered.json", "review-entered.json")), proc)
+            stop_before_release(proc, gates, "pipe", expected_code=120)
+            assert not (gates / "ordinary-returned.json").exists()
+            for area in areas.values():
+                assert (area / rc.EVIDENCE_DIRNAME / "result.bin").read_bytes() == EVIDENCE
+    finally:
+        save_evidence(tmp_path, "closed-" + stream)
+
+
 @pytest.mark.parametrize("ingress", ["pipe", SIGNAL_INGRESS[0]])
 @pytest.mark.timeout(90)
 def test_imported_main_leaves_exit_and_exceptions_to_caller(tmp_path, ingress):
@@ -283,7 +301,8 @@ def test_executable_does_not_turn_early_failures_into_success(tmp_path, entrypoi
 @pytest.mark.parametrize("signum", [None, signal.SIGINT, signal.SIGTERM] +
                          ([signal.SIGBREAK] if hasattr(signal, "SIGBREAK") else []))
 @pytest.mark.parametrize("panic", [False, True])
-def test_command_boundary_unwinds_before_exit_and_defers_to_panic(monkeypatch, signum, panic):
+@pytest.mark.parametrize("flush_error", [None, BrokenPipeError(), ValueError("closed stream")])
+def test_command_boundary_unwinds_before_exit_and_defers_to_panic(monkeypatch, signum, panic, flush_error):
     import server
     from ouroboros import server_control
 
@@ -304,6 +323,10 @@ def test_command_boundary_unwinds_before_exit_and_defers_to_panic(monkeypatch, s
         finally:
             calls.append("unwound")
 
+    if flush_error is not None:
+        def flush():
+            raise flush_error
+        monkeypatch.setattr(server.sys, "stdout", SimpleNamespace(flush=flush))
     monkeypatch.setattr(server, "main", main)
     monkeypatch.setattr(server_control, "_restart_stop_requested", panic)
     monkeypatch.setattr(server_control.os, "_exit", lambda code: calls.append(("exit", code)))

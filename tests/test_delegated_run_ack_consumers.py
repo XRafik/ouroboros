@@ -171,7 +171,7 @@ def test_a_same_attempt_cold_resume_keeps_the_restored_wake_and_its_ack(tmp_path
     if waited:
         from ouroboros.delegate_supervision import supervision_checkpoint
 
-        wake_id = supervision_checkpoint(live._ctx)["last_acknowledged_wake"]["wake_id"]
+        wake_id = supervision_checkpoint(live._ctx)["runs"]["run-1"]["last_acknowledged_wake"]["wake_id"]
         assert len(tool_rows) == 1 and '"status": "terminal"' in tool_rows[0]["content"]
         assert wake_id in tool_rows[0]["content"]
         assert _acks(tmp_path) == [("run-1", TASK, "1")]

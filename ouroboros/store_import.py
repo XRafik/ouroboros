@@ -649,10 +649,10 @@ def _build(tmp: pathlib.Path, tier: str, root: pathlib.Path, records: List[Recor
 
     with contextlib.closing(store.connect(tmp, tier, create=True)) as conn:
         conn.execute("PRAGMA synchronous = FULL")
-        conn.executescript(store._SCHEMA)
+        # executescript commits a pending transaction; BEGIN must be inside the script.
+        conn.executescript("BEGIN IMMEDIATE;\n" + store._SCHEMA)
         _derive_flag_columns(Txn(conn, root))  # prepare the empty NULL index before publishing
         conn.execute(f"PRAGMA application_id = {store._APPLICATION_ID[tier]}")
-        conn.execute("BEGIN IMMEDIATE")
         txn = Txn(conn, root)
         for task_id, document in records:
             txn.store_task(document, pending_drive=bool(o.pending_drive(root, task_id, document)))

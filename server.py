@@ -1579,8 +1579,11 @@ def executable_main() -> None:
         code = main()
         if exit_signal is not None:
             code = 128 + exit_signal
-        sys.stdout.flush()
-        sys.stderr.flush()
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except (OSError, ValueError):
+            code = code or 120  # Broken/closed output cannot restore the executor join.
         exit_after_shutdown(code)  # Accepted Panic retains its writes and exit.
     finally:
         for signum, handler in handlers.items():

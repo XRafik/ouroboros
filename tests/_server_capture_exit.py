@@ -140,6 +140,8 @@ def main():
                 yield listener
         finally:
             record(kind + "-socket-closed", closed=listener is not None and listener.fileno() == -1)
+            if stream := os.environ.get("OUROBOROS_TEST_BROKEN_STREAM"):
+                getattr(sys, stream).close()  # After real teardown, before command-boundary flushing.
 
     server_entrypoint.bound_service_socket = bound
     # The CLI treats --port 0 as absent; its environment default still supports port 0.

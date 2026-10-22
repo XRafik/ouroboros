@@ -195,6 +195,8 @@
     --surface-object-opaque: #1c1c1f;
     --surface-capsule: rgba(255, 255, 255, 0.09);
     --surface-capsule-hover: rgba(255, 255, 255, 0.135);
+    --chip-float: linear-gradient(var(--surface-capsule), var(--surface-capsule)), rgba(var(--shell-rgb), 0.98);
+    --chip-float-hover: linear-gradient(var(--surface-capsule-hover), var(--surface-capsule-hover)), rgba(var(--shell-rgb), 0.98);
     --surface-float: rgba(32, 32, 34, 0.92);
     --surface-tray: rgba(var(--neutral-rgb), 0.045);
     --surface-side: #0f0f11;
@@ -381,6 +383,8 @@
     --surface-object-opaque: var(--surface-object);
     --surface-capsule: #ffffff;
     --surface-capsule-hover: #f5f6f8;
+    --chip-float: var(--surface-capsule);
+    --chip-float-hover: var(--surface-capsule-hover);
     --surface-float: #ffffff;
     --surface-tray: rgba(var(--neutral-rgb), 0.03);
     --surface-side: #fafbfc;
@@ -912,8 +916,8 @@ textarea.ui-control { resize: vertical; }
 /* ---- Floating chrome ----------------------------------------------------------------------------------------------
    Controls that float over scrolling content (Main's header group) share one box: height, baseline and the pill
    corner; words, width, weight and tone stay the control's own (DESIGN §5). The group is invisible at rest and its
-   padding is cancelled by an equal negative margin, so grouping moves no control. A room's bar keeps its own reading
-   backing (Main: `.chat-page-header::before`), and what a bar discloses unfolds from the bar's bottom edge as one
+   padding is cancelled by an equal negative margin, so grouping moves no control. A room's separate capsules keep
+   their own reading backing, and what a bar discloses unfolds from the bar's bottom edge as one
    Shade (room_work.css), never as a box glued to one control or one group. */
 @media (pointer: coarse) {
     /* A coarse pointer (a phone) raises the shared touch minimum to a finger's 44px, and the whole family with it. */

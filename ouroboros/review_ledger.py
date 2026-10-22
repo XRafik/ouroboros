@@ -157,7 +157,7 @@ def index_path(drive_root: Any) -> pathlib.Path:
 
 @contextlib.contextmanager
 def _ledger_lock(drive_root: Any) -> Iterator[None]:
-    """Exclusive lock around compare-revision-then-write; fail-soft and loud."""
+    """Exclusive lock around compare-revision-then-write; failure permits no mutation."""
     from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
 
     lock_path = pathlib.Path(drive_root) / "locks" / LEDGER_LOCK_NAME
@@ -166,7 +166,7 @@ def _ledger_lock(drive_root: Any) -> Iterator[None]:
     except Exception:
         fd = None
     if fd is None:
-        log.warning("review ledger lock unavailable at %s; writing unlocked", lock_path)
+        raise OSError(f"review ledger lock unavailable at {lock_path}")
     try:
         yield
     finally:
@@ -323,19 +323,47 @@ def load_record(drive_root: Any, record_id: str) -> Optional[Dict[str, Any]]:
 
 
 def note_author_decision(drive_root: Any, record_id: str, decision: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Attach the author's informed decision to the record it continued from."""
+    """Attach the author's informed decision to the record it continued from.
+
+    Host facts on that decision are kept. Landing is not: a failed Git command
+    has not landed, so only ``note_commit_landing`` writes it, after success.
+    """
     def _mutate(payload: Dict[str, Any]) -> Dict[str, Any]:
+        from ouroboros.review_doctrine import decision_for_ledger
         from ouroboros.review_history import retain_author_decision
 
-        payload["author_decision"] = retain_author_decision(drive_root, payload, {"disposition": str(decision.get("disposition") or ""),
-                                      "rationale": str(decision.get("rationale") or ""),
-                                      "reused_record_id": str(decision.get("reused_record_id") or record_id)})
+        payload["author_decision"] = retain_author_decision(
+            drive_root, payload, decision_for_ledger(decision, record_id))
         return payload
 
     try:
         return revise_record(drive_root, record_id, _mutate)
     except (OSError, ValueError):
         log.warning("review ledger author decision not recorded on %s", record_id, exc_info=True)
+        return None
+
+
+def note_commit_landing(drive_root: Any, record_id: str, landing: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Record that this candidate's Git command succeeded. Same landing twice is a no-op."""
+    from ouroboros.review_doctrine import validate_landing, with_landing
+
+    try:
+        checked = validate_landing(landing)
+        current = load_record(drive_root, record_id) if checked is not None else None
+        author = current.get("author_decision") if isinstance(current, dict) else None
+        if checked is None or not isinstance(author, dict) or author.get("landing") == checked:
+            return current
+
+        def _mutate(payload: Dict[str, Any]) -> Dict[str, Any]:
+            from ouroboros.review_history import retain_author_decision
+
+            payload["author_decision"] = retain_author_decision(
+                drive_root, payload, with_landing(payload.get("author_decision") or {}, checked))
+            return payload
+
+        return revise_record(drive_root, record_id, _mutate)
+    except (OSError, ValueError):
+        log.warning("review ledger commit landing not recorded on %s", record_id, exc_info=True)
         return None
 
 
@@ -870,10 +898,12 @@ def _legacy_change_answer(raw: Dict[str, Any], answered: bool, status: str) -> D
 
 def _apply_raw(seat: Dict[str, Any], raw: Dict[str, Any]) -> None:
     from ouroboros.review_records import TYPED_FAILURE_FACT_KEYS
+    from ouroboros.reviewer_slot_config import review_cost_facts
 
-    status = str(raw.get("status") or "") or seat["status"]
+    outcome = raw.get("outcome") or {}
+    status = str(outcome.get("status") or raw.get("status") or "") or seat["status"]
     answered = status in ANSWERED_STATUSES
-    answers = raw.get("answers") if isinstance(raw.get("answers"), dict) else {}
+    answers = outcome.get("answers") or (raw.get("answers") if isinstance(raw.get("answers"), dict) else {})
     for part in answer_keys(seat["parts"]):
         if part not in seat["parts"]:
             continue
@@ -884,12 +914,18 @@ def _apply_raw(seat: Dict[str, Any], raw: Dict[str, Any]) -> None:
             seat["answers"][part] = _legacy_change_answer(raw, answered, status)
         else:
             seat["answers"][part] = _blank_answer(part, status if not answered else ANSWER_UNANSWERED)
+    seat.update({key: raw[key] for key in ("operation_id", "outcome_id", "usage_ref") if raw.get(key)})
     seat.update(status=status,
                 parts_answered=[p for p in seat["parts"] if seat["answers"][p]["status"] == ANSWER_RESPONDED],
                 usd=raw.get("cost_usd"),  # reported money and operation completion are separate facts
                 raw_text=str(raw.get("raw_text") or ""),
                 critical_count=sum(int(seat["answers"][p].get("critical") or 0) for p in seat["parts"]),
                 operation_state=str(raw.get("operation_state") or ("settled" if answered else status)))
+    seat.update(review_cost_facts(seat["usd"], route=seat["requested"]["route"], model=seat["requested"]["model"]))
+    if outcome:
+        seat["outcome"] = dict(outcome)
+    else:
+        seat.pop("outcome", None)  # A legacy terminal cannot retain an earlier pending interpretation.
     seat.update({key: raw[key] for key in TYPED_FAILURE_FACT_KEYS if key in raw})
     if not answered and not seat_open(seat) and not seat.get("reported_cause"):
         # The row outlives the raw answer and the side files: a failed seat keeps its producer's own
@@ -1192,6 +1228,18 @@ PROVENANCE_FIELDS = ("task_id", "root_task_id", "review_wave_id", "surface", "su
 ROW_PROVENANCE_FIELDS = ("subagent_id", "parts", "additional", "requested", "brief_sha")
 
 
+def _merge_evidence(*groups: Iterable[Any]) -> list:
+    """Explicit finding identities merge; otherwise only identical complete evidence deduplicates."""
+    merged = {}
+    for group in groups:
+        for value in group:
+            identity = (value.get("finding_id") or value.get("obligation_id")) if isinstance(value, dict) else None
+            key = ((str(value.get("seat_id") or ""), str(value.get("part") or ""), str(identity))
+                   if identity else json.dumps(value, sort_keys=True, default=str))
+            merged[key] = value
+    return list(merged.values())
+
+
 def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict[str, Any]:
     """The payload that settles a pending record: provenance is the dispatching
     attempt's (``prior`` — ``PROVENANCE_FIELDS`` and, per seat, ``ROW_PROVENANCE_FIELDS``
@@ -1200,21 +1248,48 @@ def settle_pending_payload(prior: Dict[str, Any], fresh: Dict[str, Any]) -> Dict
     status, cost, observed model and response refs, the verdict, the cost, the state —
     so a rules or brief update between dispatch and settle never rewrites what the
     seats actually read. ``revision``/``ts`` are ``revise_record``'s."""
-    settled = {**fresh, **{key: prior[key] for key in PROVENANCE_FIELDS if key in prior},
+    settled = {**prior, **fresh, **{key: prior[key] for key in PROVENANCE_FIELDS if key in prior},
                **({} if "preflight_execution" in prior else {"preflight_execution": {"status": "unobserved"}})}
-    before = {str(row.get("seat_id") or ""): row for row in prior.get("rows") or [] if isinstance(row, dict)}
+    if (prior.get("brief") or {}).get("dispute_input") is None:
+        from ouroboros.review_history import _gap
+        # Missing dispatch provenance cannot be filled from today's history.
+        settled["brief"] = {**(prior.get("brief") or {}), "dispute_input": {"previous_records": [], "gaps": [
+            _gap("paid wave has no saved dispute-input binding", record_id=prior.get("record_id"))]}}
+    before = {str(row.get("seat_id") or ""): row for row in prior.get("rows") or []}
+    incoming = {str(row.get("seat_id") or ""): row for row in fresh.get("rows") or []}
     rows = []
-    for row in fresh.get("rows") or []:
-        kept = before.get(str(row.get("seat_id") or ""))
-        if kept is None:
-            rows.append(row)
+    for key in dict.fromkeys([*before, *incoming]):
+        kept, row = before.get(key), incoming.get(key)
+        if kept is None or row is None:
+            rows.append(row if kept is None else kept)
             continue
-        prompt_refs = [ref for ref in kept.get("source_refs") or [] if str(ref.get("role") or "") != "response"]
-        response_refs = [ref for ref in row.get("source_refs") or [] if str(ref.get("role") or "") == "response"]
-        rows.append({**row, **{key: kept[key] for key in ROW_PROVENANCE_FIELDS if key in kept},
-                     "source_refs": prompt_refs + response_refs})
+        # A drain can return an old PENDING snapshot after another collector saved an answer.
+        # An operation identity is immutable; a different producer cannot replace this seat.
+        conflict = kept.get("operation_id") and row.get("operation_id") and kept["operation_id"] != row["operation_id"]
+        if conflict or (not seat_open(kept) and seat_open(row)):
+            rows.append(kept)
+            continue
+        refs = [ref for ref in kept.get("source_refs") or [] if str(ref.get("role") or "") != "response"]
+        refs += [ref for ref in row.get("source_refs") or [] if str(ref.get("role") or "") == "response"]
+        merged = {**kept, **row, **{field: kept[field] for field in ROW_PROVENANCE_FIELDS if field in kept}, "source_refs": refs}
+        if not row.get("outcome"):
+            merged.pop("outcome", None)
+        rows.append(merged)
     settled["rows"] = rows
-    settled["panel"] = {**settled.get("panel", {}), "not_reached": panel_not_reached(rows)}
+    still_open = any(seat_open(row) for row in rows)
+    counted = [row for row in rows if not row.get("additional")]
+    gate_reason = str((fresh.get("verdict") or {}).get("reason") or "")
+    verdict = reduce_verdict(counted, gate_blocked=gate_reason.startswith("gate_block"),
+                             gate_reason=gate_reason.removeprefix("gate_block:"), dispatch_refusal=settled.get("dispatch_refusal"),
+                             pending=any(seat_open(row) for row in counted))
+    verdict["per_row"].update({str(row.get("seat_id") or ""): row_verdict(row) for row in rows})
+    for name in (*HEAVY_VERDICT_FIELDS, "degraded_reasons"):
+        values = [*((prior.get("verdict") or {}).get(name) or []), *((fresh.get("verdict") or {}).get(name) or [])]
+        verdict[name] = _merge_evidence(values)
+    settled.update(verdict=verdict, state=STATE_PENDING if still_open else STATE_SETTLED,
+                   panel={**settled.get("panel", {}), "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)})
+    known = [float(row["usd"]) for row in rows if isinstance(row.get("usd"), (int, float))]
+    settled["cost"] = {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}
     return settled
 
 
@@ -1269,46 +1344,46 @@ def settle_from_collected(drive_root: Any, record_id: str, raws: Iterable[Dict[s
     if prior is None or prior.get("state") != STATE_PENDING:
         return prior
     by_slot = {str(raw.get("slot_id") or ""): raw for raw in raws if isinstance(raw, dict)}
-    task_id = str(prior.get("task_id") or "")
-    # The record's own severity policy (a skill wave's checklist rule) decides a late answer's
-    # critical findings exactly as it decided the dispatching attempt's.
-    policy = ((prior.get("brief") or {}).get("checklist") or {}).get("severity_policy")
-    rows, applied = [], []
-    for row in prior.get("rows") or []:
-        seat = json.loads(json.dumps(row, default=str))
-        raw = by_slot.get(str(seat.get("seat_id") or ""))
-        if raw is not None and seat_open(seat):
-            if isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
-                raw = {**raw, "answers": {part: apply_severity_policy(answer, policy)
-                                          for part, answer in raw["answers"].items()}}
-            _apply_raw(seat, raw)
-            applied.append(raw)
-            if seat.get("raw_text"):
-                seat.setdefault("source_refs", []).append(retain_text_source(
-                    drive_root, task_id, record_id=record_id, seat_id=str(seat["seat_id"]), role="response",
-                    part=",".join(seat.get("parts") or []), text=seat["raw_text"]))
-        seat.pop("raw_text", None)
-        rows.append(seat)
-    still_open = any(seat_open(seat) for seat in rows)
-    verdict = reduce_verdict([seat for seat in rows if not seat.get("additional")],
-                             dispatch_refusal=prior.get("dispatch_refusal"), pending=still_open)
-    verdict["per_row"].update({str(seat.get("seat_id") or ""): row_verdict(seat) for seat in rows if seat.get("additional")})
-    before = dict(prior.get("verdict") or {})
-    found = dict(zip(HEAVY_VERDICT_FIELDS, seat_findings(
-        applied, {str(seat.get("seat_id") or "") for seat in rows if seat.get("additional")})))
-    verdict.update({key: [*(before.get(key) or []), *found[key]] for key in HEAVY_VERDICT_FIELDS},
-                   degraded_reasons=list(before.get("degraded_reasons") or []))
-    known = [float(seat["usd"]) for seat in rows if isinstance(seat.get("usd"), (int, float))]
-    settled = {"rows": rows, "verdict": verdict, "state": STATE_PENDING if still_open else STATE_SETTLED,
-               "cost": {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}}
 
-    def _mutate(current: Dict[str, Any]) -> Dict[str, Any]:
-        # Another settlement (the author's own re-issue) may have landed meanwhile: it wins. A settled record
-        # can await nothing, so its lost seats join the seats never reached, with their cause.
-        if current.get("state") != STATE_PENDING:
-            return current
-        return {**current, **settled, "panel": {**dict(current.get("panel") or {}),
-                                                "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)}}
+    def _mutate(prior: Dict[str, Any]) -> Dict[str, Any]:
+        if prior.get("state") != STATE_PENDING:
+            return prior
+        task_id = str(prior.get("task_id") or "")
+        # The record's own severity policy (a skill wave's checklist rule) decides a late answer's
+        # critical findings exactly as it decided the dispatching attempt's.
+        policy = ((prior.get("brief") or {}).get("checklist") or {}).get("severity_policy")
+        rows, applied = [], []
+        for row in prior.get("rows") or []:
+            seat = json.loads(json.dumps(row, default=str))
+            raw = by_slot.get(str(seat.get("seat_id") or ""))
+            if (raw is not None and seat_open(seat) and (not seat.get("operation_id")
+                    or not raw.get("operation_id") or seat["operation_id"] == raw["operation_id"])):
+                if not raw.get("outcome") and isinstance(policy, dict) and isinstance(raw.get("answers"), dict):
+                    raw = {**raw, "answers": {part: apply_severity_policy(answer, policy)
+                                              for part, answer in raw["answers"].items()}}
+                _apply_raw(seat, raw)
+                applied.append(raw)
+                if seat.get("raw_text"):
+                    seat.setdefault("source_refs", []).append(retain_text_source(
+                        drive_root, task_id, record_id=record_id, seat_id=str(seat["seat_id"]), role="response",
+                        part=",".join(seat.get("parts") or []), text=seat["raw_text"]))
+            seat.pop("raw_text", None)
+            rows.append(seat)
+        still_open = any(seat_open(seat) for seat in rows)
+        verdict = reduce_verdict([seat for seat in rows if not seat.get("additional")],
+                                 dispatch_refusal=prior.get("dispatch_refusal"), pending=any(seat_open(seat) for seat in rows if not seat.get("additional")))
+        verdict["per_row"].update({str(seat.get("seat_id") or ""): row_verdict(seat) for seat in rows if seat.get("additional")})
+        before = dict(prior.get("verdict") or {})
+        found = dict(zip(HEAVY_VERDICT_FIELDS, seat_findings(
+            applied, {str(seat.get("seat_id") or "") for seat in rows if seat.get("additional")})))
+        verdict.update({key: _merge_evidence(before.get(key) or [], found[key]) for key in HEAVY_VERDICT_FIELDS},
+                       degraded_reasons=list(before.get("degraded_reasons") or []))
+        known = [float(seat["usd"]) for seat in rows if isinstance(seat.get("usd"), (int, float))]
+        settled = {"rows": rows, "verdict": verdict, "state": STATE_PENDING if still_open else STATE_SETTLED,
+                   "cost": {"usd": round(sum(known), 6), "unknown": len(known) < len(rows)}}
+
+        return {**prior, **settled, "panel": {**dict(prior.get("panel") or {}),
+                                            "not_reached": panel_not_reached(rows, lost_is_terminal=not still_open)}}
 
     return revise_record(drive_root, record_id, _mutate)
 
@@ -1400,7 +1475,8 @@ __all__ = [
     "newest_rotation_ts", "index_stamp", "surface_records",
     "build_rows", "build_wave_record",
     "distinct_model_facts", "find_reusable", "index_path", "index_row", "ledger_dir", "ledger_root", "load_record",
-    "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision", "panel_facts", "read_source",
+    "mark_provenance_unknown", "new_record_id", "normalize_model_name", "note_author_decision",
+    "note_commit_landing", "panel_facts", "read_source",
     "recent_records", "record_path", "record_sources_resolvable", "reduce_verdict", "retain_text_source", "reuse_key_digest",
     "revise_record", "row_verdict", "rows_from_plan", "seat_findings", "seat_open", "settle_from_collected",
     "settle_pending_payload", "single_question_part",
