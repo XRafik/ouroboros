@@ -6,7 +6,7 @@ The observations share the capability JSON store; old stores need no migration.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -29,6 +29,8 @@ class WindowRecord:
     accepted: int = 0
     declared: tuple[WindowLimit, ...] = ()
     accepted_at: str = ""
+    contradicted_by: Optional[WindowLimit] = None
+    retired_ack: dict = field(default_factory=dict)
 
     @property
     def usable(self) -> Optional[int]:
@@ -122,6 +124,12 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True,
                                   str(getattr(evidence, "source", None) or getattr(evidence, "evidence_source", "metadata")),
                                   str(getattr(evidence, "ts", "")))
     declared = tuple(limits.values())
+    server = getattr(evidence, "server_window", {})
+    contradiction = WindowLimit(**server) if server else captured.contradicted_by if captured else None
+    if contradiction and (ce._age_seconds(contradiction.observed_at) > ce._CONFIRMED_TTL_SEC or not any(
+            limit.source in {ce.SOURCE_OWNER_ACK, ce.SOURCE_USER_SETTING} and
+            (limit.tokens, limit.kind) != (contradiction.tokens, contradiction.kind) for limit in declared)):
+        contradiction = None
     # Only a disproved stated limit yields to an accepted INPUT. An acceptance
     # below a stated total proves no reply room; without a statement capacity stays unknown.
     if any(accepted > limit.tokens for limit in limits.values()):
@@ -131,7 +139,9 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True,
         if row.get("refused"):
             if ce._age_seconds(row["ts"]) <= ce._CONFIRMED_TTL_SEC and not any(
                     later.get("accepted", 0) > row["refused"] for later in rows[index + 1:]):
-                limits[row["kind"]] = WindowLimit(row["refused"], row["kind"], "refusal", row["ts"])
+                current = limits.get(row["kind"])
+                if current is None or row["refused"] < current.tokens:
+                    limits[row["kind"]] = WindowLimit(row["refused"], row["kind"], "refusal", row["ts"])
             break
     output = getattr(evidence, "response_limit", {}) or {}
     maximum = output.get("max_output_tokens", 0)
@@ -139,7 +149,9 @@ def resolve_window(evidence, reserve: int, *, root=None, bound: bool = True,
                         WindowLimit(maximum, "output", output.get("source", "metadata"),
                                     output.get("observed_at", "")) if maximum and not output.get("stale")
                         else captured.output if captured else None,
-                        reserve=reserve, accepted=accepted, declared=declared, accepted_at=accepted_at)
+                        reserve=reserve, accepted=accepted, declared=declared, accepted_at=accepted_at,
+                        contradicted_by=contradiction,
+                        retired_ack=getattr(evidence, "retired_ack", {}) or (captured.retired_ack if captured else {}))
 
 
 def record_refusal(usage, plan) -> None:

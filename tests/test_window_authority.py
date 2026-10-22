@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from ouroboros import capability_evidence as ce, context_budget as cb
-from ouroboros.context_window import record_refusal, resolve_window
+from ouroboros.context_window import record_observation, record_refusal, resolve_window
 from ouroboros.loop_llm_call import classify_llm_exception
 
 
@@ -119,3 +119,81 @@ def test_clear_window_ack_is_exact_route_and_audited(tmp_path, monkeypatch, mism
     if not mismatch:
         assert json.loads(response.body)["ack"]["removed"]
         assert audit[0][0] == "capability_ack" and audit[0][1]["window_tokens"] == 0
+
+
+@pytest.mark.parametrize("ack,role,expected,conflict", [
+    (0, 0, 400000, False), (1000000, 0, 1000000, True),
+    (1000000, 250000, 250000, True), (1000000, 400000, 400000, False),
+])
+def test_discovery_continues_beside_owner_declarations(tmp_path, monkeypatch, ack, role, expected, conflict):
+    from datetime import datetime, timedelta, timezone
+
+    now, calls = datetime.now(timezone.utc), []
+    monkeypatch.setattr(ce, "utc_now", lambda: now)
+    monkeypatch.setattr(ce, "utc_now_iso", lambda: now.isoformat())
+    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: calls.append(1) or (400000, now.isoformat()))
+    route = dict(provider="openai", model="openai::fixture")
+    if ack:
+        ce.record_owner_ack(tmp_path, **route, window_tokens=ack)
+    def read(fetch):
+        return ce.with_role_window(ce.probe(tmp_path, **route, allow_fetch=fetch), role)
+
+    evidence = read(True)
+    assert evidence.window_tokens == expected and len(calls) == 1
+    record = resolve_window(evidence, 65536, root=tmp_path)
+    assert bool(record.contradicted_by) is conflict
+    if conflict:
+        assert record.contradicted_by.tokens == 400000
+    if role:
+        assert evidence.ts == ""  # No metadata date invented for an owner's edit.
+    read(True)
+    assert len(calls) == 1
+    now += timedelta(seconds=ce._CONFIRMED_TTL_SEC + 1)
+    hot = read(False)
+    assert len(calls) == 1 and resolve_window(hot, 65536, root=tmp_path).contradicted_by is None
+    refreshed = read(True)
+    assert len(calls) == 2 and refreshed.window_tokens == expected
+
+
+@pytest.mark.parametrize("declared,expected", [(250000, 250000), (1000000, 400000)])
+def test_refusal_caps_but_never_raises_a_declaration(tmp_path, monkeypatch, declared, expected):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    monkeypatch.setattr(ce, "utc_now", lambda: now)
+    monkeypatch.setattr(ce, "utc_now_iso", lambda: now.isoformat())
+    evidence = ce.CapabilityEvidence(declared, "asserted", "user_setting", "route")
+    record_observation(tmp_path, "route", refused=400000)
+    assert resolve_window(evidence, 65536, root=tmp_path).total.tokens == expected
+    now += timedelta(seconds=ce._CONFIRMED_TTL_SEC + 1)
+    assert resolve_window(evidence, 65536, root=tmp_path).total.tokens == declared
+
+
+def test_process_cached_metadata_keeps_its_date_and_refreshes_after_expiry(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from ouroboros.llm import LLMClient
+    import requests
+
+    now, calls = datetime.now(timezone.utc), []
+    monkeypatch.setattr(ce, "utc_now", lambda: now)
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    from ouroboros import utils
+    monkeypatch.setattr(utils, "utc_now_iso", lambda: now.isoformat())
+    monkeypatch.setattr(LLMClient, "_SUPPORTED_PARAMS_FETCHED", False)
+    monkeypatch.setattr(LLMClient, "_CAPABILITIES_FETCH_OK", False)
+    monkeypatch.setattr(LLMClient, "_CONTEXT_LENGTH_CACHE", {})
+    monkeypatch.setattr(LLMClient, "_CONTEXT_LENGTH_OBSERVED_AT", "")
+    monkeypatch.setattr(LLMClient, "_SUPPORTED_PARAMS_CACHE", {})
+    monkeypatch.setattr(requests, "get", lambda *a, **k: calls.append(1) or SimpleNamespace(
+        status_code=200, json=lambda: {"data": [{"id": "fixture/model", "context_length": 400000,
+                                               "top_provider": {"max_completion_tokens": 65536}}]}))
+    route = dict(provider="openrouter", model="fixture/model")
+    first = ce.probe(tmp_path, **route)
+    now += timedelta(hours=1)
+    cached = ce.probe(tmp_path, **route, force=True)
+    assert cached.ts == first.ts and len(calls) == 1
+    now += timedelta(seconds=ce._CONFIRMED_TTL_SEC)
+    stale = ce.probe(tmp_path, **route, allow_fetch=False)
+    assert stale.stale and stale.ts == first.ts and len(calls) == 1
+    fresh = ce.probe(tmp_path, **route)
+    assert fresh.ts == now.isoformat() and not fresh.stale and len(calls) == 2

@@ -187,6 +187,7 @@ class CapabilityEvidence:
     response_limit: Dict[str, Any] = field(default_factory=dict)
     window_kind: str = "total"  # metadata may explicitly state an input-only limit
     retired_ack: Dict[str, Any] = field(default_factory=dict)
+    server_window: Dict[str, Any] = field(default_factory=dict)
 
     def to_json(self) -> Dict[str, Any]:
         return {
@@ -206,6 +207,7 @@ class CapabilityEvidence:
             "response_limit": self.response_limit,
             "window_kind": self.window_kind,
             "retired_ack": self.retired_ack,
+            "server_window": self.server_window,
         }
 
 
@@ -1072,16 +1074,17 @@ def _openai_compatible_metadata_window(
 
 def _provider_metadata_window(
     provider: str, model: str, base_url: str, allow_fetch: bool, api_key: Optional[str] = None
-) -> int:
-    """Best-effort live window from provider metadata. 0 = no metadata source."""
+) -> Tuple[int, str]:
+    """Provider window and its observation time; cached facts keep their original date."""
     p = str(provider or "").strip().lower()
     # OpenRouter publishes context_length in /models (one cached fetch).
     if "openrouter" in p or (not p and "/" in str(model or "")):
         try:
             from ouroboros.llm import LLMClient
-            return int(LLMClient.openrouter_context_length(model, allow_fetch=allow_fetch) or 0)
+            window = LLMClient.openrouter_context_length(model, allow_fetch=allow_fetch)
+            return int(window or 0), LLMClient._CONTEXT_LENGTH_OBSERVED_AT
         except Exception:
-            return 0
+            return 0, ""
     # CW6: OpenAI-compatible /models probe (vLLM/Ollama/...) before falling to unprobeable.
     if p in {"openai-compatible", "minimax"}:
         if p == "minimax" and api_key is None:
@@ -1090,10 +1093,11 @@ def _provider_metadata_window(
                 api_key = str((runtime_settings() or {}).get("MINIMAX_API_KEY") or "")
             except Exception:
                 api_key = ""
-        return _openai_compatible_metadata_window(model, base_url, allow_fetch, api_key=api_key, provider=p)
+        window = _openai_compatible_metadata_window(model, base_url, allow_fetch, api_key=api_key, provider=p)
+        return window, utc_now_iso() if window else ""
     # GigaChat's /models (aget_models) lists model ids but does NOT publish a per-model
     # context window, so a gigachat route stays unprobeable (owner-ack path) — no probe.
-    return 0
+    return 0, ""
 
 
 def _local_health_window(model: str) -> int:
@@ -1191,7 +1195,7 @@ def _probe_window(
 ) -> CapabilityEvidence:
     """Resolve Capability Evidence for a route, using the cache unless ``force``.
 
-    Owner-ack wins; local capacity is read from the serving instance on every
+    Local capacity is read from the serving instance on every
     call. Remote routes use fresh cache -> provider metadata -> unprobeable.
     Network probing is skipped when allow_fetch=False (hot-path callers)."""
     fp = route_fingerprint(provider=provider, base_url=base_url, model=model, headers=headers, options=options)
@@ -1201,18 +1205,6 @@ def _probe_window(
     account_bound = all(account_options.get(key) for key in (
         "source_id", "credential_profile_id", "account_fingerprint",
     ))
-
-    # Owner-ack always wins as ASSERTED evidence for its exact route.
-    ack = data.get("owner_acks", {}).get(fp)
-    if ack and not retired_owner_ack(ack) and (not subscription or account_bound):
-        return CapabilityEvidence(
-            window_tokens=int(ack.get("window_tokens") or 0), status=STATUS_ASSERTED,
-            source=SOURCE_OWNER_ACK, route_fp=fp, model=model, provider=provider,
-            ts=str(ack.get("ts") or ""), detail=f"owner-ack by {ack.get('owner') or 'owner'}",
-            source_id=str(account_options.get("source_id") or ""),
-            credential_profile_id=str(account_options.get("credential_profile_id") or ""),
-            account_fingerprint=str(account_options.get("account_fingerprint") or ""),
-        )
 
     if use_local:
         # Stored local rows have no serving-instance binding and may contain
@@ -1259,24 +1251,13 @@ def _probe_window(
             ev = CapabilityEvidence(0, STATUS_FAILED, SOURCE_NONE, fp, model, provider,
                                     ts=utc_now_iso(), detail=f"model catalog unavailable: {type(exc).__name__}")
         _store_evidence(drive_root, "probes", ev.route_fp, ev.to_json())
-        if (not ev.stale and ev.provenance and parse_deadline_ts(ev.ts)
-                and ev.source_id and ev.credential_profile_id and ev.account_fingerprint):
-            # Metadata established the missing identity for this exact account.
-            # Reuse only its owner authority, never stale metadata over this read.
-            bound_options = {**account_options, "source_id": ev.source_id,
-                             "credential_profile_id": ev.credential_profile_id,
-                             "account_fingerprint": ev.account_fingerprint}
-            acknowledged = probe(drive_root, provider=provider, model=model, base_url=base_url,
-                                 headers=headers, options=bound_options, allow_fetch=False)
-            if acknowledged.source == SOURCE_OWNER_ACK:
-                return acknowledged
         return ev
 
     # Live probe.
     window = 0
-    source = SOURCE_NONE
+    source, observed_at = SOURCE_NONE, ""
     if window <= 0:
-        meta = _provider_metadata_window(provider, model, base_url, allow_fetch=allow_fetch, api_key=api_key)
+        meta, observed_at = _provider_metadata_window(provider, model, base_url, allow_fetch=allow_fetch, api_key=api_key)
         if meta > 0:
             window, source = meta, SOURCE_PROVIDER_METADATA
 
@@ -1286,7 +1267,7 @@ def _probe_window(
     if window <= 0 and allow_generative and not use_local:
         gwin, gstatus, gdetail = _generative_probe_window(provider, model, base_url, api_key=api_key)
         if gwin > 0:
-            window, source = gwin, SOURCE_GENERATIVE_PROBE
+            window, source, observed_at = gwin, SOURCE_GENERATIVE_PROBE, utc_now_iso()
         elif gstatus == STATUS_FAILED:
             ev = CapabilityEvidence(0, STATUS_FAILED, SOURCE_NONE, fp, model, provider,
                                     ts=utc_now_iso(), detail=gdetail)
@@ -1294,7 +1275,9 @@ def _probe_window(
             return ev
 
     if window > 0:
-        ev = CapabilityEvidence(window, STATUS_CONFIRMED, source, fp, model, provider, ts=utc_now_iso(), detail="live probe")
+        ev = CapabilityEvidence(window, STATUS_CONFIRMED, source, fp, model, provider,
+                                ts=observed_at, stale=_age_seconds(observed_at) > _CONFIRMED_TTL_SEC,
+                                detail="provider metadata")
         _store_evidence(drive_root, "probes", fp, ev.to_json())
         return ev
 
@@ -1319,15 +1302,36 @@ def _probe_window(
     return ev
 
 
+def with_role_window(evidence: CapabilityEvidence, window: int) -> CapabilityEvidence:
+    """The role declaration wins without borrowing a metadata observation date."""
+    from dataclasses import replace
+
+    return replace(evidence, window_tokens=window, window_kind="total", status=STATUS_ASSERTED,
+                   source=SOURCE_USER_SETTING, stale=False, ts="", detail="role Window set by owner") if window else evidence
+
+
 def probe(drive_root: Any, **route) -> CapabilityEvidence:
     """Resolve independent context and output facts; one owner's window ack cannot suppress output discovery."""
-    from dataclasses import asdict
+    from dataclasses import asdict, replace
     from ouroboros.response_limits import probe_response_limit
 
     evidence = _probe_window(drive_root, **route)
+    if is_known(evidence, require_fresh=True):
+        evidence.server_window = dict(tokens=evidence.window_tokens, kind=evidence.window_kind,
+                                      source=evidence.source, observed_at=evidence.ts)
     ack = _load(drive_root).get("owner_acks", {}).get(evidence.route_fp)
+    options = {**(route.get("options") or {}), **{key: getattr(evidence, key) for key in (
+        "source_id", "credential_profile_id", "account_fingerprint") if getattr(evidence, key)}}
+    bound = route["provider"] != "claudexor" or all(options.get(key) for key in (
+        "source_id", "credential_profile_id", "account_fingerprint"))
     if retired_owner_ack(ack):
         evidence.retired_ack = {key: ack.get(key) for key in ("window_tokens", "ts", "note")}
+    elif ack and bound:
+        evidence = replace(evidence, window_tokens=int(ack.get("window_tokens") or 0),
+            window_kind="total", status=STATUS_ASSERTED, source=SOURCE_OWNER_ACK, stale=False,
+            ts=str(ack.get("ts") or ""), detail=f"owner-ack by {ack.get('owner') or 'owner'}",
+            **{key: str(options.get(key) or "") for key in (
+                "source_id", "credential_profile_id", "account_fingerprint")})
     evidence.response_limit = asdict(probe_response_limit(drive_root, evidence, route))
     return evidence
 

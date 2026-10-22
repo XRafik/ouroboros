@@ -169,7 +169,7 @@ def test_generative_probe_not_short_circuited_by_stale_unprobeable_cache(monkeyp
         "route_fp": fp, "model": "openai/gpt-5.5", "provider": "openai",
         "ts": ce.utc_now_iso(), "detail": "stale lazy unprobeable",
     })
-    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: 0)
+    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: (0, ce.utc_now_iso()))
     monkeypatch.setattr(ce, "_generative_probe_window", lambda *a, **k: (2_000_000, ce.STATUS_CONFIRMED, "probed"))
     ev = ce.probe(tmp_path, provider="openai", model="openai/gpt-5.5", allow_generative=True, allow_fetch=True)
     assert ev.status == ce.STATUS_CONFIRMED and ev.window_tokens == 2_000_000

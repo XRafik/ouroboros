@@ -540,7 +540,7 @@ def test_stale_evidence_arrives_marked_and_dated(monkeypatch, tmp_path):
     model = "anthropic/claude-fable-5"
     old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=5)).isoformat()
     _seed_evidence(monkeypatch, tmp_path, model, window=1_000_000, status="confirmed", ts=old)
-    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: 0)
+    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: (0, ce.utc_now_iso()))
     monkeypatch.setattr(ce, "_metadata_fetch_transport_failed", lambda *a, **k: True)
 
     resolved = resolve_reviewer_window(model)
@@ -640,7 +640,7 @@ def test_expired_evidence_is_re_sourced_instead_of_wedging_the_process(monkeypat
     model = "openai/gpt-5.6-terra"
     now = datetime.datetime.now(datetime.timezone.utc)
     _seed_evidence(monkeypatch, tmp_path, model, window=1_050_000, status="confirmed", ts=now.isoformat())
-    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: 1_050_000)
+    monkeypatch.setattr(ce, "_provider_metadata_window", lambda *a, **k: (1_050_000, ce.utc_now_iso()))
     monkeypatch.setattr(ce, "_metadata_fetch_transport_failed", lambda *a, **k: False)
 
     assert resolve_reviewer_window(model).stale is False
