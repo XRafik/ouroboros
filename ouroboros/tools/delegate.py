@@ -275,27 +275,15 @@ def _start_request(ctx: ToolContext, route: "DelegationRoute", authority: "Deleg
     target = route.resolved_target()  # ABI-4: one typed read; strings only at the wire
     request: Dict[str, Any] = {
         "prompt": text,
-        # Built from the SHAPE plus the task contract, so a mutating delegated
-        # child is told that its boundary is a request and not a fact — the same
-        # disclosure the durable record and the parent's result carry, in the one
-        # place the child can read — and the nanny's own objective rides along
-        # structurally (`_assignment_instructions`).
+        # The compiled instructions disclose requested isolation, never claim confinement.
         "instructions": instructions,
-        # The engine's default authPreference is `auto` = subscription-first WITH
-        # policy fallback to a paid API key. That fallback is invisible to us and
-        # would be settled at a confident $0.00 — the one shape the ledger must
-        # never produce. Ask for the substrate we are actually claiming.
+        # Engine `auto` can fall back to a paid key invisibly; request the claimed substrate.
         "authPreference": "subscription",
-        # The run SHAPE comes from the derived authority, not from re-deriving it
-        # here: one predicate decides what this child may do, and the mode follows it.
+        # The run shape follows the derived authority: one predicate decides what this child may do.
         "mode": authority.mode,
         "scope": {"kind": "project", "root": root, **({"ephemeral": True} if ephemeral else {})},
-        # PIN, not preference: `primaryHarness` only fronts the engine's
-        # auto-pool, which still holds every other doctor-OK harness — the run
-        # could fail over onto a route the owner never configured. The
-        # explicit one-element `harnesses` pool is the engine's pinning
-        # contract (its own MCP surface spells a forced route exactly this
-        # way): the child rides THIS route or the start refuses typed.
+        # Pin via one-element `harnesses` pool (`primaryHarness` only fronts the auto-pool):
+        # the child rides THIS route or the start refuses typed.
         "harnesses": [target.provider_route],
         "primaryHarness": target.provider_route,
         "access": authority.access,
@@ -447,7 +435,7 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
         (request_body, route, authority, root, key, project_id, owned_project_id,
          project_persistent, seconds, snapshot_id, target_root, baseline_sha,
          authority_source, resource_ref, processing_info, binding_fingerprint,
-         seconds_basis, continuation) = binding
+         seconds_basis, continuation, ttl_info) = binding
         invocation_id = retry_token
     else:
         route = actor["route"]
@@ -578,6 +566,12 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
                                           seconds, instructions, execution_root, continuation=continuation.request, ephemeral=ephemeral,
                                           **({"directory_options": directory_options} if directory_options else {}))
             request_body, processing_info = _processing_start_request(request_body, actor, gateway, route)
+            from ouroboros.delegate_custody_current import run as current_custody_run
+            from ouroboros.effort_evidence import session_prompt_cache_ttl_request
+
+            ttl_info = session_prompt_cache_ttl_request(
+                request_body, route_id=route.route_id, gateway=gateway,
+                continuation_from=current_custody_run(drive, continuation_token) if continuation_token else None)
             history_facts["access"] = request_body["access"]
             key = custody.idempotency_key(getattr(ctx, "task_id", ""), route.route_id,
                                           access, authority.mode, authority.isolation,
@@ -599,6 +593,7 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
             # Recovery proves the original actor and compiled brief before adoption.
             **actor_facts,
             processing=processing_info,
+            prompt_cache_ttl=ttl_info,
         )
         if not requested and not claim_refusal:
             claim_refusal = {"reason": "start_request_row_unwritable", "detail":
@@ -665,7 +660,7 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
         key=key, access=access, root=root, seconds=seconds,
         invocation_id=invocation_id, project_id=project_id,
         project_owned=bool(owned_project_id), project_persistent=project_persistent,
-        **actor_facts, **snapshot_facts, processing=processing_info,
+        **actor_facts, **snapshot_facts, processing=processing_info, prompt_cache_ttl=ttl_info,
         capture_mode=("engine_directory" if resource_ref.get("workspace_kind") == "directory" else
                       _CAPTURE_DELEGATED_SNAPSHOT if snapshot_id else ""),
         max_seconds_basis=seconds_basis, row_effort=None if recovering else actor.get("row_effort"),
@@ -675,7 +670,8 @@ def _delegate_start(ctx: ToolContext, prompt: str, max_seconds: Optional[int] = 
     return _started_payload(handle, run_id, route, access, authority, root,
                             durable=durable, recovering=recovering, invocation_id=invocation_id,
                             snapshot_id=snapshot_id, target_root=target_root, baseline_sha=baseline_sha,
-                            resource_ref=resource_ref, processing=processing_info, continuation=continuation.facts,
+                            resource_ref=resource_ref, processing=processing_info, prompt_cache_ttl=ttl_info,
+                            continuation=continuation.facts,
                             max_seconds=seconds, max_seconds_basis=seconds_basis,
                             engine_version=str(getattr(gateway, "engine_version", "") or ""),
                             snapshot_facts=_snapshot_facts(snapshot),
@@ -686,8 +682,8 @@ def _started_payload(handle: Dict[str, Any], run_id: str, route: Any, access: st
                      authority: "DelegatedRunShape", root: str, *, durable: bool,
                      recovering: bool, invocation_id: str, snapshot_id: str, target_root: str,
                      baseline_sha: str, engine_version: str = "", resource_ref=None, processing=None,
-                     continuation=None, max_seconds: int = 0, max_seconds_basis: str = "", snapshot_facts=None,
-                     effort_fact=None) -> ToolResult:
+                     prompt_cache_ttl=None, continuation=None, max_seconds: int = 0, max_seconds_basis: str = "",
+                     snapshot_facts=None, effort_fact=None) -> ToolResult:
     """The one author of delegate_start's started result (note + payload).
 
     The AUTHORITY guidance and the CUSTODY warning are independent facts about the same
@@ -749,8 +745,8 @@ def _started_payload(handle: Dict[str, Any], run_id: str, route: Any, access: st
         payload["pending_invocation_id"] = str(invocation_id or "")
     # Optional receipts expose the captured processing, continuation and snapshot
     # facts; copy the continuation binding before publishing it to the nanny.
-    for key, value in (("processing", processing), ("continuation", dict(continuation or {})),
-                       ("snapshot", snapshot_facts)):
+    for key, value in (("processing", processing), ("prompt_cache_ttl", prompt_cache_ttl),
+                       ("continuation", dict(continuation or {})), ("snapshot", snapshot_facts)):
         if value:
             payload[key] = value
     if snapshot_id:

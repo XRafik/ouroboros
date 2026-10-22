@@ -69,7 +69,7 @@ def session_custody_attribution(scope: Any) -> Tuple[str, str, Dict[str, str]]:
 def session_failure_identity(usage: Dict[str, Any]) -> Dict[str, Any]:
     """The started-run identity a failed reviewer's custody keeps (route, attempt, receipt)."""
     return {key: usage[key] for key in ("provider", "requested_route", "delegated_route", "observed_attempt",
-                                        "claudexor") if key in usage}
+                                        "claudexor", "review_source_delivery") if key in usage}
 
 
 def review_event_identity(request: Any) -> Dict[str, str]:

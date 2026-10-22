@@ -268,6 +268,7 @@ class ChatOutbound(ChatReferenceFields):
     card_row: NotRequired[Literal["timeline", "reviews"]]
     card_row_id: NotRequired[str]
     card_row_revision: NotRequired[int]  # canonical source order, independent of delivery timestamp
+    terminal_receipt: NotRequired[Literal["retained_work"]]  # a placed row typed as a terminal receipt, not progress
     late_evidence: NotRequired[Dict[str, Any]]  # late review identity/revision + exact applied source; no transcript
     # Event-time human presentation; raw task/project ids remain machine keys.
     target_label: NotRequired[str]
@@ -1112,6 +1113,8 @@ class TaskDetailResponse(TypedDict, total=False):
     artifacts: List[Dict[str, Any]]  # Open result rows; a nested file carries additive ``relpath``.
     # Per result directory: {name, files, size, excluded, available} for its ``?archive=`` ZIP.
     artifact_archives: Dict[str, Dict[str, Any]]
+    # Wrap up's saved-work document {name, request_id}: ``?wrap_up=<request_id>`` writes it on read; no size/digest.
+    wrap_up_document: Dict[str, str]
     cost_breakdown: TaskCostBreakdown
     history_retention: HistoryRetentionProjection
     model_waits: Dict[str, Any]

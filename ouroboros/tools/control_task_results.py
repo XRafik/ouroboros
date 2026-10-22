@@ -100,6 +100,13 @@ def _subtask_outcome_summary(data: Dict[str, Any], receipts: list | None = None)
         if envelope:
             custody["trigger"] = str(envelope.get("trigger") or "")
             custody["audit_status"] = str(envelope.get("audit_status") or "unknown")
+            if isinstance(envelope.get("owner_stop_children"), dict):
+                receipt = envelope["owner_stop_children"]
+                custody["owner_stop_children"] = {
+                    "count": len(receipt.get("children") or []),
+                    "full_source": receipt.get("full_source"),
+                    **({"gap": receipt["gap"]} if receipt.get("gap") else {}),
+                }
             for field in ("open_run_ids", "pending_invocation_ids", "undisposed_patch_run_ids", "terminal_runs"):
                 values = envelope.get(field)
                 values = list(values) if isinstance(values, list) else []
@@ -228,7 +235,7 @@ def get_task_result_entry() -> ToolEntry:
             "include_focus_source": {"type": "boolean", "default": False, "description": "Read the exact bytes this task's focus source_ref answered when the focus was authored (the retained_source of an [INDEPENDENT_ROOTS] row); same bounds contract as include_completion_source."},
             "focus_source_sha256": {"type": "string", "default": "", "description": "With include_focus_source: select the retained source by the sha256 the roster row quoted, so a later focus of the same author cannot substitute its evidence."},
             "review_source_sha256": {"type": "string", "default": "", "description": "Root turns: read only the exact acceptance-review source named by a late-evidence digest, pinned to the physical task_id even after a retry. Works across forked/empty drives. Without a range returns complete_chars/hash; then use source_start_char/source_end_char to read exact text. Does not include authority."},
-            "delegated_output_sha256": {"type": "string", "default": "", "description": "Read a retained full delegated output that this PHYSICAL task_id's own receipts publish, pinned even after a retry: call exactly the source_read of a staged_output or other_staged_outputs ref (unordered; each says complete) named in public summary delegated_custody.terminal_runs or predecessor_terminal_runs (it names the publishing task; the ref's task_id is only the staging store). Works across forked/empty drives and after drive cleanup. Omit ranges for complete_chars/hash, then use source_start_char/source_end_char. Never marks the run's result as read; does not include authority."},
+            "delegated_output_sha256": {"type": "string", "default": "", "description": "Read a retained full delegated output that this PHYSICAL task_id's own receipts publish, pinned even after a retry: call exactly the source_read of a staged_output/other_staged_outputs or terminal_observation/other_terminal_observations ref (unordered; each says complete; an observation is the exact engine read-back, not proof of full output) named in public summary delegated_custody.terminal_runs or predecessor_terminal_runs (it names the publishing task; the ref's task_id is only the staging store). Works across forked/empty drives and after drive cleanup. Omit ranges for complete_chars/hash, then use source_start_char/source_end_char. Never marks the run's result as read; does not include authority."},
             "presence_reentry_sha256": {"type": "string", "default": "", "description": "Read the exact Presence reentry observation checkpoint named in a resumed-conversation note. Includes full observed messages and transport facts plus coverage gaps. Uses the existing task scope; omit ranges for complete_chars/hash, then page with source_start_char/source_end_char."},
             "presence_reentry_offset": {"type": "integer", "description": "With presence_reentry_sha256: scan the frozen canonical interval of that checkpoint's own conversation, including rows beyond its initial scan budget. Start at history_start and follow next_offset until interval_exhausted. Small pages return complete rows and explicit gaps. Oversized pages return complete_chars/hash; use source_start_char/source_end_char with the same offset to reconstruct that page's exact JSON before advancing."},
             "source_start_char": {"type": "integer", "description": "Inclusive character offset for the requested canonical source range."},

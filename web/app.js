@@ -194,7 +194,7 @@ async function openSettingsTab(tabName) {
 }
 
 async function openDashboardTab(tabName) {
-    await showPage('dashboard');
+    if (!await showPage('dashboard')) return false;
     if (dashboardControls && typeof dashboardControls.activateTab === 'function') {
         dashboardControls.activateTab(tabName);
     }
@@ -1378,7 +1378,7 @@ initCosts({ ...ctx, mount: document.getElementById('dashboard-panel-costs') });
 const disposeStorage = initStorage({ ...ctx, mount: document.getElementById('dashboard-panel-storage') });
 initSkills(ctx);
 initWidgets(ctx);
-initUpdateStatus(ctx);
+const updateStatus = initUpdateStatus(ctx);
 
 initOnboardingOverlay();
 
@@ -1389,6 +1389,7 @@ telegramHost.bind();
 window.addEventListener('pagehide', (event) => {
     if (event.persisted) return;
     disposeEvolution();
+    updateStatus.dispose();
     disposeStorage?.destroy();
     disposeScrollFades.forEach((dispose) => dispose());
     telegramHost.dispose();

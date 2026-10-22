@@ -940,11 +940,13 @@ def _wait_for_supervisor_update_finalize() -> bool:
 def _boot_managed_update_tasks() -> None:
     """Finalize a pending update, restart after rollback, then refresh its feed."""
     try:
+        from ouroboros.gateway.update_progress import observe_boot
         from supervisor.git_ops import compute_managed_update_status
         from supervisor.update_merge import active_update_tx, finalize_managed_update_on_boot
 
         ready = _wait_for_supervisor_update_finalize()
-        result = finalize_managed_update_on_boot(supervisor_ready=ready)
+        # Observation only: the finalizer's result and every decision below stay its own.
+        result = observe_boot(finalize_managed_update_on_boot, ready=ready, bootstrap_ok=_bootstrap_ok is True)
         # A failed bootstrap (dependency sync or the import test of this tree) is not a
         # ready generation even when the supervisor thread survived it: the adoption
         # of a tree that does not import is returned, not finalized.

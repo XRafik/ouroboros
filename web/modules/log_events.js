@@ -644,7 +644,7 @@ export function taskDoneIsTerminal(evt) {
 // One factual phase -> presentation vocabulary for task chips and terminal
 // headlines. Technical outcome and terminality truth stay in their existing
 // reducers; this translator never inspects event payloads or infers completion.
-export function taskPresentation(phase = 'working') {
+export function taskPresentation(phase = 'working', quietEffective = false) {
     const normalizedPhase = typeof phase === 'string' && phase.trim() ? phase.trim() : 'working';
     const word = normalizedPhase === 'done' ? 'done'
         : normalizedPhase === 'warn' ? 'warn'
@@ -653,7 +653,8 @@ export function taskPresentation(phase = 'working') {
                     : 'working';
     const english = { done: 'Done', warn: 'Done with warnings', cancelled: 'Stopped', error: 'Failed', working: 'Working' }[word];
     // The English twin of project_dialogue.OUTCOME_PHASE_HEADLINE; an install language reads it by code.
-    return { phase: normalizedPhase, headline: tr(`task.headline.${word}`, english) };
+    return { phase: normalizedPhase, headline: quietEffective === true
+        ? tr('task.headline.quiet', 'Done · no message') : tr(`task.headline.${word}`, english) };
 }
 
 function taskOutcomeMeta(evt) {
@@ -885,7 +886,7 @@ export function summarizeLogEvent(evt) {
     if (t === 'task_done') {
         const terminal = taskDoneIsTerminal(evt);
         const outcome = taskTerminalPhase(evt);
-        const presentation = taskPresentation(terminal || outcome === 'error' ? outcome : 'working');
+        const presentation = taskPresentation(terminal || outcome === 'error' ? outcome : 'working', terminal && evt.quiet_effective === true);
         const reasonCode = evt.reason_code ? String(evt.reason_code) : '';
         const artifactStatus = evt.artifact_bundle?.status || evt.artifact_status || '';
         const reviewDetails = formatReviewProjection(evt.review_projection);
@@ -1082,10 +1083,11 @@ export function taskTerminalSummary(evt = {}) {
     const record = normalizeTaskTerminalRecord(evt);
     const knownStatus = String(record?.status || record?.outcome_axes?.lifecycle?.status || '').toLowerCase();
     const observedOutcome = OBSERVED_OUTCOME_STATUSES.has(knownStatus) ? outcome : '';
-    const presentation = taskPresentation(terminal ? outcome : 'working');
-    const body = [taskStoppedWithSummary(evt) ? OWNER_STOP_DETAIL_MARKER : '', taskReasonDetail(evt),
+    const quiet = terminal && evt.quiet_effective === true;
+    const presentation = taskPresentation(terminal ? outcome : 'working', quiet);
+    const body = quiet ? '' : [taskStoppedWithSummary(evt) ? OWNER_STOP_DETAIL_MARKER : '', taskReasonDetail(evt),
         reasonCodesNote(taskReasonCodes(evt)), terminal ? savedTerminalRowNote(evt) : ''].filter(Boolean).join('\n');
-    const cause = terminal ? taskReasonDetail(evt) : '';
+    const cause = terminal && !quiet ? taskReasonDetail(evt) : '';
     return {
         ...chatView({
             phase: presentation.phase, headline: presentation.headline, body,
@@ -1095,6 +1097,7 @@ export function taskTerminalSummary(evt = {}) {
             ...(cause ? { activityPreview: cause } : {}),
         }),
         ...(observedOutcome ? { observedOutcome } : {}),
+        ...(typeof evt.quiet_effective === 'boolean' ? { quietEffective: evt.quiet_effective } : {}),
         ...(evt.model_execution && typeof evt.model_execution === 'object'
             ? { modelExecution: evt.model_execution } : {}),
         ...(Number.isInteger(evt.tool_calls) ? { toolCalls: evt.tool_calls } : {}),

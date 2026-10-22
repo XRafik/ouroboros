@@ -981,7 +981,9 @@ def effective_task_result(
                 audit = result.get("delegate_terminal_reconciliation")
                 published = [dict(row) for row in ((audit.get("terminal_runs") if isinstance(audit, dict)
                                                     else None) or [])
-                             if isinstance(row, dict) and isinstance(row.get("staged_output"), dict)]
+                             if isinstance(row, dict) and any(
+                                 row.get(k) for k in ("staged_output", "other_staged_outputs",
+                                                      "terminal_observation", "other_terminal_observations"))]
                 lineage.insert(0, {
                     "task_id": task_id,
                     "status": result.get("status"),
@@ -993,6 +995,8 @@ def effective_task_result(
                 merged_retry["retry_lineage"] = lineage
                 merged_retry.setdefault("original_task_id", task_id)
                 merged_retry.setdefault("supersedes_task_id", task_id)
+                if result.get("cancel_receipt") and "cancel_receipt" not in merged_retry:
+                    merged_retry["cancel_receipt"] = result["cancel_receipt"]
                 # The retry answer does not erase the original's unknown effects.
                 # Invocation IDs and their original task/attempt attribution stay
                 # factual disclosure only, never authority to repeat an operation.

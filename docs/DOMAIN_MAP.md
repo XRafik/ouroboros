@@ -14,21 +14,21 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
 | D05 | Tool surfaces: files, code, shell, media, external | 41 | 0 |
 | D06 | Review stack | 95 | 0 |
-| D07 | Delegation, subagents & Claudexor | 79 | 0 |
-| D08 | Supervisor: queue, workers, events & runtime control | 72 | 0 |
+| D07 | Delegation, subagents & Claudexor | 80 | 0 |
+| D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
 | D09 | Cancellation, owner control & process custody | 23 | 0 |
 | D10 | Git, update & release machinery | 33 | 0 |
 | D11 | Gateway, server & Web UI | 101 | 0 |
 | D12 | Settings & configuration | 22 | 0 |
 | D13 | Safety, guards & runtime mode | 11 | 0 |
-| D14 | Skills & extensions | 68 | 0 |
+| D14 | Skills & extensions | 69 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 31 | 0 |
 | D16 | Observability, usage accounting & cost | 24 | 0 |
 | D17 | Projects, workspaces & task results | 47 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 18 | 0 |
-| **total** | | **850** | **0** |
+| **total** | | **853** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -545,6 +545,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/gateways/claudexor_run_events.py`
 - `ouroboros/harness_maintenance.py`
 - `ouroboros/nanny_pacing.py`
+- `ouroboros/owner_stop_receipt.py`
 - `ouroboros/subagent_bootstrap.py`
 - `ouroboros/subagent_dispatch_notes.py`
 - `ouroboros/subagent_history.py`
@@ -629,6 +630,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `supervisor/schedule_notes.py`
 - `supervisor/schedule_occurrence.py`
 - `supervisor/schedule_time.py`
+- `supervisor/schedule_view.py`
 - `supervisor/sleep_wake.py`
 - `supervisor/state.py`
 - `supervisor/state_initialization.py`
@@ -912,6 +914,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/skill_review_packs.py`
 - `ouroboros/skill_review_runner.py`
 - `ouroboros/skill_review_status.py`
+- `ouroboros/skill_schedule_suggestions.py`
 - `ouroboros/skill_source_catalog.py`
 - `ouroboros/skill_source_git.py`
 - `ouroboros/skill_source_install.py`

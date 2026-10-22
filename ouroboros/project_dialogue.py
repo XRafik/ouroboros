@@ -715,6 +715,8 @@ def routing_option_label(option: Any) -> str:
 
 OUTCOME_PHASE_HEADLINE = {"working": "Working", "done": "Done", "warn": "Done with warnings",
                           "error": "Failed", "cancelled": "Stopped"}
+# A run that chose to finish without a message (catalog code task.headline.quiet).
+QUIET_RUN_HEADLINE = "Done · no message"
 
 # One sentence per typed cause, not status × reason. Host text keeps unknown codes;
 # details-bearing views pair a neutral sentence with the exact codes, never a guess.

@@ -254,6 +254,7 @@ class _RetryBinding(NamedTuple):
     execution_binding_fingerprint: str
     max_seconds_basis: str
     continuation: Any   # delegate_continuation.ContinuationStart: the recorded lineage
+    prompt_cache_ttl: Dict[str, Any]
 
 
 def _resolve_retry_invocation(ctx: ToolContext, drive: pathlib.Path, retry_token: str, text: str, *,
@@ -385,6 +386,7 @@ def _resolve_retry_invocation(ctx: ToolContext, drive: pathlib.Path, retry_token
         # too, never re-derived from today's clocks.
         max_seconds_basis=str(record.get("max_seconds_basis") or ""),
         continuation=replayed_custody(record),
+        prompt_cache_ttl=deepcopy(record.get("prompt_cache_ttl") if isinstance(record.get("prompt_cache_ttl"), dict) else {}),
     ), None
 
 
