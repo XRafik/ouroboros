@@ -55,3 +55,33 @@ def test_history_capture_is_physically_bounded_and_discloses_narrowing(world, mo
     result = registry.execute_result("vcs_read", {"action": "file", "path": "large.txt"})
     assert result.status == "ok" and "3840 bytes omitted" in result.text
     assert "max_count (log), ref, or path" in result.text
+
+
+def test_history_timeout_reaps_child_and_closes_pipe_readers(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    from ouroboros.tools import vcs_read
+
+    popen = subprocess.Popen
+    children = []
+    def spawn(_argv, **kwargs):
+        process = popen([sys.executable, "-c", "import time; time.sleep(60)"], **kwargs)
+        children.append(process)
+        wait = process.wait
+        def expire(timeout=None):
+            if timeout == 30:
+                raise subprocess.TimeoutExpired("git", timeout)
+            return wait(timeout=timeout)
+        process.wait = expire
+        return process
+    monkeypatch.setattr(vcs_read.subprocess, "Popen", spawn)
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            vcs_read._capture_read_git(tmp_path, ["log"])
+        assert len(children) == 1 and children[0].poll() is not None
+        assert children[0].stdout.closed and children[0].stderr.closed
+    finally:
+        for process in children:
+            if process.poll() is None:
+                process.kill()
+                process.wait()
