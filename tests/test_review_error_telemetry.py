@@ -302,7 +302,7 @@ def test_awaited_valid_and_report_answers_write_no_error(tmp_path, monkeypatch):
          "multi_model_review"),
         (ReviewActorRecord(slot_id="slot-stable", model="m", status="ok", raw_text=json.dumps([
             {"item": item, "verdict": "PASS", "severity": "advisory", "reason": "checked"}
-            for item in SCOPE_REQUIRED_ITEMS])),
+            for item in sorted(SCOPE_REQUIRED_ITEMS)])),
          "scope_review"),
         (ReviewActorRecord(slot_id="slot-stable", model="m", status="ok", raw_text="# Review\nAll checks passed."),
          "deep_self_review"),

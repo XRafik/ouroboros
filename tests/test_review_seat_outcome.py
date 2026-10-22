@@ -22,7 +22,7 @@ def _body(critical=False):
                                    "reason": "restore loses the prior value"}] if critical else [],
                        "change_clean": not critical,
                        "coupling": [{"item": item, "verdict": "PASS", "severity": "advisory",
-                                     "reason": "checked callers"} for item in SCOPE_REQUIRED_ITEMS]})
+                                     "reason": "checked callers"} for item in sorted(SCOPE_REQUIRED_ITEMS)]})  # sorted: the id must not depend on the hash seed
 
 
 def _errors(root):
