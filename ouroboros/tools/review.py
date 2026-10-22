@@ -360,7 +360,8 @@ def _collect_review_findings(ctx: ToolContext, model_results: list, row_plan: Op
     triad_raw_results = [record.to_dict() for record in parsed.actor_records]
     advisers = {sid for sid, extra in zip(plan.get("slot_ids") or [], plan.get("additional") or []) if extra}
     for raw in triad_raw_results:
-        raw["additional"] = raw.get("slot_id") in advisers
+        if not raw.get("outcome"):  # Historical envelopes have no saved assignment result.
+            raw["additional"] = raw.get("slot_id") in advisers
     errored_models = [record.model_id for record in parsed.actor_records if record.status == "error"]
 
     for record in parsed.actor_records:

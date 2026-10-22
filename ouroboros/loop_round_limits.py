@@ -1035,7 +1035,8 @@ def _publish_reclaimed_transcript(ctx: Any, rebuilt: list, *, by: str = "compact
     prune_reclaim_trace_refs(ctx.tools._ctx, ctx.messages)
 
 
-def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_tokens: Optional[int] = None) -> Any:
+def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_tokens: Optional[int] = None,
+                                cause: str = "context_size") -> Any:
     """Publish a model-free source view, measuring the sealed candidate with its next facts line.
 
     ``goal_tokens`` is the refusal's measured target (``loop_model_call._refusal_target``); without
@@ -1070,7 +1071,7 @@ def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_t
         reclaim_goal_tokens=int(goal_tokens) if goal_tokens else WHOLE_CATEGORY, allow_partial_shrink=True,
     )
     rebuilt, receipt = emergency_address_view(
-        ctx.messages, request, rung=rung,
+        ctx.messages, request, rung=rung, cause=cause,
         observation=getattr(tool_ctx, "_last_context_observation", {}) or {},
         measure_candidate=measure_candidate,
         trace_refs_by_tool_call_id=reclaim_trace_refs(tool_ctx),
@@ -1079,9 +1080,9 @@ def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_t
                       if measurement.capacity_total_tokens is not None else None),
     )
     if receipt.status == "applied":
-        _publish_reclaimed_transcript(ctx, rebuilt, by=f"refusal_pass:{rung}")
+        _publish_reclaimed_transcript(ctx, rebuilt, by=f"{'refusal_pass' if cause == 'context_size' else cause}:{rung}")
     _loop()._emit_checkpoint_event(ctx.event_queue, ctx.task_id, ctx.drive_logs, {
-        "type": "context_reclaim", "checkpoint_kind": "context_reclaim_emergency", "rung": rung,
+        "type": "context_reclaim", "checkpoint_kind": "context_reclaim_emergency", "rung": rung, "cause": cause,
         "round": ctx.round_idx, "route_fp": measurement.route_fp, "round_id": measurement.round_id,
         "status": receipt.status, "reclaimed_tokens": receipt.reclaimed_tokens,
         "checkpoint_ref": receipt.checkpoint_ref, "selected_unit_ids": list(receipt.selected_unit_ids),

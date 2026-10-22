@@ -848,7 +848,9 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # 413 -> 416: the shared download cache ``package-downloads`` and its per-manager
 # ``package-downloads/*`` (named by ``workspace_preflight``, written by package managers),
 # and a candidate run's named-evidence ``.../delegated_runs/*/evidence/summary.json`` reread.
-EXPECTED_SCAN_PATHS = 416
+# 416 -> 417 (this branch): retained bootstrap identity ``state/delegate_bootstrap/*.json`` and per-target
+# payload mutation locks ``state/delegate_payload_mutations/*.lock``; the retired global claim spelling is gone.
+EXPECTED_SCAN_PATHS = 417
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
@@ -895,8 +897,9 @@ UNRESOLVED_SPELLINGS = frozenset({
     # `state`/`logs` reached with the file name as a parameter or loop value:
     # delegate_recovery.py (the two stop flags), usage_ledger.py (ledger /
     # quarantine / lock names), gateway/logs.py + memory.py + supervisor/
-    # state.py (bounded log tail, rotation helper).
-    "state/*",
+    # state.py (bounded log tail, rotation helper). ``state/*`` left this set
+    # when the per-target payload mutation lock gave the bare ``state`` token
+    # a documented resolvable writer.
     "logs/*",
     # skill payload roots resolved from a validated relpath (bucket + name):
     # config.py, contracts/skill_payload_policy.py, skill_payload_binding.py,

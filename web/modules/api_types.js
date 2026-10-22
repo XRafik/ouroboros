@@ -294,15 +294,12 @@
  *   physical task it could not settle when that differed from the displayed id.
  * @property {string=} toast_once
  * @property {string=} toast_tone
- *   The incident's valence for the one-shot toast (warn/ok/error); absent =
- *   the alarm tone.
+ *   The incident's valence for the one-shot toast (warn/ok/error); absent = the alarm tone.
  * @property {boolean=} task_id_pending
- *   X3: a repair receipt whose managed task id does not exist yet (minted at
- *   promotion) — typed truth instead of an invented id.
+ *   X3: a repair receipt whose managed task id does not exist yet (minted at promotion); typed truth, not an invented id.
  * @property {Object=} lifecycle
  * @property {Object=} lifecycle_pointer
- *   C4 multi-chat dedupe: a duplicate lifecycle initiator's typed pointer to the
- *   job that already owns the routing ({job_id, kind, target, status, chat_id}).
+ *   C4 multi-chat dedupe: a duplicate initiator's typed pointer to the job that owns the routing ({job_id, kind, target, status, chat_id}).
  * @property {string=} subagent_event
  * @property {string=} subagent_task_id
  * @property {string=} root_task_id
@@ -321,11 +318,12 @@
  * @property {string=} effort_level  The effort decided at dispatch (a session row: its leaf's); empty = unknown, no chip.
  * @property {string=} effort_requested  The parent's request when it made one.
  * @property {string=} effort_source  auto | pin | model_name | cyber.
- * @property {string=} executor_route
- *   Phase 6: the OPAQUE harness route RESOLVED AT DISPATCH for this bubble /
- *   subagent (delegated routes only) — the route it was sent to, not a receipt
- *   from the engine saying where it landed. Absent/empty = the ordinary native
- *   path; no chip is drawn.
+ * @property {string=} executor_route  Opaque delegated harness route resolved at dispatch, not an engine receipt; absent = ordinary native presentation, no chip.
+ * @property {Object=} parent_cognitive_route  Recorded parent snapshot; never inferred from the child's model lane.
+ * @property {string=} coordinator_route
+ * @property {boolean=} use_local_model
+ * @property {string=} coordinator_billing  Recorded subscription | measured | unknown; never inferred on replay.
+ * @property {string=} coordinator_provenance
  * @property {Object=} executor_observation
  *   Latest observed progress actor, bound to own task/attempt/run/revision.
  *   model_source distinguishes requested and observed; not a terminal receipt.
@@ -1150,9 +1148,7 @@
  * @property {Object.<string, {name:string, files:number, size:number, excluded:number, available:boolean}>=} artifact_archives
  *   Per top-level result directory, what `?archive=<dir>` would stream now (members from one
  *   confined stat each, rows left out counted); a folder offers its `.zip` only when `available`.
- * @property {{name:string, request_id:string}=} wrap_up_document
- *   Wrap up's saved-work document, written on read by `?wrap_up=<request_id>` on the task-file
- *   route (`taskWrapUpDocumentUrl`); no size or digest exists before it is downloaded.
+ * @property {{name:string, request_id:string}=} wrap_up_document  Wrap up's saved-work document, written on read by `?wrap_up=<request_id>` (`taskWrapUpDocumentUrl`); no size or digest before download.
  * @property {Object.<string,Object>=} model_waits
  * @property {TaskCostBreakdown=} cost_breakdown
  * @property {{status: 'pending'|'problem'|'complete', pending_count: number, problem_count: number, promoted_ref_count: number, promoted_source_handle_count: number, problem_reasons?: Array<{reason:string,count:number}>}=} history_retention

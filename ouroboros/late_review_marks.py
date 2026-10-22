@@ -190,6 +190,19 @@ def owe_after_end(drive_root: Any, duty_id: str, duty: Mapping[str, Any]) -> boo
     return _owed(drive_root, duty_id, {**json.loads(json.dumps(dict(duty), default=str)), "after_end": True})
 
 
+def update_wait_cursors(drive_root: Any, duty_id: str, waiting: Mapping[str, Any]) -> None:
+    """Refresh an existing duty's delivery facts; never discharge or recreate it."""
+    from ouroboros import store
+
+    with store.open_store(drive_root, write=True) as txn:
+        row = txn.get_row(OWED_SET, duty_id)
+        if row is None or not isinstance(row.get("left_review"), dict):
+            return
+        row["left_review"].update({key: waiting[key] for key in
+                                  ("selection", "seen_helpers", "seen_outcomes", "review_reference") if key in waiting})
+        txn.put_row(OWED_SET, duty_id, row)
+
+
 def replay_owed_late_reviews(drive_root: Any, *, stop: Any = None) -> Dict[str, int]:
     """The maintenance pass over owed rows: each duty whose author ended is published or handed back to its
     producer, and a row that names nothing it can owe is retired. Then the plan replies of ended tasks

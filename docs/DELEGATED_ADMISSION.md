@@ -47,6 +47,12 @@ omitted access keeps the run's narrower profile; explicit access never widens it
 A writable-to-readonly continuation replaces inherited execution with the ordinary
 nondelegated envelope, no workspace override, and an empty auxiliary-roots list where
 negotiated. Its current read scope stays; the old writer's undisposed patch stays separate.
+The sole widening exception is an explicit
+plan implementation by its recorded starter, within the original and still-current ceiling
+(`delegate_plan.py`); missing legacy ceilings confer no permission. Plan answers/clarifications
+stay read-only on their thread. Git/payload plans preserve a private copy for implementation;
+plain-folder plans can implement in place under ordinary mutability admission. Selected
+folder copies need a fresh executor: the plan thread cannot retarget its workspace.
 
 The harness can execute model-generated commands under the operator's OS
 identity. It is not assumed hostile, but the host cannot review each command
@@ -129,8 +135,8 @@ lineage file, a scheduled origin's whole `task_drive`/`artifact_store` included
 unreadable or nonregular file refuses the start before opening it (`readonly_inputs_unavailable`). A folder no private copy serves (a data-drive subfolder, an
 ignored starting folder) refuses typed, naming `access='readonly'`. A read-only child
 (an explicit `readonly` lowering, Observe, or a Presence ceiling without a
-delegated write grant) requests `mode: ask`, `access: readonly` under Claudexor's
-ordinary envelope. Its parent-selected starting folder is the session project
+delegated write grant) defaults to `mode: ask`, `access: readonly`. Explicit
+`mode: plan` is also read-only; omitted mode preserves access-derived execution. Its parent-selected starting folder is the session project
 root, not a read boundary; omitting it preserves inherited/folderless behavior.
 The host reads effective access back for both shapes;
 the delegated HOME/boundary checks below apply only to marker-carrying runs.
@@ -339,3 +345,44 @@ The disclosure reaches three places:
 3. **the parent-facing result** — `delegate_wait`'s terminal payload carries `containment`
    with `os_boundary`, `verified`, and `disclosed`/`attempts`, and a note naming what was
    reachable rather than merely saying a check failed.
+
+## Independent runs under one focus
+
+A root or configured-session nanny may own any number of delegated runs, on the
+same configured row or different rows. Admission has no concurrency cap or
+quota-derived team limit. Each deliberate prompt gets a fresh immutable invocation;
+`retry_of` reuses the unresolved invocation's original body and binding. Existing
+runs and undisposed patches remain custody obligations, not start refusals.
+
+The initial leaf-first bootstrap alone uses the saved assignment and row. Its
+identity is persisted under the actor decision lock before transport, so restarting
+cannot bootstrap a second leaf. Omitted selectors retain the assigned-row behavior;
+an explicit later selector and prompt describe independent work. Empty-prompt
+replacement requires verified settlement. Zero-run race checks and unreadable
+custody/billing refusals remain. A continuation inside the same snapshot still
+requires an unambiguous predecessor disposition and a single writer.
+
+Supervision schema 2 stores each run's cursor, pending wake and interaction ACKs
+separately; mail and coordination cursors belong to the task. `delegate_wait` takes
+one `run_id` or an exclusive `runs` array and wakes on any selected run. Exact
+receipt incorporation alone ACKs a wake. An unknown-provider nanny hold may name
+several positively live leaves, without resending the lost cognitive request.
+
+Recovery schema 2 holds all run and pending-invocation bindings. Adoption reports
+adopted, deferred or refused per holder, restoring a settled wake alongside live
+and pending work. Saved cognition defers pending replay; other recovery replays
+only the invocation's saved binding. Root-direct recovery uses the same path.
+Orphan protection and registration retention name exact handles, not every run of a
+reserved task. Stop reaches all owned runs and late pending starts; no new POST.
+Windows transfer needs observed parent exit 42 and measured parent/successor identity.
+Schema-1 checkpoints migrate in memory, writing v2 on mutation without rewriting events
+or issuing requests. Corruption stays unknown; live v2 custody prevents downgrade.
+
+Private skill-payload captures may coexist. The target mutation lock spans the
+whole-payload content-hash check, apply and publication; a stale second capture
+refuses with evidence retained. Git integration retains its target lock and
+per-path baselines: disjoint changes can apply, overlapping drift conflicts.
+Each starter still disposes each capture. There is no automatic merge arbiter.
+These rules apply to API-only, subscription-only and mixed installations and to
+Advisory, Blocking and Cyber Pro; configured route availability and review floors
+remain independent.
