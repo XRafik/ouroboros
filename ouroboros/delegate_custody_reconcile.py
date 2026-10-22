@@ -266,13 +266,13 @@ def reconcile_orphaned_runs(
              and (record["task_id"], "", record["invocation_id"]) not in protected
              and not _custody().review_owned_source(record.get("source"))]
     return _reconcile_each(drive_root, orphans, gateway_factory or attach_only_gateway, pending=stray,
-                           live_task_ids=live_or_reserved, replay_pending=replay_pending)
+                           live_task_ids=live_or_reserved, recoverable_handles=protected, replay_pending=replay_pending)
 
 
 def _reconcile_each(drive_root: Any, runs: List[RunCustody],
                     gateway_factory: Callable[[], Any],
                     pending: Optional[List[Dict[str, Any]]] = None,
-                    deliberate_terminal: str = "", live_task_ids=None,
+                    deliberate_terminal: str = "", live_task_ids=None, recoverable_handles=(),
                     replay_pending: Optional[Callable[[], bool]] = None) -> List[Dict[str, Any]]:
     """One transport, one settle-or-cancel pass. Shared by every reconcile surface.
 
@@ -304,7 +304,8 @@ def _reconcile_each(drive_root: Any, runs: List[RunCustody],
     unsettled_projects: set = set()
     for row in snapshot:
         if (row.project_id in owned and row.project_id not in unsettled_projects and row.run_id
-                and (not row.settled or still_continuable(drive_root, row, live_task_ids))):
+                and (not row.settled or still_continuable(
+                    drive_root, row, live_task_ids, recoverable_handles=recoverable_handles))):
             unsettled_projects.add(row.project_id)
     registrations = [row for row in snapshot
                      if row.project_owned and row.project_id
@@ -349,7 +350,8 @@ def _reconcile_each(drive_root: Any, runs: List[RunCustody],
         # Recomputed inside: a run settled this very pass may have made its
         # project eligible - the pre-pass gate is not the last word.
         if registrations or runs:
-            _custody().retire_settled_registrations(drive_root, gateway, live_task_ids=live_task_ids)
+            _custody().retire_settled_registrations(drive_root, gateway, live_task_ids=live_task_ids,
+                                                  recoverable_handles=recoverable_handles)
     finally:
         try:
             if gateway is not None:

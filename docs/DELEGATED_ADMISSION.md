@@ -325,12 +325,11 @@ Recovery schema 2 holds all run and pending-invocation bindings. Adoption report
 adopted, deferred or refused per holder, restoring a settled wake alongside live
 and pending work. Saved cognition defers pending replay; other recovery replays
 only the invocation's saved binding. Root-direct recovery uses the same path.
-Orphan protection names handles, never every run sharing a reserved task. Stop
-reaches all owned runs and late pending starts, and permits no new POST. Windows
-transfer requires observed parent exit 42 plus measured parent/successor identity.
-Schema-1 checkpoints migrate in memory and write v2 on the next mutation, without
-rewriting events or issuing requests. Corruption stays unknown; no downgrade while
-live v2 custody remains.
+Orphan protection and registration retention name exact handles, not every run of a
+reserved task. Stop reaches all owned runs and late pending starts; no new POST.
+Windows transfer needs observed parent exit 42 and measured parent/successor identity.
+Schema-1 checkpoints migrate in memory, writing v2 on mutation without rewriting events
+or issuing requests. Corruption stays unknown; live v2 custody prevents downgrade.
 
 Private skill-payload captures may coexist. The target mutation lock spans the
 whole-payload content-hash check, apply and publication; a stale second capture

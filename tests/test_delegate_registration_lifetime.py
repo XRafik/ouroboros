@@ -33,8 +33,8 @@ def result(root, tid, **fields):
                                'status': 'completed', **fields})
 
 
-def seed(root, *, task_id='owner', root_task_id='', source='', project='project'):
-    row = custody.RunCustody(run_id='run', task_id=task_id, root_task_id=root_task_id,
+def seed(root, *, task_id='owner', root_task_id='', source='', project='project', run_id='run', invocation_id=''):
+    row = custody.RunCustody(run_id=run_id, task_id=task_id, root_task_id=root_task_id, invocation_id=invocation_id,
                             route_id='route', model='model', project_id=project,
                             project_owned=True, source=source, ledger_root=str(root))
     assert custody.record_started(root, row, shape={'access': 'readonly', 'mode': 'ask'})
@@ -185,9 +185,36 @@ def test_unknown_authority_or_reserved_owner_keeps_registration(tmp_path, monkey
         settle(tmp_path, gateway, row)
     custody.reconcile_orphaned_runs(tmp_path, None if authority == 'unknown_live' else set(),
         gateway_factory=lambda: gateway,
-        recoverable_task_ids={'owner'} if authority == 'reserved' else set())
+        recoverable_handles={(row.task_id, row.run_id, row.invocation_id)} if authority == 'reserved' else set())
     assert gateway.removed == []
     assert custody.replay(tmp_path)['run'].project_owned
+
+
+@pytest.mark.parametrize('handle', [('owner', 'run-a', 'inv-a'), ('owner', 'run-a', '')])
+def test_reserved_handle_keeps_only_its_registration_until_released(tmp_path, handle):
+    gateway = Gateway()
+    first = seed(tmp_path, run_id='run-a', invocation_id='inv-a', project='project-a')
+    second = seed(tmp_path, run_id='run-b', invocation_id='inv-b', project='project-b')
+    result(tmp_path, 'owner')
+    for row in (first, second):
+        settle(tmp_path, gateway, row)
+    custody.reconcile_orphaned_runs(tmp_path, set(), gateway_factory=lambda: gateway,
+                                   recoverable_handles={handle})
+    assert gateway.removed == ['project-b']
+    assert custody.replay(tmp_path)['run-a'].project_owned
+    sweep(tmp_path, gateway, set())
+    assert gateway.removed == ['project-b', 'project-a']
+
+
+@pytest.mark.parametrize('handle', [('other', 'run', 'inv'), ('owner', 'run', 'other')])
+def test_foreign_or_mismatched_invocation_reservation_does_not_keep_registration(tmp_path, handle):
+    gateway = Gateway()
+    row = seed(tmp_path, invocation_id='inv')
+    result(tmp_path, 'owner')
+    settle(tmp_path, gateway, row)
+    custody.reconcile_orphaned_runs(tmp_path, set(), gateway_factory=lambda: gateway,
+                                   recoverable_handles={handle})
+    assert gateway.removed == ['project']
 
 
 def test_review_settlement_keeps_immediate_retirement(tmp_path):

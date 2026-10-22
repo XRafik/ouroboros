@@ -1016,10 +1016,12 @@ def is_terminal(detail: Dict[str, Any]) -> bool:
     return _is_terminal(detail, TERMINAL_STATES)
 
 
-def retire_project(drive_root: Any, gateway: Any, custody: RunCustody, *, live_task_ids=None) -> None:
+def retire_project(drive_root: Any, gateway: Any, custody: RunCustody, *, live_task_ids=None,
+                   recoverable_handles=()) -> None:
     """Serialize the replay-to-retirement decision for one shared project."""
     with project_retirement_lock(drive_root, custody.project_id):
-        _retire_project_locked(drive_root, gateway, custody, live_task_ids=live_task_ids)
+        _retire_project_locked(drive_root, gateway, custody, live_task_ids=live_task_ids,
+                               recoverable_handles=recoverable_handles)
 
 
 def _project_runs(drive_root: Any, custody: RunCustody) -> Optional[List[RunCustody]]:
@@ -1049,7 +1051,8 @@ def _release_registration(drive_root: Any, custody: RunCustody, **facts: Any) ->
                                        "project_id": custody.project_id, **facts})
 
 
-def _retire_project_locked(drive_root: Any, gateway: Any, custody: RunCustody, *, live_task_ids=None) -> None:
+def _retire_project_locked(drive_root: Any, gateway: Any, custody: RunCustody, *, live_task_ids=None,
+                           recoverable_handles=()) -> None:
     if custody.project_persistent:
         custody.project_owned = False
         emit(drive_root, PROJECT_RETIRED, {"run_id": custody.run_id, "task_id": custody.task_id,
@@ -1071,7 +1074,8 @@ def _retire_project_locked(drive_root: Any, gateway: Any, custody: RunCustody, *
         if any(not run.settled and run.run_id != custody.run_id for run in rows):
             return
         from ouroboros.delegate_continuation import still_continuable
-        if any(still_continuable(drive_root, run, live_task_ids) for run in rows):
+        if any(still_continuable(drive_root, run, live_task_ids, recoverable_handles=recoverable_handles)
+               for run in rows):
             return
     except Exception:
         log.warning("Retirement deferred: replay failed for %s",
@@ -1382,7 +1386,8 @@ def owned_project_registrations(drive_root: Any, state: Optional[Dict[str, RunCu
     return [custody for custody in state.values() if custody.project_owned and custody.project_id]
 
 
-def retire_settled_registrations(drive_root: Any, gateway: Any, *, live_task_ids=None) -> None:
+def retire_settled_registrations(drive_root: Any, gateway: Any, *, live_task_ids=None,
+                                 recoverable_handles=()) -> None:
     """Retire projects every sharer has settled; a LIVE sharer (owned or not
     - only the creator carries the registration, but any live sibling makes
     the daemon refuse) defers the attempt. Idempotent, fail-soft."""
@@ -1402,10 +1407,12 @@ def retire_settled_registrations(drive_root: Any, gateway: Any, *, live_task_ids
         if any(not row.settled for row in rows):
             continue
         if (not any(row.project_persistent for row in rows)
-                and any(still_continuable(drive_root, row, live_task_ids) for row in rows)):
+                and any(still_continuable(drive_root, row, live_task_ids, recoverable_handles=recoverable_handles)
+                        for row in rows)):
             continue  # still continuable: the registration waits until it is not
         try:
-            retire_project(drive_root, gateway, min(owned, key=lambda row: row.run_id), live_task_ids=live_task_ids)
+            retire_project(drive_root, gateway, min(owned, key=lambda row: row.run_id), live_task_ids=live_task_ids,
+                           recoverable_handles=recoverable_handles)
         except Exception:
             log.warning("Registration sweep failed for project %s", project_id, exc_info=True)
 
