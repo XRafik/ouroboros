@@ -30,7 +30,7 @@ FROM common AS desktop
 # libGL/libEGL/libGLESv2 (libglvnd), Mesa, gbm and drm are the declared host
 # graphics ABI. The shipped libepoxy aborts when a non-GLX GLES2 context needs
 # libGLESv2.so.2 and dlopen fails (run 39636484833 had no libgles2).
-RUN apt-get install -y --no-install-recommends xvfb openbox xdotool x11-utils x11-apps \
+RUN apt-get install -y --no-install-recommends xvfb openbox wmctrl x11-utils x11-apps \
     dbus-x11 fonts-dejavu-core libgl1-mesa-dri libgl1 libegl1 libgles2 libgbm1 libdrm2 imagemagick \
     && for package in libwebkit2gtk-4.1-0 libgtk-3-0 gir1.2-webkit2-4.1 python3-gi; do \
          if dpkg-query -W "$package" 2>/dev/null; then exit 1; fi; \

@@ -219,8 +219,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 page.write_text(original + suffix)
                 (evidence / 'bridge-instrumentation.html').write_text(suffix)
                 # Ask Openbox for an ordinary WM close; XDestroyWindow bypasses GTK cleanup.
-                run('xdotool', 'windowactivate', '--sync', str(setup['id']))
-                run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
+                run('wmctrl', '-ic', hex(setup['id']))
                 version = (state / 'app/repo/VERSION').read_text().strip()
                 identity = wait_for(lambda: find_window(f'Ouroboros v{version}', evidence, launcher_pid, wm_class),
                                     'Main window', process=process)
@@ -250,8 +249,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     assert 'Loading managed source launcher through' in (state / 'data/logs/launcher.log').read_text()
                 tracked = descendants(process.pid)
                 page.write_text(original)
-                run('xdotool', 'windowactivate', '--sync', window)
-                run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
+                run('wmctrl', '-ic', hex(identity['id']))
             else:
                 records = process_evidence(process.pid, evidence)
                 assert_server_environment(records, env)
