@@ -380,6 +380,7 @@ def _builtin_network_allowed(ctx: Any, name: str) -> bool:
 # share one number space, so the one verb cannot be split without a read. Each row:
 # retired name -> (successor, ((method, {argument: value}), ...)); an empty constraint withholds
 # every call of that method; target='*' means a positive issue/PR target, never a repo-wide sweep.
+# Other '*' fields mean present and non-null (including empty body / false draft); include matches a facet.
 # The dead name stays in the set too (harmless: nothing registers it).
 _RETIRED_GITHUB_TOOLS: dict[str, tuple[str, tuple[tuple[str, dict[str, str]], ...]]] = {
     "list_github_issues": ("github_read", (("list", {"kind": "issue"}), ("search", {}), ("api", {}))),
@@ -392,6 +393,13 @@ _RETIRED_GITHUB_TOOLS: dict[str, tuple[str, tuple[tuple[str, dict[str, str]], ..
     "comment_on_pr": ("github_write", (("comment", {}), ("review", {}), ("api", {}))),
     "close_github_issue": ("github_write", (("update", {"state": "closed"}), ("api", {}))),
     "create_github_issue": ("github_write", (("create_issue", {}), ("api", {}))),
+    "create_github_pr": ("github_write", (("create_pr", {}), ("api", {}))),
+    "update_github_pr": ("github_write", (("update", {"title": "*"}), ("update", {"body": "*"}),
+                                       ("update", {"base": "*"}), ("api", {}))),
+    "set_github_pr_ready": ("github_write", (("update", {"draft": "*"}), ("api", {}))),
+    "get_github_run_log": ("github_read", (("get", {"kind": "run", "include": "log"}), ("api", {}))),
+    "list_github_run_artifacts": ("github_read", (("list", {"kind": "artifact"}), ("api", {}))),
+    "download_github_artifact": ("github_read", (("download", {"kind": "artifact"}), ("api", {}))),
 }
 
 
@@ -407,12 +415,19 @@ def _retired_github_method_refusal(ctx: Any, name: str, args: Any) -> str:
     method = str(args.get("method") or "")
     target = str(args.get("target") or "").strip()
     has_target = not isinstance(args.get("target"), bool) and target.isdigit() and int(target) > 0
+
+    def matches(key: str, value: str) -> bool:
+        if value == "*":
+            return has_target if key == "target" else args.get(key) is not None
+        if key == "include":
+            return isinstance(args.get(key), list) and value in args[key]
+        return str(args.get(key) or "") == value
+
     for retired, (successor, rows) in _RETIRED_GITHUB_TOOLS.items():
         if retired not in disabled or successor != name:
             continue
         for withheld, constraint in rows:
-            if withheld == method and all(has_target if key == "target" and value == "*" else str(args.get(key) or "") == value
-                                          for key, value in constraint.items()):
+            if withheld == method and all(matches(key, value) for key, value in constraint.items()):
                 call = ", ".join([f"method={method!r}"] + [f"{key}={value!r}" for key, value in constraint.items()])
                 return (f"⚠️ RESOURCE_CONSTRAINT_BLOCKED: task_contract.disabled_tools withholds {retired!r}, "
                         f"which {name}({call}) would carry out for this task.")
