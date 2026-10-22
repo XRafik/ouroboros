@@ -226,8 +226,7 @@ export function createChatInstance({
             actionsHtml: mainHeaderActionsHtml(),
             showMobileNav: false,  // a room's ☰ is its composer row's first control
         });
-    // Main: the history note (gaps, a failed read, an approximate position) floats UNDER the bar as its own
-    // strip, never as a second row of it; the Project panel keeps its in-flow status bar.
+    // Main: a failed read or approximate restoration floats under the bar; Project keeps its status bar.
     page.innerHTML = `
         ${headerHtml}${asPanel ? '' : '<div class="chat-page-note"></div>'}
         <div id="chat-messages"></div>
@@ -258,7 +257,7 @@ export function createChatInstance({
     const inputArea = byId('input-area');
     const statusBadge = byId('status');
     const headerActions = byId('header-actions');
-    const pageHeader = page.querySelector('.chat-page-header');
+    const pageHeader = page.querySelector('.chat-page-header') || (asPanel ? container?.closest?.('.project-panel')?.querySelector?.('.project-panel-bar') : null);
     const pageNote = page.querySelector('.chat-page-note');
     const budgetPill = byId('budget-pill');
     const disposeHeaderPlacement = asPanel ? () => {} : bindHeaderControlPlacement({ headerActions, budgetPill });
@@ -1549,7 +1548,7 @@ export function createChatInstance({
         if (event?.detail?.page === 'chat') void showLatest();
         else if (event?.type !== 'visibilitychange') return;
         else if (document.hidden) reading.land(() => 0, reading.arriving);
-        else reading.request();
+        else { reading.request(); historyControls.showNotice(); }
     };
     window.addEventListener('ouro:page-shown', handlePageShown);
     document.addEventListener('visibilitychange', handlePageShown);
@@ -2797,6 +2796,7 @@ export function createChatInstance({
         for (const record of liveCardRecords.values()) record.childDetailRead = undefined;
         reading.followAfterLayout();
         updateScrollButton();
+        historyControls.showNotice();
     }
     scrollBottomBtn?.addEventListener('click', showLatest);
 
@@ -3046,7 +3046,11 @@ export function createChatInstance({
         }
     }
 
-    const historyControls = createHistoryControls(messagesDiv, pageNote || page.querySelector('.chat-panel-statusbar'));
+    const historyControls = createHistoryControls(messagesDiv, pageNote || page.querySelector('.chat-panel-statusbar'), {
+        isVisible: () => isInstanceVisible() && !messagesDiv.closest('[inert]')
+            && !document.body.classList.contains('nav-drawer-open') && (asPanel || (!isProjectOpening?.()
+            && !document.body.classList.contains('project-panel-open'))),
+    });
     const { olderButton: loadOlderBtn } = historyControls;
 
     const historyPager = createChatHistoryPager({
@@ -3093,6 +3097,8 @@ export function createChatInstance({
             return true;
         });
     }
+    const handleHistoryLanguage = () => syncLoadOlderControl();
+    window.addEventListener('ouro:language-changed', handleHistoryLanguage);
     async function loadOlderHistory() {
         if (historyControls.recentFailed()) {
             const owned = onHistoryRetry?.();
@@ -3553,6 +3559,8 @@ export function createChatInstance({
         // Called by app.js when a kept panel is shown again: a room reopens at its
         // newest message (owner decision 2026-10-05).
         showLatest,
+        // Shell exposure after its motion: present retained notice state, without fetching or scrolling.
+        showHistoryNotice: () => { if (!destroyed) historyControls.showNotice(); },
         refreshHistory: readReceipt.refresh,
         revealQuestion,
         revealSource: replies.reveal,
@@ -3595,6 +3603,8 @@ export function createChatInstance({
             }
             wsDisposers.length = 0;
             historyControls.endRecent();
+            historyControls.destroy();
+            window.removeEventListener('ouro:language-changed', handleHistoryLanguage);
             historyPager.destroy();
             disposeReadingGestures();
             document.removeEventListener('selectionchange', retryHistoricalUpserts);
