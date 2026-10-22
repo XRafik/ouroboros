@@ -796,10 +796,10 @@ def direct_owner_wait(ctx: Any, checkpoint: dict) -> str:
     finally:
         get_direct_activity_registry().clear_parked(ctx.task_id)
     if not control_reason:
+        # Every continuation exit above was already admitted (or is terminal); a late
+        # control only joins it. Re-checking admission here could re-park a stack that
+        # is already resuming and hide it from the update drain (#2191).
         control_reason = str(control.control_reason() or "")
-        if control_reason in {"finalize_requested", "finalize_now"} and not _admit_direct_continuation_wake(
-                ctx.task_id, wait, root):
-            control_reason = ""
     outcome = (f"control:{control_reason}" if control_reason else outcome if warm_pause else
                _fresh_wake(ctx, str(checkpoint.get("quiz_id") or ""), outcome))
     set_owner_wait(root, ctx.task_id,

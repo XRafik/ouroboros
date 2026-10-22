@@ -681,3 +681,74 @@ def test_resume_during_closed_update_admission_refuses_with_notice_and_preserves
         workers.open_repo_writer_admission()
         resume_warm_owner_pause_root(task_id)
         worker.join(timeout=5.0)
+
+
+def test_late_finalize_after_admitted_wake_keeps_the_resuming_turn_a_drain_blocker(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Review finding (Astra, rl-20261022T140822): an admitted wake followed by the
+    update closing admission and a late Wrap up must not be re-parked by a second
+    admission check; the resuming stack stays visible to the update drain."""
+    from ouroboros.cancel_intents import STOP_POLICY_FINALIZE, request_cancel
+    from ouroboros.owner_mailbox import KIND_FINALIZE_NOW
+    from ouroboros.outcomes import REASON_OWNER_REQUESTED_FINALIZATION
+    from supervisor.owner_stop import owner_stop_control_id
+
+    task_id = "late-wrap-up"
+    _, ctx, limit = _direct_turn_setup(tmp_path, monkeypatch, task_id)
+    ctx._owner_wait_requested = "quiz-race"
+    checkpoint = owner_wait.checkpoint_owner_wait(
+        ctx, limit.messages, limit.llm_trace, limit.accumulated_usage,
+        limit.round_idx, limit.tool_schemas, limit.owner_msg_seen,
+    )
+    write_owner_message(tmp_path, "answer", task_id=task_id, msg_id="answer")
+    registry = get_direct_activity_registry()
+    real_admit = owner_wait._admit_direct_continuation_wake
+    admissions: list[bool] = []
+    drains: list[list[str]] = []
+
+    def ordered_admit(*args):
+        admitted = real_admit(*args)
+        admissions.append(admitted)
+        if len(admissions) == 1 and admitted:
+            workers.close_repo_writer_admission("managed_update:smart")
+            stop = request_cancel(tmp_path, task_id, requested_by="owner",
+                                  requested_stop_policy=STOP_POLICY_FINALIZE)
+            write_owner_message(tmp_path, REASON_OWNER_REQUESTED_FINALIZATION, task_id=task_id,
+                                msg_id=owner_stop_control_id(stop), kind=KIND_FINALIZE_NOW)
+            drains.append(list(workers.drain_repo_writers(timeout=0)))
+        return admitted
+
+    monkeypatch.setattr(owner_wait, "_admit_direct_continuation_wake", ordered_admit)
+    try:
+        outcome = owner_wait.direct_owner_wait(ctx, checkpoint)
+        assert admissions == [True], "an admitted continuation is never re-checked"
+        assert drains == [[task_id]], "the resuming stack must remain a drain blocker"
+        assert registry.get(task_id).parked_wait is None
+        assert workers.drain_repo_writers(timeout=0) == [task_id]
+        assert outcome.startswith("control:finalize")
+        assert load_task_result(tmp_path, task_id)["owner_wait"]["state"] == "resumed"
+    finally:
+        workers.open_repo_writer_admission()
+
+
+def test_update_admission_notice_falls_back_to_the_saved_chat_address(
+    tmp_path: pathlib.Path,
+) -> None:
+    """Review finding (Astra, advisory): a queue row without chat_id still gets the
+    Resume notice through the task's saved chat address."""
+    from supervisor.budget_resume import _update_admission_refusal
+
+    task_id = "resume-notice-fallback"
+    write_task_result(tmp_path, task_id, STATUS_RUNNING, chat_id=7, _is_direct_chat=True)
+    sent: list[tuple] = []
+    q = SimpleNamespace(
+        repo_writer_admission_closed=lambda: "managed update (smart)",
+        repo_writer_task_allowed=lambda _task: False,
+        send_with_budget=lambda chat_id, text, **kw: sent.append((chat_id, text, kw)),
+    )
+    refused = _update_admission_refusal(q, {"id": task_id}, tmp_path, task_id)
+    assert refused and refused["error"] == "update_in_progress"
+    assert [(chat_id, kw.get("system_type")) for chat_id, _text, kw in sent] == [
+        (7, "managed_update_notice")]

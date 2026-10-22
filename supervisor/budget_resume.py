@@ -135,6 +135,7 @@ def _owner_pause_blockers(blockers: Any) -> List[Dict[str, Any]]:
 
 def _update_admission_refusal(q: Any, task: Optional[Dict[str, Any]], result_root: pathlib.Path,
                               task_id: str) -> Optional[Dict[str, Any]]:
+    from ouroboros.task_results import load_task_result
     from supervisor import workers
 
     closed_fn = getattr(q, "repo_writer_admission_closed", workers.repo_writer_admission_closed)
