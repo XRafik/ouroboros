@@ -367,7 +367,6 @@ EXPLICIT_RANGE_ARGS: frozenset[str] = frozenset({
 # partial view only; it exempts nothing from source persistence.
 PAGEABLE_TOOL_RESULTS: frozenset[str] = frozenset({
     "read_file", "chat_history", "journal_read", "tree_read", "recent_tasks", "query_code", "query_data",
-
 })
 
 

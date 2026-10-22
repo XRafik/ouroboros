@@ -258,10 +258,8 @@ def get_tools() -> List[ToolEntry]:
             schema={
                 "name": "enable_tools",
                 "description": (
-                    (
-                'Load schemas for named tools this task may already call (comma-separated). Reports loaded, '
-                'policy-hidden and unknown names; grants no permission.'
-            )
+                    'Load schemas for named tools this task may already call (comma-separated). Reports loaded, '
+                    'policy-hidden and unknown names; grants no permission.'
                 ),
                 "parameters": {
                     "type": "object",
