@@ -1089,7 +1089,7 @@ def _run_emergency_address_pass(ctx: Any, disposition: Any, *, rung: str, goal_t
     return receipt
 
 
-def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None, view_address=()) -> bool:
+def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None) -> bool:
     """Narrow memory beside the actual transcript without inventing a smaller route window.
 
     The view saves the measured ``saving`` (else the capacity
@@ -1102,18 +1102,14 @@ def _coarsen_memory_view(ctx: Any, fit: Any, *, saving: Optional[int] = None, vi
     mode = str(ctx.active_context_mode or "max")
     before = plan.projection(mode).system_content_json
     capacity = measurement.capacity_total_tokens
-    if view_address:
-        from ouroboros.memory_floor import select_view
-        rebound = select_view(plan, mode, view_address)
-    else:
-        rebound = plan.reproject_for_route(
-            window_tokens=int(capacity or 0), known_window=capacity is not None,
-            ratio=measurement.measurement_density,
-            output_reserve=int(plan.output_reserve_tokens), tool_schemas=ctx.tool_schemas, start_mode=mode,
-            current_messages=ctx.messages,
-            refused_tokens=max(1, int(saving or measurement.capacity_deficit_tokens or 0)),
-        )
-    selected_mode = mode if view_address else rebound.initial_mode
+    rebound = plan.reproject_for_route(
+        window_tokens=int(capacity or 0), known_window=capacity is not None,
+        ratio=measurement.measurement_density,
+        output_reserve=int(plan.output_reserve_tokens), tool_schemas=ctx.tool_schemas, start_mode=mode,
+        current_messages=ctx.messages,
+        refused_tokens=max(1, int(saving or measurement.capacity_deficit_tokens or 0)),
+    )
+    selected_mode = rebound.initial_mode
     if selected_mode == mode and rebound.projection(mode).system_content_json == before:
         return False
     mode = selected_mode
