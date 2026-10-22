@@ -168,7 +168,8 @@ def publish(root, root_task_id, *, task=None):
 
 def refresh_for_task(root, task):
     """Late publications revise an existing receipt; ordinary rounds do no tree scan."""
-    from ouroboros.task_results import load_task_result, validate_task_id
+    from ouroboros.task_results import validate_task_id
+    from ouroboros.task_store import receipt_anchor
 
     if not root or not task:
         return
@@ -178,12 +179,14 @@ def refresh_for_task(root, task):
         except ValueError:
             return  # System accounting actors have no task-result receipt.
     try:
-        row = task if isinstance(task, dict) else load_task_result(root, str(task), strict=True) or {}
-        task_id = str(row.get("task_id") or row.get("id") or "")
-        root_id = str(row.get("root_task_id") or (row.get("metadata") or {}).get("root_task_id") or task_id)
-        owner = row if task_id == root_id else load_task_result(root, root_id, strict=True) or {}
-        if owner.get("swarm_receipt"):
-            publish(root, root_id)
+        if isinstance(task, dict):
+            task_id = str(task.get("task_id") or task.get("id") or "")
+            root_id = str(task.get("root_task_id") or (task.get("metadata") or {}).get("root_task_id") or task_id)
+            anchor = (root_id, bool(task.get("swarm_receipt"))) if task_id == root_id else receipt_anchor(root, root_id)
+        else:
+            anchor = receipt_anchor(root, str(task))  # two typed fields, never a parsed task result
+        if anchor and anchor[1]:
+            publish(root, anchor[0])
     except Exception as exc:
         # This hook also runs during provider exception handling; its chain may
         # contain credentials, so retain only the local failure type.

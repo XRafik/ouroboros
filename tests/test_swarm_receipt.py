@@ -273,13 +273,33 @@ def test_full_task_handoff_discloses_receipt_only_when_recorded():
 
 @pytest.mark.parametrize("task_id,expected", [("root", True), ("system:provider_test", False)])
 def test_accounting_refresh_reads_only_task_result_identities(tmp_path, monkeypatch, task_id, expected):
-    from ouroboros import swarm_receipt, task_results
+    """The hook asks the store for two typed fields of a task identity; it never parses a
+    task result and never asks about a system accounting id."""
+    from ouroboros import swarm_receipt, task_results, task_store
 
-    reads, publishes = [], []
-    def load(root, identity, **kwargs):
-        reads.append(identity)
-        return {"task_id": identity, "swarm_receipt": {"revision": 1}}
-    monkeypatch.setattr(task_results, "load_task_result", load)
+    lookups, publishes = [], []
+    monkeypatch.setattr(task_results, "load_task_result",
+                        lambda root, identity, **kwargs: pytest.fail("a receipt refresh parsed a task result"))
+    monkeypatch.setattr(task_store, "receipt_anchor",
+                        lambda root, identity: lookups.append(identity) or (identity, True))
     monkeypatch.setattr(swarm_receipt, "publish", lambda root, identity: publishes.append(identity))
     swarm_receipt.refresh_for_task(tmp_path, task_id)
-    assert reads == publishes == ([task_id] if expected else [])
+    assert lookups == publishes == ([task_id] if expected else [])
+
+
+def test_refresh_follows_the_stored_root_and_skips_roots_without_a_receipt(tmp_path, monkeypatch):
+    from ouroboros import swarm_receipt
+    from ouroboros.task_results import write_task_result
+
+    write_task_result(tmp_path, "root-a", "running")
+    write_task_result(tmp_path, "child-a", "completed", root_task_id="root-a")
+    publishes = []
+    monkeypatch.setattr(swarm_receipt, "publish", lambda root, identity: publishes.append(identity))
+    swarm_receipt.refresh_for_task(tmp_path, "child-a")
+    assert publishes == []  # the root holds no receipt yet: nothing to revise
+    from ouroboros.task_store import patch_document
+    patch_document(tmp_path, "root-a", lambda current: {**current, "swarm_receipt": {"revision": 1}})
+    swarm_receipt.refresh_for_task(tmp_path, "child-a")
+    swarm_receipt.refresh_for_task(tmp_path, {"task_id": "child-a", "root_task_id": "root-a"})
+    assert publishes == ["root-a", "root-a"]
+    assert swarm_receipt.refresh_for_task(tmp_path, "absent-task") is None and publishes == ["root-a", "root-a"]
