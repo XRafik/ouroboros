@@ -281,7 +281,7 @@ ouroboros/ — agent core and shared runtime (§6)
   size_ratchet_manifest.py — Generated data-only size-debt manifest (`scripts/regenerate_size_ratchet.py`)
   review_execution_projection.py — Reviewer-execution projection; kinds `api` | `harness` | `native`, so the owner can tell a retrieving review from a packet review on the same model
   preflight_runner.py, preflight_node.py, preflight_receipts.py, test_parallelism.py, test_evidence.py, safe_test_supervisor.py — Hermetic gate, Node, receipts, worker budget, durable results, command lifetime (§6; §8)
-  test_selection.py, preflight_inventory.py, preflight_qualification.py — Scope, execution inventory, full adoption proof (§6)
+  test_selection.py, preflight_inventory.py, preflight_qualification.py — Scope, execution inventory, adoption evidence (§6)
   review_substrate.py — Review seat coordinator: independent seats, per-actor records that keep transport, parse, verdict, coverage and quorum distinct (§6 Review stack, Result review)
   review_custody.py, review_source_closure.py, review_operation.py, review_live_join.py — Reviewer workers: no-resend custody, retained owner-bound inputs, panel waits/checkpoints, existing-producer collection/live joins (§6 Review stack; Paid stamp and owner custody)
   review_owner_custody.py — Paid attempts record `(server session, pid)` (§6 Paid stamp and owner custody)
