@@ -53,6 +53,22 @@ def test_status_diff_paths_normalize_like_the_retired_tools(world):
         assert registry.execute_result("vcs_read", {"action": action, "path": "*.md"}).text.startswith("VCS target:")
 
 
+def test_diff_pattern_that_can_reach_a_protected_file_is_blocked_like_a_bare_diff(world):
+    registry, ctx, _, project = world
+    (project / "secret.txt").write_text("PROTECTED-BYTES\n")
+    git(project, "add", "secret.txt")
+    git(project, "commit", "-qm", "secret")
+    (project / "secret.txt").write_text("PROTECTED-BYTES-CHANGED\n")
+    (project / "note.txt").write_text("note changed\n")
+    ctx.task_metadata = {"task_contract": {"resource_policy": {"protected_artifacts": [
+        {"id": "ref", "role": "black_box_reference", "paths": ["./secret.txt"], "allow": ["execute"]}]}}}
+    for path in ("*.txt", "*", "secre?.txt"):
+        result = registry.execute_result("vcs_read", {"action": "diff", "path": path})
+        assert result.code == "RESOURCE_POLICY_BLOCKED" and "PROTECTED-BYTES" not in result.text, (path, result.text)
+    named = registry.execute_result("vcs_read", {"action": "diff", "path": "note.txt"})
+    assert named.status == "ok" and "+note changed" in named.text and "PROTECTED-BYTES" not in named.text
+
+
 def test_history_capture_is_physically_bounded_and_discloses_narrowing(world, monkeypatch):
     from ouroboros.tools import vcs_read
     registry, _, _, project = world

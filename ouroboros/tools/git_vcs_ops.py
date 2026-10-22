@@ -152,7 +152,9 @@ def _git_diff(
         if not (stat or name_only):
             from ouroboros.tools.vcs_read import _protected_content_reason
 
-            if reason := _protected_content_reason(ctx, binding, relative, "show"):
+            # A pathspec pattern can reach protected files its literal target does not name.
+            scope = "" if any(ch in relative for ch in "*?[") else relative
+            if reason := _protected_content_reason(ctx, binding, scope, "show"):
                 return _git()._vcs_result(reason, binding)
         from ouroboros.protected_artifacts import shell_block_reason as protected_artifact_shell_block_reason
 
