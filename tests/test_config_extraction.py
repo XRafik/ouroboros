@@ -137,6 +137,7 @@ _MOVED_OWNERS = {
     "get_safety_model": model_slots,
     "WORKER_SPAWN_GRACE_SEC": runtime_limits,
     "ARTIFACT_COMPRESSION_TIMEOUT_SEC": runtime_limits,
+    "GIT_READ_CAPTURE_TIMEOUT_SEC": runtime_limits,
     "WORKER_READY_WINDOW_SEC": runtime_limits,
     "WORKER_READY_MAX_ATTEMPTS": runtime_limits,
     "EXTENSION_STREAM_CHUNK_BYTES": runtime_limits,
