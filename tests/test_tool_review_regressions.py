@@ -5,7 +5,9 @@ import json
 import pytest
 
 from ouroboros import mcp_client
-from tests.test_canonical_runtime_reads import actor, world  # noqa: F401
+from tests.test_canonical_runtime_reads import actor, world as _world
+
+world = _world
 
 
 @pytest.mark.parametrize("profile", ["root", "local_readonly_subagent", "acting_subagent"])
@@ -57,7 +59,7 @@ def test_all_schema_readers_agree_on_network_gate(tmp_path, monkeypatch):
     reg.set_context(ToolContext(repo_dir=tmp_path / "repo", drive_root=tmp_path / "data", task_id="actor"))
     for allowed in (False, True):
         reg._ctx.task_contract = {"allowed_resources": {"network": allowed}}
-        name = "get_github_run_log"
+        name = "github_read"
         for core_only in (False, True):
             assert (name in {row["function"]["name"] for row in reg.schemas(core_only=core_only)}) is allowed
         assert (reg.get_schema_by_name(name) is not None) is allowed

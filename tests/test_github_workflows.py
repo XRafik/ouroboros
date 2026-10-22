@@ -140,7 +140,7 @@ def _typed(ctx):
     return ctx._active_builtin_tool_result
 
 
-# --- get_github_run_log ---------------------------------------------------------------------------------------------
+# --- github_read get run with log -----------------------------------------------------------------------------------
 
 def test_run_log_resolves_identity_retains_exact_bytes_and_shows_the_tail(fake, ctx):
     """Paired benefit over ``gh run view 11 --log`` read as text: one call names the repository, attempt, source command
@@ -270,7 +270,7 @@ def test_run_log_malformed_json_and_transport_failures_are_reported_not_guessed(
     assert gh.kinds() == ["run_json", "log"]
 
 
-# --- list_github_run_artifacts --------------------------------------------------------------------------------------
+# --- github_read list artifact -------------------------------------------------------------------------------------
 
 _DIST = {"id": 501, "name": "dist", "size_in_bytes": 2048, "expired": False, "created_at": "2026-10-20T10:00:00Z",
          "expires_at": "2027-01-18T10:00:00Z", "digest": "sha256:" + "0" * 64, "workflow_run": {"id": 11, "head_sha": SHA}}
@@ -349,7 +349,7 @@ def test_artifact_list_refusals(fake, ctx):
     assert gh.kinds() == ["run_json", "artifacts"]
 
 
-# --- download_github_artifact ---------------------------------------------------------------------------------------
+# --- github_read download artifact ---------------------------------------------------------------------------------
 
 ARCHIVE = _zip({"report.xml": b"<testsuite/>", "logs/pytest.txt": b"1 failed\n"})
 
@@ -571,3 +571,40 @@ def test_old_job_requires_its_explicit_attempt(fake, ctx):
     assert text.startswith("GitHub Actions log — owner/selected run 11 attempt 1, job 55")
     assert gh.calls[0].args[3:5] == ["--attempt", "1"]
     assert gh.calls[-1].args[-2:] == ["--attempt", "1"]
+
+
+def test_run_metadata_without_log_uses_shared_projection_and_never_captures(fake, ctx):
+    gh = fake()
+    entry = next(entry for entry in github.get_tools() if entry.name == "github_read")
+    text = entry.handler(ctx, method="get", kind="run", target=11, fields=["databaseId", "headSha"])
+    payload = json.loads(text.partition("\n")[2])
+    assert payload["item"] == {"databaseId": 11, "headSha": SHA}
+    assert payload["complete"] is True and payload["next_cursor"] == "" and "capture" not in payload
+    assert gh.kinds() == ["run_json"]
+
+
+def test_artifact_page_uses_shared_cursor_limit_projection_and_explicit_filter_note(fake, ctx):
+    gh = fake(artifacts=[_DIST], total=7)
+    entry = next(entry for entry in github.get_tools() if entry.name == "github_read")
+    text = entry.handler(ctx, method="list", kind="artifact", target=11, cursor="2", limit=2,
+                         fields=["id"], since="2026-01-01T00:00:00Z")
+    payload = json.loads(text.partition("\n")[2])
+    assert payload["items"] == [{"id": _DIST["id"]}]
+    assert payload["complete"] is False and payload["next_cursor"] == "3"
+    assert "per_page=2&page=2" in gh.calls[-1].args[1]
+    assert payload["omitted"] == ["artifact listing has no since filter; this page is unfiltered"]
+
+
+def test_shared_cut_manifest_preserves_entire_artifact_page_and_cursor(fake, ctx, monkeypatch):
+    from ouroboros.tools import github_read
+    monkeypatch.setattr(github_read, "tool_result_limit", lambda _: 2000)
+    rows = [{**_DIST, "id": 500 + i, "name": "long " * 40} for i in range(100)]
+    fake(artifacts=rows, total=150)
+    entry = next(entry for entry in github.get_tools() if entry.name == "github_read")
+    text = entry.handler(ctx, method="list", kind="artifact", target=11, limit=100, detail="full")
+    manifest = json.loads(text.partition("\n")[2])
+    data = pathlib.Path(manifest["saved"]["absolute_path"]).read_bytes()
+    saved = json.loads(data)
+    assert saved["items"] == rows and saved["next_cursor"] == "2" and not saved["complete"]
+    assert manifest["summary"]["next_cursor"] == "2" and manifest["summary"]["items"] == 100
+    assert len(data) == manifest["saved"]["bytes"] and hashlib.sha256(data).hexdigest() == manifest["saved"]["sha256"]

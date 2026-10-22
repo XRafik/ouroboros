@@ -25,8 +25,8 @@ from ouroboros.tools import (
     query_data,
 )
 from ouroboros.tools.registry import ToolContext, ToolRegistry
-from tests.test_github_pr_write import BASE_SHA, CREATE, SHA, FakeGitHub, _open_pr
-from tests.test_github_workflows import _DIST, LOG, FakeGh, _retained, _zip
+from tests.test_github_pr_write import BASE_SHA, CREATE, SHA, FakeGitHub, _open_pr, _pr
+from tests.test_github_workflows import _DIST, LOG, FakeGh, _retained, _zip, _read
 from tests.test_tool_usability_slice import _write_pdf
 
 
@@ -209,15 +209,15 @@ def test_gh_run_readers_add_run_identity_exact_capture_and_artifact_id(tmp_path,
     old_list = driver(["api", "repos/owner/selected/actions/runs/11/artifacts?per_page=100&page=1",
                        "--hostname", "github.example"], ctx)
     assert json.loads(old_list.text)["artifacts"][0]["id"] == 501
-    listing = github_workflows.list_run_artifacts(ctx, run_id=11)
-    assert "owner/selected run 11:" in listing and "download_github_artifact(artifact_id=501" in listing
+    listing = _read(ctx, "list", "artifact", run_id=11)
+    assert "owner/selected run 11:" in listing and "github_read(method='download', kind='artifact', target=501" in listing
     assert "attempt 1" not in listing  # artifact API is run-scoped, not attempt-scoped
     assert driver.kinds()[:4] == ["run_json", "artifacts", "run_json", "artifacts"]
     old_log_path = tmp_path / "old-log.bin"
     old_log = driver(["run", "view", "11", "--log", "--attempt", "1"], ctx,
                      capture_to=old_log_path, max_bytes=4096)
     assert old_log.capture.size == len(LOG) and old_log_path.read_bytes() == LOG
-    log = github_workflows.get_run_log(ctx, run_id=11)
+    log = _read(ctx, "get", "run", run_id=11)
     assert "run 11 attempt 1" in log and hashlib.sha256(LOG).hexdigest() in log
     assert driver.calls[-1].args == ["run", "view", "11", "--log", "--attempt", "1"]
     assert _retained(ctx, log).read_bytes() == LOG
@@ -227,7 +227,7 @@ def test_gh_run_readers_add_run_identity_exact_capture_and_artifact_id(tmp_path,
     old_archive = driver(["api", "repos/owner/selected/actions/artifacts/501/zip",
                           "--hostname", "github.example"], ctx, capture_to=tmp_path / "old.zip", max_bytes=4096)
     assert old_archive.capture.size > 0 and (tmp_path / "old.zip").read_bytes() == driver.archive
-    downloaded = github_workflows.download_artifact(ctx, artifact_id=501, max_bytes=4096)
+    downloaded = _read(ctx, "download", "artifact", artifact_id=501, max_bytes=4096)
     assert "artifact 501" in downloaded and "out.txt" in downloaded
     assert driver.kinds()[-3:] == ["repo", "artifact", "zip"]
     assert "Retained as the archive" in downloaded
@@ -248,9 +248,9 @@ def test_gh_readers_reach_readonly_child_that_cannot_use_shell(tmp_path, monkeyp
     monkeypatch.setattr(github_workflows, "_gh_run", driver)
     assert registry.get_schema_by_name("run_command") is None
     for name, args, content in (
-        ("get_github_run_log", {"run_id": 11}, "run 11 attempt 1"),
-        ("list_github_run_artifacts", {"run_id": 11}, "artifact_id=501"),
-        ("download_github_artifact", {"artifact_id": 501, "max_bytes": 4096}, "out.txt"),
+        ("github_read", {"method": "get", "kind": "run", "target": 11, "include": ["log"]}, "run 11 attempt 1"),
+        ("github_read", {"method": "list", "kind": "artifact", "target": 11, "limit": 100}, "target=501"),
+        ("github_read", {"method": "download", "kind": "artifact", "target": 501, "max_bytes": 4096}, "out.txt"),
     ):
         assert registry.get_schema_by_name(name) is not None
         result = registry.execute_result(name, args)
@@ -317,8 +317,8 @@ def test_pr_writers_match_safe_one_shell_precheck_and_readback(
     assert old_state == "stale" and old_held is None and old.writes() == []
     guarded = FakeGitHub(pr=pr, refs=refs)
     monkeypatch.setattr(github_pr_write, "_gh_run", guarded)
-    handler = {"create": github_pr_write.create_pr, "edit": github_pr_write.update_pr,
-               "ready": github_pr_write.set_pr_ready}[tool]
+    def handler(ctx, **kwargs):
+        return _pr(ctx, "create_pr" if tool == "create" else "update", **kwargs)
     text = handler(ctx, **kwargs)
     assert fragment in text and guarded.writes() == []
 
@@ -333,9 +333,8 @@ def test_pr_writers_match_safe_one_shell_precheck_and_readback(
     assert len(fresh.writes()) == 1 and fresh.pr == old_held
     # Correctness parity. The new tool packages the workflow and required
     # expected SHA in its public parameters; no shell incapability is claimed.
-    entry = next(x for x in github_pr_write.tool_entries() if x.name ==
-                 {"create": "create_github_pr", "edit": "update_github_pr", "ready": "set_github_pr_ready"}[tool])
-    assert "expected_head_sha" in entry.schema["parameters"]["required"]
+    entry = next(x for x in github.get_tools() if x.name == "github_write")
+    assert "head_sha" in entry.schema["parameters"]["properties"]["expect"]["properties"]
 
 
 def test_pr_update_reports_partial_state_after_one_send(tmp_path, monkeypatch):
@@ -365,7 +364,7 @@ def test_pr_update_reports_partial_state_after_one_send(tmp_path, monkeypatch):
 
     driver, call = partial_driver()
     monkeypatch.setattr(github_pr_write, "_gh_run", call)
-    text = github_pr_write.update_pr(ctx, number=7, expected_head_sha=SHA, title="New title", body="New body")
+    text = _pr(ctx, "update", number=7, expected_head_sha=SHA, title="New title", body="New body")
     assert len(driver.writes()) == 1 and "held: title confirmed" in text
     assert "not held: body differs" in text and "before resending only the fields not held" in text
     assert driver.pr == old_held  # typed field report packages the same correct readback

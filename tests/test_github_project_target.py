@@ -114,16 +114,16 @@ _CALLS = [
 
 
 _NEW_CALLS = [
-    ("get_github_run_log", {"run_id": 11}, ["run view", "run view"]),
-    ("list_github_run_artifacts", {"run_id": 11}, ["run view", "api"]),
-    ("download_github_artifact", {"artifact_id": 23, "max_bytes": 4096}, ["repo view", "api", "api"]),
-    ("create_github_pr", {"title": "New title", "head": "feature", "base": "main",
-                          "expected_head_sha": SHA, "expected_base_sha": MOVED, "body": "New body"},
+    ("github_read", {"method": "get", "kind": "run", "target": 11, "include": ["log"]}, ["run view", "run view"]),
+    ("github_read", {"method": "list", "kind": "artifact", "target": 11, "limit": 100}, ["run view", "api"]),
+    ("github_read", {"method": "download", "kind": "artifact", "target": 23, "max_bytes": 4096}, ["repo view", "api", "api"]),
+    ("github_write", {"method": "create_pr", "title": "New title", "head": "feature", "base": "main",
+                      "expect": {"head_sha": SHA, "base_sha": MOVED}, "body": "New body"},
      ["repo view", "api", "api", "pr list", "pr create", "pr view"]),
-    ("update_github_pr", {"number": 7, "expected_head_sha": SHA, "title": "New title",
-                          "body": "New body", "base": "release", "expected_base_sha": MOVED},
+    ("github_write", {"method": "update", "kind": "pr", "target": 7, "expect": {"head_sha": SHA, "base_sha": MOVED},
+                      "title": "New title", "body": "New body", "base": "release"},
      ["pr view", "repo view", "api", "pr edit", "pr view"]),
-    ("set_github_pr_ready", {"number": 7, "expected_head_sha": SHA},
+    ("github_write", {"method": "update", "kind": "pr", "target": 7, "draft": False, "expect": {"head_sha": SHA}},
      ["pr view", "pr ready", "pr view"]),
 ]
 
@@ -228,15 +228,18 @@ def test_new_repository_tools_keep_target_through_read_and_readback(
     assert "repo" in entry.schema["parameters"]["properties"]
     assert len(complete_gh) == len(steps)
     assert [argv[1] if argv[1] == "api" else " ".join(argv[1:3]) for argv, _ in complete_gh] == steps
+    operation = "draft" if "draft" in args else args["method"]
+    result = json.loads(result.partition("\n")[2])
+    result = result.get("view", "") + result.get("detail", "")
     api_paths = {
-        "list_github_run_artifacts": ["repos/owner/selected/actions/runs/11/artifacts?per_page=100&page=1"],
-        "download_github_artifact": ["repos/owner/selected/actions/artifacts/23",
+        "list": ["repos/owner/selected/actions/runs/11/artifacts?per_page=100&page=1"],
+        "download": ["repos/owner/selected/actions/artifacts/23",
                                      "repos/owner/selected/actions/artifacts/23/zip"],
-        "create_github_pr": ["repos/owner/selected/git/ref/heads/feature",
+        "create_pr": ["repos/owner/selected/git/ref/heads/feature",
                              "repos/owner/selected/git/ref/heads/main"],
-        "update_github_pr": ["repos/owner/selected/git/ref/heads/release"],
+        "update": ["repos/owner/selected/git/ref/heads/release"],
     }
-    assert [argv[2] for argv, _ in complete_gh if argv[1] == "api"] == api_paths.get(name, [])
+    assert [argv[2] for argv, _ in complete_gh if argv[1] == "api"] == api_paths.get(operation, [])
     for argv, kwargs in complete_gh:
         assert kwargs["env"]["GH_HOST"] == "configured.example"
         if argv[1] == "api":
@@ -255,13 +258,13 @@ def test_new_repository_tools_keep_target_through_read_and_readback(
             assert "GH_REPO" not in kwargs["env"]
         else:
             assert kwargs["env"]["GH_REPO"] == "unrelated/wrong-repo"
-    if name == "get_github_run_log":
+    if operation == "get":
         assert "job\tstep\tpassed" in result and "captured 16 bytes exactly" in result
         assert complete_gh[-1][1]["capture"] is True
         assert complete_gh[-1][0][4:7] == ["--log", "--attempt", "1"]
-    elif name == "list_github_run_artifacts":
+    elif operation == "list":
         assert "id 23: test-results" in result and "Complete captured JSON page" in result
-    elif name == "download_github_artifact":
+    elif operation == "download":
         assert "results.txt (7 bytes)" in result and "Retained as the archive" in result
         assert complete_gh[-1][1]["capture"] is True
     else:
@@ -281,7 +284,7 @@ def test_new_repository_tools_reject_null_target_without_gh(tmp_path, complete_g
     elif kind == "broken":
         ctx.task_metadata = {"_project_room_note": "registry unavailable"}
     monkeypatch.setenv("GH_REPO", "unrelated/wrong-repo")
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
+    monkeypatch.setattr("ouroboros.safety.check_safety", lambda *_a, **_k: (True, ""))
     registry = ToolRegistry(repo_dir=ctx.repo_dir, drive_root=ctx.drive_root)
     registry.set_context(ctx)
 
@@ -508,7 +511,7 @@ def test_presence_repository_selection_keeps_host_argument_authority(tmp_path, g
             assert gh_calls[0][0][2] == "repos/{owner}/{repo}/issues/7"
 
 
-def test_child_does_not_gain_github_access_from_explicit_repo(tmp_path, gh_calls):
+def test_child_cannot_bypass_process_binding_with_explicit_repo(tmp_path, gh_calls):
     from ouroboros.tools.registry import ToolRegistry
 
     ctx, _ = _context(tmp_path, "queued")
@@ -516,5 +519,5 @@ def test_child_does_not_gain_github_access_from_explicit_repo(tmp_path, gh_calls
     registry = ToolRegistry(repo_dir=ctx.repo_dir, drive_root=ctx.drive_root)
     registry.set_context(ctx)
     result = registry.execute("github_read", {"method": "get", "kind": "issue", "target": 7, "repo": "owner/unselected"})
-    assert "BLOCKED" in result
+    assert result.startswith("⚠️ GH_ERROR:") and "cannot shell any process cwd root" in result
     assert not gh_calls

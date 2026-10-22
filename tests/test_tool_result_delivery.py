@@ -526,8 +526,8 @@ def test_requested_result_view_classifies_declared_range_parameters():
 
 
 @pytest.mark.parametrize("tool,args", [
-    ("list_github_run_artifacts", {"run_id": 7, "page": 2}),
-    ("get_github_run_log", {"run_id": 7, "tail_lines": 500}),
+    ("github_read", {"method": "list", "kind": "artifact", "target": 7, "cursor": "2"}),
+    ("github_read", {"method": "get", "kind": "run", "target": 7, "include": ["log"], "tail_lines": 500}),
 ])
 def test_explicit_github_views_keep_requested_content_when_frame_has_room(tmp_path, tool, args):
     # The produced view exceeds the unsolicited share but fits the physical frame.

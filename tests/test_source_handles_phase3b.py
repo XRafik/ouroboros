@@ -235,7 +235,7 @@ def test_over_limit_pageable_results_persist_their_exact_source(tmp_path):
     exist."""
     from ouroboros.tool_result_delivery import RECOVER_PAGEABLE
 
-    for tool_name in ("read_file", "query_code", "chat_history", "list_github_run_artifacts"):
+    for tool_name in ("read_file", "query_code", "chat_history"):
         ctx, visible, trace_row = _project_large_result(
             tmp_path, tool_name=tool_name, call_id=f"page-{tool_name}",
             result="page-head\n" + ("y" * 120_000) + "\nDECISIVE_TAIL=FAIL",
@@ -254,7 +254,7 @@ def test_over_limit_pageable_results_persist_their_exact_source(tmp_path):
 def test_a_non_pageable_tool_keeps_its_do_not_rerun_wording(tmp_path):
     from ouroboros.tool_result_delivery import RECOVER_OTHER, RECOVER_PAGEABLE
 
-    for tool in ("run_command", "vcs_read", "get_github_run_log"):
+    for tool in ("run_command", "vcs_read", "github_read"):
         ctx, visible, row = _project_large_result(
             tmp_path, tool_name=tool, call_id=f"page-{tool}",
             result="cmd\n" + ("z" * 120_000),
