@@ -135,12 +135,12 @@ def observe(x, result):
                       title=None if title is None else title.decode('utf-8', errors='strict'))
 
 
-def select_window(observation, pid, title):
+def select_window(observation, pid, title, wm_class='Ouroboros'):
     if observation.get('status') != 'ok':
         raise RuntimeError(f'X11 identity observation failed: {observation}')
     matches = [r for r in observation['windows'] if r['pid'] == pid and r['map_state'] == 2
                and r['wm_class'] is not None
-               and any(name in r['wm_class'] for name in ('Ouroboros', 'Ouroboros.bin'))
+               and wm_class in r['wm_class']
                and r['title'] == title and r['width'] > 0 and r['height'] > 0]
     if len(matches) > 1:
         raise RuntimeError(f'Ambiguous visible launcher windows: {matches}')

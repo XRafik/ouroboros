@@ -60,10 +60,13 @@ def test_visible_window_requires_real_pid_class_geometry_and_exact_unicode_title
     assert select(expected, 120, 'Ouroboros — Setup')['id'] == 0x40000e
     # The public shell entry executes the renamed frozen binary. GTK's actual
     # WM_CLASS in the retained native run is this binary's name, not its wrapper.
-    packaged = observation()
-    packaged['windows'][0]['wm_class'] = ['Ouroboros.bin', 'Ouroboros.bin', '']
-    assert select(packaged, 120, 'Ouroboros — Setup')['id'] == 0x40000e
-    assert select(packaged, 999, 'Ouroboros — Setup') is None
+    for actual, expected_class in [(['Ouroboros.bin', 'Ouroboros.bin', ''], 'Ouroboros.bin'),
+                                   (['launcher.py', 'Launcher.py', ''], 'Launcher.py')]:
+        packaged = observation()
+        packaged['windows'][0]['wm_class'] = actual
+        assert select(packaged, 120, 'Ouroboros — Setup', expected_class)['id'] == 0x40000e
+        assert select(packaged, 999, 'Ouroboros — Setup', expected_class) is None
+        assert select(packaged, 120, 'Ouroboros — Setup', 'other') is None
     for field, value in [('pid', 999), ('wm_class', ['other']), ('map_state', 0), ('width', 0),
                          ('title', None), ('title', ''), ('title', 'Ouroboros - Setup'),
                          ('title', 'Ouroboros — Setup Required')]:

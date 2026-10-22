@@ -56,11 +56,11 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "$GITHUB_SHA"
-          for path in scripts/x11_window_identity.py tests/test_x11_window_identity.py; do
+          for path in scripts/x11_window_identity.py scripts/qualify_linux_appimage.py tests/test_x11_window_identity.py; do
             git show "$GITHUB_SHA:$path" > "$path"
           done
           git diff --binary > "$RUNNER_TEMP/ob688-evidence/qualifier-correction.patch"
-          sha256sum scripts/x11_window_identity.py tests/test_x11_window_identity.py > "$RUNNER_TEMP/ob688-evidence/qualifier-correction.sha256"
+          sha256sum scripts/x11_window_identity.py scripts/qualify_linux_appimage.py tests/test_x11_window_identity.py > "$RUNNER_TEMP/ob688-evidence/qualifier-correction.sha256"
       - name: Build the clean desktop without GTK or WebKit
         run: |
           set -euo pipefail

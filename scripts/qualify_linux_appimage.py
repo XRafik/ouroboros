@@ -62,7 +62,7 @@ def descendants(pid):
     return found
 
 
-def find_window(title, evidence, launcher_pid):
+def find_window(title, evidence, launcher_pid, wm_class='Ouroboros'):
     """Observe actual clients and their raw properties; an error is never absence."""
     reader = Path(__file__).with_name('x11_window_identity.py')
     args = [sys.executable, '-I', '-S', str(reader)]
@@ -70,7 +70,7 @@ def find_window(title, evidence, launcher_pid):
     report = {'argv': args, 'returncode': observed.returncode,
               'stdout': observed.stdout.decode('ascii', errors='backslashreplace'),
               'stderr': observed.stderr.decode('utf-8', errors='backslashreplace'),
-              'requested_title': title, 'launcher_pid': launcher_pid}
+              'requested_title': title, 'launcher_pid': launcher_pid, 'requested_class': wm_class}
     # Keep every poll, including failures, and the last observation for inspection.
     with (evidence / 'window-search.jsonl').open('a') as stream:
         stream.write(json.dumps(report) + '\n')
@@ -81,7 +81,7 @@ def find_window(title, evidence, launcher_pid):
         observation = json.loads(observed.stdout)
     except ValueError as exc:
         raise RuntimeError(f'Invalid X11 identity response: {report}') from exc
-    return runpy.run_path(str(reader))['select_window'](observation, launcher_pid, title)
+    return runpy.run_path(str(reader))['select_window'](observation, launcher_pid, title, wm_class)
 
 
 def alive(pid):
@@ -193,7 +193,8 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                     return json.load(response)
             (evidence / 'health.json').write_text(json.dumps(wait_for(health, 'server health', process=process), indent=2))
             if native:
-                setup = wait_for(lambda: find_window('Ouroboros — Setup', evidence, launcher_pid),
+                wm_class = 'Launcher.py' if source else 'Ouroboros.bin'
+                setup = wait_for(lambda: find_window('Ouroboros — Setup', evidence, launcher_pid, wm_class),
                                  'Setup', process=process)
                 (evidence / 'setup-identity.json').write_text(json.dumps(setup, indent=2))
                 (evidence / 'setup-title.txt').write_text(setup['title'], encoding='utf-8')
@@ -203,7 +204,12 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 suffix = """<script>
                 const witness = setInterval(async () => {
                     if (!window.pywebview?.api?.shell_info) return;
+                    if (document.readyState !== 'complete' ||
+                        !document.querySelector('#primary-sidebar')?.innerText.includes('Main Chat') ||
+                        !document.querySelector('#content')?.innerText.trim()) return;
                     clearInterval(witness);
+                    await document.fonts.ready;
+                    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
                     const info = await window.pywebview.api.shell_info();
                     await fetch('http://127.0.0.1:PORT/bridge', {method:'POST',
                         body:JSON.stringify({nonce:'NONCE', info, title:document.title,
@@ -216,7 +222,7 @@ def one_case(appimage, state, evidence, *, source=False, display=True, native=Tr
                 run('xdotool', 'windowactivate', '--sync', str(setup['id']))
                 run('xdotool', 'key', '--clearmodifiers', 'alt+F4')
                 version = (state / 'app/repo/VERSION').read_text().strip()
-                identity = wait_for(lambda: find_window(f'Ouroboros v{version}', evidence, launcher_pid),
+                identity = wait_for(lambda: find_window(f'Ouroboros v{version}', evidence, launcher_pid, wm_class),
                                     'Main window', process=process)
                 (evidence / 'main-identity.json').write_text(json.dumps(identity, indent=2))
                 window = str(identity['id'])
