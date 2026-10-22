@@ -13,7 +13,7 @@ from tests._review_session_route_shared import (  # noqa: F401
     FakeGateway,
     _agent_slot,
     _terminal_detail,
-    fake_route,
+    fake_route as fake_route,
 )
 from tests._usage_store_testing import ledger_rows
 from tests.test_review_operation_collection import forbid_effects  # noqa: F401
