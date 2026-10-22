@@ -491,7 +491,7 @@ def _get_task_result(
             child_result_sha256=child_result_sha256,
             outcome_summary=outcome_summary,
             capability_delta=disclosable_capability_delta(data),
-            presence_scope=str(presence_scope or ""),
+            effort=disclosable_effort_fact(data), presence_scope=str(presence_scope or ""),
         )
 
     unchanged = _unchanged_result_reference(str(task_id), child_result_sha256, known_result_sha256)
@@ -1063,10 +1063,6 @@ def await_messages_entry() -> ToolEntry:
             "wake_after_sec": {"type": "integer", "description": "Requires mode=warm or cold. Sleep: wake after this many seconds."},
         }},
     }, _await_messages, timeout_sec=get_per_call_timeout_ceiling_sec() + 60)
-
-
-
-
 
 
 def _count_live_sibling_children(ctx: ToolContext, status_drive_root: Path, *, exclude_task_id: str) -> int:

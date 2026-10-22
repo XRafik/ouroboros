@@ -27,6 +27,8 @@ def retained_call_source(ctx, root, data, task_id, call_id, digest, start, end):
         ref = {"call_id": call_id, "sha256": digest,
                "path": str(call_manifest_path(root, task_id, call_id))}
     else:
+        # The selected document may be a retry's: its published calls carry that task's identity.
+        task_id = str(data.get("task_id") or task_id)
         rows = (data.get("trace_refs") or {}).get("tool_call_refs") or []
         ref = next((row["manifest_ref"] for row in rows if isinstance(row, dict)
                     and isinstance(row.get("manifest_ref"), dict)
@@ -148,7 +150,7 @@ def _add_evidence_facts(payload: Dict[str, Any], summary: Mapping[str, Any]) -> 
 def render_result_view(
     data: Mapping[str, Any], *, task_id: str, view: str, known_result_sha256: Any,
     child_result_sha256: str, outcome_summary: str, capability_delta: Mapping[str, Any],
-    presence_scope: str = "",
+    effort: Mapping[str, str], presence_scope: str = "",
 ) -> str:
     """Render a short view without projecting the stored envelope itself.
 
@@ -179,7 +181,6 @@ def render_result_view(
         payload["capability_delta"] = dict(capability_delta)
 
     from ouroboros.task_custody import unread_mail_notice
-    from ouroboros.tools.control_task_results import disclosable_effort_fact
 
     if isinstance(data.get("cancel_origin"), dict):
         payload["cancel_origin"] = data["cancel_origin"]
@@ -190,8 +191,8 @@ def render_result_view(
         }
     if unread := unread_mail_notice(data.get("unread_mailbox")):
         payload["unread_mail_notice"] = unread
-    if effort := disclosable_effort_fact(dict(data)):
-        payload["effort"] = effort
+    if effort:
+        payload["effort"] = dict(effort)
 
     reread_arguments = {"task_id": task_id, "view": "answer"}
     authority_arguments = {"task_id": task_id, "include_authority": True}

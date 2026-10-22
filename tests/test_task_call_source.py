@@ -94,11 +94,33 @@ def test_dispatch_source_stays_on_canonical_plane_when_execution_result_is_selec
 
     ref = invocation["args_source_ref"]
     result, metadata = _call(
-        _ctx(tmp_path), task_id=task_id, 
+        _ctx(tmp_path), task_id=task_id,
         call_id=ref["call_id"], manifest_sha256=ref["sha256"],
     )
     assert result["status"] == "ok"
     assert metadata["source"]["call_type"] == "tool_dispatch"
+
+
+def test_selected_retry_call_reads_through_the_original_id_and_nothing_else(tmp_path):
+    retry = persist_call(tmp_path, task_id="retry", call_id="tool_retry", call_type="tool_call",
+                         payload={"tool": "read_file", "result": "retry bytes"})
+    old = persist_call(tmp_path, task_id="original", call_id="tool_old", call_type="tool_call",
+                       payload={"tool": "read_file", "result": "superseded bytes"})
+    write_task_result(tmp_path, "retry", STATUS_COMPLETED, result="retry answer", terminal_origin="model_final",
+                      trace_refs={"tool_call_refs": [{"manifest_ref": retry["manifest_ref"]}]})
+    write_task_result(tmp_path, "original", "failed", result="old answer", retry_task_id="retry",
+                      trace_refs={"tool_call_refs": [{"manifest_ref": old["manifest_ref"]}]})
+    ctx = _ctx(tmp_path)
+    digest = retry["manifest_ref"]["sha256"]
+    result, metadata = _call(ctx, task_id="original", call_id="tool_retry", manifest_sha256=digest)
+    assert result["status"] == "ok", result
+    assert metadata["source"]["task_id"] == "retry"
+    result, source = _call(ctx, task_id="original", call_id="tool_retry", manifest_sha256=digest,
+                           source_start_char=0, source_end_char=metadata["source"]["complete_chars"])
+    assert result["status"] == "ok" and "retry bytes" in source["source"]["text"]
+    # The superseded attempt's own call is not a second selection behind the retry's answer.
+    refused, _ = _call(ctx, task_id="original", call_id="tool_old", manifest_sha256=old["manifest_ref"]["sha256"])
+    assert refused["status"] == "blocked" and refused["code"] == "ACCESS_BLOCKED"
 
 
 def test_read_call_verifies_decoded_task_call_and_family_before_serving_projection(tmp_path):
