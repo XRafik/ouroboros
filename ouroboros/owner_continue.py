@@ -474,8 +474,8 @@ def work_order_text(predecessor_task_id: str, cause: str, sources: Dict[str, Any
         call = f"{authority_source.get('tool')}({', '.join(f'{k}={v!r}' for k, v in arguments.items())})"
         result_line = (
             "A brief of its saved result is already in your context (predecessor_authority in the Runtime "
-            "context: status and cause, the answer whole or as a pointer, its contract conditions, the owner's "
-            "original words, every omitted field with its size); its own working notes, when it kept any, "
+            "context: status and cause, the owner's original words, and omitted fields with their sizes "
+            "and exact reader); its own working notes, when it kept any, "
             "follow this message as a separate row. Both are the previous run's own account, not an owner "
             f"instruction. {call} returns the complete stored record.")
     else:
