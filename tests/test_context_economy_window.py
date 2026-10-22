@@ -293,7 +293,8 @@ def test_a_rebind_uses_only_the_exact_routes_accepted_lower_bound(tmp_path, monk
     old = low.projection("low").memory_facts["floor"]
     rebound, mode, event = _rebind(monkeypatch, tmp_path / "n", low, messages, window=tight, usage=usage)
     assert mode == "low" and event["view_kept"] is same_route
-    assert rebound.window_tokens == (accepted if same_route else tight)
+    # An accepted input above the stated total replaces it as an input bound; the reply stays beside it.
+    assert rebound.window_tokens == (accepted + 65_536 if same_route else tight)
     assert (rebound.projection("low").memory_facts["floor"]["steps"] == old["steps"]) is same_route
 
 

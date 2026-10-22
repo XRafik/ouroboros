@@ -89,13 +89,12 @@ def route_observation_scope(route, settings) -> str:
     import hashlib
     import json
     from ouroboros.capability_evidence import route_fingerprint
-    from ouroboros.llm import LLMClient
+    from ouroboros.response_limits import dispatch_target
 
     if route["provider"] == "claudexor":
         return route_fingerprint(provider=route["provider"], model=route["model"],
             base_url=route["base_url"], options=route["options"]) if route["options"].get("account_fingerprint") else ""
-    target = (dict(route, keyless=True) if route["use_local"] else
-              LLMClient().resolve_remote_target(route["model"], settings=settings))
+    target = dict(route, keyless=True) if route["use_local"] else dispatch_target(route["model"], settings)
     credentials = {key: target.get(key, "") for key in ("api_key", "user", "password", "scope")}
     if not any(credentials.values()) and not target.get("keyless"):
         return ""
