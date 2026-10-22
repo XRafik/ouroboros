@@ -824,7 +824,7 @@ export function createRoomWork({
         close({ restoreFocus: false });
         scrollToNode(target);
         showBack(place.anchor, place);
-        // The card's one control of its own, "Show details", takes the keyboard; a portal (which hides it) takes it itself.
+        // The card's one control of its own, "Details", takes the keyboard; a portal (which hides it) takes it itself.
         const disclosure = records.get(row.id)?.disclosureEl;
         const focus = disclosure?.isConnected && disclosure.getClientRects?.().length ? disclosure : target;
         if (focus === target && !target.hasAttribute?.('tabindex')) target.setAttribute('tabindex', '-1');

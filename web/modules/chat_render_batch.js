@@ -326,12 +326,13 @@ export function liveCardProjectionChanged(before, record) {
     return before.some((value, index) => value !== after[index]);
 }
 
-// The expanded state belongs to the card's one disclosure, the "Show details" button; the summary band
+// The expanded state belongs to the card's one disclosure, the "Details" button; the summary band
 // above it is reading content and states nothing (a Main portal hides the button: work_portal.js).
+// Its word stays; `aria-expanded` and the turned chevron say open or closed.
 export function syncLiveCardToggle(record) {
     if (!record?.toggleEl) return;
     const expanded = record.root.dataset.expanded === '1';
-    const text = expanded ? 'Hide details' : 'Show details';
+    const text = 'Details';
     const ariaExpanded = expanded ? 'true' : 'false';
     if (record.toggleEl.textContent !== text) record.toggleEl.textContent = text;
     if (record.disclosureEl && record.disclosureEl.getAttribute('aria-expanded') !== ariaExpanded) {

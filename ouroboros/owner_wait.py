@@ -193,6 +193,8 @@ def continuation_state(ctx: Any, messages: list, trace: dict, usage: dict,
             "_historical_author_inputs", "_pending_owner_dialogue", *_SEND_OBSERVER_KEYS,
         ) if getattr(ctx, key, None) is not None},
         "round_idx": round_idx, "tool_schemas": tool_schemas,
+        **({"actor_loaded_tool_names": sorted(ctx._actor_loaded_tool_names)}
+           if hasattr(ctx, "_actor_loaded_tool_names") else {}),
         "seen": sorted(seen), "owner_directives": getattr(ctx, "_owner_directives", []),
         "sleep_interaction_seen": dict(getattr(ctx, "_sleep_interaction_seen", None) or {}),
         "held_owner_messages": dict(getattr(ctx, "_held_owner_messages", None) or {}),
@@ -986,6 +988,10 @@ def restore_continuation_state(tools: Any, state: dict, messages: list, trace: d
         if key in {"_last_context_observation", "_inspected_context_view", "_pending_compaction", "_historical_author_inputs", "_pending_owner_dialogue", *_SEND_OBSERVER_KEYS}:
             setattr(ctx, key, value)
     messages[:] = state["messages"]
+    # This set is also bound into enable_tools; never replace the closure's object.
+    loaded = getattr(ctx, "_actor_loaded_tool_names", None)
+    if loaded is not None:
+        loaded.update(state.get("actor_loaded_tool_names") or ())
     trace.update(state["trace"])
     usage.update(state["usage"])
     seen.update(state["seen"])
@@ -1022,6 +1028,7 @@ def rebind_restored_route(tools: Any, state: dict, messages: list) -> tuple:
     from ouroboros.loop import _rebind_context_fit_plan, get_context_mode
     from ouroboros.memory_floor import MODES
     from ouroboros.model_slots import task_model_binding
+    from ouroboros.continuation_tools import reconcile_restored_tools
 
     ctx = tools._ctx
     model_wait = getattr(ctx, "model_wait_context", None)
@@ -1031,13 +1038,16 @@ def rebind_restored_route(tools: Any, state: dict, messages: list) -> tuple:
         overrides=model_wait.overrides if model_wait is not None else None,
     )
     owner, ran = get_context_mode(), getattr(ctx, "active_context_mode", None)
-    return _rebind_context_fit_plan(
-        ctx.context_fit_plan, tools, messages, model=ctx.active_model,
+    route = dict(model=ctx.active_model,
         use_local=ctx.active_use_local, preferred_mode=owner,
         tool_schemas=state["tool_schemas"],
         model_role=role, model_route={}, credential_profile_id=account,
-        start_mode=ran if owner in MODES and ran in MODES[MODES.index(owner):] else None,
     )
+    plan, mode = _rebind_context_fit_plan(ctx.context_fit_plan, tools, messages, **route,
+        start_mode=ran if owner in MODES and ran in MODES[MODES.index(owner):] else None)
+    if reconcile_restored_tools(tools, state, messages, mode):
+        plan, mode = _rebind_context_fit_plan(plan, tools, messages, **route, start_mode=mode)
+    return plan, mode
 
 
 def resume_native_loop(tools: Any, state: dict, messages: list, trace: dict,

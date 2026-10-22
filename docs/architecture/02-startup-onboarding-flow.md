@@ -4,6 +4,8 @@ Startup orders launcher checks, gateway onboarding and an atomic save of setting
 
 ### Boot order
 
+`server_boot.mcp_startup` makes the server the only MCP lister, pruning then listing in background (§6).
+
 UI preparation (Linux: browser), PID lock and automatic-intent check precede activation/Windows tray and Git/venv/seed bootstrap. `launcher_bootstrap` reaps noninteractive commands on completion or Quit/Panic: Jobs on Windows, lifelines on source POSIX, group/token custody without an abrupt-death guardian on frozen POSIX. OS installers keep terminal semantics and captured roots; shutdown during another bootstrap command also requests their stop. The lifecycle thread (exit 42, crash fuse: §1) probes `/api/health` while its child lives (`launcher_readiness.py`); exit before serving fails startup. Readiness permits onboarding, then shell/browser.
 
 Before serving, the lifespan admits the data root, applies settings/UI/runtime-mode baseline, starts the WebSocket heartbeat and opens the store's import window (`store_switch.start`). Data-, extension- and child-dependent work runs in the lifespan-owned boot coordinator (`server_liveness.start_boot_coordinator`; steps: `server_boot.py`), ending with store and supervisor publication outcomes. `/api/health` answers 200 as soon as the socket serves and carries the `boot` document (`gateway/health_contracts.py`: `phase` starting → serving → ready | failed, `dialogue_ready`, `tasks_ready`, steps, jobs), which `/api/state` repeats for the chat header. A fail-soft step (an extension that did not load) is reported failed and the boot goes on; an unpublished store or a failed supervisor init fails the phase with its cause.

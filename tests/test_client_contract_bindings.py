@@ -244,6 +244,44 @@ def _owned_names() -> dict:
     return names
 
 
+@pytest.mark.parametrize("outcome", ["unlisted", "listed", "failed", "unpublished"])
+def test_mcp_listing_evidence_matches_published_contracts(client, monkeypatch, tmp_path, outcome):
+    from ouroboros import config, mcp_catalog, mcp_client
+    from ouroboros.gateway import mcp as api
+
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    value = {"MCP_ENABLED": True, "MCP_SERVERS": [{"id": "demo", "enabled": True, "url": "https://example.test/mcp"}]}
+    monkeypatch.setattr(api, "load_settings", lambda: value)
+    manager = mcp_client.MCPManager()
+    monkeypatch.setattr(mcp_client, "_manager", manager)
+    async def listing(cfg, timeout):
+        if outcome == "failed":
+            raise TimeoutError("offline")
+        return [{"name": "ping", "description": "Ping", "input_schema": {}}]
+    manager._async_list_tools = listing
+    if outcome == "unpublished":
+        def cannot_publish(*args):
+            raise PermissionError("catalog is locked")
+        monkeypatch.setattr(mcp_catalog, "publish", cannot_publish)
+    if outcome != "unlisted":
+        response = client.post("/api/mcp/refresh", json={"server_id": "demo"})
+        assert assert_bound("POST /api/mcp/refresh", response) == "McpRefreshResponse"
+        assert response.json()["published"] is (outcome != "unpublished")
+        assert bool(response.json()["publication_error"]) is (outcome == "unpublished")
+    response = client.get("/api/mcp/status")
+    assert assert_bound("GET /api/mcp/status", response) == "McpStatusResponse"
+    row = response.json()["servers"][0]
+    assert set(row) <= _declared("McpServerStatus")
+    attempt = row["latest_attempt"]
+    if outcome == "unlisted":
+        assert attempt is None and row["listed_at"] is None and not row["complete"]
+    else:
+        assert set(attempt) == _declared("McpListingAttempt")
+        assert attempt["ok"] is (outcome != "failed")
+        invalid = {**row, "latest_attempt": {**attempt, "partial": "not a boolean"}}
+        assert validate_ingress(invalid, contract_typed_dict("McpServerStatus"))
+
+
 def test_every_published_and_owned_shape_has_one_field_identical_browser_twin():
     from ouroboros.review import is_gated_js_module
 
