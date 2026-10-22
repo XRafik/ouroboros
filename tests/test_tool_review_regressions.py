@@ -26,7 +26,7 @@ def test_directory_recipe_keeps_canonical_target(world, profile):
 
 
 @pytest.mark.parametrize("keyword", ["default", "const", "enum", "examples", "x-extension"])
-def test_mcp_secret_literal_withholds_only_affected_descriptor(monkeypatch, keyword):
+def test_mcp_secret_literal_drops_optional_field_or_withholds_only_affected_descriptor(monkeypatch, keyword):
     token = "synthetic-schema-literal-secret"
     literal = {"description": token, "title": "ordinary"}
     value = [literal] if keyword in {"enum", "examples"} else literal
@@ -43,12 +43,19 @@ def test_mcp_secret_literal_withholds_only_affected_descriptor(monkeypatch, keyw
         "url": "https://example.test/mcp", "auth_token": token, "allowed_tools": []}]})
     result = manager.refresh_server("secret")
     assert token not in json.dumps(result)
-    assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(manager.status_payload())
     rows = manager.list_tools_for_registry()
-    assert len(rows) == 1 and rows[0]["name"].endswith("__good")
-    assert rows[0]["schema"]["properties"]["x"]["default"] == {"description": "literal"}
-    assert token not in json.dumps(rows)
-    assert manager.resolve_tool_name("mcp_secret__bad").status != "callable"
+    good = next(row for row in rows if row["name"].endswith("__good"))
+    assert good["schema"]["properties"]["x"]["default"] == {"description": "literal"}
+    assert token not in json.dumps([rows, manager.status_payload()])
+    if keyword in {"default", "examples"}:  # dispensable: the field goes, the tool stays
+        assert "MCP_SCHEMA_OPTIONAL_DROPPED" in json.dumps(manager.status_payload())
+        bad = next(row for row in rows if row["name"].endswith("__bad"))
+        assert keyword not in bad["schema"]
+        assert manager.resolve_tool_name("mcp_secret__bad").status == "callable"
+    else:  # irreducible input contract: only this descriptor is withheld
+        assert "MCP_SCHEMA_LITERAL_SECRET" in json.dumps(manager.status_payload())
+        assert len(rows) == 1
+        assert manager.resolve_tool_name("mcp_secret__bad").status != "callable"
 
 
 def test_all_schema_readers_agree_on_network_gate(tmp_path, monkeypatch):
