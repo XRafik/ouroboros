@@ -14,7 +14,7 @@ from tests.test_memory_view_lever import plan as lever_plan
 from ouroboros.tools.compact_context import record_context_view, _compact_context
 from ouroboros.loop_round_limits import _run_round_compaction
 from tests.test_context_view_tool import _context
-from tests.test_main_authored_context import main_loop, call
+from tests.test_main_authored_context import main_loop as main_loop, call
 
 
 def _core(mature):

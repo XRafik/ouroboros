@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from ouroboros.task_pacing import in_task_cost_ceiling_disclosure as _in_task_cost_ceiling
 from ouroboros.config import runtime_setting

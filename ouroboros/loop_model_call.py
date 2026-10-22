@@ -575,7 +575,6 @@ def _rebind_context_fit_plan(
         raise RuntimeError(
             "CONTEXT_FIT_REBUILD_FAILED: immutable context core is unavailable for route switch"
         )
-    from ouroboros.capability_evidence import is_known
     from ouroboros.context import _context_fit_route
     from ouroboros.context_anchor import main_input_anchor
     from ouroboros.context_fit import (_failed_route_evidence, _route_calibration_ratio,

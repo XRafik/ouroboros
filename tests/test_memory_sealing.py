@@ -1,5 +1,4 @@
 """Own-work sealing, terminal links and the ON/OFF candidate boundary."""
-import json
 from types import SimpleNamespace
 
 import pytest

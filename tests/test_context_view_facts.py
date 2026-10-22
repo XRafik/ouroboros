@@ -1,6 +1,5 @@
 """Selected context facts name their sources without adding advice or another allowance."""
 from dataclasses import replace
-from types import SimpleNamespace
 
 from ouroboros import capability_evidence as ce
 from ouroboros.context_window import record_observation, resolve_window

@@ -521,7 +521,7 @@ def test_continue_carries_an_unreadable_predecessor_plan_as_a_named_gap_through_
 
     env, memory = _make_env_and_memory(tmp_path)
     root, predecessor = env.drive_root, "plan-predecessor"
-    spec = _plan_predecessor(root, predecessor, damage)
+    _plan_predecessor(root, predecessor, damage)
     with open_store(root, write=False) as txn:
         row_text, revision = txn.body_text(predecessor), signature(root, predecessor, txn=txn)
     task = {"id": "plan-successor", "type": "task", "text": "continue", "budget_drive_root": str(root),

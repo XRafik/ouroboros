@@ -349,7 +349,6 @@ def _measured_frame(
     *, drive_root: pathlib.Path, task_id: str,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Main's first show: one measured batch allowance, requested forms first."""
-    from ouroboros.context_fit import reclaim_low_water_margin
 
     count = len(rows)
     texts = [reader_text(text) for text in full]

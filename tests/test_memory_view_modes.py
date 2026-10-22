@@ -1,6 +1,5 @@
 """Start book choice and subsequent route recovery from one captured view."""
 import dataclasses
-import json
 import pytest
 from ouroboros import context_budget as cb, memory_floor as mf
 from ouroboros.context_fit import MinimumViewUnfit
@@ -11,7 +10,6 @@ _TASK = {"type": "task", "text": "hi", "id": "tmain", "chat_id": 1}
 def _built(tmp_path, monkeypatch, *, books=80_000, ratio=None, page_chars=0):
     """``(core, plan(window, **kw))`` on the shared installation; Max's books grown by ``books`` characters
     so that Max's fixed part exceeds Low's (the test repository's own books are smaller than its nav map)."""
-    import dataclasses
     from types import SimpleNamespace
 
     from ouroboros import context, context_fit
