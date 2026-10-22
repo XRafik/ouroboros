@@ -515,8 +515,8 @@ ouroboros/ — agent core and shared runtime (§6)
     commit_gate.py — Commit gate: LLM claim synthesis, block classification, the free identical-verdict refusal, paid review-cycle counting and ceiling, the review-contract fingerprint
     git_rollback.py — Emits `rollback_request`; the supervisor runs the UI Rollback door's procedure (P4-S)
     git_pr.py — Five PR tools (non-core)
-    github.py — Issue, PR and checks tools (frozen tool module): the shared process binding selects the active Project; discovery reads token sources or native CLI configuration without an authentication probe; a refusal before the first `gh` launch is `completed_no_effect`
-    github_checks.py — the reader behind `get_github_checks`: one commit's runs, jobs, annotations and PR rollup as facts and named unavailable sources under one deadline
+    github.py, github_read.py, github_write.py — `github_read`, `github_write`, `pr_merge` (frozen tool module), one `gh` transport bound to the active Project; discovery reads token sources or native CLI config unprobed; a refusal before its first `gh` launch is `completed_no_effect`
+    github_checks.py — checks reader: a commit's runs, jobs, annotations, PR rollup as facts, unavailable sources named, one deadline
     parallel_review.py — Prepares and admits every seat before the review wave sends (§6 Surfaces and money admission)
     plan_review_references.py — Reference projection with its own provenance rows (progress stream); no plan authority
     plan_review.py — `plan_task` entry: free write and read, the paid ask, typed `PLAN_*` refusals (§6 Plan construction and review)
