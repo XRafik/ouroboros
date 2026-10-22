@@ -39,12 +39,14 @@ def prepare_review_session_request(invocation: Any, route: Any, *,
                                    schema_asked: bool, ephemeral: bool = False, shape: Any = None,
                                    execution: Optional[Dict[str, Any]] = None,
                                    instructions: str = "", input_limit: Optional[dict] = None,
-                                   source_root: Any = None, delivery_facts: Optional[dict] = None) -> Dict[str, Any]:
+                                   source_root: Any = None, delivery_facts: Optional[dict] = None,
+                                   gateway: Any = None, capabilities: Optional[dict] = None) -> Dict[str, Any]:
     """Prepare and measure the exact wire request; no start, wait or recovery effects.
 
     ``shape`` is the seat's run shape (read-only unless its configured access is
     writable); a writable seat names its private checking copy in ``execution``
     and its own ``instructions``."""
+    from ouroboros.effort_evidence import session_prompt_cache_ttl_request
     from ouroboros.review_execution import ReviewRouteUnavailable, _CLAUDEXOR_MAX_SECONDS
     from ouroboros.subagents import delegated_run_shape
     shape = shape or delegated_run_shape(False, str(getattr(invocation, "access", "") or "readonly"))
@@ -78,6 +80,8 @@ def prepare_review_session_request(invocation: Any, route: Any, *,
         run_request["outputSchema"] = output_schema
     facts = delivery_facts if delivery_facts is not None else invocation.source_delivery
     facts = facts if facts is not None else {}
+    facts["prompt_cache_ttl"] = session_prompt_cache_ttl_request(
+        run_request, route_id=route.route_id, gateway=gateway, capabilities=capabilities)
     limit = input_limit or facts.get("input_limit") or {}
     budget = limit.get("prompt_budget")
     if type(budget) is int and budget >= 0:

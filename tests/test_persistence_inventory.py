@@ -824,7 +824,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # the switch helper (body adoption row).
 # 409 -> 414: the place seam (one path the inherited pin missed) plus focus, the gate directory and its
 # author-census member family, documented in section 2.
-EXPECTED_SCAN_PATHS = 414
+# 414 -> 415: ``state/sent_history_changes.json``, the running code's record of sent-history changes
+# (``ouroboros/transcript_prefix.py``, its own section-2 row).
+# The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
+# accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
+# ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 415 -> 410.
+EXPECTED_SCAN_PATHS = 410
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
