@@ -154,6 +154,23 @@ def test_identity_unborn_dirty_refs_merge_base_and_linked_worktree(world):
     assert "GIT_ERROR" in read(ctx, action="identity", repository="corrupt")
 
 
+def test_identity_dirty_uses_the_same_git_config_as_status(world, tmp_path, monkeypatch):
+    _registry, ctx, _system, project = world
+    ignore = tmp_path / "global-ignore"
+    ignore.write_text("*.local\n", encoding="utf-8")
+    config = tmp_path / "global.gitconfig"
+    config.write_text("", encoding="utf-8")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    (project / "scratch.local").write_text("ignored by the operator\n", encoding="utf-8")
+
+    def dirty() -> bool:
+        return json.loads(read_ok(ctx, action="identity").split("\n\nVCS target:")[0])["dirty"]
+
+    assert dirty() is True and "scratch.local" in read_ok(ctx, action="status")
+    config.write_text(f"[core]\n\texcludesFile = {ignore.as_posix()}\n", encoding="utf-8")
+    assert dirty() is False and "scratch.local" not in read_ok(ctx, action="status")
+
+
 def test_explicit_repository_status_diff_and_omission_parity(world):
     registry, ctx, _system, project = world
     nested = repo(project / "nested")

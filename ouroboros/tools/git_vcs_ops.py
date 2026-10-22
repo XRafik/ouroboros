@@ -108,7 +108,7 @@ def _git_status(
         binding = _git()._vcs_binding(ctx, _resolved_binding, root=root, path=path or ".")
         cmd = ["git", "status", "--porcelain"]
         if relative := _git()._binding_relative_path(binding, path, literal=True):
-            cmd.extend(["--", f":(literal){relative}"])
+            cmd.extend(["--", relative])  # an ordinary pathspec, as before: globs keep working
         output = _git().run_cmd(cmd, cwd=binding.repository_path or binding.base_path)
         return _git()._vcs_result(
             _git()._limit_git_output(output, max_chars),
@@ -156,7 +156,7 @@ def _git_diff(
             cmd.append("--stat")
         cmd.extend(revisions)
         if relative := _git()._binding_relative_path(binding, path, literal=True):
-            cmd.extend(["--", f":(literal){relative}"])
+            cmd.extend(["--", relative])
         if not (stat or name_only):
             from ouroboros.tools.vcs_read import _protected_content_reason
 

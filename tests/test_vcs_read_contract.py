@@ -43,6 +43,16 @@ def test_status_diff_keep_clean_filter_comparison(world, repository):
     assert "+changed CANONICAL" in difference.text
 
 
+def test_status_diff_paths_normalize_like_the_retired_tools(world):
+    registry, _, _, project = world
+    (project / "note.txt").write_text("changed\n")
+    for action in ("status", "diff"):
+        for path in (str(project / "note.txt"), f"{project.name}/note.txt", "*.txt", "./"):
+            result = registry.execute_result("vcs_read", {"action": action, "path": path, "max_chars": "4000"})
+            assert result.status == "ok" and "note.txt" in result.text.split("VCS target:")[0], (action, path, result.text)
+        assert registry.execute_result("vcs_read", {"action": action, "path": "*.md"}).text.startswith("VCS target:")
+
+
 def test_history_capture_is_physically_bounded_and_discloses_narrowing(world, monkeypatch):
     from ouroboros.tools import vcs_read
     registry, _, _, project = world
@@ -69,7 +79,7 @@ def test_history_timeout_reaps_child_and_closes_pipe_readers(tmp_path, monkeypat
         children.append(process)
         wait = process.wait
         def expire(timeout=None):
-            if timeout == 30:
+            if timeout == vcs_read.GIT_READ_CAPTURE_TIMEOUT_SEC:
                 raise subprocess.TimeoutExpired("git", timeout)
             return wait(timeout=timeout)
         process.wait = expire

@@ -13,6 +13,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
+from ouroboros.config import GIT_READ_CAPTURE_TIMEOUT_SEC
 from ouroboros.protected_artifacts import block_reason_for_path, protected_artifact_paths
 from ouroboros.tool_access import ResolvedResourceBinding
 from ouroboros.tools.git_plumbing import _publish_git_error, _sanitize_git_error
@@ -29,20 +30,25 @@ READ_DESCRIPTION = (
 _CONTENT_ACTIONS = frozenset({"show", "file", "blame"})
 _ACTIONS = frozenset({"status", "diff", "log", "show", "file", "blame", "refs", "rev_parse", "merge_base", "identity"})
 _CAPTURE_BYTES = 1024 * 1024
+_CONFIG_LOCATIONS = frozenset({"GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM"})
 
 
 def _capture_read_git(repo: pathlib.Path, args: list[str]) -> subprocess.CompletedProcess[bytes]:
-    """Capture one local Git read with operator Git state and helpers disabled."""
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    """Capture one local Git read with the inherited Git environment and helpers disabled.
+
+    The user and system config stay read, from the same locations status and diff
+    use: their filters, excludes, autocrlf and safe.directory decide what "clean" means.
+    """
+    env = {key: value for key, value in os.environ.items()
+           if not key.startswith("GIT_") or key in _CONFIG_LOCATIONS}
     env.update({
         "LC_ALL": "C", "LANG": "C", "GIT_OPTIONAL_LOCKS": "0",
         "GIT_NO_LAZY_FETCH": "1", "GIT_NO_REPLACE_OBJECTS": "1",
-        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
         "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0",
     })
     cmd = [
         "git", "--no-pager", "--no-optional-locks",
-        "-c", "core.fsmonitor=false", "-c", "core.pager=cat",
+        "-c", "core.fsmonitor=false", "-c", "core.pager=cat", "-c", "color.ui=false",
         "-c", f"core.hooksPath={os.devnull}",
         "-c", "log.showSignature=false",
     ]
@@ -60,7 +66,7 @@ def _capture_read_git(repo: pathlib.Path, args: list[str]) -> subprocess.Complet
         stdout = pool.submit(drain, process.stdout, _CAPTURE_BYTES)
         stderr = pool.submit(drain, process.stderr, 65536)
         try:
-            process.wait(timeout=30)
+            process.wait(timeout=GIT_READ_CAPTURE_TIMEOUT_SEC)
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
@@ -105,14 +111,15 @@ def _literal_path(binding: ResolvedResourceBinding, path: str) -> str:
 
     # The binding proves current physical confinement; Git needs the requested
     # tree entry, not a symlink's current target (which may have different bytes).
-    if not binding.target_path.is_relative_to(binding.repository_path or binding.base_path):
+    from ouroboros.tool_access_paths import normalize_root_relative
+
+    repo = binding.repository_path or binding.base_path
+    if not binding.target_path.is_relative_to(repo):
         raise ValueError("path escapes the selected repository")
-    relative = pathlib.PurePosixPath(normalized_path_text(path)).as_posix()
+    relative = pathlib.PurePosixPath(normalize_root_relative(repo, normalized_path_text(path))).as_posix()
     if relative.startswith("/") or ".." in pathlib.PurePosixPath(relative).parts:
         raise ValueError("path must be repository-relative")
-    if relative in {"", "."}:
-        raise ValueError("path must name a file inside the selected repository")
-    return relative
+    return "" if relative in {"", "."} else relative
 
 
 def _protected_content_reason(ctx, binding: ResolvedResourceBinding, path: str, action: str) -> str:
@@ -193,6 +200,8 @@ def _vcs_read(
     _resolved_binding: Optional[ResolvedResourceBinding] = None,
 ) -> str:
     """Read Git objects using only the prepared repository and path binding."""
+    max_count, max_chars = (int(value) if isinstance(value, str) and value.strip().isdigit() else value
+                            for value in (max_count, max_chars))
     if (action not in _ACTIONS or not isinstance(max_count, int)
             or not isinstance(max_chars, int) or not 1 <= max_count <= 200 or max_chars < 0
             or (path and action not in {"status", "diff", "log", "show", "file", "blame"})
@@ -284,7 +293,7 @@ def get_tools():
             "repository": {"type": "string", "default": "",
                            "description": "Git worktree root within root; omitted selects root itself. Not a file filter."},
             "path": {"type": "string", "default": "",
-                     "description": "Literal repository-relative file/path filter; required for file and blame."},
+                     "description": "Repository-relative path filter (a pathspec for status/diff, literal for history); required for file and blame."},
             "ref": {"type": "string", "default": "",
                     "description": "Local revision (default HEAD), or a literal refs/ prefix for refs."},
             "base": {"type": "string", "default": "", "description": "First revision for merge_base, or diff base resolved once to a tree."},
