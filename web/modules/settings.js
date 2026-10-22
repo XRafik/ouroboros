@@ -482,6 +482,7 @@ export function initSettings({ state, setBeforePageLeave, ws } = {}) {
     bindEffortSegments(page);
     // Appearance is client-local and injected after boot; never a server setting.
     globalThis.ouroTheme?.mount();
+    globalThis.ouroScale?.mount();
     // Notification preferences are client-local for the same reason; the module
     // owns delegated handlers, so mounting only paints current state.
     getNotifier().mountSettings(page);

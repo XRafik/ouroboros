@@ -675,6 +675,17 @@ export function renderSettingsPage() {
                     ${languageBlockHtml()}
 
                     <div class="form-section">
+                        <h3>Interface size</h3>
+                        <div class="ui-field-inline" role="group" aria-label="Interface scale">
+                            <button type="button" class="btn btn-default" data-ui-scale-step="-1" aria-label="Smaller interface">−</button>
+                            <output data-ui-scale-label aria-live="polite">System</output>
+                            <button type="button" class="btn btn-default" data-ui-scale-step="1" aria-label="Larger interface">+</button>
+                            <button type="button" class="btn btn-default" data-ui-scale-step="reset">System</button>
+                        </div>
+                        <div class="settings-section-copy">Changes text and controls together on this client only. Applies immediately; System removes the override and keeps the environment's normal scaling. If this client blocks storage, the choice lasts until reload.</div>
+                    </div>
+
+                    <div class="form-section">
                         <h3>Theme</h3>
                         <div class="settings-section-copy">
                             <code>System</code> follows this device's OS appearance and is the default for a new client.

@@ -2485,6 +2485,8 @@ notifications need the current app.
 
 ## 10. Shell
 
+**Client scale.** Appearance offers smaller/larger buttons and a System reset. A 70–120% override scales shared type, controls and spacing; System removes it and keeps the environment's normal scaling. The client remembers the choice, not the server; no inverse-DPI compensation or viewport zoom changes geometry.
+
 One interface serves the desktop window, browsers, phones and the Telegram Mini
 App. The phone layout is the same elements arranged by one rule, never a second
 set of screens, so a page added for the desktop works on a phone without phone

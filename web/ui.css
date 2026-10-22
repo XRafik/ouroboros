@@ -1,5 +1,10 @@
 /* Shared values and portable controls. Pages own layout; opt-in author pages
    use these same bytes without inheriting an application-wide reset. */
+html[data-ui-scale="70"] { --ui-scale: 0.7; }
+html[data-ui-scale="80"] { --ui-scale: 0.8; }
+html[data-ui-scale="90"] { --ui-scale: 0.9; }
+html[data-ui-scale="110"] { --ui-scale: 1.1; }
+html[data-ui-scale="120"] { --ui-scale: 1.2; }
 :root {
     --native-color-scheme: dark;
     --neutral-rgb: 255, 255, 255;
@@ -19,10 +24,10 @@
     --bg-card: rgba(var(--neutral-rgb), 0.06);
     --bg-hover: rgba(var(--neutral-rgb), 0.08);
     /* Type scale + foreground semantics: docs/DESIGN.md. Four sizes, no fifth. */
-    --type-meta: 12px;
-    --type-body: 14px;
-    --type-section: 16px;
-    --type-page: 24px;
+    --type-meta: calc(12px * var(--ui-scale, 1));
+    --type-body: calc(14px * var(--ui-scale, 1));
+    --type-section: calc(16px * var(--ui-scale, 1));
+    --type-page: calc(24px * var(--ui-scale, 1));
     /* Not UI sizes: the chat reading ladder, relative to the bubble's reading
        text (20px and 18px over the 16px bubble; DESIGN.md §1). */
     --md-heading-major: 1.25em;
@@ -160,21 +165,21 @@
     --radius: 12px;
     --radius-lg: 16px;
     --radius-xl: 20px;
-    --page-header-padding-y: 10px;
-    --page-header-padding-x: 20px;
-    --page-header-padding-bottom: 6px;
-    --pill-padding-y: 7px;
-    --pill-padding-x: 14px;
-    --pill-font-size: 13px;
+    --page-header-padding-y: calc(10px * var(--ui-scale, 1));
+    --page-header-padding-x: calc(20px * var(--ui-scale, 1));
+    --page-header-padding-bottom: calc(6px * var(--ui-scale, 1));
+    --pill-padding-y: calc(7px * var(--ui-scale, 1));
+    --pill-padding-x: calc(14px * var(--ui-scale, 1));
+    --pill-font-size: calc(13px * var(--ui-scale, 1));
     --pill-radius: 999px;
     --pill-strip-padding: 6px 0 8px;
-    --button-padding-y: 8px;
-    --button-padding-x: 16px;
-    --button-font-size: 13px;
-    --button-min-height: 34px;
+    --button-padding-y: calc(8px * var(--ui-scale, 1));
+    --button-padding-x: calc(16px * var(--ui-scale, 1));
+    --button-font-size: calc(13px * var(--ui-scale, 1));
+    --button-min-height: calc(34px * var(--ui-scale, 1));
     /* Floating chrome (the recipe at the end): one height for a floating group's text controls, and the
        group's inset, which its negative margin cancels so grouping moves no control. */
-    --chrome-control-h: 30px;
+    --chrome-control-h: calc(30px * var(--ui-scale, 1));
     --chrome-navigation-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
     --chrome-inset: calc(var(--space-1) + 1px);
     /* Airy dopamine seed (DESIGN.md design bible): the dark values; the light theme's follow in its block. One set of
@@ -255,7 +260,7 @@
     --motion-fade: 180ms;
     --widget-fault-status-max-width: min(240px, 35vw);
     /* App shell: persistent desktop sidebar + optional project detail pane. */
-    --sidebar-width: 280px;
+    --sidebar-width: calc(280px * var(--ui-scale, 1));
     --project-panel-width: clamp(340px, 36vw, 440px);
     /* One hover fill for an item in a popup menu or a picker list. Six menus
        used five different fills (0.04 / 0.06 / 0.08 / an accent tint / an
@@ -264,11 +269,11 @@
     --menu-item-hover: rgba(var(--neutral-rgb), 0.07);
     /* 8pt spacing scale (Apple HIG / common 8pt grid) — use these instead of
        ad-hoc pixel values so spacing stays consistent across components. */
-    --space-1: 4px;
-    --space-2: 8px;
-    --space-3: 12px;
-    --space-4: 16px;
-    --space-5: 24px;
+    --space-1: calc(4px * var(--ui-scale, 1));
+    --space-2: calc(8px * var(--ui-scale, 1));
+    --space-3: calc(12px * var(--ui-scale, 1));
+    --space-4: calc(16px * var(--ui-scale, 1));
+    --space-5: calc(24px * var(--ui-scale, 1));
     /* Bounded scroll region for the Updates restore list (DESIGN section 5:
        a new visual dimension becomes a variable before a page-local literal). */
     --updates-list-max-height: 320px;
@@ -292,7 +297,7 @@
     /* Message fields (DESIGN §3, "Quiz card"): the composer's control height, which a question's Send shares; the one
        cap a message field grows to before it scrolls (chat_input_sizing.js reads it as the field's max-height); and
        the row a question's voice line and head share, its × as tall as the row. */
-    --composer-control-height: 32px;
+    --composer-control-height: calc(32px * var(--ui-scale, 1));
     --message-field-max-height: 140px;
     --quiz-row-height: 28px;
     /* The smallest comfortable touch target; a coarse pointer (a phone) raises it to a finger's 44px (below). */
