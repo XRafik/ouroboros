@@ -743,17 +743,18 @@ def test_update_admission_notice_falls_back_to_the_saved_chat_address(
 ) -> None:
     """Review finding (Astra, advisory): a queue row without chat_id still gets the
     Resume notice through the task's saved chat address."""
-    from supervisor.budget_resume import _update_admission_refusal
+    from supervisor.budget_resume import _restart_or_update_refusal
 
     task_id = "resume-notice-fallback"
     write_task_result(tmp_path, task_id, STATUS_RUNNING, chat_id=7, _is_direct_chat=True)
     sent: list[tuple] = []
     q = SimpleNamespace(
+        DRIVE_ROOT=tmp_path,
         repo_writer_admission_closed=lambda: "managed update (smart)",
         repo_writer_task_allowed=lambda _task: False,
         send_with_budget=lambda chat_id, text, **kw: sent.append((chat_id, text, kw)),
     )
-    refused = _update_admission_refusal(q, {"id": task_id}, tmp_path, task_id)
+    refused = _restart_or_update_refusal(q, {"id": task_id}, tmp_path, task_id)
     assert refused and refused["error"] == "update_in_progress"
     assert [(chat_id, kw.get("system_type")) for chat_id, _text, kw in sent] == [
         (7, "managed_update_notice")]
