@@ -121,6 +121,7 @@ class RunCustody:
     profile_id: str = ""
     effort: Optional[str] = None
     processing_preference: Optional[str] = None
+    prompt_cache_ttl: Optional[Dict[str, Any]] = None
     row_effort: Optional[str] = None  # the configured row's pin ('' = Auto); None on rows without one
     project_id: str = ""
     project_owned: bool = False
@@ -494,6 +495,8 @@ def _merge_started_into(entry: RunCustody, previous: RunCustody) -> None:
             setattr(entry, attr, getattr(previous, attr))
     if previous.work_order_source_request:
         entry.work_order_source_request = dict(previous.work_order_source_request)
+    if previous.prompt_cache_ttl:
+        entry.prompt_cache_ttl = copy.deepcopy(previous.prompt_cache_ttl)
     for start, end in previous.verified_source_ranges:
         _merge_verified_source_range(entry, start, end)
     merge_source_delivery_confirmations(entry, previous)
@@ -532,6 +535,9 @@ def _apply(state: Dict[str, RunCustody], row: Dict[str, Any]) -> None:
             resource_ref=dict(ref) if isinstance(ref, dict) else {},
             work_order_source_request=(
                 dict(source_request) if isinstance(source_request, dict) else {}
+            ),
+            prompt_cache_ttl=(
+                copy.deepcopy(row["prompt_cache_ttl"]) if isinstance(row.get("prompt_cache_ttl"), dict) else None
             ),
             **{attr: str(row.get(key) or "") for attr, key in _STARTED_STR_FIELDS},
             **{key: row[key] for key in _STARTED_OPTION_FIELDS if isinstance(row.get(key), str)},
@@ -953,6 +959,8 @@ def record_started(drive_root: Any, custody: RunCustody,
         "project_owned": custody.project_owned, "project_persistent": custody.project_persistent,
         "resource_ref": custody.resource_ref or {},
         "work_order_source_request": custody.work_order_source_request or {},
+        **({"prompt_cache_ttl": copy.deepcopy(custody.prompt_cache_ttl)}
+           if isinstance(custody.prompt_cache_ttl, dict) else {}),
         **{key: getattr(custody, attr) for attr, key in _STARTED_STR_FIELDS},
         **(shape or {}),
         **{key: getattr(custody, key) for key in _STARTED_OPTION_FIELDS if getattr(custody, key) is not None},
