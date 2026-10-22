@@ -130,6 +130,7 @@ _PENDING_FIELDS = (
     'configured_subagent', 'memory_mode', 'drive_root', 'parent_cognitive_route',
     'subagent_availability', 'child_drive_root', 'budget_drive_root', 'task_constraint',
     'predecessor_authority_source', 'metadata', 'origin_message_ref', 'origin_message_text',
+    'image_source_ref', 'image_mime', 'image_caption',
     '_attempt', 'review_reason', 'review_source_task_id', '_budget_pause',
     'budget_resumed_at', '_terminalization_retry', '_cancel_intent_authority_hold', '_owner_wait_resume',
     '_budget_pause_resume', '_budget_pause_hold', '_resume_selection', '_continuation_prepared', '_admission_owner_token',
