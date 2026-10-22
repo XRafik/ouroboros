@@ -2434,10 +2434,10 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 }
 .chat-live-card > .chat-live-summary-button .chat-live-activity:empty { display: none; }
 
+/* The notes count stays the disclosure's name (`36 notes · 1 child Details`) but leaves its row: the
+   collapsed header shows the one word and the chevron (owner, refined A 21.10). */
 .chat-live-count {
-    color: var(--text-secondary);
-    font-size: var(--type-meta);
-    white-space: nowrap;
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 
 .chat-live-toggle {
@@ -2568,6 +2568,24 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 }
 .chat-live-details > div { padding: 0 14px var(--space-1); }
 .chat-live-card:not([data-expanded="1"]) > .chat-live-details { display: none; }
+
+/* The card's facts beyond its compact line (coordinator, model execution, origin, counts): a labelled
+   list at the meta size, label in secondary ink and value in primary, selectable like the rest. */
+.chat-live-facts {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-1) var(--space-4);
+    margin: 0;
+    padding: 0 14px var(--space-2);
+}
+.chat-live-facts[hidden] { display: none; }
+.chat-live-fact { display: contents; }
+.chat-live-fact > dt { color: var(--text-secondary); }
+.chat-live-fact > dd { margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+@container livecard (max-width: 400px) {
+    .chat-live-facts { grid-template-columns: minmax(0, 1fr); row-gap: 0; }
+    .chat-live-fact > dd { margin-bottom: var(--space-1); }
+}
 
 /* The secondary status fact beside the outcome chip (a running finalization).
    Neutral by rule: the outcome owns the status colour, this only says the task
@@ -2870,12 +2888,6 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
         justify-content: flex-end;
     }
 
-    /* A narrow card keeps its counts and chevron beside the chip (the chevron already says it opens);
-       the words would push them onto a row of their own, so they leave the row and stay the button's name. */
-    .chat-live-card:not(.subagent) > .chat-live-summary-button .chat-live-toggle {
-        position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
-    }
-
     .chat-live-line-toggle {
         flex-wrap: wrap;
     }
@@ -2996,11 +3008,6 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 }
 .chat-live-card.subagent .chat-live-meta:empty {
     display: none;
-}
-
-/* The child's `Show details` words are the root's to show: off the row, they stay its button's name. */
-.chat-live-card.subagent .chat-live-toggle {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
 }
 
 .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-foot > .chat-live-meta {
@@ -7964,6 +7971,53 @@ body.keyboard-open .project-panel {
     border-radius: var(--radius);
     background: var(--ui-card-bg-soft);
 }
+/* The banner's row (owner, refined A 21.10): the verdict, the engine version as a quiet fact beside it, and
+   Diagnostics, which opens the engine's measurements (home, heap, loop, store, jobs, caps) under the row. */
+.agents-service { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--space-3); min-width: 0; }
+.agents-service-version { color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); }
+.agents-service-diagnostics {
+    flex-basis: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin: 0 0 var(--space-3);
+    font-size: var(--type-meta);
+    line-height: var(--line-meta);
+}
+.agents-service-diagnostics[hidden] { display: none; }
+.agents-service-diagnostics > div { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); }
+.agents-service-diagnostics dt { flex: 0 1 8em; color: var(--text-secondary); }
+.agents-service-diagnostics dd { flex: 1 1 240px; margin: 0; min-width: 0; color: var(--text-primary); overflow-wrap: anywhere; }
+/* A quiet disclosure (Diagnostics, a program's Details): its words and a chevron that turns when open; no body at
+   rest, the quiet tint under a hovering pointer, the shared ring for the keyboard. The pill's padding is paid back by
+   an equal negative margin, so it stands where its words stand. */
+.settings-disclosure {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    margin: calc(var(--space-1) * -1) calc(var(--space-2) * -1);
+    padding: var(--space-1) var(--space-2);
+    border: 0;
+    border-radius: var(--pill-radius);
+    background: transparent;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--type-meta);
+    line-height: var(--line-meta);
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--motion-tone);
+}
+.settings-disclosure[hidden] { display: none; }
+.settings-disclosure:focus-visible { outline: 2px solid var(--focus-accent-border); outline-offset: 2px; }
+@media (hover: hover) {
+    .settings-disclosure:hover { background: var(--tone-quiet-hover); }
+}
+.settings-disclosure-caret { flex: none; transition: transform 0.18s ease; }
+.settings-disclosure[aria-expanded="true"] .settings-disclosure-caret { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .settings-disclosure-caret { transition: none; } }
+/* Who an unpinned run would take next: a quiet fact of the family head, not a second status. */
+.agent-family-next { color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); }
 /* Accounts are grouped by FAMILY, one card each (owner: "все акки клод кода
    должны быть эквивалентны", "в каждой секции добавить кнопку"). The card
    header carries the family name, its aggregate status and its OWN Add
@@ -8049,7 +8103,20 @@ body.keyboard-open .project-panel {
     overflow-wrap: anywhere;
 }
 .harness-maintenance-notice[data-tone="warn"] { color: var(--status-warn-fg); }
-.harness-maintenance-details summary { color: var(--text-primary); cursor: pointer; }
+/* The program's state row: its status, a short cause or this view's own sentence, and the Details toggle. */
+.harness-maintenance-state {
+    flex-basis: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-1) var(--space-3);
+    min-width: 0;
+}
+.harness-maintenance-state > .harness-maintenance-notice { flex-basis: auto; }
+.harness-maintenance-cause { min-width: 0; color: var(--text-meta); font-size: var(--type-meta); line-height: var(--line-meta); }
+.harness-maintenance-details[hidden] { display: none; }
+.harness-maintenance-details > p { margin: var(--space-2) 0 0; }
+.harness-maintenance-exact code { white-space: pre-wrap; overflow-wrap: anywhere; }
 .harness-maintenance-details dl { margin: var(--space-2) 0; }
 .harness-maintenance-details dt { color: var(--text-meta); }
 .harness-maintenance-details dd { margin: 0 0 var(--space-1); color: var(--text-primary); }
@@ -8531,10 +8598,6 @@ body.keyboard-open .project-panel {
        same flex gap as every other one. */
     vertical-align: middle;
 }
-/* The chip's detail sentence is card text only while the card is expanded;
-   `contents` makes its separator and text ordinary parts of the meta line. */
-.chat-live-executor-detail { display: none; }
-.chat-live-card[data-expanded="1"] > :is(.chat-live-summary-button, .chat-live-foot) .chat-live-executor-detail { display: contents; }
 
 /* Structured chat delivery surfaces. All controls inherit the dark application
    palette so media stays legible in both Main and Project chat instances. */
@@ -9218,21 +9281,8 @@ body.keyboard-open .project-panel {
     min-inline-size: 0;
 }
 .chat-quiz-stake .inline-code { font-size: inherit; }
-/* A question's time line (chat_media.bubbleFrameNode `foot`): `15:18 · Asked by …`, the host's own sentence (who
-   asks, how the run started, the owner's last message) after the time it qualifies, one meta sentence whose second
-   line starts at the bubble's edge. The dot is drawn, so a copy of the sentence stays the host's words. */
-.chat-bubble-foot {
-    margin-top: var(--space-3);
-    font-size: var(--type-meta);
-    line-height: var(--line-meta);
-    contain: inline-size;
-}
-.chat-bubble-foot > * { display: inline; margin: 0; }
-.chat-bubble-foot > * + *::before { content: "·"; content: "·" / ""; margin-inline: 6px; }
-.chat-quiz-host-facts {
-    color: var(--text-meta);
-    overflow-wrap: anywhere;
-}
+/* A question ends on its time alone (owner, refined A 21.10), separate from the card's contents. */
+.chat-bubble > .chat-quiz-card + .msg-time { margin-top: var(--space-3); line-height: var(--line-meta); }
 /* An offered answer is an elevated card (owner 16.10: Material's elevated card, a choice and never a field): the
    capsule surface on the rest shadow like every pressable thing, the object radius because an answer can be a
    paragraph; hover and press change its colour. Once the question settles the other cards lie flat and the chosen
