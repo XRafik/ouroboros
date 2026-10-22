@@ -310,7 +310,7 @@ class MCPNameResolution:
                     f"Advanced; {name!r} was not executed.")
         else:
             text = (f"⚠️ MCP_CATALOG_UNAVAILABLE: MCP server {server!r} has incomplete discovery evidence "
-                    f" ({self.detail}); whether {name!r} exists is "
+                    f"({self.detail}); whether {name!r} exists is "
                     "unknown. Nothing was executed.")
         return ToolResult(status="unavailable", code="MCP_CATALOG_UNAVAILABLE" if self.status == "catalog_unavailable" else "MCP_UNAVAILABLE", text=text)
 
@@ -784,7 +784,7 @@ async def _list_tools_async(cfg: MCPServerConfig, *, timeout_sec: int) -> List[D
                         )
                 return tools_raw
 
-    # Server discovery and draft probes retain the global owner-Pause admission.
+    # Server listings and draft probes name no task; no task's Pause gates them.
     return await asyncio.wait_for(
         submit_async_preparation(_do_with_session), timeout=timeout_sec
     )
@@ -1130,7 +1130,9 @@ class MCPManager:
         with self._lock:
             if not self._enabled:
                 return []
-            return [{"id": rt.config.id, "detail": mcp_catalog.catalog_notice(rt)}
+            return [{"id": item["id"], "detail": f"not listed under the current configuration: {item['last_error']}"}
+                    for item in self._configuration_errors if item["enabled"]] + [
+                    {"id": rt.config.id, "detail": mcp_catalog.catalog_notice(rt)}
                     for rt in self._servers.values() if rt.config.enabled and (
                         not rt.catalog or not rt.catalog.get("complete") or rt.catalog["latest_attempt"].get("partial")
                         or rt.last_error or rt.publication_error)]
@@ -1162,24 +1164,14 @@ class MCPManager:
             return self._tool_timeout_sec
 
     def enabled_servers_without_tools(self) -> List[Dict[str, str]]:
-        """Enabled servers that currently expose ZERO tools, with their last_error.
-
-        Lets the tool registry surface a capability-omission when MCP is enabled and
-        configured but a server returned no tools without raising (unreachable / slow
-        / auth-failed) — otherwise the absence is silent and reads to the user as
-        "the agent doesn't see my MCP server" (D1)."""
+        """Only complete empty listings whose latest attempt succeeded in full."""
         with self._lock:
             if not self._enabled:
                 return []
-            out = [{"id": item["id"], "last_error": item["last_error"]}
-                   for item in self._configuration_errors if item["enabled"]]
-            for runtime in self._servers.values():
-                cfg = runtime.config
-                if not cfg.enabled:
-                    continue
-                if not runtime.tools:
-                    out.append({"id": cfg.id, "last_error": _redact_error_text(runtime.last_error or "", cfg)})
-            return out
+            return [{"id": rt.config.id, "last_error": ""} for rt in self._servers.values()
+                    if rt.config.enabled and rt.catalog and rt.catalog["complete"] and not rt.catalog["items"]
+                    and rt.catalog["latest_attempt"].get("ok") is True
+                    and not rt.catalog["latest_attempt"].get("partial")]
 
     def list_tools_for_registry(self) -> List[Dict[str, Any]]:
         """Return enabled MCP tools in ToolRegistry shape."""
@@ -1314,7 +1306,7 @@ class MCPManager:
         at = datetime.now(timezone.utc).isoformat()
         with self._lock:
             target = self._servers.get(server_id)
-            if target is not runtime or target.config != cfg:
+            if target is not runtime or mcp_catalog.identity(target.config) != mcp_catalog.identity(cfg):
                 return {"ok": False, "published": False, "error": f"stale MCP refresh discarded for server {server_id!r}"}
             envelope = mcp_catalog.attempt_envelope(cfg, target.catalog, at=at, error=error,
                                                    items=items, complete=complete)
@@ -1540,8 +1532,8 @@ def reconfigure_from_settings(settings: Dict[str, Any]) -> None:
     get_manager().reconfigure(settings)
 
 
-def ensure_configured_from_settings(*, refresh: bool = False) -> None:
-    """Adopt catalog files on every registry read; only the server schedules listings."""
+def ensure_configured_from_settings() -> None:
+    """Adopt catalogs on reads; server settings-mtime changes also run configuration_changed."""
     from ouroboros.config import SETTINGS_PATH, load_settings
 
     manager = get_manager()

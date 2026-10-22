@@ -216,7 +216,9 @@ def test_invalid_stdio_fields_are_visible_without_transport(extra):
     assert status["id"] == "local"
     assert status["code"] == "MCP_CONFIG_ERROR"
     assert status["last_error"]
-    assert manager.enabled_servers_without_tools()[0]["last_error"] == status["last_error"]
+    assert manager.enabled_servers_without_tools() == []
+    notice = manager.catalog_notices()[0]
+    assert notice["id"] == "local" and status["last_error"] in notice["detail"]
     assert manager.test_server(raw)["code"] == "MCP_CONFIG_ERROR"
     assert manager.refresh_server("local")["code"] == "MCP_CONFIG_ERROR"
     assert manager.list_tools_for_registry() == []
@@ -951,31 +953,35 @@ def test_run_async_works_from_sync_caller():
 
 
 # ---------------------------------------------------------------------------
-# D1 (v6.39): surface enabled servers that returned zero tools (silent absence)
+# Empty listings and failed attempts have separate capability disclosures.
 # ---------------------------------------------------------------------------
 
 
-def test_enabled_servers_without_tools_surfaces_broken_only():
+def test_catalog_notices_surface_broken_only():
     mgr = mcp_client.MCPManager()
 
-    # id-aware transport: 'healthy' returns a tool, 'broken' raises (token to redact)
+    # Healthy, failed and successfully empty listings remain distinguishable.
     async def _list_tools(cfg, timeout):
         if cfg.id == "broken":
             raise RuntimeError("connection refused Bearer secret-1234")
+        if cfg.id == "empty":
+            return []
         return [{"name": "ok_tool", "description": "d", "input_schema": {"type": "object", "properties": {}}}]
     mgr._async_list_tools = _list_tools
 
     mgr.reconfigure(_settings(
         _good_server(id="healthy"),
         _good_server(id="broken", auth_token="Bearer secret-1234"),
+        _good_server(id="empty"),
     ))
     mgr.refresh_server("healthy")
     mgr.refresh_server("broken")
-    empties = mgr.enabled_servers_without_tools()
-    ids = [e["id"] for e in empties]
-    assert ids == ["broken"]  # healthy (has tools) is NOT masked away / not included
-    assert "connection refused" in empties[0]["last_error"]
-    assert "secret-1234" not in empties[0]["last_error"]  # redacted
+    mgr.refresh_server("empty")
+    notices = mgr.catalog_notices()
+    assert [row["id"] for row in notices] == ["broken"]
+    assert "connection refused" in notices[0]["detail"]
+    assert "secret-1234" not in notices[0]["detail"]  # redacted
+    assert mgr.enabled_servers_without_tools() == [{"id": "empty", "last_error": ""}]
 
 
 def test_enabled_servers_without_tools_empty_when_disabled():
@@ -986,6 +992,7 @@ def test_enabled_servers_without_tools_empty_when_disabled():
     mgr.reconfigure(_settings(_good_server(id="s"), enabled=False))
     # global MCP disabled -> nothing surfaced
     assert mgr.enabled_servers_without_tools() == []
+    assert mgr.catalog_notices() == []
 
 
 def test_duplicate_tool_names_disclose_instead_of_crashing(monkeypatch, tmp_path):

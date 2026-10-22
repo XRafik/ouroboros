@@ -683,6 +683,7 @@ class ToolRegistry:
             self._capability_omissions.append({"surface": "mcp", "reason": "server_no_tools", "servers": empty})
         for notice in manager.catalog_notices():
             self._capability_omissions.append({"surface": "mcp", "reason": "catalog_provenance",
+                                              "servers": [{"id": notice["id"]}],
                                               "error": f"{notice['id']}: {notice['detail']}"})
         return rows
 
@@ -883,7 +884,7 @@ class ToolRegistry:
                 get_manager as _mcp_get_manager,
                 is_mcp_tool_name as _mcp_is_name,
             )
-            _mcp_ensure_configured(refresh=False)
+            _mcp_ensure_configured()
         except Exception:
             _mcp_get_manager = None
             _mcp_is_name = None
@@ -1007,7 +1008,7 @@ class ToolRegistry:
         if _mcp_get_manager and _mcp_is_name and _mcp_is_name(name):
             try:
                 # The loop obtains the OUTER timeout before registry execution.
-                # Use the same hit-only Settings recheck as dispatch, or a
+                # Use the same settings/catalog adoption as dispatch, or a
                 # changed valid timeout would be strangled by the old outer one.
                 self._mcp_dispatch_resolution(name)
                 return int(_mcp_get_manager().tool_timeout_sec()) + 3

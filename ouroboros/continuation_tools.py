@@ -87,7 +87,7 @@ def _adopt_current_tools(tools: Any, state: dict, messages: list, mode: str, bef
     after = transcript_prefix.tools_digest(fitted)
     if after == before:
         return False
-    missing = _history_names(messages) - current.keys()
+    missing = (_history_names(messages) & old.keys()) - current.keys()
     if missing:
         messages.append({"role": "user", "content": (
             "[SYSTEM NOTICE]\nThe saved tool set was kept: the current tool set after route fitting "

@@ -133,26 +133,32 @@ def test_other_adoption_triggers_use_the_shared_baseline(tmp_path, monkeypatch, 
 
 @pytest.mark.parametrize("carrier", ["canonical", "native"])
 @pytest.mark.parametrize("available", [False, True])
-def test_history_requires_current_contracts_after_fitting(tmp_path, monkeypatch, carrier, available):
+@pytest.mark.parametrize("carried", [False, True])
+def test_history_requires_only_frozen_contracts_after_fitting(tmp_path, monkeypatch, carrier, available, carried):
     row = ({"role": "assistant", "tool_calls": [{"function": {"name": "history_tool"}}]}
            if carrier == "canonical" else
            {"role": "assistant", "content": [{"type": "tool_use", "name": "history_tool", "id": "t", "input": {}}]})
     current = [_schema("new")] + ([_schema("history_tool")] if available else [])
-    prepared = prepare(tmp_path, monkeypatch, current=current, history=[row])
+    frozen = [_schema("old")] + ([_schema("history_tool")] if carried else [])
+    prepared = prepare(tmp_path, monkeypatch, frozen=frozen, current=current, history=[row])
     tools, state, messages, trace, enabled, projections = prepared
-    assert restore(prepared) == (current if available else [_schema("old")])
-    if not available:
+    assert restore(prepared) == (frozen if carried and not available else current)
+    if carried and not available:
         assert "saved tool set was kept" in messages[-1]["content"]
         assert "history_tool" in messages[-1]["content"]
         assert trace == {} and len(projections) == 1 and enabled == set()
         assert not hasattr(tools._ctx, "_route_left_out_tool_names")
+    else:
+        assert len(projections) == 2 and trace["continuation_tools"]
+        assert not any("saved tool set was kept" in str(row.get("content")) for row in messages)
 
 
 @pytest.mark.parametrize("enabled", [False, True])
 def test_history_check_is_after_the_route_ceiling(tmp_path, monkeypatch, enabled):
     catalog = _catalog(129)
     tail = [name for name in _names(catalog) if name.startswith("extra_")][-1]
-    prepared = prepare(tmp_path, monkeypatch, current=catalog, loaded=[tail] if enabled else (), history=[
+    frozen = [_schema("old"), _schema(tail)]
+    prepared = prepare(tmp_path, monkeypatch, frozen=frozen, current=catalog, loaded=[tail] if enabled else (), history=[
         {"role": "assistant", "content": [{"type": "tool_use", "name": tail}]}])
     tools, _, messages, _, _, _ = prepared
     tools._ctx.active_model = "openai::unseen-model"
@@ -163,7 +169,7 @@ def test_history_check_is_after_the_route_ceiling(tmp_path, monkeypatch, enabled
         assert len(resident) == 128 and tail in _names(resident)
         assert not any("saved tool set was kept" in str(row.get("content")) for row in messages)
     else:
-        assert resident == [_schema("old")]
+        assert resident == frozen
         assert tail in messages[-1]["content"] and "after route fitting" in messages[-1]["content"]
 
 

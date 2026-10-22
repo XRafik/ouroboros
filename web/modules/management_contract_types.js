@@ -529,6 +529,14 @@
  */
 
 /**
+ * @typedef {Object} McpListingAttempt
+ * @property {string} at
+ * @property {boolean} ok
+ * @property {string} error
+ * @property {boolean} partial
+ */
+
+/**
  * One configured MCP server (a configuration error row carries only id, enabled, tool_count, last_error, code).
  * @typedef {Object} McpServerStatus
  * @property {string} id
@@ -549,6 +557,10 @@
  * @property {?string} last_error
  * @property {*=} last_refreshed
  * @property {*=} last_attempted
+ * @property {?string=} listed_at
+ * @property {?McpListingAttempt=} latest_attempt
+ * @property {boolean=} complete
+ * @property {string=} publication_error
  * @property {string=} code
  */
 
@@ -561,6 +573,8 @@
  * @typedef {Object} McpRefreshResponse
  * @property {string=} server_id
  * @property {boolean=} ok
+ * @property {boolean=} published
+ * @property {string=} publication_error
  * @property {number=} tool_count
  * @property {string[]=} configuration_warnings
  * @property {Object[]=} tool_name_collisions

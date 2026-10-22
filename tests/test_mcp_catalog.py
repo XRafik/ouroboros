@@ -119,6 +119,12 @@ def test_failed_relisting_retains_tools_and_discloses_in_task(monkeypatch, tmp_p
     notice = "\n".join(format_capability_omissions(registry.capability_omissions()))
     assert before["listed_at"] in notice and after["latest_attempt"]["at"] in notice
     assert "failed: TimeoutError: offline" in notice
+    from ouroboros.tools.tool_discovery import list_available_tools
+    scoped = list_available_tools(registry, registry._ctx, None, namespace="mcp_demo")
+    assert before["listed_at"] in scoped and after["latest_attempt"]["at"] in scoped
+    assert "failed: TimeoutError: offline" in scoped and "catalog_provenance" in scoped
+    other = list_available_tools(registry, registry._ctx, None, namespace="mcp_other")
+    assert "catalog_provenance" not in other and "offline" not in other
     assert manager.resolve_tool_name("mcp_demo__ping").status == "callable"
     miss = manager.resolve_tool_name("mcp_demo__missing").refusal("mcp_demo__missing")
     assert miss.code == "MCP_CATALOG_UNAVAILABLE" and "unknown" in miss.text
@@ -165,7 +171,10 @@ def test_identity_change_ignores_file_until_server_event_prunes(change, monkeypa
     assert not path.exists()
 
 
-def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_path):
+@pytest.mark.parametrize("stale_boot", [False, True])
+def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_path, stale_boot):
+    from ouroboros.gateway import owner_settings
+    early = {"MCP_ENABLED": True, "MCP_SERVERS": []} if stale_boot else settings()
     writer = publisher()
     writer.refresh_server("demo")
     orphan = mcp_catalog.catalog_path("gone")
@@ -188,13 +197,88 @@ def test_boot_seeds_before_blocked_listing_and_prunes_removed(monkeypatch, tmp_p
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path / "fork")
     # Before the MCP boot step, its configure path already seeds the file.
     assert any(row["function"]["name"] == "mcp_demo__ping" for row in registry.schemas())
-    server_boot.mcp_startup(settings())
+    read_settings, prune = config.load_settings, mcp_catalog.prune_catalogs
+    def ordered_read():
+        assert owner_settings._settings_document_lock.locked()
+        return read_settings()
+    def ordered_prune(configs):
+        assert owner_settings._settings_document_lock.locked()
+        return prune(configs)
     try:
+        with monkeypatch.context() as startup:
+            startup.setattr(config, "load_settings", ordered_read)
+            startup.setattr(mcp_catalog, "prune_catalogs", ordered_prune)
+            server_boot.mcp_startup(early)
         assert entered.wait(5) and not orphan.exists()
+        assert mcp_catalog.catalog_path("demo").exists()
+        # A blocked network listing must not hold the Settings ordering lock.
+        with owner_settings.settings_document_mutation():
+            assert manager.server_ids() == ["demo"]
         assert any(row["function"]["name"] == "mcp_demo__ping" for row in registry.schemas())
     finally:
         release.set()
         assert finished.wait(5)
+
+
+@pytest.mark.parametrize("evidence", ["none", "failed", "partial", "failed_after_empty", "partial_after_empty", "invalid"])
+def test_uncertain_empty_catalog_has_only_provenance(monkeypatch, tmp_path, evidence):
+    value = settings(url="file:///invalid") if evidence == "invalid" else settings()
+    install_settings(monkeypatch, value)
+    manager = publisher(value, items=[])
+    monkeypatch.setattr(mcp_client, "_manager", manager)
+    if evidence.endswith("after_empty"):
+        assert manager.refresh_server("demo")["published"]
+        assert manager.enabled_servers_without_tools()
+    if evidence.startswith("failed"):
+        fail(manager)
+    if evidence.startswith("partial"):
+        async def partial(cfg, timeout):
+            return [{"_pagination_truncated": True}]
+        manager._async_list_tools = partial
+        manager.refresh_server("demo")
+    registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
+    registry.schemas()
+    omissions = [row for row in registry.capability_omissions() if row.get("surface") == "mcp"]
+    assert [row["reason"] for row in omissions] == ["catalog_provenance"]
+    notice = "\n".join(format_capability_omissions(omissions))
+    assert "no tools listed" not in notice and manager.enabled_servers_without_tools() == []
+    if evidence == "none":
+        assert "not listed yet" in notice and not mcp_catalog.catalog_path("demo").exists()
+
+
+@pytest.mark.parametrize("source", ["settings", "mtime"])
+@pytest.mark.parametrize("malformed", [False, True])
+def test_prune_sharing_violation_keeps_event_and_other_files_live(monkeypatch, source, malformed):
+    from pathlib import Path
+    writer = publisher()
+    writer.refresh_server("demo")
+    blocked = mcp_catalog.catalog_path("demo")
+    if malformed:
+        blocked.write_text("not json")
+    orphan = mcp_catalog.catalog_path("removed")
+    orphan.write_text("{}")
+    value = settings(url="https://replacement.test/mcp")
+    install_settings(monkeypatch, value)
+    monkeypatch.setattr(mcp_client, "_manager", writer)
+    background = Mock()
+    monkeypatch.setattr(writer, "refresh_all_background", background)
+    original_unlink = Path.unlink
+    def sharing_violation(path, *args, **kwargs):
+        if path == blocked:
+            raise PermissionError("sharing violation")
+        return original_unlink(path, *args, **kwargs)
+    with monkeypatch.context() as locked_file:
+        locked_file.setattr(Path, "unlink", sharing_violation)
+        if source == "mtime":
+            writer.become_lister()
+            mcp_client.ensure_configured_from_settings()
+        else:
+            writer.configuration_changed(value, reason="settings")
+        assert blocked.exists() and not orphan.exists()
+        assert names(writer) == []  # an inaccessible obsolete catalog is never adopted
+        background.assert_called_once()
+    writer.configuration_changed(value, reason="settings")
+    assert not blocked.exists()
 
 
 def test_read_time_allowlist_and_cyber_filter_share_one_file(monkeypatch):
@@ -293,6 +377,31 @@ def test_inflight_result_for_changed_or_removed_server_writes_nothing(failure, r
     result = writer.refresh_server("demo")
     assert not result["published"] and "stale" in result["error"]
     assert not mcp_catalog.catalog_path("demo").exists() and names(writer) == []
+
+
+@pytest.mark.parametrize("edit", [{"allowed_tools": ["other"]}, {"name": "Renamed"}, {"enabled": False}])
+@pytest.mark.parametrize("failure", [False, True])
+def test_inflight_result_survives_non_connection_edits(edit, failure):
+    writer = publisher()
+    writer.refresh_server("demo")
+    before = json.loads(mcp_catalog.catalog_path("demo").read_text())
+    async def edited(cfg, timeout):
+        writer.reconfigure(settings(**edit))
+        if failure:
+            raise TimeoutError("still offline")
+        return listing("new")
+    writer._async_list_tools = edited
+    result = writer.refresh_server("demo")
+    after = json.loads(mcp_catalog.catalog_path("demo").read_text())
+    assert result["published"] and result["ok"] is not failure
+    assert after["identity"] == before["identity"]
+    assert after["latest_attempt"]["ok"] is not failure
+    assert after["items"] == (before["items"] if failure else listing("new"))
+    status = writer.status_payload()["servers"][0]
+    assert all(status[key] == value for key, value in edit.items())
+    assert names(publisher(settings(**edit))) == names(writer)
+    if "enabled" in edit or "allowed_tools" in edit:
+        assert names(writer) == []
 
 
 def test_write_failure_keeps_local_listing_but_never_claims_publication(monkeypatch):

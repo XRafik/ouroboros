@@ -9,12 +9,15 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable
 
 from ouroboros import config
 from ouroboros.utils import atomic_write_json
+
+log = logging.getLogger(__name__)
 
 
 def catalog_path(server_id: str) -> Path:
@@ -115,11 +118,14 @@ def prune_catalogs(configs: list) -> None:
     for path in directory.glob("server-*.json"):
         expected = wanted.get(path)
         try:
-            data = json.loads(path.read_text(encoding="utf-8")) if expected else {}
-            if not expected or data.get("identity") != expected:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8")) if expected else {}
+                if not expected or data.get("identity") != expected:
+                    path.unlink(missing_ok=True)
+            except (ValueError, AttributeError):
                 path.unlink(missing_ok=True)
-        except (ValueError, AttributeError):
-            path.unlink(missing_ok=True)
+        except OSError:
+            log.warning("Could not prune MCP catalog %s", path, exc_info=True)
 
 
 def catalog_notice(runtime: Any) -> str:

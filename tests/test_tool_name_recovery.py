@@ -171,14 +171,14 @@ def test_exact_hit_rechecks_saved_settings_before_safety_or_dispatch(world, monk
     wire = mcp_client.make_tool_name("canvas", CANVAS[0])
     observed = []
 
-    def disable_mcp(*, refresh=False):
-        observed.append(refresh)
+    def disable_mcp():
+        observed.append(True)
         manager.reconfigure({"MCP_ENABLED": False, "MCP_SERVERS": []})
 
     monkeypatch.setattr(mcp_client, "ensure_configured_from_settings", disable_mcp)
     result = registry.execute_result(wire, {"course_id": 12})
     assert (result.status, result.code) == ("unavailable", "MCP_UNAVAILABLE")
-    assert observed == [False, False]  # hit revocation, then current-catalog refusal context
+    assert observed == [True, True]  # hit revocation, then current-catalog refusal context
     assert safety == [] and transport.call_calls == []
     # Restore fixture configuration after exercising the revocation edge.
     manager.reconfigure({"MCP_ENABLED": True, "MCP_TOOL_TIMEOUT_SEC": 60, "MCP_SERVERS": [
@@ -194,13 +194,13 @@ def test_valid_hit_rechecks_timeout_before_the_loop_outer_deadline(world, monkey
     wire = mcp_client.make_tool_name("canvas", CANVAS[0])
     calls = []
 
-    def update_timeout(*, refresh=False):
-        calls.append(refresh)
+    def update_timeout():
+        calls.append(True)
         manager._tool_timeout_sec = 600
 
     monkeypatch.setattr(mcp_client, "ensure_configured_from_settings", update_timeout)
     assert registry.get_timeout(wire) == 603
-    assert calls == [False] and transport.call_calls == [] and safety == []
+    assert calls == [True] and transport.call_calls == [] and safety == []
     assert registry.execute_result(wire, {}).status == "ok"
     assert len(transport.call_calls) == 1 and len(safety) == 1
     manager._tool_timeout_sec = 60
@@ -338,7 +338,8 @@ def test_unknown_health_disabled_server_and_unknown_server_stay_distinct(world):
     assert "the tool catalog of any configured MCP server" in nowhere.text
     assert "No tool in mcp_nowhere is currently callable" in nowhere.text
     overview = registry.execute("list_available_tools", {})
-    assert "server_no_tools" in overview and "upstream refused" in overview
+    assert "catalog_provenance" in overview and "upstream refused" in overview
+    assert "server_no_tools" not in overview
     assert safety == [] and transport.call_calls == []
 
 
