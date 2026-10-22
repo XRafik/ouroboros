@@ -8,7 +8,7 @@
 # without a retry. A red test runs once more (passing then = flaky: reported, never handed over); a red again
 # is bisected over the first-parent merges to the merge that broke it and handed to that pull
 # request's author (one comment) and to Ouroboros (an issue labelled `post-merge-red`, which a
-# later run closes once the tests pass). The check blocks nothing, reverts nothing, runs on no
+# later run closes once the tests pass and the findings are gone). The check blocks nothing, reverts nothing, runs on no
 # schedule and uses no secret: only this workflow's own GITHUB_TOKEN with the permissions below.
 # scripts/post_merge_check.py documents each step.
 
