@@ -856,7 +856,8 @@ def test_a_duty_whose_controller_died_before_settlement_keeps_what_was_recorded(
     a.reviewer.release()
     [mark] = until(lambda: _late_marks(a.data))
     assert "outcome unknown" not in mark["text"] and "Its record now reads PASS" in mark["text"]
-    assert _owed_left_rows(a) == {} and sorted(a.reviewer.rounds) == ["m1", "m2"]
+    until(lambda: _owed_left_rows(a) == {})  # the owed row retires right after the mark, not in the same write
+    assert sorted(a.reviewer.rounds) == ["m1", "m2"]
     assert _commit_count(a) == 1 and not a.pushes
     assert replay_owed_late_reviews(a.data)["settled"] == 0
     assert wait["retry_key"] == mark["review"]["subject"]["retry_key"]
