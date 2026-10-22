@@ -10,6 +10,21 @@ from ouroboros.gateway import history_paging
 from tests.test_chat_history_paging import isolated_runtime, pages, request, row, write  # noqa: F401
 
 
+def test_progress_gap_follows_delivered_span_after_quota_deferral(tmp_path):
+    progress = tmp_path / "logs" / "progress.jsonl"
+    write(progress, [row(index, "progress", ts=f"2026-09-12T00:00:{index:02d}Z") for index in range(20)])
+    progress.write_bytes(b"{broken\n" + progress.read_bytes())
+    write(tmp_path / "logs" / "chat.jsonl", [row(0)])
+    status, recent = request(tmp_path, n_progress="2")
+    assert status == 200
+    span = recent["coverage"]["spans"]["progress"]
+    assert span["from"] > len(b"{broken\n")
+    assert span["gaps"] == []
+    assert "progress_malformed_jsonl" not in recent["window"]["truncated_by"]
+    loaded = list(pages(tmp_path, n_human="0", n_progress="2"))
+    assert any("malformed_jsonl" in page["coverage"]["spans"]["progress"]["gaps"] for page in loaded)
+
+
 def foreign_archives(root, stamp, count=3):
     for index in range(count):
         write(root / "archive" / f"chat_{stamp}{index}.jsonl",
