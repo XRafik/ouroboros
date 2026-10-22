@@ -581,8 +581,10 @@ def _build_builtin_target_binding(ctx: Any, name: str, args: dict[str, Any]) -> 
             if (pathlib.PurePosixPath(normalized_path).is_absolute() or ".." in parts
                     or normalized_path.startswith(":") or not normalized_path.strip()):
                 raise ValueError("path must be a literal repository-relative path")
-            target = (repo / normalized_path).resolve(strict=False)
-            if not target.is_relative_to(repo):
+            # The target is the entry Git reads: matchers that resolve still see a symlink's
+            # current referent, ancestry checks see the entry; confinement uses the referent.
+            target = pathlib.Path(os.path.normpath(repo / normalized_path))
+            if not target.resolve(strict=False).is_relative_to(repo):
                 raise ValueError("path escapes the selected repository")
         else:
             target = repo

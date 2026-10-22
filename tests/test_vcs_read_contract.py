@@ -85,6 +85,31 @@ def test_docker_backend_paths_map_to_the_workspace_for_every_action(world):
     assert registry.execute_result("vcs_read", {"action": "file", "path": "/app/note.txt"}).text.startswith("first")
 
 
+def test_protected_history_is_judged_on_the_entry_git_reads_not_a_symlinks_target(world):
+    registry, ctx, _, project = world
+    (project / "private").mkdir()
+    (project / "src").mkdir()
+    (project / "src" / "current.txt").write_text("PUBLIC BODY\n")
+    (project / "private" / "legacy.txt").write_text("PROTECTED HISTORY\n")
+    git(project, "add", ".")
+    git(project, "commit", "-qm", "history")
+    old = git(project, "rev-parse", "HEAD")
+    (project / "private" / "legacy.txt").unlink()
+    try:
+        (project / "private" / "legacy.txt").symlink_to("../src/current.txt")
+    except OSError:
+        pytest.skip("host cannot create symlinks")
+    git(project, "add", "-A")
+    git(project, "commit", "-qm", "compatibility link")
+    ctx.task_metadata = {"task_contract": {"resource_policy": {"protected_artifacts": [
+        {"id": "private", "role": "black_box_reference", "paths": ["./private"], "allow": ["execute"]}]}}}
+    for spelling in ("private/legacy.txt", str(project / "private" / "legacy.txt")):
+        blocked = registry.execute_result("vcs_read", {"action": "file", "path": spelling, "ref": old})
+        assert blocked.code == "RESOURCE_POLICY_BLOCKED" and "PROTECTED HISTORY" not in blocked.text, (spelling, blocked.text)
+    allowed = registry.execute_result("vcs_read", {"action": "file", "path": "src/current.txt", "ref": old})
+    assert allowed.status == "ok" and allowed.text.startswith("PUBLIC BODY")
+
+
 def test_diff_pattern_that_can_reach_a_protected_file_is_blocked_like_a_bare_diff(world):
     registry, ctx, _, project = world
     (project / "secret.txt").write_text("PROTECTED-BYTES\n")
