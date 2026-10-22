@@ -141,7 +141,7 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
   `:root[data-theme="light"]` (`--elev-*`, `--radius-object` / `-inner` / `-sheet`,
-  `--surface-object` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
+  `--surface-object` / `-object-opaque` / `-capsule` / `-float` / `-tray` / `-side`, `--glass`, `--voice-*`,
   `--tone-*` with `--tone-crimson-ink`, `--tone-crimson-soft` / `-soft-ink` and `--tone-crimson-word`,
   `--place-mark`, `--status-warn-word` / `-error-word`, `--press` / `--press-solid`); the light
   block restates its own values of the hues and tints the dark seed sets differently, and the dark voice materials
@@ -722,7 +722,7 @@ Two shapes carry a tone, and they are not interchangeable:
   *is* the status and has nothing else to carry it.
 
 Surfaces whose tone is a class suffix rather than `data-tone`
-(`.toast-*`, `.log-phase`, `.evo-runtime-pill`, `.widget-table-status`,
+(`.toast-*`, `.log-phase`, `.widget-table-status`,
 `.widget-metric` / `.widget-callout`) name the same tokens. A task card's chip
 (`.chat-live-phase`) and a settled Logs task headline keep their phase classes as
 facts and take their tone from the `data-chip-tone` attribute their painters write. A surface that
@@ -782,7 +782,7 @@ status sentence's or a composer chip's dot is its tone, §4).
 - **Amber is the owner's attention and nothing else:** (1) the owner's move — a
   question, or what only the owner can do: sign in, a spending limit, Resume after a
   restart, crash or Panic, grant access, a skill review that must run first, local
-  changes before an update, an Evolution or Consciousness pill that needs the owner
+  changes before an update, an Evolution chip or Consciousness sentence that needs the owner
   or was stopped by the spending limit; (2) a warning worth reading — warn toasts and sentences,
   Settings and onboarding notes, warnings inside task timelines, reviews and Logs
   events, account quota; (3) the System voice (a pale tint in the light theme, its name
@@ -2227,14 +2227,15 @@ has migrated. Migrated today:
 - `web/cards.css` (living cards in the feed)
 - `web/style.css` regions paired by `design-system:migrated-begin` /
   `design-system:migrated-end`: harness accounts; Dashboard → Updates (status
-  card, one action row, collapsed Recovery with one restore list) and Storage;
+  card, one action row, collapsed Recovery with one restore list), Storage and
+  Evolution;
   the Skills page (Installed, Browse, Sources, the detail sheet, its dialogs);
   chat typography, foreground and status colour. Chat geometry retains local
   literals per the viewport reserve contract; shared palette channels keep
   translucent glass coherent across themes.
 - the global `.muted`, `.form-section h3` and shared `.ui-status` tone rules
 
-The remaining page-specific typography in widgets, logs and evolution is
+The remaining page-specific typography in widgets and logs is
 historical. Their adopted common controls follow the shared
 family; unrelated page rules keep their literals until their own pass. Migrate
 each selected family completely and remove its replaced recipes in the same

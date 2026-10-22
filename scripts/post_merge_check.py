@@ -10,12 +10,14 @@
 `.github/workflows/post-merge.yml` runs these steps after pushes to `ouroboros` in the official
 repository (owner decision 3A, 2026-10-21). Nobody waits before a merge; merges that land while a
 check runs are checked together by the next one. A test that fails is run once more: passing then
-makes it FLAKY (reported, not handed over), anything else makes it FAILED. Each FAILED test is
-bisected over the first-parent commits since the base to the merge that broke it; that pull
-request's author gets one comment and Ouroboros an issue labelled `post-merge-red`, which the
-check closes by itself once the tests pass. It blocks nothing, reverts nothing, runs on no
-schedule and talks to GitHub only with the workflow's own GITHUB_TOKEN. Its subprocesses are git
-and `scripts/run_tests.py`; everything else is stdlib.
+makes it FLAKY (reported, not handed over), anything else makes it FAILED. Each finding of the
+release's lint gate (`ruff check --select F`, owner decision 2A, 2026-10-22) is FAILED too, with no
+retry: it is deterministic. Each FAILED test or finding is bisected over the first-parent commits
+since the base to the merge that broke it; that pull request's author gets one comment and
+Ouroboros an issue labelled `post-merge-red`, which the check closes by itself once the tests pass
+and the findings are gone. It blocks nothing, reverts nothing, runs on no schedule and talks to
+GitHub only with the workflow's own GITHUB_TOKEN. Its subprocesses are git, ruff and
+`scripts/run_tests.py`; everything else is stdlib.
 
 DIR is the evidence root of `scripts/run_tests.py --selected --keep-going --evidence-dir DIR`
 (selection.json, parallel/, serial/: tests/ci_evidence.py's results.json and events.jsonl). Each
@@ -43,6 +45,8 @@ BRANCH = "ouroboros"
 WORKFLOW_FILE = "post-merge.yml"
 LABEL = "post-merge-red"
 NODE_LANE = "node-lane"
+LINT_PREFIX = "ruff "  # a lint finding's id: "ruff <code> <path> <name>"
+LINT_ARGS = ("check", "--select", "F", "--output-format", "json", "--exit-zero")  # the release lint gate
 MAX_PROBES = 16
 ZERO_SHA = "0" * 40
 # Retry, probe and re-check sessions keep the per-test bound of both selected passes
@@ -389,8 +393,32 @@ def command_base(args, environ=os.environ) -> int:
 
 # --- classify --------------------------------------------------------------------------------
 
-def classify(evidence: Path, *, run=run_pytest, node=run_node_lane, read_source=working_source,
-             checkpoint=lambda record: None) -> dict:
+def lint_findings(cwd: Path | None = None, paths=()) -> dict[str, str] | None:
+    """{id: message} of the lint gate in `cwd` (over `paths`, else the whole tree); None if ruff could not run.
+
+    The id names the code, the file and the message's first backticked name rather than a line,
+    which moves with every edit above it.
+    """
+    root = Path(cwd or REPO_ROOT).resolve()
+    try:
+        done = subprocess.run([sys.executable, "-m", "ruff", *LINT_ARGS, *(paths or ["."])], cwd=root,
+                              capture_output=True, text=True, encoding="utf-8", timeout=600)
+        rows = json.loads(done.stdout or "null")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if done.returncode != 0 or not isinstance(rows, list):
+        return None
+    found = {}
+    for row in rows:
+        path = Path(row.get("filename") or "").resolve()
+        name = re.search(r"`([^`]+)`", row.get("message") or "")
+        found[f"{LINT_PREFIX}{row.get('code')} {path.relative_to(root).as_posix() if path.is_relative_to(root) else path} "
+              f"{name.group(1) if name else row.get('message')}"] = row.get("message") or ""
+    return found
+
+
+def classify(evidence: Path, *, run=run_pytest, node=run_node_lane, lint=None,
+             read_source=working_source, checkpoint=lambda record: None) -> dict:
     """FAILED and FLAKY of the selected run after exactly one more execution of each red.
 
     `checkpoint(record)` receives the reds before their retry starts, every one still FAILED with
@@ -422,9 +450,15 @@ def classify(evidence: Path, *, run=run_pytest, node=run_node_lane, read_source=
                                       if session["evidence"] else f"the {label} pass left no evidence")
     if selection.get("node") == "failure":
         found[NODE_LANE] = ("node", "the Node lane was red")
+    findings = lint() if lint is not None else {}
+    record["lint_checked"] = lint is not None and findings is not None
+    if findings is None:
+        record["problems"].append("ruff could not run, so the lint gate went unchecked")
+    for finding, message in (findings or {}).items():
+        found[finding] = ("lint", message)
     checkpoint({**record, "complete": False, "flaky": [], "failed": [
         {"id": nodeid, "pass": label, "why": why, "retry": "not run"} for nodeid, (label, why) in sorted(found.items())]})
-    ids = sorted(nodeid for nodeid in found if nodeid != NODE_LANE)
+    ids = sorted(nodeid for nodeid in found if nodeid != NODE_LANE and not nodeid.startswith(LINT_PREFIX))
     status = {}
     if ids:
         run(ids, evidence / "retry")
@@ -435,6 +469,7 @@ def classify(evidence: Path, *, run=run_pytest, node=run_node_lane, read_source=
             status = check_ids(ids, evidence / "retry" / "nodes", read_source=read_source, run=run)
     if NODE_LANE in found:
         status[NODE_LANE] = "passed" if node() == 0 else "failed"
+    status.update({nodeid: "failed" for nodeid in found if nodeid.startswith(LINT_PREFIX)})  # deterministic
     for nodeid in sorted(found):
         label, why = found[nodeid]
         row = {"id": nodeid, "pass": label, "why": why, "retry": status.get(nodeid, "unknown")}
@@ -445,7 +480,8 @@ def classify(evidence: Path, *, run=run_pytest, node=run_node_lane, read_source=
 def command_classify(args) -> int:
     head = args.head or os.environ.get("GITHUB_SHA") or _git("rev-parse", "HEAD")
     output = Path(args.evidence_dir) / "classification.json"
-    record = classify(args.evidence_dir, checkpoint=lambda provisional: _write_json(output, {**provisional, "head": head}))
+    record = classify(args.evidence_dir, lint=lint_findings,
+                      checkpoint=lambda provisional: _write_json(output, {**provisional, "head": head}))
     _write_json(output, {**record, "head": head})
     print(f"post-merge: {len(record['failed'])} failed, {len(record['flaky'])} flaky after one retry"
           + "".join(f"; {problem}" for problem in record["problems"]))
@@ -511,9 +547,9 @@ class Prober:
     imports the worktree's tree; nothing can fall back to the head checkout's code.
     """
 
-    def __init__(self, evidence: Path, work: Path, head: str, *, run=None, node=None):
+    def __init__(self, evidence: Path, work: Path, head: str, *, run=None, node=None, lint=None):
         self.evidence, self.work = Path(evidence), Path(work)
-        self.run, self.node = run or run_pytest, node or run_node_lane
+        self.run, self.node, self.lint = run or run_pytest, node or run_node_lane, lint or lint_findings
         self.lock, self.records = _blob(head, "uv.lock"), []
 
     def __call__(self, sha: str, ids) -> dict[str, str]:
@@ -527,7 +563,8 @@ class Prober:
             record["error"] = f"the worktree failed: {error}"
             return {nodeid: "error" for nodeid in ids}
         try:
-            answers, tests = {}, [nodeid for nodeid in ids if nodeid != NODE_LANE]
+            answers = lint_answers(tree, [nodeid for nodeid in ids if nodeid.startswith(LINT_PREFIX)], self.lint)
+            tests = [nodeid for nodeid in ids if nodeid != NODE_LANE and not nodeid.startswith(LINT_PREFIX)]
             if tests:
                 found = check_ids(tests, self.evidence / "probes" / label, read_source=tree_source(sha),
                                   run=lambda args, directory: self.run(args, directory, cwd=tree))
@@ -539,6 +576,15 @@ class Prober:
             return answers
         finally:
             remove_worktree(tree)
+
+
+def lint_answers(tree: Path, findings, lint) -> dict[str, str]:
+    """`probe` answers for lint findings: ruff over their files as `tree` has them (absent = pass)."""
+    if not findings:
+        return {}
+    paths = sorted({path for path in (finding.split(" ", 3)[2] for finding in findings) if (Path(tree) / path).is_file()})
+    present = lint(tree, paths) if paths else {}
+    return {finding: "error" if present is None else "fail" if finding in present else "pass" for finding in findings}
 
 
 def remove_worktree(tree: Path) -> None:
@@ -606,6 +652,8 @@ def issue_key(block: dict) -> tuple:
 def _named(nodeid: str) -> str:
     if nodeid == NODE_LANE:
         return f"`{nodeid}` (the complete Node lane, `python scripts/run_tests.py --node`)"
+    if nodeid.startswith(LINT_PREFIX):
+        return f"`{nodeid}` (a finding of `ruff check --select F`)"
     return f"`{nodeid}`"
 
 
@@ -687,7 +735,8 @@ def route(github, *, classification: dict, attribution: dict, head: str, run_url
     if known and issues:
         node_green = (NODE_LANE not in failed and ((classification.get("selection") or {}).get("node") == "success"
                                                    or any(row["id"] == NODE_LANE for row in classification.get("flaky", []))))
-        _close_green(call, github, issues, failed, node_green, head, run_url, recheck, record)
+        _close_green(call, github, issues, failed, node_green, head, run_url, recheck, record,
+                     lint_checked=bool(classification.get("lint_checked")))
     tracked = {nodeid for issue in issues or [] if issue["number"] not in record["closed"]
                for nodeid in issue["block"]["ids"]}
     groups = defaultdict(list)
@@ -719,14 +768,17 @@ def route(github, *, classification: dict, attribution: dict, head: str, run_url
     return record
 
 
-def _close_green(call, github, issues, failed, node_green, head, run_url, recheck, record) -> None:
-    ids = sorted({nodeid for issue in issues for nodeid in issue["block"]["ids"]} - failed - {NODE_LANE})
+def _close_green(call, github, issues, failed, node_green, head, run_url, recheck, record, *, lint_checked=False) -> None:
+    ids = sorted({nodeid for issue in issues for nodeid in issue["block"]["ids"]
+                  if not nodeid.startswith(LINT_PREFIX)} - failed - {NODE_LANE})
     status = recheck(ids) if ids else {}
     record["rechecked"] = status
 
     def green(nodeid):
         if nodeid == NODE_LANE:
             return node_green
+        if nodeid.startswith(LINT_PREFIX):  # the head's whole tree was linted: a finding not seen is gone
+            return lint_checked and nodeid not in failed
         return nodeid not in failed and status.get(nodeid) in ("passed", "skipped", "absent")
 
     for issue in issues:
