@@ -117,6 +117,27 @@ def test_gaps_are_not_verification_and_a_real_digest_is(tmp_path, monkeypatch):
     assert reloaded["reports"][0]["evidence_sha256"] == digest
 
 
+@pytest.mark.parametrize("top,nested,claim,identity,status", [
+    ("", "scout", "scout", "recorded", "bound"),
+    ("", "actual", "claimed", "mismatch", "bound"),
+    ("top", "nested", "nested", "mismatch", "bound"),
+    ("", "", "claimed", "unknown", "gap"),
+    ("", "", "", "unknown", "gap"),
+])
+def test_report_actor_comes_only_from_retained_identity(tmp_path, top, nested, claim, identity, status):
+    write_task_result(tmp_path, "helper-1", "completed", result="report", subagent_id=top,
+                      configured_subagent={"selected_subagent_id": nested})
+    ref = {"task_id": "helper-1", **({"subagent_id": claim} if claim else {})}
+    fact = build_fact(parse_subagent_check({**_CLAIM, "report_refs": [ref]}), subject_hash="s",
+                      review_reference={}, drive_root=tmp_path, actors=[], observed_at="t")
+    report = fact["reports"][0]
+    assert report["actor"]["subagent_id"] == (top or nested)
+    assert report["ref"] == ref
+    assert (report["actor_identity"], report["status"]) == (identity, status)
+    stored = {"disposition": "accepted", "rationale": "r", "subject_hash": "s", FACT_KIND: fact}
+    assert validate_author_disposition(stored, subject_hash="s")[FACT_KIND] == fact
+
+
 def test_billing_label_does_not_grant_review_credit(monkeypatch):
     rows = {}
 

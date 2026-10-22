@@ -23,7 +23,7 @@ EVIDENCE_KIND = "evidence_at_decision"
 LANDING_KEY = "landing"
 LANDING_KIND = "commit_landing"
 _FEEDBACK = frozenset({"none_received", "received", "unavailable", "unknown"})
-_GAPS = frozenset({"report_unreadable", "subject_mismatch", "digest_mismatch"})
+_GAPS = frozenset({"report_unreadable", "subject_mismatch", "digest_mismatch", "actor_identity_unknown"})
 _BILLING = frozenset({"subscription", "measured", "unknown"})
 _LIVE = frozenset({"in_flight", "pending_dispatch"})
 _ANSWERED = frozenset({"responded", "ok", "empty", "parse_failure"})
@@ -290,18 +290,26 @@ def _bind_report(drive_root: Any, ref: Dict[str, str], subject_hash: str) -> Dic
     claimed_digest = ref.get("report_sha256") or ""
     if claimed_digest and claimed_digest != digest:
         return _gap(ref, "digest_mismatch", host_sha256=digest)
-    return {
+    configured = row.get("configured_subagent") or {}
+    host_actor = str(row.get("subagent_id") or configured.get("selected_subagent_id") or "").strip()
+    claimed_actor = ref.get("subagent_id") or ""
+    report = {
         "ref": dict(ref),
         "status": "bound",
+        "actor_identity": "mismatch" if claimed_actor and claimed_actor != host_actor else "recorded",
         "evidence_sha256": digest,
         "actor": {
             "task_id": str(row.get("task_id") or task_id),
             "run_id": host_run or claimed_run,
-            "subagent_id": str(row.get("subagent_id") or ref.get("subagent_id") or ""),
+            "subagent_id": host_actor,
             "model": str(row.get("model") or row.get("model_id") or ""),
             "billing": _billing(row),
         },
     }
+    if not host_actor:
+        report.update(status="gap", gap="actor_identity_unknown", actor_identity="unknown")
+        report.pop("evidence_sha256")
+    return report
 
 
 def _claim_key(reason: str, selection: str, refs: List[Dict[str, str]]) -> str:

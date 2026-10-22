@@ -71,3 +71,13 @@ test('plan history shows the fact only on the decision that claimed it', () => {
     assert.match(html, /Check replaced by subagents: I used a helper\./);
     assert.match(html, /do not create PASS/);
 });
+
+test('report identity shows a conflicting claim beside the recorded actor and keeps unknowns', () => {
+    const render = (reports) => authorDoctrineLines({ review_replaced_by_subagents: { reports } }).join('\n');
+    const mismatch = render([{ status: 'bound', actor_identity: 'mismatch',
+        ref: { subagent_id: 'claimed' }, actor: { subagent_id: 'actual' } }]);
+    assert.match(mismatch, /Actor identity mismatch: claimed claimed; recorded actual/);
+    assert.match(render([{ status: 'gap', actor_identity: 'unknown', ref: { subagent_id: 'claimed' } }]),
+        /Report actor identity: unknown/);
+    assert.doesNotMatch(render([{ status: 'bound', actor_identity: 'recorded' }]), /mismatch|identity: unknown/);
+});

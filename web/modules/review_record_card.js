@@ -155,6 +155,13 @@ export function authorDoctrineLines(decision) {
         if (fact.selection_rationale) lines.push(`Selection: ${String(fact.selection_rationale)}`);
         if (fact.subject_hash) lines.push(`Checked subject: ${String(fact.subject_hash)}`);
         lines.push(`Subagent reports: ${bound} bound, ${gaps} evidence gap(s).`);
+        for (const report of reports) {
+            if (report?.actor_identity === 'mismatch') {
+                lines.push(`Actor identity mismatch: claimed ${report.ref?.subagent_id || 'unknown'}; recorded ${report.actor?.subagent_id || 'unknown'}.`);
+            } else if (report?.actor_identity === 'unknown') {
+                lines.push('Report actor identity: unknown (no retained host identity).');
+            }
+        }
     }
     const snapshot = decision.evidence_at_decision;
     if (snapshot && typeof snapshot === 'object' && snapshot.feedback_at_decision) {
