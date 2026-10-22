@@ -433,6 +433,19 @@ def test_beside_a_dead_worker_a_test_in_flight_runs_again_without_spending_its_r
     assert verdict["continued"] == 2
 
 
+def test_an_internal_error_leaves_the_tests_in_flight_unblamed(ci_retry, monkeypatch, tmp_path):
+    """pytest's internal error (exit status 3) comes from a hook or the xdist scheduler between tests
+    (a conftest close after the reports, a scheduler assertion on Windows): the tests other workers had
+    in flight run again as if they never ran, rather than failing once each for a stop they did not cause."""
+    journal = [{"event": "start", "nodeid": A}, {"event": "start", "nodeid": B},
+               {"event": "report", "nodeid": B, "phase": "call", "outcome": "passed"}, {"event": "finish", "nodeid": B}]
+    code, verdict, requested = _wrapped(ci_retry, monkeypatch, tmp_path,
+                                        _session({B: "passed"}, exit=3, assigned=[A, B, C], journal=journal),
+                                        _session({A: "passed", C: "passed"}, exit=0))
+    assert code == 0 and requested == [[], [A, C]]
+    assert verdict["verdict"] == "green" and verdict["flaky"] == [] and verdict["continued"] == 2
+
+
 def test_a_collection_failure_blocks_and_is_never_retried(ci_retry, monkeypatch, tmp_path):
     code, verdict, requested = _wrapped(ci_retry, monkeypatch, tmp_path,
                                         _session({A: "failed"}, exit=2, collection=["tests/test_broken.py"]),
