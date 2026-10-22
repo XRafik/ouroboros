@@ -1,7 +1,7 @@
 """Own-work candidate selection and terminal links; neither invents page coverage."""
 from __future__ import annotations
 
-from ouroboros import chat_chain, memory_inventory
+from ouroboros import chat_chain, dialogue_store, memory_inventory
 from ouroboros.chronicle_store import DELEGATED_FOCUS_ROLES
 
 
@@ -34,29 +34,66 @@ def failed_work_units(root, store):
     return sorted(units, key=lambda unit: unit.segment.rows[0][2])
 
 
-def terminal_links(root, record, cache=None):
-    """Only this page writer's later typed terminal rows, as separately attributed addresses."""
-    author, metadata = record.get("author", {}), record.get("metadata", {})
+def _terminal_writer(record):
+    author = record.get("author", {})
     task_id = str(author.get("task_id") or "")
     own_writer = author.get("kind") == "mind" or (author.get("kind") == "helper" and
         author.get("focus", {}).get("role") in DELEGATED_FOCUS_ROLES)
-    if record.get("kind") != "page" or not own_writer or not task_id:
+    return task_id if record.get("kind") == "page" and own_writer else ""
+
+
+def _terminal_after(record):
+    return int(record.get("metadata", {}).get("terminal_after_pos",
+        (record.get("covers", {}).get("stream_span") or [0, 0])[-1]))
+
+
+def capture_terminal_rows(root, records):
+    """Group the writers' later terminal rows once, through task indexes at one captured boundary."""
+    starts = {}
+    for record in records:
+        task_id = _terminal_writer(record)
+        if task_id:
+            key = (str(record["room_id"]), task_id)
+            starts[key] = min(starts.get(key, _terminal_after(record)), _terminal_after(record))
+    if not starts:
+        return {}
+    upper = dialogue_store.stream_end(root, "chat")
+    lower = chat_chain.position_boundary(root, min(starts.values()) + 1)
+    dialogue_store.require_imported(root, "chat", lower=lower, upper=upper)
+    tasks = {task_id for _room, task_id in starts}
+    facts, grouped, after = memory_inventory.membership_facts(root), {}, lower - 1
+    while entries := dialogue_store.task_rows(root, tasks, stream="chat", after=after, before=upper):
+        for entry in entries:
+            row = entry.row
+            task_id = str(row.get("task_id") or "")
+            host = row.get("type") in ("task_summary", "project_completion_summary")
+            final = row.get("direction") == "out" and not row.get("is_progress") and (
+                row.get("terminal_origin") or row.get("task_terminal_status") or row.get("task_phase") == "finalizing")
+            if task_id not in tasks or not (host or final):
+                continue
+            rooms = memory_inventory.rooms_of_row(memory_inventory.row_meta(row), facts)
+            for address, _row, pos in chat_chain._addressed(root, (entry,)):
+                for room in rooms:
+                    key = (room, task_id)
+                    if key in starts and pos > starts[key]:
+                        grouped.setdefault(key, []).append((address, row, pos))
+        after = entries[-1].seq
+    return grouped
+
+
+def terminal_links(root, record, cache=None):
+    """Only this page writer's later typed terminal rows, as separately attributed addresses."""
+    task_id = _terminal_writer(record)
+    if not task_id:
         return []
-    end = int(metadata.get("terminal_after_pos", (record.get("covers", {}).get("stream_span") or [0, 0])[-1]))
-    links, room = [], record["room_id"]
-    cache = {} if cache is None else cache
-    if room not in cache:
-        cache[room] = list(chat_chain.iter_room_rows(root, room))
-    for address, row, pos in cache[room]:
-        if pos <= end or str(row.get("task_id") or "") != task_id:
+    end, links = _terminal_after(record), []
+    cache = capture_terminal_rows(root, (record,)) if cache is None else cache
+    for address, row, pos in cache.get((str(record["room_id"]), task_id), ()):
+        if pos <= end:
             continue
-        host = row.get("type") in ("task_summary", "project_completion_summary")
-        final = row.get("direction") == "out" and not row.get("is_progress") and (
-            row.get("terminal_origin") or row.get("task_terminal_status") or row.get("task_phase") == "finalizing")
-        if host or final:
-            addr = chat_chain.format_address(address)
-            speaker = "host summary" if host else "task final report"
-            status = row.get("status") or row.get("task_terminal_status") or "status not recorded"
-            links.append(f"- Linked {speaker} of task {task_id} ({status}); not page coverage; "
-                         f"memory_read(room_id='{record['room_id']}', rows=true, from='{addr}', to='{addr}')")
+        addr = chat_chain.format_address(address)
+        speaker = "host summary" if row.get("type") in ("task_summary", "project_completion_summary") else "task final report"
+        status = row.get("status") or row.get("task_terminal_status") or "status not recorded"
+        links.append(f"- Linked {speaker} of task {task_id} ({status}); not page coverage; "
+                     f"memory_read(room_id='{record['room_id']}', rows=true, from='{addr}', to='{addr}')")
     return links

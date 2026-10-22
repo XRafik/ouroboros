@@ -106,3 +106,62 @@ def test_end_page_links_only_own_later_terminal_rows_and_to_leaves_no_holes(tmp_
     assert "child001" not in document and "not page coverage" in document
     assert set(store.get(page["id"])["covers"]["rows"]) == before
     assert not {sha(row) for row in terminal} & store.sealed_row_refs("1")
+
+
+class _CountedReads:
+    """One module as memory_sealing sees it, counting the rows its readers return."""
+
+    def __init__(self, module, *readers):
+        self._module, self.rows = module, 0
+        for name in readers:
+            setattr(self, name, self._counted(getattr(module, name)))
+
+    def _counted(self, read):
+        def counted(*args, **kwargs):
+            rows = list(read(*args, **kwargs))
+            self.rows += len(rows)
+            return rows
+        return counted
+
+    def __getattr__(self, name):
+        return getattr(self._module, name)
+
+
+@pytest.mark.parametrize("writers,foreign", [(2, 30), (6, 120)])
+def test_story_links_terminal_rows_once_per_capture_without_reading_room_history(tmp_path, monkeypatch, writers, foreign):
+    from ouroboros import dialogue_store, memory_sealing
+
+    ChronicleStore(tmp_path).ensure_activated()
+    ids, pages, expected = [f"writer{i:02d}" for i in range(writers)], {}, {}
+    for i, writer in enumerate(ids):
+        work = chat(tmp_path, [{"chat_id": 1, "direction": "out", "ts": ts(10 + i), "text": f"work {i}", "task_id": writer}])[0]
+        page = write(ctx_for(tmp_path, writer), kind="page", text=f"Page of {writer}", covers={"from": addr(work), "to": addr(work)})
+        assert page["ok"], page
+        pages[writer] = page["node_id"]
+    chat(tmp_path, [{"chat_id": 1, "direction": "out", "ts": ts(100 + n), "text": f"foreign {n}", "task_id": "foreign1"}
+                    for n in range(foreign)])
+    chat(tmp_path, [{"chat_id": 1, "direction": "out", "ts": ts(400), "text": "Foreign final", "task_id": "foreign1",
+                     "terminal_origin": "model_final"}])
+    for i, writer in enumerate(ids):
+        final, summary = chat(tmp_path, [
+            {"chat_id": 1, "direction": "out", "ts": ts(500 + 2 * i), "text": "Final", "task_id": writer, "terminal_origin": "model_final"},
+            {"chat_id": 1, "direction": "system", "ts": ts(501 + 2 * i), "text": "Done", "task_id": writer, "type": "task_summary",
+             "status": "completed"}])
+        expected[writer] = [
+            f"- Linked task final report of task {writer} (status not recorded); not page coverage; "
+            f"memory_read(room_id='1', rows=true, from='{addr(final)}', to='{addr(final)}')",
+            f"- Linked host summary of task {writer} (completed); not page coverage; "
+            f"memory_read(room_id='1', rows=true, from='{addr(summary)}', to='{addr(summary)}')"]
+    chain = _CountedReads(chat_chain, "iter_room_rows", "iter_rows", "_addressed")
+    dialogue = _CountedReads(dialogue_store, "task_rows", "iter_rows")
+    monkeypatch.setattr(memory_sealing, "chat_chain", chain)
+    monkeypatch.setattr(memory_sealing, "dialogue_store", dialogue, raising=False)
+    task = {"id": "next0001", "chat_id": 1}
+    story = mv.render_story(mv.capture_memory_view(tmp_path, task, mv.view_spec_for_task(task, tmp_path)))
+    for writer in ids:
+        block = story.split(f" · page {pages[writer]}\n", 1)[1].split("\n### ", 1)[0]
+        assert [line for line in block.splitlines() if line.startswith("- Linked")] == expected[writer]
+    assert "foreign1" not in story
+    # The capture reads the writers' own rows once; the room's foreign history is never visited.
+    assert chain.rows == 2 * writers
+    assert 2 * writers <= dialogue.rows <= 3 * writers

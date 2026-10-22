@@ -367,23 +367,23 @@ def _story_pages(store: ChronicleStore, label: Callable[..., str],
                 {"kind": "correction" if record["kind"] == "correction" else "rejection", "id": record["id"],
                  "text": record.get("text"), "reason": record.get("reason")})
     rooms = sorted({str(record["room_id"]) for record in store.records(kinds=("page", "part"))})
-    terminal_cache = {}
+    records = [record for room in rooms for record in store.room_records(room)
+               if record["kind"] in ("page", "part") and not record.get("folded_into")]
+    from ouroboros.memory_sealing import capture_terminal_rows, terminal_links
+    terminal_cache = capture_terminal_rows(store.data_root, records)
     keyed = [((entry.pop("first"), entry["sequence"]), entry) for entry in account_entries(
         store, label, units, fixes, lambda period: _period(period.span, period.note()))]
-    for room in rooms:
-        for record in store.room_records(room):
-            if record["kind"] not in ("page", "part") or record.get("folded_into"):
-                continue
-            period = memory_inventory.record_period(store, record, units)
-            from ouroboros.memory_sealing import terminal_links
-            keyed.append(((period.first, record["sequence"]), {
-                "kind": record["kind"], "id": record["id"], "room_id": room,
-                "label": str(_mapping(record.get("metadata")).get("room_label") or label(room)),
-                "source_period": period.span, "period_basis": period.source,
-                "period": _period(period.span, period.note()), "text": str(record.get("current_text") or ""),
-                "status": str(record.get("status") or ""), "signer": draft_signer(record.get("author")),
-                "stamp": _stamp_summary(record.get("host_stamp")), "fixes": _fixes(store, record, fixes),
-                "terminal_links": terminal_links(store.data_root, record, terminal_cache), "quotes": record.get("quotes") or []}))
+    for record in records:
+        room = str(record["room_id"])
+        period = memory_inventory.record_period(store, record, units)
+        keyed.append(((period.first, record["sequence"]), {
+            "kind": record["kind"], "id": record["id"], "room_id": room,
+            "label": str(_mapping(record.get("metadata")).get("room_label") or label(room)),
+            "source_period": period.span, "period_basis": period.source,
+            "period": _period(period.span, period.note()), "text": str(record.get("current_text") or ""),
+            "status": str(record.get("status") or ""), "signer": draft_signer(record.get("author")),
+            "stamp": _stamp_summary(record.get("host_stamp")), "fixes": _fixes(store, record, fixes),
+            "terminal_links": terminal_links(store.data_root, record, terminal_cache), "quotes": record.get("quotes") or []}))
     told = told_map([entry for _key, entry in keyed if entry["kind"] == "account"])
     return [{**entry, "told_by": told[entry["id"]]} if entry["id"] in told else entry
             for _key, entry in sorted(keyed, key=lambda pair: pair[0])]
