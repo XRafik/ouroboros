@@ -148,9 +148,7 @@ class _CapabilityPolicyMixin:
                 [(m.get("id"), (m.get("top_provider") or {}).get("max_completion_tokens")) for m in rows],
                 provider="openrouter", base_url="https://openrouter.ai/api/v1",
                 field="top_provider.max_completion_tokens", source="OpenRouter")
-            cls._CONTEXT_LENGTH_CACHE = {}
-            from ouroboros.utils import utc_now_iso
-            cls._CONTEXT_LENGTH_OBSERVED_AT = utc_now_iso()
+            context_lengths = {}
             for m in rows:
                 mid = m.get("id") or ""
                 sp = m.get("supported_parameters")
@@ -159,7 +157,9 @@ class _CapabilityPolicyMixin:
                 # Context window (provider_metadata Capability Evidence source).
                 cl = m.get("context_length")
                 if mid and isinstance(cl, (int, float)) and cl > 0:
-                    cls._CONTEXT_LENGTH_CACHE[mid] = int(cl)
+                    context_lengths[mid] = int(cl)
+            from ouroboros.utils import utc_now_iso
+            cls._CONTEXT_LENGTH_CACHE, cls._CONTEXT_LENGTH_OBSERVED_AT = context_lengths, utc_now_iso()
             # Image input is a fact about this exact route: one parser, stored
             # under the OpenRouter route scope with this response's time, so any
             # process (a worker, a cold VLM child) reads it without a fetch.

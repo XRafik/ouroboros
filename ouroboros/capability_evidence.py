@@ -859,9 +859,10 @@ def record_owner_ack(
 
 
 def retired_owner_ack(record: Any) -> bool:
-    """Exact provenance of the removed dialogs, which could only assert 1M."""
+    """Retire only the fixed 1M acknowledgements from the removed dialogs."""
     return isinstance(record, dict) and record.get("window_tokens") == 1_000_000 and record.get("note") in {
         "owner-confirmed via settings save", "owner-confirmed via context-mode toggle",
+        "owner-confirmed scope reviewer window",
     }
 
 

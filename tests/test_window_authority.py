@@ -70,10 +70,13 @@ def test_output_and_body_errors_keep_precedence(prefix):
 @pytest.mark.parametrize("note,window,retired", [
     ("owner-confirmed via settings save", 1000000, True),
     ("owner-confirmed via context-mode toggle", 1000000, True),
+    ("owner-confirmed scope reviewer window", 1000000, True),
     ("owner-confirmed via settings save", 400000, False),
     ("owner-confirmed via context-mode toggle", 400000, False),
+    ("owner-confirmed scope reviewer window", 400000, False),
     ("typed by owner", 1000000, False),
     ("owner-confirmed via settings save ", 1000000, False),
+    ("owner-confirmed scope reviewer window ", 1000000, False),
 ])
 def test_only_forced_dialog_acks_retire_without_a_read_rewrite(tmp_path, monkeypatch, note, window, retired):
     from ouroboros.response_limits import record_response_ack
@@ -171,14 +174,15 @@ def test_refusal_caps_but_never_raises_a_declaration(tmp_path, monkeypatch, decl
 
 def test_process_cached_metadata_keeps_its_date_and_refreshes_after_expiry(tmp_path, monkeypatch):
     from datetime import datetime, timedelta, timezone
+    from ouroboros import utils, vision_routing
     from ouroboros.llm import LLMClient
     import requests
 
     now, calls = datetime.now(timezone.utc), []
     monkeypatch.setattr(ce, "utc_now", lambda: now)
     monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
-    from ouroboros import utils
     monkeypatch.setattr(utils, "utc_now_iso", lambda: now.isoformat())
+    monkeypatch.setattr(vision_routing, "utc_now_iso", lambda: now.isoformat())
     monkeypatch.setattr(LLMClient, "_SUPPORTED_PARAMS_FETCHED", False)
     monkeypatch.setattr(LLMClient, "_CAPABILITIES_FETCH_OK", False)
     monkeypatch.setattr(LLMClient, "_CONTEXT_LENGTH_CACHE", {})
@@ -197,3 +201,42 @@ def test_process_cached_metadata_keeps_its_date_and_refreshes_after_expiry(tmp_p
     assert stale.stale and stale.ts == first.ts and len(calls) == 1
     fresh = ce.probe(tmp_path, **route)
     assert fresh.ts == now.isoformat() and not fresh.stale and len(calls) == 2
+
+
+@pytest.mark.parametrize("window", [400000, 0])
+def test_catalog_refresh_publishes_complete_windows_with_their_date(tmp_path, monkeypatch, window):
+    from ouroboros import utils, vision_routing
+    from ouroboros.llm import LLMClient
+    import requests
+
+    old = {"fixture/first": 128000, "fixture/second": 64000, "fixture/removed": 16000}
+    old_date, new_date = "2026-10-20T00:00:00+00:00", "2026-10-22T00:00:00+00:00"
+    monkeypatch.setattr(LLMClient, "_CONTEXT_LENGTH_CACHE", old)
+    monkeypatch.setattr(LLMClient, "_CONTEXT_LENGTH_OBSERVED_AT", old_date)
+    monkeypatch.setattr(LLMClient, "_SUPPORTED_PARAMS_CACHE", {})
+    monkeypatch.setattr(ce, "canonical_evidence_root", lambda: tmp_path)
+    monkeypatch.setattr(utils, "utc_now_iso", lambda: new_date)
+    monkeypatch.setattr(vision_routing, "utc_now_iso", lambda: new_date)
+    reads = []
+
+    class ObservedRow(dict):
+        def get(self, key, default=None):
+            if key == "context_length":
+                # Interleave a hot-path reader with parsing each new catalog row.
+                reads.append(({model: LLMClient.openrouter_context_length(model, allow_fetch=False)
+                               for model in old}, LLMClient._CONTEXT_LENGTH_OBSERVED_AT))
+            return super().get(key, default)
+
+    rows = [ObservedRow(id="fixture/first", context_length=window),
+            ObservedRow(id="fixture/second", context_length=window * 2)]
+    monkeypatch.setattr(requests, "get", lambda *a, **k: SimpleNamespace(
+        status_code=200, json=lambda: {"data": rows}))
+    LLMClient._fetch_openrouter_capabilities()
+
+    assert reads == [(old, old_date), (old, old_date)]
+    expected = {"fixture/first": window, "fixture/second": window * 2} if window else {}
+    assert LLMClient._CONTEXT_LENGTH_CACHE == expected
+    assert LLMClient._CONTEXT_LENGTH_OBSERVED_AT == new_date
+    assert LLMClient._CAPABILITIES_FETCH_OK
+    assert LLMClient.openrouter_context_length("fixture/first", allow_fetch=False) == window
+    assert LLMClient.openrouter_context_length("fixture/removed", allow_fetch=False) == 0
