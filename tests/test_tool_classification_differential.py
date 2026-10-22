@@ -362,6 +362,9 @@ def _golden() -> dict[str, dict]:
 # unavailable. Keep the historical corpus intact and assert the new observed
 # outcome explicitly rather than manufacture old evidence (04-AGENCY S1/S3).
 CURRENT_PRODUCER_CONTRACTS = {
+    # D1 per-target mutation custody: the existing INTEGRATE_ family reports a
+    # busy target as a substrate refusal; no historical answer is fabricated.
+    "INTEGRATE_DELEGATED_TARGET_BUSY": (True, "integration_blocked"),
     # #1657: only missing logs are unavailable; status/stop retain warnings.
     "SERVICE_NOT_FOUND": (False, "ok"),
     "native:LEGACY_UNAVAILABLE:SERVICE_NOT_FOUND": (True, "unavailable"),

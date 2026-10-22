@@ -112,8 +112,9 @@ def test_git_catalog_schema_bytes_and_handler_owners_are_stable():
         separators=(",", ":"),
     ).encode()
     # Reviewed commit aliases disclose strictness-keyed panels; vcs_diff keeps base/head.
+    # S3 collection permits omitted commit_message; S5 adds author doctrine; D4 adds wake_on.
     assert hashlib.sha256(schema_bytes).hexdigest() == (
-        "73a7f4cce0e3044fdb2f83ba5350cd49ddfb9ae2ee1d7003a33e0fe084131b4b"
+        "81b3d3892154f02cc805193bc2bdea95c8940226050bb9c01afaff9ffad042a7"
     )
     assert {
         entry.name: (entry.handler.__module__, entry.handler.__name__)
