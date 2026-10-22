@@ -458,7 +458,7 @@ def recover_pending_root_post_task_synthesis(
                     release_post_task_synthesis(key)
                 continue
             usage = {"cost": cost_projection(task)["accounted_upper_bound_usd"],
-                     "rounds": int(task.get("total_rounds") or 0),
+                     "rounds": ((task.get("loop_outcome") or {}).get("usage") or {}).get("total_rounds"),
                      "reason_code": str(task.get("reason_code") or ""), "outcome_axes": task.get("outcome_axes") or {}}
             trace = {"tool_calls": [], "reasoning_notes": [str(task.get("trace_summary") or "")],
                      "recovered_post_task_synthesis": True}
@@ -960,6 +960,7 @@ def emit_task_results(
     pending_events.append({
         "type": "task_metrics",
         "task_id": task.get("id"), "task_type": task.get("type"),
+        "rounds": usage.get("rounds"),
         "outcome_axes": outcome_axes,
         "reason_code": reason_code,
         "duration_sec": duration_sec,

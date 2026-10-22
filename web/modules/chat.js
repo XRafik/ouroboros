@@ -784,14 +784,16 @@ export function createChatInstance({
 
     // Fold host facts; absent counters stay absent.
     function noteToolMetrics(taskId, metrics, rawTs, { suppressDomInsert = false } = {}) {
+        const rounds = Number.isInteger(metrics?.rounds) && metrics.rounds >= 0 ? metrics.rounds : null;
         const [calls, errors, routing, completion] = ['tool_calls', 'tool_errors', 'routing_tool_calls', 'completion_tool_calls']
             .map(key => Number.isInteger(metrics?.[key]) ? metrics[key] : null);
-        if (!calls && !errors && !metrics.tool_evidence?.observations?.length
+        if (rounds === null && !calls && !errors && !metrics.tool_evidence?.observations?.length
                 && !metrics.tool_evidence?.legacy?.calls && !toolEvidenceIncomplete(metrics.tool_evidence?.coverage)) return false;
         return withStableViewport(() => {
             const record = getLiveCardRecord(taskId);
             const before = captureLiveCardProjection(record);
             const duration = Number(metrics.duration_sec);
+            if (rounds !== null) record.rounds = Math.max(record.rounds ?? 0, rounds);
             if (Number.isFinite(duration)) record.durationSec = duration;
             const summary = noteToolHostMetrics(record, { calls, errors, routing, completion, counts: metrics.tool_call_counts, evidence: metrics.tool_evidence });
             record.toolCalls = summary.calls;
@@ -1165,7 +1167,7 @@ export function createChatInstance({
 
     function admitCardMetadata(row) {
         // Carrier facts precede presentation returns.
-        if (row.tool_evidence && row.task_id) noteToolMetrics(row.task_id, row, row.ts || row.timestamp || '');
+        if ((row.tool_evidence || Number.isInteger(row.rounds)) && row.task_id) noteToolMetrics(row.task_id, row, row.ts || row.timestamp || '');
         if (row.system_type === 'task_evidence') {
             // The task's own evidence: mints its card at the carrier's row (zero tools included).
             const record = getLiveCardRecord(row.task_id);
@@ -1243,6 +1245,7 @@ export function createChatInstance({
             <div class="chat-live-foot" data-live-foot>
                 <div class="chat-live-meta" data-live-meta></div>
                 <div class="chat-live-foot-end" data-live-foot-end>
+                    <div class="chat-live-meta" data-live-counters hidden></div>
                     <div class="chat-live-review-summary" data-live-review-summary hidden></div>
                 </div>
             </div>
@@ -1269,6 +1272,7 @@ export function createChatInstance({
             footEl: root.querySelector('[data-live-foot]'),
             footEndEl: root.querySelector('[data-live-foot-end]'),
             metaEl: root.querySelector('[data-live-meta]'),
+            countersEl: root.querySelector('[data-live-counters]'),
             reviewSummaryEl: root.querySelector('[data-live-review-summary]'),
             toggleEl: root.querySelector('[data-live-toggle]'),
             // Both actions render lazily from the record's facts (syncBlockChrome,
@@ -1912,7 +1916,7 @@ export function createChatInstance({
         const rawTs = msg?.ts || new Date().toISOString();
         if (!taskId) return false;
         modelWaits.observe(taskId, msg);
-        let changed = msg.tool_evidence ? noteToolMetrics(taskId, msg, rawTs) : false;
+        let changed = msg.tool_evidence || Number.isInteger(msg.rounds) ? noteToolMetrics(taskId, msg, rawTs) : false;
         // Only host-attested progress grants Stop authority.
         if (grantCancelAuthority && msg.cancelable === true) {
             changed = markTaskCancelable(String(taskId)) || changed;
@@ -2100,7 +2104,7 @@ export function createChatInstance({
         const summary = summarizeChatLiveEvent(evt);
         if (childInfo && subagentTerminalChildren.has(taskId) && !summary?.toolCall) return false;
         // Root/child fold: metrics, terminal and replay.
-        let changed = evt.tool_evidence || ['task_metrics_event', 'task_eval', 'task_done'].includes(eventType)
+        let changed = evt.tool_evidence || Number.isInteger(evt.rounds) || ['task_metrics_event', 'task_eval', 'task_done'].includes(eventType)
             ? noteToolMetrics(taskId, evt, rawTs) : false;
         if (!childInfo) changed = attachTaskDetailReviews(taskId, evt) || changed;
         if (!summary) return changed;

@@ -835,6 +835,7 @@ export function clearStickyCardState(record) {
     record.modelExecution = null;
     record.effort = null;
     record.toolCalls = null;
+    record.rounds = null;
     record.toolErrors = null;
     // The folded evidence is cycle state too: a recycled slot must not count
     // the previous cycle's invocations.
@@ -1394,6 +1395,11 @@ function paintLiveFacts(record, rows) {
 export function renderLiveCardMeta(record, { agentModel = record?.agentModel || '' } = {}) {
     if (!record?.metaEl) return false;
     const toolCalls = Number.isInteger(record.toolCalls) ? `${record.toolCalls} tool ${record.toolCalls === 1 ? "call" : "calls"}` : '';
+    const counters = [Number.isInteger(record.rounds) ? `${record.rounds} round${record.rounds === 1 ? '' : 's'}` : '', toolCalls].filter(Boolean);
+    if (record.countersEl) {
+        record.countersEl.textContent = counters.join(' · ');
+        record.countersEl.hidden = !counters.length;
+    }
     const cost = (record.costMeta && Array.isArray(record.costMeta.meta)) ? record.costMeta.meta : [];
     // A Main portal is the collapsed form of a work that lives in its Project room: tool calls ·
     // cost · updated, plus the facts that change what the owner may trust. Executor, model and

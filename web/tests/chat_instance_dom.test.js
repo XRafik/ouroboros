@@ -1342,6 +1342,7 @@ for (const order of ['final-first', 'done-first', 'cold']) {
             assert.match(card.querySelector('[data-live-facts]').innerHTML, /<dt>Tool calls<\/dt><dd>2<\/dd>/);
             // The compact line names the model the solve response reported; the details keep the route and request.
             assert.match(card.querySelector('[data-live-meta]').innerHTML, />model-b-provider</);
+            assert.equal(card.querySelector('[data-live-counters]').textContent, '2 rounds · 2 tool calls');
             assert.match(card.querySelector('[data-live-facts]').innerHTML,
                 /<dt>Last solve response<\/dt><dd>model-b-provider \(initial request: model-a\) · provider · route: provider\/model-b<\/dd>/);
             if (card.dataset.expanded !== '1') card.querySelector('[data-live-disclosure]').listeners.get('click')[0]({ detail: 0 });

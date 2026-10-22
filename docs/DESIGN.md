@@ -1882,8 +1882,9 @@ and no conversion; its chip says its state (Waiting…, Cancelling…, Failed), 
 wait controls stay, and its first row of work gives it the title. The compact
 meta line says who ran the work on what (a root: the
 observed solve model, else its agent model), duration, cost, exceptions and, while
-it runs, `updated` from its own narration. Tool calls, model provenance, origin
-and a finished card's update time are labelled rows of its details. Money
+it runs, `updated` from its own narration. Completed solve rounds and tool calls
+share a quiet second line beside Reviews; unknown counts stay absent. Model
+provenance, origin and a finished card's update time stay in details. Money
 there is ONE line whose wording carries its openness and never renders an
 unknown as a number: `$0.00` only where priced rows evidenced that zero,
 `up to $1.20` while the tracked subtotal is inexact, `Tracked: $1.20` when part
