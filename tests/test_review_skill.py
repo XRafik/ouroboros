@@ -235,7 +235,7 @@ def test_an_oversized_payload_is_not_delivered_to_a_packet_seat_and_is_said_so(b
     """J: no chunking. A packet seat that cannot hold the payload receives the file index and a plain
     "NOT delivered" statement; a retrieving seat still reads the frozen copy."""
     h = briefing
-    (h.skill_dir / "big.txt").write_text("x" * 20_000 + "\n", encoding="utf-8")
+    (h.skill_dir / "big.txt").write_bytes(b"x" * 20_000 + b"\n")
     h.monkeypatch.setattr("ouroboros.tools.review_helpers.REVIEW_PROMPT_TOKEN_BUDGET", 2_000)
     outcome = _review(h, reviewers=["t1"], reason="small payload")
     assert outcome.status == "clean", outcome.error

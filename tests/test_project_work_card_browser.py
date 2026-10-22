@@ -67,7 +67,8 @@ def project_chat(request):
                   "last_line": "Comparing the reviewer verdicts across the last three runs.",
                   "last_line_at": "2026-10-08T14:05:00Z", "tool_calls": 41, "cancelable": True},
                  {"activity_id": "transfer", "project_id": "beta", "chat_id": 8, "kind": "managed_task",
-                  "phase": "budget_paused", "pause_cause": "owner", "started_at": 1791467880},
+                  "phase": "budget_paused", "pause_cause": "owner", "started_at": 1791467880,
+                  "stop": {"cause": "pause", "scope": "tree", "release": "resume"}},
              ]}
     conversions, details, requests, continues = {}, {}, [], {}
     history = {"messages": rows, "progress": [], "has_more": False, "page_cursor": "work-cards",

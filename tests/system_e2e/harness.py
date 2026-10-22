@@ -324,11 +324,9 @@ def canned_review_answer(kind: str) -> dict | None:
     if kind == "safety":
         return {"role": "assistant",
                 "content": json.dumps({"status": "SAFE", "reason": "stub"})}
-    if kind == "skill_review":
-        return {"role": "assistant", "content": skill_review_clean_text()}
     if kind == "two_part_review":
         return {"role": "assistant", "content": two_part_clean_text()}
-    if kind == "triad_review":
+    if kind in ("triad_review", "skill_review"):
         return {"role": "assistant", "content": TRIAD_CLEAN_TEXT}
     if kind == "reviewer_slot":
         return {"role": "assistant", "content": reviewer_slot_clean_text()}
