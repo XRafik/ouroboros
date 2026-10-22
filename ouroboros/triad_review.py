@@ -349,25 +349,31 @@ def two_part_payload(payload: Any) -> Optional[Dict[str, Any]]:
     return out
 
 
+_FENCE_LINE_END = re.compile(r"\r\n|\r|\n")
+
+
 def _whole_json(raw_text: str) -> Any:
     """The response as ONE JSON value — bare, or inside one code fence that opens
     on the first line and closes on the last; prose around the value is a
     non-response (the same discipline as the array contract). The whole text is
     parsed first, and a fence is recognized by its fence LINES only, so a fence
-    spelling inside a JSON string is content, never a split point."""
+    spelling inside a JSON string is content, never a split point. Lines end at
+    CR/LF only and the body between the fence lines is parsed as written, so a
+    U+0085/U+2028/U+2029 inside a JSON string (``str.splitlines`` cuts there) is
+    content too."""
     text = str(raw_text or "").strip()
     try:
         return json.loads(text)
     except (json.JSONDecodeError, ValueError, TypeError):
         pass
-    lines = text.splitlines()
+    lines = _FENCE_LINE_END.split(text)
     if len(lines) < 3 or not lines[0].startswith("```") or lines[-1].strip() != "```":
         return None
     tag = lines[0][3:].strip()
     if tag and not tag.isalnum():
         return None
     try:
-        return json.loads("\n".join(lines[1:-1]).strip())
+        return json.loads(text[len(lines[0]):len(text) - len(lines[-1])].strip())
     except (json.JSONDecodeError, ValueError, TypeError):
         return None
 

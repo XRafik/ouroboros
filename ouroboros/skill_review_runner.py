@@ -1477,13 +1477,6 @@ def run_skill_review_lifecycle_blocking(
                 or bound_content_hash.get("value") or content_hash,
                 landing_failed=getattr(outcome, "deps_status", "") == "failed"))
 
-    try:
-        from ouroboros.skill_loader import discover_skills
-        from supervisor.queue import sync_skill_schedules
-
-        sync_skill_schedules(discover_skills(drive_root, repo_path=repo_path), drive_root=drive_root)
-    except Exception:
-        log.debug("skill review schedule sync failed", exc_info=True)
     return _outcome_payload(
         outcome,
         deps_status=getattr(outcome, "deps_status", "not_required"),
