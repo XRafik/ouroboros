@@ -1060,8 +1060,7 @@ def kill_process_on_port(port: int) -> None:
     """Kill any process listening on the given TCP port."""
     try:
         if IS_WINDOWS:
-            # psutil's socket table, not netstat's text: netstat translates its state column (no "LISTENING"
-            # on a Russian Windows) and prints in a code page the ANSI decoder cannot read.
+            # psutil's socket table, not netstat's text, whose state words and code page are localized.
             import psutil
 
             listeners = list(dict.fromkeys(  # a dual-stack listener has an IPv4 and an IPv6 row
