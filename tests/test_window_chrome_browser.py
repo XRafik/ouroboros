@@ -42,7 +42,24 @@ def shell_page(ui, width, height=722):
 
 
 def apply(page, top=TOP, start=START):
-    page.evaluate("([top, start]) => window.__ouroWindowChrome({doc: performance.timeOrigin, top, start})", [top, start])
+    # Like the native shell, answer the document's latest declaration (including page-cache returns).
+    page.evaluate("""([top, start]) => {
+        const doc = window.__shellMessages.filter(message => message.type === 'declare').at(-1).doc;
+        window.__ouroWindowChrome({doc, top, start});
+    }""", [top, start])
+
+
+@pytest.mark.parametrize("engine", ["chromium", "webkit"])
+def test_shell_fixture_replies_to_the_restored_document(request, monkeypatch, engine):
+    monkeypatch.setenv("OUROBOROS_UI_BROWSER_ENGINE", engine)
+    ui = request.getfixturevalue("subscription_ui")
+    page = shell_page(ui, 1100)
+    page.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+    assert page.evaluate("window.__shellMessages.filter(m => m.type === 'declare').at(-1).doc !== performance.timeOrigin")
+    apply(page)
+    assert page.evaluate("document.documentElement.dataset.windowChrome") == INTEGRATED
+    apply(page, top=0, start=0)
+    assert page.evaluate("document.documentElement.dataset.windowChrome || null") is None
 
 
 def box(page, selector):
