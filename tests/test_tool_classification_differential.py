@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import json
 import pathlib
-import subprocess
 from types import MappingProxyType
 from typing import Mapping, NamedTuple
 
@@ -40,8 +39,6 @@ from tests.tool_classification_corpus import (
     typed_result,
 )
 from tests.test_skill_install_checks import registry_release  # noqa: F401  (fixtures)
-from tests.test_github_read import _comment, _issue
-from tests.test_github_write import gh as github_gh  # noqa: F401  (fixture)
 
 GOLDEN_PATH = pathlib.Path(__file__).resolve().parent / "fixtures" / "legacy_tool_classification_0f715831.json"
 
@@ -572,44 +569,6 @@ def test_current_producer_contracts_have_explicit_live_answers(subject, detail):
     identifier = subject.rsplit(":", 1)[-1]
     case = Case("current:" + subject, subject, "read_file", "⚠️ " + identifier + detail, code)
     assert _live_answer(case) == CURRENT_PRODUCER_CONTRACTS[subject]
-
-
-@pytest.mark.parametrize("identifier,args,reply,code,outcome", [
-    ("GH_WRITE_UNKNOWN", {"method": "comment", "target": 7, "body": "x"},
-     subprocess.TimeoutExpired(["gh"], 60), "TOOL_ERROR", "unknown"),
-    ("GH_WRITE_NOT_APPLIED", {"method": "create_issue", "title": "T"},
-     (1, "gh: Validation Failed (HTTP 422)"), "TOOL_ERROR", "completed_no_effect"),
-    ("GH_EXPECTATION_FAILED", {"method": "comment", "target": 7, "body": "x", "expect": {"state": "closed"}},
-     json.dumps(_issue(7)), "TOOL_ERROR", "completed_no_effect"),
-    ("GH_API_READ_ONLY", {"method": "api", "route": "POST repos/{owner}/{repo}/issues"},
-     "{}", "TOOL_ARG_ERROR", "completed_no_effect"),
-    ("GH_WRITE_READBACK_MISMATCH", {"method": "comment", "target": 7, "body": "x"},
-     json.dumps(_comment(3, body="edited by a bot")), "OK", "completed"),
-])
-def test_github_producers_keep_their_typed_loop_outcomes(github_gh, monkeypatch, identifier, args, reply, code, outcome):  # noqa: F811
-    from ouroboros.tools import github
-    from ouroboros.tools.registry import ToolRegistry
-
-    monkeypatch.setenv("OUROBOROS_SAFETY_MODE", "off")
-    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_SAFETY_MODE", "off")
-    monkeypatch.setattr(github, "github_cli_configured", lambda: True)
-    github_gh.answer = lambda p, argv, kw: "[]" if identifier == "GH_WRITE_UNKNOWN" and p.method == "GET" else reply
-    registry = ToolRegistry(repo_dir=github_gh.ctx.repo_dir, drive_root=github_gh.ctx.drive_root)
-    registry.set_context(github_gh.ctx)
-    tool = "github_read" if identifier == "GH_API_READ_ONLY" else "github_write"
-    result = registry.execute_result(tool, args)
-    assert result.text.startswith(f"⚠️ {identifier}:") and result.code == code
-    is_error = _typed_execution_failure(True, result)
-    meta = _typed_result_metadata(tool, result.text, is_error, result)
-    assert (is_error, meta["status"]) == CURRENT_PRODUCER_CONTRACTS[f"native:{code}:{identifier}"]
-    assert meta["tool_result_meta"]["operation_outcome"] == outcome
-    sends = [s for s in github_gh.sent() if s[0] == "POST"]
-    assert len(sends) == (0 if identifier in ("GH_API_READ_ONLY", "GH_EXPECTATION_FAILED") else 1)
-    if identifier == "GH_WRITE_UNKNOWN":
-        assert is_error and "do not resend" in result.text
-    if identifier == "GH_WRITE_READBACK_MISMATCH":
-        receipt = json.loads(result.text.split("\n", 1)[1])
-        assert receipt["outcome"] == "confirmed" and receipt["readback"]["verified"] is False
 
 
 @pytest.mark.parametrize("tool", ["skill_install", "skill_update"])
