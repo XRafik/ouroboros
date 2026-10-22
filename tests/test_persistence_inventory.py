@@ -829,7 +829,9 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
 # accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
 # ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 415 -> 410.
-EXPECTED_SCAN_PATHS = 410
+# Base c15fc161 already scans 411: artifacts.copy_file_to_task_artifacts' immutable
+# digest-named attachment path (task_results/artifacts/*/*-*) shares section 7's row.
+EXPECTED_SCAN_PATHS = 411
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

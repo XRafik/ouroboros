@@ -193,7 +193,7 @@ def test_answer_transport_passes_only_an_explicit_remaining_timeout():
     assert calls[0]["json"] == calls[1]["json"] == {"answers": []}
 
 
-def test_schema_is_unconditional_and_plan_extension_refuses(setup, tmp_path):
+def test_schema_is_unconditional_and_plan_address_has_one_selector(setup, tmp_path):
     from ouroboros.tools.core import get_tools
     from ouroboros.tools.delegate import get_tools as delegated_tools
 
@@ -201,7 +201,10 @@ def test_schema_is_unconditional_and_plan_extension_refuses(setup, tmp_path):
         if tool.name in {"escalate", "forward_to_worker", "delegate_message", "delegate_answer"}:
             assert "reply_to" in tool.schema["parameters"]["properties"]
     _, _, address = setup
-    with pytest.raises(ValueError, match="plan_unsupported"):
+    with pytest.raises(ValueError, match="exactly one"):
         write_task_message(tmp_path, "yes", "nanny", source_task_id="root",
                            reply_to={**address, "plan_run_id": "plan"})
+    plan_address = {**address, "plan_run_id": address["run_id"]}
+    del plan_address["interaction_id"]
+    assert write_task_message(tmp_path, "plan answer", "nanny", source_task_id="root", reply_to=plan_address)
     assert write_task_message(tmp_path, "legacy context", "nanny", source_task_id="root")

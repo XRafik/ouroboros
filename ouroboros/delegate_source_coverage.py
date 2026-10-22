@@ -297,7 +297,7 @@ def record_started_custody(
     baseline_sha: str, authority_source: str,
     resource_ref: Dict[str, Any], capture_mode: str, processing: Mapping[str, Any] | None = None,
     continuation_of: str = "", capture_id: str = "", snapshot_task_id: str = "", max_seconds_basis: str = "",
-    row_effort: Optional[str] = None,
+    row_effort: Optional[str] = None, plan_facts: Optional[dict] = None,
 ) -> bool:
     """Write the one STARTED custody row, including the source binding.
 
@@ -348,11 +348,12 @@ def record_started_custody(
         mode=authority.mode,
         isolation=authority.isolation,
         delegated=authority.delegated,
+        **(plan_facts or {}),
         continuation_of=str(continuation_of or ""),
         capture_id=str(capture_id or ""),
         snapshot_task_id=str(snapshot_task_id or ""),
     )
-    return custody_module.record_started(
+    recorded = custody_module.record_started(
         drive,
         entry,
         shape={
@@ -363,6 +364,11 @@ def record_started_custody(
             "capture_mode": capture_mode,
         },
     )
+    if recorded and entry.promotion:
+        from ouroboros.delegate_plan import promotion_notice
+
+        promotion_notice(ctx, entry)
+    return recorded
 
 
 __all__ = [

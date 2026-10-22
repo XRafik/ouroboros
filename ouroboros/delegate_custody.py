@@ -160,6 +160,11 @@ class RunCustody:
     # #1573: SETTLED's engine locators (runDir, primary kind/path/bytes/truncated, no text); None = legacy.
     engine_locator: Optional[Dict[str, Any]] = None
     terminal_ack_attempt: str = ""  # the attempt whose transcript took the terminal wake
+    execution_mode: str = ""
+    effective_access: str = ""
+    thread_id: str = ""
+    authority_ceiling: Dict[str, Any] = field(default_factory=dict)
+    promotion: Dict[str, Any] = field(default_factory=dict)
     continuation_of: str = ""  # the settled run this one explicitly continued (``continue_from``)
     # Same-tree continuation (``delegate_continuation``): a run that continues IN its
     # predecessor's undisposed snapshot records its own capture identity (``capture_id``,
@@ -446,6 +451,7 @@ def _iter_rows(path: pathlib.Path, *, strict: bool = False, start_offset: Option
 
 from ouroboros.delegate_registration_policy import (
     STARTED_OPTION_FIELDS as _STARTED_OPTION_FIELDS,
+    STARTED_MAPPING_FIELDS as _STARTED_MAPPING_FIELDS,
     STARTED_FIRST_WINS_FACTS as _STARTED_FIRST_WINS_FACTS,
     STARTED_PROGRESS_FLAGS as _STARTED_PROGRESS_FLAGS,
     STARTED_SETTLEMENT_FACTS as _STARTED_SETTLEMENT_FACTS,
@@ -501,6 +507,8 @@ def _merge_started_into(entry: RunCustody, previous: RunCustody) -> None:
         entry.access, entry.mode = previous.access, previous.mode
         entry.isolation, entry.delegated = previous.isolation, previous.delegated
         entry.resource_ref = previous.resource_ref
+        for attr in ("execution_mode", "effective_access", "thread_id", "authority_ceiling", "promotion"):
+            setattr(entry, attr, copy.deepcopy(getattr(previous, attr)))
 
 
 def _supersede(state: Dict[str, RunCustody], entry: RunCustody) -> None:
@@ -510,6 +518,8 @@ def _supersede(state: Dict[str, RunCustody], entry: RunCustody) -> None:
     Derived from the successor's STARTED row, the one durable fact of the hand-over,
     so a start that never bound a run leaves the predecessor's obligation intact."""
     prior = state.get(entry.continuation_of) if entry.capture_id and entry.continuation_of else None
+    if prior is not None and prior.mode == "plan" and prior.thread_id and prior.thread_id == entry.thread_id:
+        prior.superseded_by = entry.run_id  # Thread heads advance even without a writable snapshot.
     if (prior is not None and prior is not entry and prior.snapshot_id
             and prior.snapshot_id == entry.snapshot_id and prior.patch_disposed in ("", SUPERSEDED)):
         prior.patch_disposed, prior.superseded_by = SUPERSEDED, entry.run_id
@@ -530,6 +540,7 @@ def _apply(state: Dict[str, RunCustody], row: Dict[str, Any]) -> None:
             project_persistent=bool(row.get("project_persistent")),
             delegated=row.get("delegated") is True,
             resource_ref=dict(ref) if isinstance(ref, dict) else {},
+            **{key: copy.deepcopy(row[key]) for key in _STARTED_MAPPING_FIELDS if isinstance(row.get(key), dict)},
             work_order_source_request=(
                 dict(source_request) if isinstance(source_request, dict) else {}
             ),
@@ -837,7 +848,9 @@ def open_snapshot_ids(drive_root: Any) -> set:
 
     ids: set = set()
     for custody in current_runs(drive_root, "state=?", ("held",)).values():  # a settled, disposed run is closed: never here
-        if custody.snapshot_id and not (custody.settled and custody.patch_disposed):
+        # A terminal plan has no patch duty. GC still requires its owning task
+        # to be proven over; active starters can keep answering or implement it.
+        if custody.snapshot_id and not (custody.settled and (custody.patch_disposed or custody.mode == "plan")):
             ids.add(custody.snapshot_id)
     for record in pending_invocations(drive_root):
         snap = str(record.get("snapshot_id") or "")
@@ -952,6 +965,7 @@ def record_started(drive_root: Any, custody: RunCustody,
         "daemon_store_id": custody.daemon_store_id,
         "project_owned": custody.project_owned, "project_persistent": custody.project_persistent,
         "resource_ref": custody.resource_ref or {},
+        **{key: copy.deepcopy(getattr(custody, key)) for key in _STARTED_MAPPING_FIELDS},
         "work_order_source_request": custody.work_order_source_request or {},
         **{key: getattr(custody, attr) for attr, key in _STARTED_STR_FIELDS},
         **(shape or {}),

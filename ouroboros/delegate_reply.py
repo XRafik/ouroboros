@@ -1,9 +1,4 @@
-"""Exact question addresses carried as context, never as control authority.
-
-D2 extension point: add a plan_run_id validator and its separate answer carrier
-here when plan turns land. A plan question is not an engine interaction; this
-module deliberately refuses it today rather than selecting a recent question.
-"""
+"""Exact interaction or plan-question addresses: context, never control authority."""
 from __future__ import annotations
 
 import json
@@ -12,7 +7,7 @@ from typing import Any
 
 REPLY_TO_SCHEMA = {
     "type": "object",
-    "description": "Exact question address from waiting_on_user. Preserve it through escalation and replies; it grants no authority. Plan addresses are not supported yet.",
+    "description": "Exact question address from waiting_on_user or a terminal plan receipt. Preserve through escalation and replies; it grants no authority.",
     "properties": {
         "starter_task_id": {"type": "string"},
         "run_id": {"type": "string"},
@@ -31,14 +26,13 @@ def normalize_reply_to(value: Any) -> dict | None:
         return None
     if not isinstance(value, dict):
         raise ValueError("reply_to must be an exact question address")
-    if "plan_run_id" in value:
-        raise ValueError("reply_to_plan_unsupported: plan questions belong to D2")
-    keys = {"starter_task_id", "run_id", "interaction_id", "question_ids"}
+    selector = "plan_run_id" if "plan_run_id" in value else "interaction_id"
+    keys = {"starter_task_id", "run_id", selector, "question_ids"}
     if set(value) != keys or any(
         not isinstance(value.get(key), str) or not value[key].strip()
         for key in keys - {"question_ids"}
     ):
-        raise ValueError("reply_to requires starter_task_id, run_id, interaction_id and question_ids")
+        raise ValueError("reply_to requires starter_task_id, run_id, question_ids and exactly one of interaction_id or plan_run_id")
     questions = value["question_ids"]
     if (not isinstance(questions, list) or not questions
             or any(not isinstance(q, str) or not q.strip() for q in questions)
@@ -82,6 +76,8 @@ def validate_reply_target(ctx: Any, address: Any, *, recipient: str = "") -> dic
     if refusal is not None or entry is None:
         reason = delegate_payload(refusal)["reason"] if refusal is not None else "run_ownership_unknown"
         raise ValueError(f"reply_to unavailable: {reason}")
+    if "plan_run_id" in address and (entry.mode != "plan" or address["plan_run_id"] != entry.run_id):
+        raise ValueError("reply_to does not identify this plan run")
     if entry.task_id != address["starter_task_id"]:
         raise ValueError("reply_to starter does not own the addressed run")
     if recipient and recipient != entry.task_id:
@@ -94,7 +90,7 @@ def validate_answer_address(address: Any, starter: str, run_id: str,
     address = normalize_reply_to(address)
     if address is not None and (
         address["starter_task_id"] != starter or address["run_id"] != run_id
-        or address["interaction_id"] != interaction_id
+        or address.get("interaction_id") != interaction_id
         or not {a.get("questionId") for a in answers}.issubset(address["question_ids"])
     ):
         raise ValueError("reply_to does not match this starter, run, interaction and answer set")

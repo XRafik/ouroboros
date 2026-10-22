@@ -299,7 +299,8 @@ def _resolve_retry_invocation(ctx: ToolContext, drive: pathlib.Path, retry_token
     # byte-for-byte, but host custody/capture must keep naming the snapshot.
     # On the strict 3.8.0 wire workspaceRoot is absent and scope.root remains
     # the execution root, so this is byte-compatible with the legacy shape.
-    root = str(execution.get("workspaceRoot") or scope_root)
+    root = str((record.get("execution_root") if request_body.get("_thread_id") else "")
+               or execution.get("workspaceRoot") or scope_root)
     project_id = str(record.get("project_id") or "")
     # The C1 isolation binding recorded at the original attempt. Pre-C1 rows
     # carry none; their scope.root IS the authority target (in-place regime).
@@ -633,6 +634,8 @@ def capture_terminal_patch_for_drive(drive: Any, entry: _RunCustody, *, gateway=
     def finish(block, transport=None):
         return retain_investigation_evidence(drive, entry, block, transport) if retain_investigation else block
 
+    if entry is not None and entry.mode == "plan":
+        return None  # A read-only plan retains its workspace for a later implement turn.
     if is_directory_run(entry):
         owned_gateway = None
         try:

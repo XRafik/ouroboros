@@ -451,7 +451,7 @@ _ANSWER_HANDSHAKE_MAX_SEC = 30.0
 
 
 def _delegate_answer(
-    ctx: ToolContext, run_id: str, interaction_id: str, answers: Any,
+    ctx: ToolContext, run_id: str, interaction_id: str = "", answers: Any = None,
     source_response: Optional[Dict[str, Any]] = None,
     reply_to: Optional[Dict[str, Any]] = None,
 ) -> ToolResult:
@@ -482,13 +482,19 @@ def _delegate_answer(
     if not rid:
         return _fail("delegate_answer", "missing_run_id", "run_id is required")
     iid = str(interaction_id or "").strip()
-    if not iid:
-        return _fail("delegate_answer", "missing_interaction_id",
-                     "interaction_id is required (from the waiting_on_user payload)")
     not_mine, entry = _owned_run(ctx, "delegate_answer", rid)
     if not_mine or entry is None:
         return not_mine or _fail("delegate_answer", "run_ownership_unknown",
                                  "custody unresolved", run_id=rid)
+    if entry.mode == "plan":
+        from ouroboros.delegate_plan import answer_plan
+
+        if iid or source_response is not None:
+            return _fail("delegate_answer", "plan_answer_conflict", "Plan questions are artifacts; omit interaction_id and source_response.")
+        return answer_plan(ctx, entry, answers, reply_to)
+    if not iid:
+        return _fail("delegate_answer", "missing_interaction_id",
+                     "interaction_id is required (from the waiting_on_user payload)")
     verified_source = None
     if source_response is not None:
         from ouroboros.subagent_work_order import validate_work_order_source_response
