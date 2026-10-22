@@ -185,7 +185,7 @@ An out-of-process extension response streams through `extension_route_stream.py`
 
 ### Dashboard
 
-Dashboard's sub-tabs share the common tab binder; each owns its loading and refresh policy, never running expensive readers while hidden. Charting uses the bundled Chart.js (§3 Widgets page).
+Dashboard's sub-tabs share the common tab binder; each owns its loading and refresh policy, never running expensive readers while hidden.
 
 Logs merges live WebSocket frames with bounded REST backfill from the events, tools, progress and supervisor logs: chronological, deduplicated across live/reconnect overlap, bounded grouped task cards, raw record on demand, `log_events.js` presentation. A failed backfill names unavailable sources in a separate status row while live events continue; clearing the panel deletes no log. Mounted unfinished child cards refresh their holds through `/api/tasks?queue_only=1`. `project_admission_hold` (a gateway contract field) carries the host's label, reason and detail, not a phase; a missing or unreadable queue never proves recovery, and parked phases, Stop and terminal outrank it (`chat_activity.js`).
 
@@ -195,7 +195,7 @@ Costs is a projection of the physical-attempt ledger: known spend (confirmed plu
 
 Storage (`storage.js`) opens passively. **Measure** counts every owned place in a low-I/O-priority child (progress, Stop, phase-only live region). Only finished counts give the five-share bar, date, growth; free space stays fresh; failed reads keep the gauge; unknown is never zero. **Temporary space** (`storage_free.js`) previews finished tasks' folders/copies without writes, then sizes them; the shared confirmation frees selected plan items via existing retirers at retention zero, one copy per call, Stop between. Visible polling covers count, preview and deletion (not stuck ones); results: removed/kept/deleting/stuck.
 
-Evolution shows the evolution state, the consciousness alarm clock, campaign objective and progress, queue/failure/budget information and durable history; starting a campaign uses the shared input dialog, where confirmed empty input selects the backend's default autonomous objective. Light runtime mode disables self-modifying campaigns rather than offering a control the backend will refuse.
+Evolution's campaign object (state; consciousness and its allowance; Start via the shared dialog, empty = default objective, off in Light mode or without a current state; Pause when on) never waits for history: `evolution_history.py` serves the saved copy and re-measures only on new tags or Try again. Milestones are dots on one measure; the chosen version's README row reads beneath.
 
 #### Updates
 

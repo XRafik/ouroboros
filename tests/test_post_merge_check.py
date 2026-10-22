@@ -172,6 +172,58 @@ def test_one_retry_separates_failed_from_flaky(tmp_path):
     assert record["failed"][0]["pass"] == "serial" and record["problems"] == []
 
 
+LINTED = "ruff F811 tests/t.py fake_route"
+
+
+def test_lint_findings_name_code_file_and_name_and_say_when_ruff_could_not_run(tmp_path, monkeypatch):
+    """The release's lint gate, run as it runs there; a line number is not part of the id, it moves with edits."""
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "m.py").write_text("import os\nfrom json import loads\n\n\ndef loads():\n    return 1\n",
+                                           encoding="utf-8")
+    (tmp_path / "pkg" / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+    found = pmc.lint_findings(tmp_path)
+    assert sorted(found) == ["ruff F401 pkg/m.py os", "ruff F811 pkg/m.py loads"]
+    assert pmc.lint_findings(tmp_path, ["pkg/clean.py"]) == {}
+
+    def missing(*args, **kwargs):
+        raise OSError("no ruff")
+
+    monkeypatch.setattr(pmc.subprocess, "run", missing)
+    assert pmc.lint_findings(tmp_path) is None
+
+
+def test_a_lint_finding_is_failed_without_a_retry_and_ruff_that_cannot_run_is_a_problem(tmp_path):
+    _selection(tmp_path)
+    no_retry = dict(run=lambda *a: pytest.fail("a lint finding is deterministic: no retry"), node=lambda: 0)
+    record = pmc.classify(tmp_path, lint=lambda: {LINTED: "Redefinition of unused `fake_route` from line 3"},
+                          **no_retry)
+    assert record["failed"] == [{"id": LINTED, "pass": "lint", "retry": "failed",
+                                 "why": "Redefinition of unused `fake_route` from line 3"}]
+    assert record["lint_checked"] is True and record["problems"] == []
+    record = pmc.classify(tmp_path, lint=lambda: None, **no_retry)
+    assert record["failed"] == [] and record["lint_checked"] is False
+    assert record["problems"] == ["ruff could not run, so the lint gate went unchecked"]
+    assert pmc.classify(tmp_path, **no_retry)["lint_checked"] is False  # a caller that does not lint
+
+
+def test_a_lint_finding_is_probed_on_its_file_as_the_commit_has_it(tmp_path):
+    tree = tmp_path / "tree"
+    (tree / "tests").mkdir(parents=True)
+    (tree / "tests" / "t.py").write_text("x = 1\n", encoding="utf-8")
+    absent = "ruff F401 tests/gone.py os"
+    asked = []
+
+    def lint(cwd, paths):
+        asked.append((Path(cwd), list(paths)))
+        return {LINTED: "Redefinition"}
+
+    assert pmc.lint_answers(tree, [LINTED, absent], lint) == {LINTED: "fail", absent: "pass"}
+    assert asked == [(tree, ["tests/t.py"])]  # only the files the commit has
+    assert pmc.lint_answers(tree, [LINTED], lambda cwd, paths: {}) == {LINTED: "pass"}
+    assert pmc.lint_answers(tree, [LINTED], lambda cwd, paths: None) == {LINTED: "error"}
+    assert pmc.lint_answers(tree, [], lambda cwd, paths: pytest.fail("no finding, no ruff")) == {}
+
+
 def test_a_red_node_lane_is_retried_as_one_target(tmp_path):
     for code, verdict in ((0, "flaky"), (1, "failed")):
         evidence = tmp_path / str(code)
@@ -463,6 +515,22 @@ def test_issues_whose_tests_pass_at_the_head_are_closed_and_others_stay_open():
     record = _route(FakeGitHub(issues=[_issue(8, {"kind": "culprit", "pr": 2, "ids": [pmc.NODE_LANE]})]),
                     [], [], node="failure")
     assert record["closed"] == []  # a red Node lane in this run is not green
+
+
+def test_a_lint_issue_closes_only_once_a_linted_head_no_longer_has_its_finding():
+    def run(lint_checked, failed=()):
+        github = FakeGitHub(label=True, issues=[_issue(5, {"kind": "culprit", "pr": 1, "culprit": "c" * 40,
+                                                           "ids": [LINTED]})])
+        record = pmc.route(github, classification={"failed": [{"id": nodeid} for nodeid in failed], "flaky": [],
+                                                   "selection": {"node": "success"}, "lint_checked": lint_checked},
+                           attribution={"verdicts": [{"id": nodeid, "verdict": "unattributed"} for nodeid in failed]},
+                           head=HEAD, run_url="https://example.invalid/run/9",
+                           recheck=lambda ids: pytest.fail(f"a finding is not a test to rerun: {ids}") if ids else {})
+        return record["closed"]
+
+    assert run(True) == [5]
+    assert run(True, failed=[LINTED]) == []  # still found at the head
+    assert run(False) == []  # ruff did not run: nothing proves the finding gone
 
 
 def test_reds_without_blame_get_one_issue_unless_already_tracked():
