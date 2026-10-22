@@ -51,7 +51,7 @@ from ouroboros.dialogue_provenance import (RoomLabelResolver, is_presence_task, 
                                            row_class)
 from ouroboros.memory_view_account import account_entries, account_lines, accounts_line, told_map
 from ouroboros.memory_view_legacy import INDENT, indented as _indented, retold_lines
-from ouroboros.utils import append_jsonl, utc_now_iso
+from ouroboros.utils import append_jsonl, sha256_text, utc_now_iso
 
 log = logging.getLogger(__name__)
 
@@ -481,8 +481,10 @@ def _spoken(entry: Entry, author: Mapping[str, Any], texts: Mapping[str, Dict[st
     """A verbatim lane-1 line with the facts its address line needs (head, size, position)."""
     from ouroboros.dialogue_provenance import row_provenance
 
+    row = texts.get(entry[0]["row_sha256"])
     return {"owner_side": author.get("kind") == "human" and row_provenance(entry[1]) != "place",
             "ref": f"chat {entry[0]['chat_id']} / {entry[1].get('client_message_id') or ''}",
+            "text_sha256": sha256_text(str(row.get("text") or "")) if row else "",
             "line": _row_line(entry, author, texts), "head": _row_head(entry, author), "kind": author.get("kind"),
             "address": chat_chain.format_address(entry[0]), "ts": entry[1].get("ts"),
             "chars": entry[1].get("text_chars", 0), "pos": entry[2]}
@@ -822,12 +824,13 @@ def capture_memory_view(drive_root: Any, task: Mapping[str, Any], spec: ViewSpec
         if room:
             from ouroboros.owner_words import task_governing_words
 
+            # Governing words bind by identity: their ref, or (without one) the row's own exact text.
             governing, _absence = task_governing_words(task)
-            refs = {item.get("ref") for item in governing if item.get("ref")}
+            ids = {g.get("ref") or sha256_text(g.get("text") or "") for g in governing if g.get("ref") or g.get("text")}
             last_reply = max((item["pos"] for item in room["lane1"] if item["kind"] == "ouroboros"), default=-1)
             for item in room["lane1"]:
-                item["immune"] = item.get("owner_side", False) and (item["pos"] > last_reply or
-                    item.get("ref") in refs or any(g.get("text") and g["text"] in item["line"] for g in governing))
+                item["immune"] = item.get("owner_side", False) and (
+                    item["pos"] > last_reply or bool({item.get("ref"), item.get("text_sha256")} & ids))
                 # Open rows have no page coverage. A reply alone is not proof of carried commitments.
                 item["carried"] = False
     except Exception as exc:  # a journal that turns unreadable mid-capture still leaves a view with its reason

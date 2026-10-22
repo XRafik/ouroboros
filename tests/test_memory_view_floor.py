@@ -133,6 +133,23 @@ def test_capture_protects_governing_words_and_does_not_recapture_for_fitting(tmp
     assert mv.snapshot_json(snapshot) == before
 
 
+@pytest.mark.parametrize("governing, immune", [
+    ([{"text": "да"}], {"m5"}),
+    ([{"text": "всегда проверяй логи"}], {"m4"}),
+    ([{"text": "да", "ref": "chat 1 / m3"}], {"m3"}),
+    ([{"source": "initial_user"}, {"text": "да"}], {"m5"}),
+])
+def test_governing_words_protect_rows_by_identity_never_by_substring(tmp_path, governing, immune):
+    shared.world(tmp_path)
+    words = {"m3": "когда это будет готово?", "m4": "всегда проверяй логи", "m5": "да"}
+    shared.append(tmp_path / "logs" / "chat.jsonl", *[shared.msg(f"2026-09-04T00:0{i}:00+00:00", text, client_message_id=key)
+                                                      for i, (key, text) in enumerate(words.items())],
+                  shared.msg("2026-09-04T00:09:00+00:00", "answered", direction="out", task_id="t4"))
+    task = {"id": "turn0002", "chat_id": 1, "type": "task", "_is_direct_chat": True, "governing_owner_words": governing}
+    lane1 = mv.capture_memory_view(tmp_path, task, mv.view_spec_for_task(task, tmp_path)).room["lane1"]
+    assert {key for key in words for item in lane1 if item["ref"] == f"chat 1 / {key}" and item["immune"]} == immune
+
+
 @pytest.mark.parametrize("names, expected", [(None, ""), (("memory_read",), ""),
     (("enable_tools",), "reachable through enable_tools"), (("list_available_tools",), "my parent task can read")])
 def test_floor_receipt_names_reachable_sources_and_never_promises_lossless_recall(names, expected):
