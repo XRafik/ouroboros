@@ -23,7 +23,6 @@ _LIFETIME_RE = re.compile(r"^\[(record|bounded|disposable: ([\w.]+))\]")
 
 # Disposable planes nothing retires yet: each entry is the row's first path pattern. Only removals.
 DISPOSABLE_WITHOUT_RETIRER = frozenset({
-    "state/evolution_metrics_cache.json",
     "state/presence_turn_gate/last-<sha256>.json",
     "state/betterleaks/",
     "state/pycache/",

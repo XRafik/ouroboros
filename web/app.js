@@ -470,6 +470,7 @@ if (navDrawerClose) {
 // While a Project panel paints, Main defers first hydration (bounded in chat.js).
 let projectPanelOpeningSince = 0;
 let mainChat;
+let evolution = null;  // Dashboard → Evolution, which takes every sequenced snapshot too (its campaign controls)
 const stateSnapshots = createStateSnapshotSequencer((data, requestedAt, generation) => {
     data = data && typeof data === 'object' ? data : {};
     // A complete REST body cannot prove absence while the socket is in a
@@ -482,10 +483,12 @@ const stateSnapshots = createStateSnapshotSequencer((data, requestedAt, generati
         data.project_chat_ids ?? (data.projects ? undefined : Array.from(state.projectChatIds)), projectActivityIndex);
     applyTaskBindings(data.task_bindings || {});
     hydrateOpenChatsFromState(data, requestedAt, generation);
+    evolution?.hydrateStateSnapshot(data);
     observeMainRevision(data.main_visible_revision);
 }, undefined, (requestedAt) => {
     markProjectActivityUnknown();
     hydrateOpenChatsFromState(null, requestedAt);
+    evolution?.hydrateStateSnapshot(null);
 });
 
 const ctx = {
@@ -1375,7 +1378,7 @@ setInterval(() => refreshProjectsNav(false), 20000);
 settingsControls = initSettings(ctx);
 dashboardControls = initDashboard(ctx);
 initLogs({ ...ctx, mount: document.getElementById('dashboard-panel-logs') });
-const disposeEvolution = initEvolution({ ...ctx, mount: document.getElementById('dashboard-panel-evolution') });
+evolution = initEvolution({ ...ctx, mount: document.getElementById('dashboard-panel-evolution') });
 initUpdates({ ...ctx, mount: document.getElementById('dashboard-panel-updates') });
 initActivity({ ...ctx, mount: document.getElementById('dashboard-panel-activity') });
 initConsciousnessDashboard({ ...ctx, mount: document.getElementById('dashboard-panel-consciousness') });
@@ -1393,7 +1396,7 @@ const telegramHost = createTelegramHost({ layers });
 telegramHost.bind();
 window.addEventListener('pagehide', (event) => {
     if (event.persisted) return;
-    disposeEvolution();
+    evolution.dispose();
     updateStatus.dispose();
     disposeStorage?.destroy();
     disposeScrollFades.forEach((dispose) => dispose());

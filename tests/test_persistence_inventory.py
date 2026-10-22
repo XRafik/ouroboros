@@ -480,7 +480,16 @@ class _PathResolver:
                     for node in nodes:
                         if not isinstance(node, ast.Return) or node.value is None:
                             continue
-                        rel, ok = self.resolve(node.value, consts, local)
+                        value = node.value
+                        if (isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute)
+                                and value.func.attr == "resolve" and isinstance(value.func.value, ast.BinOp)
+                                and isinstance(value.func.value.op, ast.Div)
+                                and self._segment(value.func.value.right, consts) in TOP_LEVEL):
+                            # A pure helper may RETURN the canonical store root;
+                            # its callers own mkdir. This does not promote local
+                            # locator readers' resolve() calls to store declarations.
+                            value = value.func.value
+                        rel, ok = self.resolve(value, consts, local)
                         if ok and _is_named(rel):
                             found.setdefault(fn.name, set()).add(rel)
                 per_file[path] = found
@@ -829,7 +838,12 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # The skill-review fold (tool-reuse-20261020) removed the root-task projection (+ its gaps file), the
 # accepted-rebuttals file and the dispatch markers, and added the frozen payload view under
 # ``state/review_checkouts/views/`` (one section-2 row each in PERSISTENCE.md): 415 -> 410.
-EXPECTED_SCAN_PATHS = 410
+# #2151's pure observability helper hid two named paths and introduced three false
+# data-root spellings. Resolving its return restores the audited 410-path population;
+# the local evolution export introduced by #2137 is also a sentinel below.
+# 410 -> 411: #2177 retains a parked pre-start task's inline image as
+# ``source_handles/context_checkpoints/inline-image-*.image`` (``budget_pause``; its section-7 row).
+EXPECTED_SCAN_PATHS = 411
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
@@ -846,6 +860,7 @@ SENTINELS = frozenset({
     "logs/chat.jsonl",
     "memory/identity.md",
     "task_results/artifacts/*",
+    "task_results/artifacts/*/evolution-*.json",
     "task_results/artifacts/*/source_handles/context_checkpoints/presence-reentry-*.json",
     "task_results/artifacts/*/source_handles/context_checkpoints/presence-transport-queue-*.json",
     "task_trees/*/blackboard.jsonl",
@@ -1236,8 +1251,32 @@ def test_resolved_observability_root_matches_real_writer_outputs(tmp_path):
         relative = pathlib.Path(ref["path"]).relative_to(root.resolve()).as_posix()
         assert relative.startswith("observability/")
         assert any(fnmatch.fnmatchcase(relative, path) for path in paths)
-    assert {"observability/blobs/*.*.gz", "observability/calls/*/*.json"} <= paths
+    assert {"observability/blobs/*.*.gz", "observability/calls/*/*.json",
+            "observability/calls/*/*.model_send_violation.json", "observability/salvaged/*.txt"} <= paths
     assert not any(path.startswith(("blobs/", "calls/")) for path in paths)
+
+
+def test_pure_resolved_store_helper_keeps_its_prefix(tmp_path):
+    """Read-only root helpers need no mkdir; opaque locators declare no store."""
+    module = tmp_path / "ouroboros" / "synthetic_writer.py"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "from pathlib import Path\n"
+        "def store_root(data_dir):\n"
+        "    return (Path(data_dir) / 'observability').resolve(strict=False)\n"
+        "def writer(data_dir):\n"
+        "    return store_root(data_dir) / 'blobs' / 'known.gz'\n"
+        "def reader(locator):\n"
+        "    return Path(locator).resolve() / 'unknown.json'\n"
+        "def relative_reader(locator, relative):\n"
+        "    root = (Path(locator) / 'observability').resolve()\n"
+        "    return root / relative\n",
+        encoding="utf-8",
+    )
+    paths = scan_data_paths(tmp_path)
+    assert "observability/blobs/known.gz" in paths
+    assert "observability/*" not in paths
+    assert not any(path.startswith("blobs/") or path.endswith("unknown.json") for path in paths)
 
 
 def test_literal_source_handle_calls_match_real_writer_outputs(tmp_path):
