@@ -3606,10 +3606,11 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     line-height: var(--line-meta);
 }
 
-/* A touch keyboard zooms into a field under 16px: the guard follows the pointer, not a width. */
+/* A touch keyboard zooms into a field under 16px: the guard follows the pointer, not a width. Below 100 % interface
+   size (theme.js) the field keeps 16 device px, so a smaller page never makes the keyboard zoom in. */
 @media (pointer: coarse) {
     textarea, input[type="text"], input[type="password"], input[type="email"], select {
-        font-size: 16px !important;
+        font-size: max(16px, calc(16px / var(--interface-scale, 1))) !important;
     }
 }
 

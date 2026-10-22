@@ -30,6 +30,7 @@ import { initUpdates } from './modules/updates.js';
 import { initActivity } from './modules/activity.js';
 import { initConsciousnessDashboard } from './modules/consciousness_dashboard.js';
 import { initUpdateStatus } from './modules/update_status.js';
+import { getInterfaceSize } from './modules/interface_size.js';
 import { initDashboard } from './modules/dashboard.js';
 import { initStorage } from './modules/storage.js';
 import { SHELL_ICONS } from './modules/page_icons.js';
@@ -1387,6 +1388,8 @@ const disposeStorage = initStorage({ ...ctx, mount: document.getElementById('das
 initSkills(ctx);
 initWidgets(ctx);
 const updateStatus = initUpdateStatus(ctx);
+// The interface size's one controller: the desktop keys work on every page, the slider lives in Settings.
+getInterfaceSize();
 
 initOnboardingOverlay();
 

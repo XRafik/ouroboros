@@ -167,6 +167,18 @@ under System. In full screen the bar hides until the pointer reveals it; the set
 and error windows and a UI that does not declare it keep the ordinary title bar. A
 browser, another OS or an older desktop app reserves nothing.
 
+**Interface size** (Settings → Appearance, under Theme) is one slider that makes
+everything larger or smaller, per device like the theme (owner 23.10). Whoever
+owns the viewport applies it, never the page by scaling itself: the desktop app
+zooms its own window as a browser's Cmd+ does (50–200 %, ⌘/Ctrl + − 0 in tens,
+and its next window opens at the same size); a touch screen lays the page out at
+another width (from 75 % up to the size that still leaves 320 CSS px); a browser
+on a computer keeps its own zoom, which no page can set, and the control names
+its keys; where neither exists (a Mini App in Telegram for Android, Telegram
+Desktop) the size stays 100 % and the control says so. A size applies when the
+slider is let go. Ouroboros sees the size in the owner's surface fact and can say
+where to change it, never changes it.
+
 Appearance belongs to a browser profile or desktop client, not an account or
 server setting. Existing saved Light/Dark choices keep their meaning. Storage
 failures are visible; clearing site data returns the choice to System. Switching

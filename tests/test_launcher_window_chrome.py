@@ -705,7 +705,8 @@ def test_the_page_reserves_room_only_under_the_measured_state():
     readers = [m for m in re.finditer(r"([^{}]*)\{([^{}]*var\(--window-chrome-[^{}]*)\}", css)]
     assert readers, "style.css consumes the measured title bar geometry"
     for rule in readers:
-        for selector in rule.group(1).split(","):
+        # A selector list splits at its own commas, never at those inside `:is(...)` or `:where(...)`.
+        for selector in re.split(r",(?![^()]*\))", rule.group(1)):
             assert ':root[data-window-chrome="integrated"]' in selector, selector.strip()
     assert "window-chrome" not in re.sub(r"/\*.*?\*/", "", _read("web/ui.css"), flags=re.S)
 

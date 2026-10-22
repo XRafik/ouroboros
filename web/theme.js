@@ -244,3 +244,108 @@
         refreshSystem: () => { if (choice === 'system') settle(); },
     };
 })();
+
+/* Interface size on a touch screen (docs/DESIGN.md "Appearance"; web/modules/interface_size.js owns the setting).
+   A phone's own page zoom is its viewport: the meta's layout width (`width = the width at 100 % ÷ scale`,
+   `initial-scale = scale`) lays the page out narrower or wider and the screen shows it at the owner's size, with every
+   length, query and coordinate still in one CSS pixel (CSS `zoom` on the page instead pushed the composer off screen).
+   Written here, before CSS, so the first layout already has the stored size. A host that ignores the meta (a Mini App
+   in Telegram for Android, a desktop engine, a frame inside another page) keeps 100 %: a size is kept only once the
+   layout width really became the one asked for. Per device, like the theme. */
+(() => {
+    'use strict';
+    const KEY = 'ouroboros.interface-size';
+    const STEP = 5;
+    const MIN = 75;      // smaller, a finger's targets fall far under their 44 px
+    const FLOOR = 320;   // never laid out narrower than this many CSS px (WCAG 1.4.10's reflow width)
+    const meta = document.querySelector?.('meta[name="viewport"]') || null;
+    const original = meta?.getAttribute('content') || '';
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const topLevel = (() => { try { return window.top === window; } catch { return false; } })();
+    const listeners = new Set();
+    let base = 0;       // the layout width at 100 %, in CSS px
+    let percent = 100;  // the size in effect
+    let state = meta && coarse && topLevel && typeof requestAnimationFrame === 'function' ? 'pending' : 'unavailable';
+    let generation = 0;
+
+    const stored = () => {
+        try {
+            const value = Number(localStorage.getItem(KEY));
+            return Number.isFinite(value) && value > 0 ? value : 100;
+        } catch { return 100; }
+    };
+    const store = (value) => {
+        try { if (value === 100) localStorage.removeItem(KEY); else localStorage.setItem(KEY, String(value)); }
+        catch { /* the size holds until the page reloads */ }
+    };
+    const width = () => Number(document.documentElement.clientWidth) || Number(window.innerWidth) || 0;
+    const max = () => Math.max(100, Math.floor(((base / FLOOR) * 100) / STEP) * STEP);
+    const clamp = (value) => Math.min(max(), Math.max(MIN, Math.round(Number(value) / STEP) * STEP));
+    const asked = (value) => Math.round(base / (value / 100));
+    const frames = () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+    const notify = () => { for (const listener of listeners) { try { listener(); } catch { /* one view's fault */ } } };
+    const write = (value) => {
+        meta.setAttribute('content', value === 100 ? original
+            : `width=${asked(value)}, initial-scale=${value / 100}, viewport-fit=cover`);
+        // The touch field guard keeps a field's text at 16 device px whatever the size (style.css).
+        document.documentElement.style.setProperty('--interface-scale', String(value / 100));
+    };
+
+    /* Apply `value` %, keeping it only if the host laid the page out at the width asked for. */
+    const apply = async (value) => {
+        if (state === 'unavailable') return state;
+        const mine = ++generation;
+        const next = clamp(value);
+        write(next);
+        await frames();
+        if (mine !== generation) return state;
+        if (next !== 100 && Math.abs(width() - asked(next)) > 2) {
+            write(100);
+            percent = 100;
+            state = 'unavailable';  // this host ignores the meta: 100 % stays, and the control says so
+        } else {
+            percent = next;
+            state = 'active';
+        }
+        notify();
+        return state;
+    };
+
+    /* A rotation or a new window width changes the width at 100 %: measure it again at 100 %, then reapply. */
+    const remeasure = async () => {
+        if (state === 'unavailable') return;
+        const keep = percent;
+        const mine = ++generation;
+        write(100);
+        await frames();
+        if (mine !== generation) return;
+        base = width();
+        if (keep !== 100) await apply(keep);
+        else notify();
+    };
+
+    if (state === 'pending') {
+        base = width();
+        const wanted = stored();
+        if (wanted === 100) {
+            state = 'active';
+        } else {
+            apply(wanted);
+        }
+        window.matchMedia('(orientation: portrait)')?.addEventListener?.('change', () => { remeasure(); });
+    }
+
+    window.ouroViewportScale = {
+        get state() { return state; },  // 'active' | 'pending' | 'unavailable'
+        get percent() { return percent; },
+        get min() { return MIN; },
+        get max() { return base ? max() : 100; },
+        get step() { return STEP; },
+        async set(value) {
+            const next = await apply(value);
+            if (next === 'active') store(percent);
+            return next;
+        },
+        subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
+    };
+})();
