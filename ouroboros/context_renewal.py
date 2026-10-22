@@ -190,7 +190,8 @@ def _cannot_help(limit_ctx: Any) -> bool:
     from ouroboros.loop_messages import _context_components
 
     view = SimpleNamespace(messages=limit_ctx.messages, tool_schemas=getattr(limit_ctx, "tool_schemas", None) or [],
-                           accumulated_usage=limit_ctx.accumulated_usage)
+                           accumulated_usage=limit_ctx.accumulated_usage,
+                           context_fit_plan=getattr(limit_ctx, "context_fit_plan", None))
     try:
         limit_ctx.accumulated_usage["_context_refusal_frame"] = [list(part) for part in _context_components(
             view, measured=False)]
