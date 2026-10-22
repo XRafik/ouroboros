@@ -437,8 +437,11 @@ def _recover_pending_invocation(drive_root: Any, gateway: Any,
         return result
     execution = body.get("execution") if isinstance(body.get("execution"), dict) else {}
     scope = body.get("scope") if isinstance(body.get("scope"), dict) else {}
+    from ouroboros.delegate_plan import plan_facts
+
     custody = _custody().RunCustody(
         run_id=run_id, task_id=task_id,
+        **plan_facts(record),
         route_id=str(record["route"] or body.get("primaryHarness") or ""),
         model=str(body.get("model") or ""),
         profile_id=str(body.get("credentialProfileId") or ""),

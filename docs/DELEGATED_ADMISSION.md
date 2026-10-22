@@ -43,7 +43,12 @@ runs in THAT snapshot, with the same execution root, baseline and binding, and
 takes its custody over, so the earlier work is captured once in the successor's
 cumulative patch. A predecessor whose patch was already applied or rejected is
 continued from a fresh snapshot of the target. The admission floors are unchanged:
-an omitted access keeps the continued run's own when it is narrower, and a named one is never wider than it.
+omitted access keeps the narrower prior access. The sole widening exception is an explicit
+plan implementation by its recorded starter, within the original and still-current ceiling
+(`delegate_plan.py`); missing legacy ceilings confer no permission. Plan answers/clarifications
+stay read-only on their thread. Git/payload plans preserve a private copy for implementation;
+plain-folder plans can implement in place under ordinary mutability admission. Selected
+folder copies need a fresh executor: the plan thread cannot retarget its workspace.
 
 The harness can execute model-generated commands under the operator's OS
 identity. It is not assumed hostile, but the host cannot review each command
@@ -83,8 +88,8 @@ lineage file, a scheduled origin's whole `task_drive`/`artifact_store` included
 unreadable or nonregular file refuses the start before opening it (`readonly_inputs_unavailable`). A folder no private copy serves (a data-drive subfolder, an
 ignored starting folder) refuses typed, naming `access='readonly'`. A read-only child
 (an explicit `readonly` lowering, Observe, or a Presence ceiling without a
-delegated write grant) requests `mode: ask`, `access: readonly` under Claudexor's
-ordinary envelope. Its parent-selected starting folder is the session project
+delegated write grant) defaults to `mode: ask`, `access: readonly`. Explicit
+`mode: plan` is also read-only; omitted mode preserves access-derived execution. Its parent-selected starting folder is the session project
 root, not a read boundary; omitting it preserves inherited/folderless behavior.
 The host reads effective access back for both shapes;
 the delegated HOME/boundary checks below apply only to marker-carrying runs.

@@ -857,7 +857,7 @@ def resolve_configured_actor_dispatch(
             surface = str(getattr(normalized, "surface", "") or "")
             shape = delegated_run_shape(
                 predicted_subagent_profile(write_surface=surface) == "acting_subagent",
-                snapshot.get("access", "workspace_write"),
+                snapshot.get("access", "workspace_write"), task.get("delegated_mode"),
             )
             gateway = None
             try:
@@ -1125,6 +1125,7 @@ def exact_start(ctx: Any, prompt: str, spec: Optional[dict[str, Any]] = None) ->
     try:
         if str(options.get("retry_of") or "").strip() and (
             selected_id or selected_snapshot is not None or access is not None
+            or options.get("mode") is not None or options.get("override_plan_readiness") is not None
         ):
             raise SubagentSelectionError(
                 "retry_selector_conflict",
@@ -1148,7 +1149,13 @@ def exact_start(ctx: Any, prompt: str, spec: Optional[dict[str, Any]] = None) ->
                 subagent_id=selected_id,
             )
         if selected_snapshot is not None:
-            if access is None and str(options.get("continue_from") or "").strip():
+            from ouroboros.delegate_plan import inherited_mode
+
+            prior_mode = inherited_mode(ctx, options["continue_from"]) if options.get("continue_from") else None
+            if options.get("mode") is None:
+                options["mode"] = prior_mode
+            plan_turn = prior_mode == "plan"
+            if access is None and not plan_turn and str(options.get("continue_from") or "").strip():
                 # Omitted access keeps the continued run's own; only a chosen widening is refused.
                 from ouroboros.delegate_continuation import inherited_access
 
@@ -1183,7 +1190,8 @@ def exact_start(ctx: Any, prompt: str, spec: Optional[dict[str, Any]] = None) ->
             _coordination_context=coordination_context,
             _initial_bootstrap=bool(options.pop("_initial_bootstrap", False)),
             **{key: options.pop(key) for key in (
-                "directory_strategy", "scope_paths", "continue_from", "continue_carrier") if key in options},
+                "directory_strategy", "scope_paths", "continue_from", "continue_carrier", "mode",
+                "override_plan_readiness", "_plan_answers") if key in options},
         )
         # Every configured-session start lands here — the host's pre-start
         # (charter, owner 2026-08-28/29) and any model-issued retry/replacement
@@ -1322,6 +1330,8 @@ def delegate_start_entry(ctx: Any, prompt: str = "", _resolved_binding: Any = No
             )
         bound = dict(params)
         bound.pop("subagent_id", None)
+        if "mode" not in bound and bootstrap.get("delegated_mode"):
+            bound["mode"] = bootstrap["delegated_mode"]
         bound.update({
             "snapshot": dict(bootstrap.get("snapshot") or {}),
             "compiled_work_order": True,

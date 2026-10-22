@@ -937,17 +937,14 @@ class ClaudexorGateway(ClaudexorMaintenanceGateway):
     def start_run(self, request: Dict[str, Any], *, idempotency_key: str = "") -> Dict[str, Any]:
         """POST /v2/runs with a caller-built, schema-valid request body.
 
-        ``idempotency_key`` is the caller's LOGICAL INVOCATION ID — minted once per
-        intended invocation, reused verbatim on a transport retry. The engine's replay
-        check (control-api ``handleRunCreate`` → daemon command store) runs BEFORE any
-        preflight: a replayed key with the byte-identical request returns the ORIGINAL
-        accepted job's handle, and a replayed key with a different request digest is a
-        409 ``idempotency_conflict`` — so a retry must reuse the id AND reproduce the
-        body exactly. A fresh random key per POST makes an accepted start whose
-        response was lost come back as a SECOND live run that nothing knows about; a
-        stale content-stable key makes a deliberate re-run come back as the finished
-        OLD run. Callers with no invocation identity keep the random default.
+        The logical invocation key and exact request replay one accepted run.
+        Host-owned thread bindings use the same producer and recovery identity.
         """
+        if request.get("_thread_id"):
+            from ouroboros.review_thread_continuity import start_review_thread_turn
+
+            return start_review_thread_turn(self, request["_thread_id"], request,
+                                            idempotency_key=str(idempotency_key))
         body = self._request(
             "POST", "/v2/runs",
             json_body=dict(request),

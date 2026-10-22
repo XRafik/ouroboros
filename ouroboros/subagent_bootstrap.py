@@ -299,6 +299,7 @@ def _pre_start_leaf(
         "snapshot": dict(actor_bootstrap.get("snapshot") or {}), "compiled_work_order": True,
         "work_order_fingerprint": str(actor_bootstrap.get("work_order_fingerprint") or ""),
         "effort_fact": dict(actor_bootstrap.get("effort_fact") or {}), "_initial_bootstrap": True,
+        **({"mode": actor_bootstrap["delegated_mode"]} if "delegated_mode" in actor_bootstrap else {}),
         **{key: actor_bootstrap[key] for key in ("directory_strategy", "scope_paths") if key in actor_bootstrap},
     })
     try:
@@ -803,6 +804,7 @@ def _prepare_actor_first_bootstrap(
                          "applied": str(task.get("effort_level") or ""),
                          "source": str(task.get("effort_source") or "")}
                         if task.get("effort_source") else {}),
+        **({"delegated_mode": task["delegated_mode"]} if "delegated_mode" in task else {}),
         **{key: task[key] if key == "directory_strategy" else list(task[key])
            for key in ("directory_strategy", "scope_paths") if key in task},
     }

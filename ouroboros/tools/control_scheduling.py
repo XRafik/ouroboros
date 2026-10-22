@@ -826,6 +826,10 @@ def _schedule_task(ctx: ToolContext, internal: Dict[str, Any] | None = None, /, 
     except SubagentSelectionError as exc:
         return _publish_scheduling_refusal(ctx, "error", "TOOL_ARG_ERROR", f"⚠️ {exc.code}: {exc.detail}", reason=exc.code)
     route = configured_subagent.get("route") if isinstance(configured_subagent.get("route"), dict) else {}
+    if fields.get("delegated_mode") and route.get("kind") != "agent_session":
+        return _publish_scheduling_refusal(ctx, "error", "TOOL_ARG_ERROR",
+            "⚠️ delegated_mode_unsupported: mode requires an agent_session row; API children keep their ordinary task execution.",
+            reason="delegated_mode_unsupported")
     if fields.get("directory_strategy") == "copy" and route.get("kind") != "agent_session":
         return _publish_scheduling_refusal(
             ctx, "error", "TOOL_ARG_ERROR",
@@ -971,7 +975,7 @@ def _schedule_task(ctx: ToolContext, internal: Dict[str, Any] | None = None, /, 
         "requested_effort": fields["requested_effort"],
         "configured_subagent": configured_subagent,
         "parent_cognitive_route": parent_cognitive_route,
-        **{key: fields[key] for key in ("directory_strategy", "scope_paths") if key in fields},
+        **{key: fields[key] for key in ("directory_strategy", "scope_paths", "delegated_mode") if key in fields},
     }
     owner_origin = governing_words_for_schedule(ctx)  # the owner's words that caused this tree, by value
     child_facts = {
