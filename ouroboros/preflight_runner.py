@@ -1233,9 +1233,9 @@ def _run_hermetic_pytest(
 ) -> Optional[str]:
     """Run Node and both pytest lanes in one disposable candidate checkout.
 
-    A full run is the default; reviewed ordinary commits request ``selected``.
-    Selection uses the assembled candidate, HEAD before commit or HEAD~1 after,
-    plus authored widening. Only complete full runs may mint durable receipts.
+    A full run is the default; reviewed ordinary commits request ``selected`` against
+    ``base`` (default HEAD before commit, HEAD~1 after) plus authored widening. Green
+    runs mint receipts: full ones as full, selected ones only of an exact commit.
     Skip/no suite returns None without proof; failures return bounded diagnostics.
     OUROBOROS_PREFLIGHT_TIMEOUT_SEC owns the shared total lane budget.
 
@@ -1357,7 +1357,7 @@ def _run_hermetic_pytest(
             PreflightTestProof, capture_preflight_test_subject, log_preflight_test_proof,
             preflight_test_workload_unchanged, selected_workload_unchanged,
         )
-        from ouroboros.preflight_receipts import FullGateReceipt
+        from ouroboros.preflight_receipts import GateReceipt
         from ouroboros.preflight_inventory import selection_passes, read_inventory, inventory_problem
         if selected:
             from ouroboros.test_selection import select_tests
@@ -1375,7 +1375,7 @@ def _run_hermetic_pytest(
         if selection is not None and ctx is not None and subject is None:
             raise ValueError("selected test subject could not be bound")
         can_reuse = isinstance(previous_proof, PreflightTestProof) and previous_proof.covers(subject)
-        receipt = None if can_reuse else FullGateReceipt.prepare(ctx, subject, passes, probe_module, agent_python, temp_root, worktree)
+        receipt = None if can_reuse else GateReceipt.prepare(ctx, subject, passes, probe_module, agent_python, temp_root, worktree)
         if can_reuse or receipt.covered():
             evidence.update(reuse="process_proof" if can_reuse else "receipt", reused_from=getattr(
                 ctx, "_preflight_previous_evidence", None) if can_reuse else receipt.evidence)
