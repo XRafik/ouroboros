@@ -20,8 +20,11 @@ STARTUP = "startup_recovery"
 
 def record_startup(root, *, gaps):
     """Publish the recovery gate before a child may retire task sources. Missing means unknown."""
+    from ouroboros.plan_collection_job import recover_startup
+
     with store.open_store(root, write=True) as txn:
         txn.set_meta(STARTUP, {"generation": uuid.uuid4().hex, "gaps": bool(gaps)})
+        recover_startup(txn)
 
 
 def _inputs(root):

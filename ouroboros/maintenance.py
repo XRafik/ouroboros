@@ -317,7 +317,7 @@ JOB_NAMES = tuple(JOBS)
 
 
 def due(root: Any) -> List[str]:
-    """The jobs whose facts say work may wait (cheap reads only; nothing is walked here)."""
+    """Read job facts, replaying owed producer wakes before dispatch; no history walk."""
     root = pathlib.Path(root)
     rows = maintenance_jobs.jobs(root, JOBS)
     facts = _store_facts(root)
