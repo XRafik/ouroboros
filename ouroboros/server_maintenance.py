@@ -11,7 +11,7 @@ import pathlib
 import threading
 import time
 from contextlib import contextmanager
-from typing import Any, Dict
+from typing import Any, Callable, Dict, NamedTuple, Optional, Tuple
 
 from ouroboros.server_process import DATA_DIR, _restart_requested, _supervisor_stop, log
 from ouroboros.config import BODY_MAINTENANCE_INTERVAL_SEC
@@ -50,6 +50,8 @@ _LAST_COLD_CUSTODY_SWEEP = [0.0]
 _CUSTODY_SWEEP_LOCK = threading.Lock()
 _RECONCILE_SWEEP_LOCK = threading.Lock()
 _SCHEDULE_SWEEP_LOCK = threading.Lock()
+CUSTODY_SWEEP_SEC = 600  # the custody block's cadence (stamped at dispatch)
+RECONCILE_SWEEP_SEC = 300  # the reconcile block's cadence (stamped when its pass ends, issue #1230)
 
 
 def bind_body_lifespan(drive_root: Any, stop_event: Any, *, collection_ready=None):
@@ -348,22 +350,13 @@ def _periodic_supervisor_maintenance(
         from supervisor.continuation_admission import held_continuation_predecessors
         # A writer hold installs no root fence: the held row itself is the cheap
         # scheduling hint, and the off-loop pass re-reads the queue under its lock.
-        held = (("held_continuation_recheck", _CONTINUATION_SWEEP_LOCK),) if held_continuation_predecessors(
-            queue.PENDING) else ()
-        for step, latch in (
-            ("cancel_intent_sweep", _CANCEL_INTENT_SWEEP_LOCK),
-            ("terminal_delivery_replay", _DELIVERY_SWEEP_LOCK),
-            ("question_delivery_replay", _QUESTION_SWEEP_LOCK),
-            ("pause_notice_replay", _PAUSE_NOTICE_SWEEP_LOCK),
-            ("abandoned_usage_reconciliation", _USAGE_SWEEP_LOCK),
-            ("post_task_synthesis_recovery", _SYNTHESIS_SWEEP_LOCK),
-            *held,
-        ):
-            if latch.acquire(blocking=False):
-                _start_maintenance_thread(latch, step, _run_terminal_duty,
-                                          (pathlib.Path(DATA_DIR), step, latch, stop_event))
+        held = (host_duty("held_continuation_recheck"),) if held_continuation_predecessors(queue.PENDING) else ()
+        for duty in (*TWENTY_SECOND_DUTIES, *held):  # the one 20 s group of HOST_DUTIES, dispatched together
+            if duty.latch.acquire(blocking=False):
+                _start_maintenance_thread(duty.latch, duty.name, duty.run,
+                                          (pathlib.Path(DATA_DIR), duty.name, duty.latch, stop_event))
             else:
-                _duty_busy(latch, BODY_MAINTENANCE_INTERVAL_SEC)
+                _duty_busy(duty.latch, BODY_MAINTENANCE_INTERVAL_SEC)
     # The host accepts a saved cold request while its actor is still RUNNING;
     # waiting for the park event would make release and acceptance wait on each other.
     from supervisor.active_activity import get_direct_activity_registry
@@ -381,17 +374,17 @@ def _periodic_supervisor_maintenance(
         _start_maintenance_thread(latch, "owner_pause_settlement", _run_terminal_duty,
                                   (pathlib.Path(DATA_DIR), "owner_pause_settlement", latch, stop_event))
     latch = _CUSTODY_SWEEP_LOCK  # a pass releases THIS object, never a later generation's
-    if now - last_custody_reap[0] > 600:
+    if now - last_custody_reap[0] > CUSTODY_SWEEP_SEC:
         if latch.acquire(blocking=False):
             last_custody_reap[0] = now
             _start_maintenance_thread(latch, "custody-maintenance", _run_periodic_custody_sweep,
                                       (stop_event, latch))
         else:
-            _duty_busy(latch, 600)
+            _duty_busy(latch, CUSTODY_SWEEP_SEC)
     latch = _RECONCILE_SWEEP_LOCK
-    if now - last_review_reconcile[0] > 300:
+    if now - last_review_reconcile[0] > RECONCILE_SWEEP_SEC:
         if not latch.acquire(blocking=False):
-            _duty_busy(latch, 300)
+            _duty_busy(latch, RECONCILE_SWEEP_SEC)
         elif not _start_maintenance_thread(latch, "reconcile-maintenance", _run_periodic_reconcile_sweep,
                                            (last_review_reconcile, stop_event, latch)):
             last_review_reconcile[0] = time.time()  # a start that failed still waits out a cadence
@@ -1014,6 +1007,53 @@ def _tick_maintenance_child() -> None:
     from ouroboros.maintenance import child
 
     child.tick(pathlib.Path(DATA_DIR), pathlib.Path(REPO_DIR))
+
+
+class HostDuty(NamedTuple):
+    """One recurring pass the supervisor tick starts off-loop: its journal name (``host_duty_stall``),
+    the single-flight latch the tick takes before starting it (``None``: the pass keeps its own slot),
+    the source of its cadence (a named constant or the fact that makes it due; never a number of its
+    own) and the function that runs ONE pass on the thread the tick starts."""
+    name: str
+    latch: Optional[threading.Lock]
+    cadence: str
+    run: Callable[..., Any]
+
+
+# The reconciled duty inventory (ARCHITECTURE §5 "Maintenance and custody", invariant 24): every
+# recurring pass ``_periodic_supervisor_maintenance`` starts, with the latch and cadence it uses
+# there; the 20 s group is dispatched from this table, the others keep their own due conditions
+# above and are started under the latch named here. The delegated body's tick
+# (``delegate_collection.BodyRuntime``, the lifespan's own thread) and ``maintenance.JOBS`` (the
+# child's) are the two other recurring passes of a server process. tests/test_cost_contract.py B7
+# drives each of the three families twice over a scale root and requires the second pass to rest;
+# tests/test_duty_inventory.py fails when the tick starts a pass this table does not name, or a
+# row here names a pass the tick never starts.
+HOST_DUTIES: Tuple[HostDuty, ...] = (
+    HostDuty("cancel_intent_sweep", _CANCEL_INTENT_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
+    HostDuty("terminal_delivery_replay", _DELIVERY_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC, or _DELIVERY_WAKE",
+             _run_terminal_duty),
+    HostDuty("question_delivery_replay", _QUESTION_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
+    HostDuty("pause_notice_replay", _PAUSE_NOTICE_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
+    HostDuty("abandoned_usage_reconciliation", _USAGE_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
+    HostDuty("post_task_synthesis_recovery", _SYNTHESIS_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
+    HostDuty("held_continuation_recheck", _CONTINUATION_SWEEP_LOCK,
+             "BODY_MAINTENANCE_INTERVAL_SEC while a writer-held Continue waits in queue.PENDING", _run_terminal_duty),
+    HostDuty("owner_pause_settlement", _OWNER_PAUSE_SWEEP_LOCK, "every tick while queue.BUDGET_ROOT_FENCES",
+             _run_terminal_duty),
+    HostDuty("cold-custody", _COLD_CUSTODY_SWEEP_LOCK, "delegate_supervision._TICK_SEC while any actor exists",
+             _run_cold_custody),
+    HostDuty("custody-maintenance", _CUSTODY_SWEEP_LOCK, "CUSTODY_SWEEP_SEC", _run_periodic_custody_sweep),
+    HostDuty("reconcile-maintenance", _RECONCILE_SWEEP_LOCK, "RECONCILE_SWEEP_SEC", _run_periodic_reconcile_sweep),
+    HostDuty("maintenance-child", None, "maintenance.child.owed(): a process's first tick, request(), a reconcile pass's end",
+             _tick_maintenance_child),
+    HostDuty("schedule-admission", _SCHEDULE_SWEEP_LOCK, "every tick", _run_schedule_duty),
+)
+TWENTY_SECOND_DUTIES = HOST_DUTIES[:6]  # the one cadence stamped by _LAST_CANCEL_INTENT_SWEEP
+
+
+def host_duty(name: str) -> HostDuty:
+    return next(duty for duty in HOST_DUTIES if duty.name == name)
 
 
 def _run_drive_custody_pass(stop_event: Any = None) -> None:
