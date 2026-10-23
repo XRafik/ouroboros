@@ -1107,7 +1107,7 @@ def run_cmd(
     # Tool output is PARSED (git error signatures, porcelain text), so it must not
     # depend on the operator's locale: a Russian-locale git answers «метка … уже
     # существует» where the code and its tests match "already exists".
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
 
     env = host_git_env()
     res = subprocess.run(

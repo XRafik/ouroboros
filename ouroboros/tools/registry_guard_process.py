@@ -219,7 +219,7 @@ def _is_pure_read_inspection(text_lower: str) -> bool:
 
 def _light_repo_snapshot(repo_dir: pathlib.Path) -> Optional[Dict[str, Any]]:
     """Worktree tripwire for light-mode shell writes, not rollback machinery."""
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     try:
         repo = pathlib.Path(repo_dir)
         status = subprocess.run(

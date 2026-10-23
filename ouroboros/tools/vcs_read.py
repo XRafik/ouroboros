@@ -39,7 +39,7 @@ def _capture_read_git(repo: pathlib.Path, args: list[str]) -> subprocess.Complet
     The user and system config stay read, from the same locations status and diff
     use: their filters, excludes, autocrlf and safe.directory decide what "clean" means.
     """
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
 
     env = {key: value for key, value in os.environ.items()
            if not key.startswith("GIT_") or key in _CONFIG_LOCATIONS}

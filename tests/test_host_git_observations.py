@@ -125,6 +125,9 @@ def test_observation_does_not_repair_corruption_but_a_writer_can(tmp_path, monke
 
 
 def test_read_policy_beats_inherited_config_without_losing_it(tmp_path, monkeypatch):
+    from ouroboros.git_observation import host_git_env
+
+    assert git_ops.host_git_env is host_git_env
     repo = _repo(tmp_path)
     monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
     monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
@@ -134,3 +137,50 @@ def test_read_policy_beats_inherited_config_without_losing_it(tmp_path, monkeypa
         result = subprocess.run(["git", "config", "--get", key], cwd=repo, env=env,
                                 capture_output=True, text=True, check=True)
         assert result.stdout.strip() == "false"
+
+
+@pytest.mark.parametrize("count,valid", [
+    ("not-a-number", False), ("-1", False), ("1_0", False), ("１", False), ("1 ", False),
+    ("", True), ("0", True), ("1", True), ("+1", True), (" 1", True), ("-0", True),
+])
+def test_inherited_config_count_keeps_gits_own_result(tmp_path, monkeypatch, count, valid):
+    """Bad configuration returns Git's diagnostic, while valid counts still work."""
+    repo = _repo(tmp_path)
+    _git(repo, "config", "core.autocrlf", "false")
+    monkeypatch.setattr(git_ops, "REPO_DIR", repo)
+    monkeypatch.setenv("GIT_CONFIG_COUNT", count)
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "false")
+    command = ["git", "config", "--get", "core.autocrlf"]
+    expected = subprocess.run(command, cwd=repo, capture_output=True, text=True,
+                              env={**os.environ, "LC_ALL": "C", "LANG": "C"})
+    assert (expected.returncode == 0) is valid
+    assert git_ops.git_capture(command) == (
+        expected.returncode, expected.stdout.strip(), expected.stderr.strip())
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
+@pytest.mark.parametrize("file_reference", [False, True], ids=["patch", "file-reference"])
+def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch, changed, file_reference):
+    from ouroboros import workspace_patch_capture as capture
+
+    repo = _repo(tmp_path)
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    if file_reference:
+        monkeypatch.setattr(capture, "_PATCH_FILE_REFERENCE_BYTES", 8)
+    seed = repo / "seed.txt"
+    if changed:
+        seed.write_text("changed payload\n", encoding="utf-8")
+    info = seed.stat()
+    os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+    before = _index(repo)
+    artifacts, manifest = capture.write_workspace_patch_artifacts(repo, tmp_path / "artifacts", task={})
+    assert manifest["errors"] == []
+    assert manifest["status"] == ("ready_with_changes" if changed else "ready_no_changes")
+    assert manifest["tracked_changed"] == (["seed.txt"] if changed else [])
+    assert manifest["counts"]["tracked_changed"] == int(changed)
+    assert bool(manifest["file_output_changes"]) is (changed and file_reference)
+    assert any(row["kind"] == "workspace_file_outputs" for row in artifacts) is (changed and file_reference)
+    assert any(row["kind"] == "workspace_patch" for row in artifacts) is (changed and not file_reference)
+    assert _index(repo) == before
+    assert not (repo / ".git" / "index.lock").exists()

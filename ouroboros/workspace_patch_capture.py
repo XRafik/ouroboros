@@ -122,11 +122,11 @@ def write_workspace_patch_artifacts(
     except (OSError, ValueError) as exc:
         errors.append({"type": "file_capture_failed", "message": f"{type(exc).__name__}: {exc}"})
         file_baseline = {}
-    changed_tracked = _git_path_list(
-        ["git", "diff", "--name-only", "--no-renames", "-z", "--no-ext-diff", "--no-color", base_ref, "--"],
-        root,
-        errors,
-    )
+    # Numstat omits stat-only dirt without index writes, keeping unchanged large files out of outputs.
+    changed_tracked = [row.split("\t", 2)[2] for row in _git_path_list(
+        ["git", "diff", "--numstat", "--no-renames", "-z", "--no-ext-diff", "--no-color", base_ref, "--"],
+        root, errors,
+    )]
     # A tracked WAL index (committed beside its database, or staged in a copy) is shared memory as an
     # untracked one is: never diffed, and never named for an integration to stage over the target's own.
     wal_indexes = {rel: reason for rel in changed_tracked if (reason := _wal_index_reason(root, rel))}
@@ -547,7 +547,7 @@ def _git_bytes(
     allow_rc: Iterable[int] = (0,),
     errors: Optional[List[Dict[str, Any]]] = None,
 ) -> bytes:
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     try:
         result = subprocess.run(
             list(cmd),
@@ -585,7 +585,7 @@ def _append_git_output(
     errors: List[Dict[str, Any]],
     diagnostics: List[Dict[str, Any]],
 ) -> int:
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     written_box = {"value": 0}
     read_errors: List[str] = []
     try:

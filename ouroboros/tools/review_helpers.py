@@ -640,7 +640,7 @@ def check_worktree_readiness(
     *, information: "list[str] | None" = None,
 ) -> "list[str]":
     """Run cheap deterministic pre-advisory checks; never crash."""
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     repo_dir = Path(repo_dir)
     warnings: list = []
 

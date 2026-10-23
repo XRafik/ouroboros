@@ -73,7 +73,7 @@ def _stable_hash(payload: Any) -> str:
 
 
 def _run_git(root: pathlib.Path, *args: str) -> str:
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
 
     proc = subprocess.run(
         ["git", *args],

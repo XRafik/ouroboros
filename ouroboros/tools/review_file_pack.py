@@ -143,7 +143,7 @@ def list_changed_paths_from_git_status(
     include_sources_for_renames: bool = False,
 ) -> list[str]:
     """Return changed paths using NUL-delimited porcelain output."""
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
 
     path_args = (["--"] + list(paths)) if paths else []
     # --untracked-files=all: a repo-local status.showUntrackedFiles=no would

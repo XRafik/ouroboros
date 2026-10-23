@@ -30,7 +30,7 @@ from ouroboros.tool_access import (
     path_is_relative_to,
 )
 from ouroboros.utils import safe_relpath
-from supervisor.git_ops import host_git_env
+from ouroboros.git_observation import host_git_env
 
 
 def _resolve_git_root(path: pathlib.Path) -> pathlib.Path | None:
