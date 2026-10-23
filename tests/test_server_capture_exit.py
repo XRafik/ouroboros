@@ -210,7 +210,8 @@ def test_executable_quit_preserves_owed_capture_for_next_generation(tmp_path, en
                 "ordinary": asdict(ordinary), "review": receipt, "accounting": rows,
                 "terminal_output": payload,
             }))
-            shutil.copytree(cap, gates / "ordinary-capture")
+            # The live server may release (remove) the disposition lock mid-copy; it is not evidence.
+            shutil.copytree(cap, gates / "ordinary-capture", ignore=shutil.ignore_patterns("disposition.lock"))
             shutil.copytree(Path(receipt["evidence_dir"]), gates / "review-capture")
             proc.stdin.write(b"quit\n")
             proc.stdin.flush()
