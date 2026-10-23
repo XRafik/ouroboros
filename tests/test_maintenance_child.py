@@ -253,7 +253,11 @@ def _setup_job(name, data, monkeypatch):
     from ouroboros import store_import
     from ouroboros.task_results import write_task_result
 
-    if name == "subagent_metrics":
+    if name == "delegate_capture":
+        from tests.test_delegate_capture_child import _queued
+
+        assert _queued(data.parent, monkeypatch)[0] == data
+    elif name == "subagent_metrics":
         from ouroboros.subagent_metrics import EVENT
         from ouroboros.utils import append_jsonl
         from tests.test_subagent_metrics import event

@@ -51,14 +51,16 @@ def _decode(raw):
 
 
 def collection_pending(entry, root=None) -> bool:
-    """Ordinary-run collection debt; review copies belong to their native checking markers."""
+    """Collection debt, never retry eligibility. Only custody facts, even with a root."""
+    from ouroboros.delegate_capture_attempt import capture_required, named_required
+
     if entry is None or entry.review_owned:
         return False
-    capture = entry.mode != "plan" and bool(entry.execution_root or entry.resource_ref.get("workspace_kind") == "directory")
     if entry.terminal_source and (not entry.ledger_recorded or not entry.settled
         or not entry.output_source or not entry.output_complete
         or entry.output_terminal_sha != entry.terminal_source.get("sha256")
-        or (capture and not entry.patch_captured and not entry.patch_disposed and not entry.superseded_by)):
+        or (capture_required(entry) and not entry.patch_captured)
+        or (named_required(entry) and entry.named_evidence.get("status") != "retained")):
         return True
     return False
 

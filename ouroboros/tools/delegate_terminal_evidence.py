@@ -552,7 +552,7 @@ def _delivered_terminal_payload(ctx: ToolContext, run_id: str, detail: Dict[str,
 def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
     """Join the body collection; deliver retained output independently of other duties."""
     from ouroboros import delegate_custody as custody
-    from ouroboros.delegate_collection import collect_terminal, observe_run, retained_payload, body_runtime, capture_projection
+    from ouroboros.delegate_collection import collect_terminal, observe_run, retained_payload, capture_projection, body_runtime
     from ouroboros.delegate_custody_current import run
 
     root = custody.custody_root(ctx)
@@ -586,11 +586,8 @@ def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
     if retained_payload(root, fresh) is None:
         collection = collect_terminal(root, rid, gateway=gateway,
                                       staging_task_id=str(getattr(ctx, "task_id", "") or ""),
-                                      output_authority=authority)
+                                      output_authority=authority, background=body_runtime(root) is not None)
     else:
-        runtime = body_runtime(root)
-        if runtime is not None:
-            runtime.request(rid)
         collection = {"status": "pending" if not fresh.settled else "retained",
                       "reason": "available_output"}
     entry = run(root, rid) or fresh
@@ -665,7 +662,7 @@ def _record_terminal_delivery(ctx, entry, payload):
 def retained_terminal_result(ctx, run_id, *, complete_only=True):
     """Read exact owned bytes before transport; pending collection is a separate fact."""
     from ouroboros.delegate_custody_current import run
-    from ouroboros.delegate_collection import capture_projection, retained_payload, collection_pending, body_runtime
+    from ouroboros.delegate_collection import capture_projection, retained_payload, collection_pending
     from ouroboros.delegate_shared import retry_result_status
     root = _delegate().custody.custody_root(ctx)
     entry = run(root, run_id)
@@ -680,9 +677,6 @@ def retained_terminal_result(ctx, run_id, *, complete_only=True):
     payload = _retained_terminal_payload(ctx, entry, full=full)
     if payload is not None:
         pending = collection_pending(entry, root)
-        runtime = body_runtime(root) if pending else None
-        if runtime is not None:
-            runtime.request(run_id)
         payload["current_observation"] = {"status": "retained", "basis": "retained_terminal_source"}
         payload["settlement"] = _settlement_projection(entry)
         payload["collection"] = {"status": "pending" if pending else "retained"}
