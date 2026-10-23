@@ -37,16 +37,26 @@ TAG = "answer_path"
 
 def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any],
           boundary: Callable[[Any, Any], Callable[[], Any]]) -> Dict[int, Dict[str, Any]]:
-    """Build each root, let ``boundary(root, facts)`` warm up and return the counted call; compare."""
+    """Build each root, let ``boundary(root, facts)`` warm up and return the counted call; compare.
+
+    Cached store connections are closed after the build, so every connection the boundary uses
+    is opened under the meter and its SQL is counted (a connection opened before the meter is
+    installed carries no trace callback)."""
+    from ouroboros import store
+
     counted, answers = {}, {}
     for k in (K_SMALL, K_LARGE):
         root = tmp_path / f"k{k:03d}" / "data"
         root.mkdir(parents=True)
         monkeypatch.setenv("OUROBOROS_DATA_DIR", str(root))
-        call = boundary(root, build(root, k))
+        facts = build(root, k)
+        store.close_connections()
         with CostMeter(root) as meter:
+            call = tagged("warm-up", lambda: boundary(root, facts))
             answers[k] = tagged(TAG, call)
+            assert not meter.join_spawned(TAG), "a thread the boundary started is still running"
         counted[k] = meter.snapshot(TAG)
+        assert counted[k]["counts"].get("statements"), "the counted call ran no SQL the meter could see"
     breaches = contract_breaches(counted[K_SMALL]["counts"], counted[K_LARGE]["counts"], K_LARGE)
     growing = sorted(((source, amount - counted[K_SMALL]["callers"].get(source, 0))
                       for source, amount in counted[K_LARGE]["callers"].items()
@@ -153,6 +163,99 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
 
     answers = _flat(tmp_path, monkeypatch, _packed_history, boundary)
     assert answers[K_SMALL] == answers[K_LARGE] == (True, True, True)
+
+
+
+# ---- owner-message intake: the routing manifests over k-scaled task history ----------------------
+
+HISTORY_ROOTS_PER_K, HISTORY_CHILDREN_PER_K, ELSEWHERE_ROOTS_PER_K = 10, 4, 6
+
+
+def _stored(txn, template, task_id, ts, **fields):
+    txn.store_task({**template, "task_id": task_id, "ts": ts, "updated_at": ts, **fields}, pending_drive=False)
+
+
+def _task_history(root, k):
+    """The same current results at every size: ``cap + 1`` newest roots and two newer children in
+    Main and in the project room (one root past the cap in each). Unrelated history grows with k:
+    older Main roots and children and another project's roots, each with a 4 KB result body."""
+    from ouroboros import store
+    from ouroboros.projects_registry import create_project
+    from ouroboros.runtime_limits import get_routing_manifest_result_rows
+    from ouroboros.task_results import write_task_result
+    from ouroboros.task_store import read_document
+
+    room = create_project(root, "room", name="Room")
+    create_project(root, "elsewhere", name="Elsewhere")
+    write_task_result(root, "template", "completed", chat_id=1, result="r" * 4000, ts="2023-01-01T00:00:00+00:00")
+    template = read_document(root, "template")
+    current = get_routing_manifest_result_rows() + 1
+    with store.open_store(root, write=True) as txn:
+        for scope, project in (("main", ""), ("room", "room")):
+            for index in range(current):
+                _stored(txn, template, f"cur-{scope}-{index:02d}",
+                        f"2026-09-01T00:{index:02d}:{30 if project else 0:02d}+00:00",
+                        project_id=project, objective=f"current {scope} work {index}")
+            for index in range(2):
+                _stored(txn, template, f"cur-{scope}-child-{index}", f"2026-09-02T00:0{index}:00+00:00",
+                        project_id=project, parent_task_id=f"cur-{scope}-00", root_task_id=f"cur-{scope}-00",
+                        delegation_role="subagent")
+    for unit in range(k):
+        with store.open_store(root, write=True) as txn:
+            day = f"2024-{1 + unit // 28:02d}-{1 + unit % 28:02d}"
+            for index in range(HISTORY_ROOTS_PER_K):
+                _stored(txn, template, f"hist-{unit}-{index}", f"{day}T01:{index:02d}:00+00:00")
+            for index in range(HISTORY_CHILDREN_PER_K):
+                _stored(txn, template, f"hist-{unit}-child-{index}", f"{day}T02:{index:02d}:00+00:00",
+                        parent_task_id=f"hist-{unit}-0", root_task_id=f"hist-{unit}-0", delegation_role="subagent")
+            for index in range(ELSEWHERE_ROOTS_PER_K):
+                _stored(txn, template, f"hist-{unit}-elsewhere-{index}", f"{day}T03:{index:02d}:00+00:00",
+                        project_id="elsewhere")
+    return {"room_chat_id": int(room["chat_id"])}
+
+
+@pytest.mark.parametrize("room", ["main", "project"])
+def test_owner_message_intake_reads_the_newest_roots_not_every_task(tmp_path, monkeypatch, room):
+    """The supervisor loop routes an owner message: the Main manifest walks the store's newest
+    rows until its window is full, a project room sorts only its own rows; bodies are decoded for
+    the offered rows alone. Both sizes offer the same newest roots, children never among them."""
+    from ouroboros import server_owner_routing
+
+    def boundary(root, facts):
+        directed, started = [], threading.Event()
+
+        def direct(*_args, task_metadata=None, **_kwargs):
+            directed.append(task_metadata)
+            started.set()
+
+        ctx = SimpleNamespace(DRIVE_ROOT=root, RUNNING={}, PENDING=[], handle_chat_direct=direct)
+        chat_id = 1 if room == "main" else facts["room_chat_id"]
+
+        def message(cmid):
+            server_owner_routing._route_owner_message(SimpleNamespace(), ctx, {
+                "chat_id": chat_id, "text": "continue the work", "client_message_id": cmid, "task_metadata": None,
+                "log_text": "continue the work", "origin_message_ref": {"chat_id": chat_id, "client_message_id": cmid},
+                "source": "web"})
+
+        message("warm-up")
+        assert started.wait(10), "the warm-up turn never started"
+
+        def route():
+            message("counted")
+            return len(directed)
+        return lambda: (route(), directed)
+
+    answers = _flat(tmp_path, monkeypatch, _task_history, boundary)
+    manifests = {}
+    for k, (_count, directed) in answers.items():
+        metadata = directed[-1]
+        manifest = metadata["main_routing_manifest" if room == "main" else "project_routing_manifest"]
+        manifests[k] = [row["task_id"] for row in manifest["final_results"]]
+    # Main offers every lane's roots (the room's current roots are a minute newer); a room its own.
+    newest = sorted(((f"2026-09-01T00:{index:02d}:{30 if scope == 'room' else 0:02d}", f"cur-{scope}-{index:02d}")
+                     for scope in (("main", "room") if room == "main" else ("room",)) for index in range(17)),
+                    reverse=True)
+    assert manifests[K_SMALL] == manifests[K_LARGE] == [task_id for _ts, task_id in newest[:16]]
 
 
 def _spy_sidecars(monkeypatch):
