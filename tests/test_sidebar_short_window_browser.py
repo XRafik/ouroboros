@@ -31,6 +31,8 @@ FOOT = """() => {
             position: getComputedStyle(meta).position, metaBottom: Math.round((m.bottom - edge) * 10) / 10,
             version: Math.round((edge - box(document.getElementById('nav-version')).bottom) * 10) / 10,
             onTop: Boolean(under && meta.contains(under)),
+            opaque: getComputedStyle(meta).backgroundColor === getComputedStyle(side).backgroundColor
+                && getComputedStyle(meta).backgroundColor !== 'rgba(0, 0, 0, 0)',
             toolsClear: m.top >= box(side.querySelector('[data-nav-page="settings"]')).bottom - 0.5,
             gapToTools: Math.round(box(side.querySelector('[data-nav-page="files"]')).top
                 - box(document.getElementById('nav-projects')).bottom)};
@@ -76,7 +78,7 @@ def test_a_short_window_keeps_the_version_and_the_update_on_the_bottom_edge(shel
         foot = facts[state]
         assert foot['position'] == 'sticky' and abs(foot['metaBottom']) <= 1, ('the foot is on the edge', state, facts)
         assert abs(foot['version'] - tall['version']) <= 1, ('its text sits where a tall window puts it', state, facts)
-        assert foot['onTop'], ('the rows pass under the foot', state, facts)
+        assert foot['onTop'] and foot['opaque'], ('the rows pass under an opaque foot', state, facts)
     assert facts['at-1']['toolsClear'], ('at the end of the scroll the last tool is above the foot', facts)
     assert abs(facts['collapsed']['gapToTools'] - tall['gapToTools']) <= 1, ('the tools follow the list', facts)
     # Outside the short-window mode the foot is not pinned: it rests in the tools' box, on the column's padding.
@@ -200,17 +202,33 @@ FOCUS_MOVES = """async () => {
         await frames();
         bars[name] = {before, after: side.scrollTop};
     }
-    const hidden = [];
+    // Every row parked half under the foot, then half under the head, and brought into view from there: only the
+    // row's own scroll margin can move it clear (a row inside the scrollport counts as visible without it).
+    const hidden = [], parked = {foot: 0, head: 0};
     const rows = [...side.querySelectorAll('#nav-projects-list [data-project-id], .sidebar-foot > [data-nav-page]')];
+    const max = side.scrollHeight - side.clientHeight;
     for (const row of rows) {
-        side.scrollTop = 0;
-        await frames();
-        row.focus();
-        await frames();
-        const r = row.getBoundingClientRect(), h = head.getBoundingClientRect(), m = meta.getBoundingClientRect();
-        if (r.bottom > m.top + 0.5 || r.top < h.bottom - 0.5) hidden.push(row.textContent.trim().slice(0, 40));
+        for (const bar of ['foot', 'head']) {
+            document.activeElement?.blur?.();
+            side.scrollTop = 0;
+            await frames();
+            const r0 = row.getBoundingClientRect(), y = r0.top - side.getBoundingClientRect().top;
+            const middle = y + r0.height / 2;
+            const at = bar === 'foot' ? middle - side.clientHeight + meta.getBoundingClientRect().height
+                : middle - head.getBoundingClientRect().height;
+            if (at < 0 || at > max) continue;
+            side.scrollTop = at;
+            await frames();
+            const r = row.getBoundingClientRect(), h = head.getBoundingClientRect(), m = meta.getBoundingClientRect();
+            if (bar === 'foot' ? r.bottom <= m.top + 0.5 : r.top >= h.bottom - 0.5) continue;
+            parked[bar] += 1;
+            row.focus();
+            await frames();
+            const s = row.getBoundingClientRect(), h2 = head.getBoundingClientRect(), m2 = meta.getBoundingClientRect();
+            if (s.bottom > m2.top + 0.5 || s.top < h2.bottom - 0.5) hidden.push(bar + ': ' + row.textContent.trim().slice(0, 40));
+        }
     }
-    return {bars, rows: rows.length, hidden};
+    return {bars, rows: rows.length, parked, hidden};
 }"""
 
 
@@ -218,7 +236,8 @@ FOCUS_MOVES = """async () => {
                          ids=['desk', 'phone-drawer'])
 def test_a_pinned_bars_own_control_leaves_the_column_where_it_is(shell_ui, tmp_path, width, height, touch):
     """The rows carry the bars' heights as their scroll margin, not the column as its scroll padding: a row brought
-    into view clears both bars, and focusing Main or the foot does not count them as covered and scroll the column."""
+    into view from half under either bar clears both, the tools included, and focusing Main or the foot does not
+    count them as covered and scroll the column."""
     page = seed_page(shell_ui, width, height, touch=touch)
     facts = {'engine': shell_ui['engine'], 'size': [width, height]}
     try:
@@ -233,6 +252,7 @@ def test_a_pinned_bars_own_control_leaves_the_column_where_it_is(shell_ui, tmp_p
     assert facts['short'] is True and facts['rows'] > 30, facts
     for name, move in facts['bars'].items():
         assert move['before'] > 0 and abs(move['after'] - move['before']) <= 1, ('the column stayed put', name, facts)
+    assert facts['parked']['foot'] > 20 and facts['parked']['head'] > 20, ('rows were parked under both bars', facts)
     assert facts['hidden'] == [], ('a row brought into view under a pinned bar', facts)
 
 

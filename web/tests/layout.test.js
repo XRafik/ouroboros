@@ -95,7 +95,7 @@ test('a pinch is read against the layout width, so a smaller Interface size is n
     assert.equal(pinchMagnified({ innerWidth: 390 }), false, 'no visual viewport, no pinch');
 });
 
-test('measurePinnedBars writes the pinned head and foot heights as the column\'s scroll padding values', async () => {
+test('measurePinnedBars writes the pinned head and foot heights for the rows\' scroll margin', async () => {
     const { measurePinnedBars } = await import('../modules/layout.js');
     const props = new Map();
     const box = (height) => ({ getBoundingClientRect: () => ({ height }) });

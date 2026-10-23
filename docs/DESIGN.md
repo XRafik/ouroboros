@@ -2699,4 +2699,4 @@ scroll by touch); `tests/test_shell_layout_static.py`,
 `tests/test_design_system_css_static.py` keep the one switch, the registry, the
 glyph set, the breakpoint ratchet and sentence case; `web/tests/layers.test.js`,
 `web/tests/drawer_drag.test.js` and `web/tests/host_telegram.test.js` pin the
-behaviour.
+behaviour, and `tests/test_sidebar_short_window_browser.py` the short window's pinned foot.
