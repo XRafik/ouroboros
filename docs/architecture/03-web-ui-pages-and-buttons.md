@@ -89,7 +89,7 @@ Attach file/paste/drop stage attachments without count/size rejection; Send uplo
 
 #### Direct turns and the activity block
 
-Main/Project turns own native agents without queue rows, beside other work. `supervisor.active_activity.DirectActivityRegistry` retains private actors through preparation/delivery; Stop/Hurry/quiz/steering address them, census/typing only present them. Registered turns read Preparing request, then neutral Working at call start (§6). Writer drain, custody maintenance and restart census include direct turns; live owner turns defer consciousness wakes.
+Main/Project turns own native agents without queue rows, beside other work. `supervisor.active_activity.DirectActivityRegistry` retains private actors through preparation/delivery; Stop/Hurry/quiz/steering address them, census/typing only present them. Registered turns read Preparing with their start step (census `turn_phase`), then the call's word (§6). Writer drain, custody maintenance and restart census include direct turns; live owner turns defer consciousness wakes.
 
 `_is_direct_chat` persists through result, terminal event, rebuilt `task_done`, authored `task_summary`, history terminal truth and census `kind`, keeping ordinary Project-native direct replies local; managed/transferred-direct ones stay mirror-eligible. Worker `_emit_progress.narration` marks model words, never host notes; history's `_PROGRESS_META_FIELDS` keeps it: only narration reaches titles/collapsed activity; host notes stay timeline rows.
 

@@ -25,6 +25,26 @@ def test_working_member_names_its_exact_call():
     assert ws.classify_member(row("t", "preparing", kind="direct_chat"))["call"] == "preparing"
 
 
+@pytest.mark.parametrize("turn_phase, text", [
+    ("admitted", "Setting up the turn"), ("started", "Starting the turn"),
+    ("context_building", "Building context"), ("context_built", "Context ready"),
+])
+def test_a_preparing_direct_turn_says_the_start_step_it_stands_at(turn_phase, text):
+    state = ws.classify_member(row("d", "preparing", kind="direct_chat", turn_phase=turn_phase))
+    assert (state["activity"], state["call"], state["live"]) == ("working", "preparing", True)
+    assert state["reasons"] == [{"code": f"turn_{turn_phase}", "text": text}]
+
+
+def test_a_start_step_speaks_only_while_preparing_and_dispatch_reads_sending():
+    sent = ws.classify_member(row("d", "preparing", kind="direct_chat", turn_phase="dispatched"))
+    assert (sent["call"], sent["reasons"]) == ("sending", [])
+    # Without a start fact, or once its census phase moved on, a turn's word and reasons stay what they were.
+    assert ws.classify_member(row("d", "preparing", kind="direct_chat"))["reasons"] == []
+    moved = ws.classify_member(row("d", "working", kind="direct_chat", turn_phase="context_built"))
+    assert (moved["call"], moved["reasons"]) == ("working", [])
+    assert ws.classify_member(row("d", "working", kind="direct_chat", turn_phase="dispatched"))["call"] == "working"
+
+
 def test_writer_held_continue_waits_and_is_never_the_owners_turn():
     held = row("c", "budget_paused", pause_cause="unknown", can_resume=False)
     state = ws.classify_member(held, {"hold": {"reason": "continuation_writer_unsettled"}})
