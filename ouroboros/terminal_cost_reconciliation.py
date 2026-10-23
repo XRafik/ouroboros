@@ -291,9 +291,17 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         money_marker = txn.marker()
         with _UNRESOLVED_LOCK:
             state = _subject_state(root, COST_PROJECTIONS)
-            resting = state.get("absence_inputs") == [arrivals, money_marker]
-        owners = state["present_owners"] if resting else txn.dirty_owners()
+            inputs = state.get("absence_inputs")
+            resting = bool(inputs and inputs[0] == arrivals and inputs[1][0] == money_marker[0]
+                           and inputs[1][1] <= money_marker[1])
+            owners = dict(state.get("present_owners", ())) if resting else {}
+        if not resting:
+            owners.update(txn.dirty_owners())
+        elif inputs[1] != money_marker:
+            owners.update(txn.dirty_owners(since=inputs[1][1]))
+        owners = list(owners.items())
     if resting and not owners:
+        state["absence_inputs"] = [arrivals, money_marker]
         # Retry a failed diagnostic publication, not the proven-absent owners.
         if state["fault"] is not None or state["published"] is None:
             _publish_unresolved(root, {}, subject=COST_PROJECTIONS, keep=state["observed"])
@@ -304,9 +312,8 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
             ids[owner] = validate_task_id(owner)
         except ValueError:
             pass  # System accounting scopes own no task result.
-    # Successful absence keeps debt and rests on task arrival or a money write.
-    # Only a waiting owner's arrival or money changes invalidate the selection. Other pending
-    # owners keep being examined without materializing the absent owners or rests.
+    # A money-only pass selects newer dirty rows plus still-present owners. Successful
+    # absence keeps debt; arrival, a changed ledger epoch or restart reselects it.
     _ids, facts = _present_facts(root, ids.values())
     settled = set() if facts is None else {tid for tid, row in facts.items() if row["status"] in SETTLED_STATUSES}
     rest = DutyRest(root, "cost_projection", {ids[owner]: {"usage_revision": revision}
@@ -354,11 +361,19 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         rest.signatures.get(tid) is None for tid in absent)
     confirmed = rest.commit(confirm=absent if unchanged_absence else ())
     with _UNRESOLVED_LOCK:
-        if not resting:
+        if resting:
+            # Never swallow another absent owner's arrival during this partial pass.
+            state["absence_inputs"] = ([arrivals, money_marker] if not absent or
+                unchanged_absence and confirmed == arrivals else None)
+            state["absent_owners"].difference_update(ids.values())
+            state["absent_owners"].update(absent)
+        else:
             state["absence_inputs"] = [confirmed, money_marker] if unchanged_absence and confirmed is not None else None
             state["absent_owners"] = absent
         state["present_owners"] = [(owner, rev) for owner, rev in owners if owner in pending and owner not in absent]
-        if resting and not failures and not acknowledged and state["fault"] is None and state["published"] is not None:
+        if (resting and all(state["observed"].get(tid) == reason for tid, reason in failures.items())
+                and not any(tid in state["observed"] and tid not in failures for tid in ids.values())
+                and state["fault"] is None and state["published"] is not None):
             return
         kept = pending | state.get("absent_owners", set()) if resting else pending
     _publish_unresolved(root, failures, subject=COST_PROJECTIONS, faults=faults, keep=kept)

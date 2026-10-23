@@ -5,6 +5,8 @@ The child acknowledges successful examinations; failures stay due for its next p
 Legacy classification and explicit repair select all candidates once; unrelated task
 completions never wake collection.
 """
+import logging
+
 from ouroboros import maintenance_jobs, store
 from ouroboros.utils import machine_json
 
@@ -23,13 +25,16 @@ def task_written(txn, task_id, columns):
 
 
 def producer_published(root, token):
-    """Wake only the plan whose retained producer manifest became durable."""
-    with store.open_store(root, write=True) as txn:
-        task_id = str(token[0])
-        if txn.row(task_id, "plan_collection_pending") != 0:
-            txn.put_row(CHANGED, task_id, {"producer": token})
-    from ouroboros.maintenance import child
-    child.request()
+    """Best-effort wake after durability; pending-job repair rediscovers missed replies."""
+    try:
+        with store.acquisition_budget(0), store.open_store(root, write=True) as txn:
+            task_id = str(token[0])
+            if txn.row(task_id, "plan_collection_pending") != 0:
+                txn.put_row(CHANGED, task_id, {"producer": token})
+        from ouroboros.maintenance import child
+        child.request()
+    except Exception:
+        logging.getLogger(__name__).debug("Plan publication awaits collection repair", exc_info=True)
 
 
 def due(root, row, facts, child):
