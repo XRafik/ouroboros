@@ -1107,11 +1107,11 @@ def pack_task(root: Any, task_id: str, *, keep_shas: set, listing: Optional[list
     member whose loose file exists now (a busy retry); the rest stay closed. Referenced records that
     are neither loose nor packed are counted (``missing``), never invented."""
     root = pathlib.Path(root)
-    from ouroboros.evidence_packer import _loose_task_ids, pack_sweep, task_rows, task_stamps
+    from ouroboros.evidence_packer import keep_rows, pack_sweep, task_stamps
 
     if sweep is None:
         with pack_sweep(root) as sweep:
-            sweep.collect_keep(task_rows(root, _loose_task_ids(root)))
+            sweep.collect_keep(keep_rows(root))
             return pack_task(root, task_id, keep_shas=keep_shas, listing=listing, revision=revision, sweep=sweep)
     if revision is None:
         revision = task_stamps(root, task_id)

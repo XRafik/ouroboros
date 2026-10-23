@@ -220,22 +220,10 @@ def test_b1_no_child_process_before_health(measured):
         assert measured[k]["popen_before_health"] == 0, (k, measured[k]["B1"]["names"])
 
 
-# The boot's dialogue cutover decides whether to plan the chains again by listing archive/ once and examining
-# every entry (each stream's segment count and newest name against the recorded tails): the one scandir is the
-# same call at every size, the entries it delivers are the history's.
-B2_ARCHIVE_LISTING = ("dialogue_import._replan_owed -> _archive_tails (since e39bae271) lists archive/ whole on every boot: "
-                      "dir_entries:archive 10 -> 213 at k=1 -> k=30 under B2_dialogue and B2_ready, one scandir at both "
-                      "sizes. An addressed check reads the archive directory's own stamp (st_mtime_ns, as "
-                      "delegate_custody_current._archive_stamp) and lists the tails only after it moved. Named for the "
-                      "root to assign (fix cycle 1).")
-
-
-@pytest.mark.xfail(strict=True, reason=B2_ARCHIVE_LISTING)
 def test_b2_publication_to_dialogue_is_flat(measured):
     assert_publication_flat(measured, "B2_dialogue")
 
 
-@pytest.mark.xfail(strict=True, reason=B2_ARCHIVE_LISTING)
 def test_b2_publication_to_supervisor_ready_is_flat(measured):
     assert_publication_flat(measured, "B2_ready")
 
@@ -378,24 +366,10 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
 # The install is never idle: between two passes an ordinary, unrelated task completes. A job or duty may do
 # the addressed work that completion owes it, and its cost is the same at k=1 and k=30; one whose rest keys
 # on an install-wide counter (the store revision, the terminal-write counter, a directory's time) redoes
-# history-sized work instead. Where today's code still does, the breach is named here with its measured
-# numbers and its remover (the Opus review, fix cycle 1); the marker flips the moment the cause is gone.
-UNRELATED_JOB_GAPS: Dict[str, str] = {
-    "evidence_packing": ("after one unrelated completion the packer's pass takes a fresh census of every task's loose "
-                         "evidence (evidence_packer.run_pass; _packing_due re-arms on the terminal-write counter): stat 63 -> 237, "
-                         "stat:root 30 -> 88 at k=1 -> k=30, and under the child's pass task_results/ is listed whole "
-                         "(dir_entries:task_results 7 -> 65). A census of the tasks whose rows moved (tasks.terminal_seq) "
-                         "removes it; the packer's owner — root to assign."),
-}
-UNRELATED_DUTY_GAPS: Dict[str, str] = {
-    "reconcile-maintenance": (
-        "the drive settlement is flat after the completion (stat:headless 3 -> 3, no verdict decoded: fix cycle 1); the growth "
-        "is the child's evidence_packing census the pass's end wakes (dir_entries:task_results 7 -> 65). Removed with "
-        "UNRELATED_JOB_GAPS['evidence_packing']."),
-    "maintenance-child": (
-        "the evidence_packing census after one unrelated completion (dir_entries:task_results 7 -> 65). Removed with "
-        "UNRELATED_JOB_GAPS['evidence_packing']."),
-}
+# history-sized work instead. A breach still in the code is named here with its measured numbers and its
+# remover; the marker flips the moment the cause is gone.
+UNRELATED_JOB_GAPS: Dict[str, str] = {}
+UNRELATED_DUTY_GAPS: Dict[str, str] = {}
 
 
 @pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_JOB_GAPS, name)) for name in JOB_NAMES])

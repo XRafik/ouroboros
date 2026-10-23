@@ -397,6 +397,18 @@ def _measure_boundaries(meter: CostMeter, srv: Any, result: Dict[str, Any], root
     _boundary(meter, result, "P:allowance", lambda: allowance_window(root))
 
 
+def _heartbeats(root: pathlib.Path) -> None:
+    """The running tasks' workers' heartbeats, as a live install's would be when the producer boundaries
+    run: their rows keep the build's ``ts`` otherwise, and a build plus a boot that take longer than the
+    orphan grace (``task_status._ORPHAN_RUNNING_GRACE_SECONDS``, at k=100 under load) would send the
+    send boundary down the stale-orphan check, a path the small root never takes."""
+    from ouroboros.task_results import write_task_result
+    from ouroboros.utils import utc_now_iso
+
+    for task_id in CURRENT["running"]:
+        write_task_result(root, task_id, "running", ts=utc_now_iso())
+
+
 def _duty_rows(sm: Any) -> List[Any]:
     """The inventory the dispatcher starts from. An older body without the declaration (the negative
     control on the body that broke the owner's install) is read by the latch and runner names its
@@ -458,9 +470,19 @@ def _drain(meter: CostMeter, tag: str, sm: Any, root: pathlib.Path, stop: thread
     """Everything the pass dispatched or woke, before its count is read: its threads (the child's
     look, the daemon latch retry, a reaper), the child look it requested (run here under its tag),
     the child's jobs a look it caused spawned — every spawn recorded since ``spawned``, the count
-    before the pass — (run here under its tag, as B6's job runner does: a child process the meter
-    cannot see would hide the work a pass dispatched) and the early delivery replay it woke."""
+    before the pass — (run under its tag, as B6's job runner does: a child process the meter cannot
+    see would hide the work a pass dispatched; on a thread of its own, as the child process starts:
+    it inherits no connection pool, so the connections the jobs open are the same at every size
+    instead of depending on what the pass's thread leased before) and the early delivery replay it woke."""
     from ouroboros import maintenance
+
+    def child_pass() -> None:
+        worker = threading.Thread(target=lambda: maintenance.run(root, should_stop=lambda: False),
+                                  name="maintenance-child-jobs")
+        worker.start()
+        worker.join(600.0)
+        if worker.is_alive():
+            result["errors"].append(f"{tag}: the child's jobs did not finish")
 
     for _round in range(3):
         alive = meter.join_spawned(tag, timeout=180.0)
@@ -469,7 +491,7 @@ def _drain(meter: CostMeter, tag: str, sm: Any, root: pathlib.Path, stop: thread
         woke = False
         if len(result.get("child_spawns", ())) > spawned:
             spawned, woke = len(result["child_spawns"]), True
-            tagged(tag, lambda: maintenance.run(root, should_stop=lambda: False))
+            tagged(tag, child_pass)
         if maintenance.child.owed():
             woke = True
             tagged(tag, sm._tick_maintenance_child)
@@ -707,6 +729,7 @@ def run(spec: Dict[str, Any]) -> Dict[str, Any]:
                 _request(meter, client, result, "B5", "POST", f"/api/tasks/{CURRENT['stop_root']}/cancel",
                          json={"cascade": True})
                 if facts.get("held_runs"):  # a root with the duties' shapes: B8 first, then B7
+                    _heartbeats(root)
                     _measure_boundaries(meter, srv, result, root, facts)
                     _measure_duties(meter, srv, result, root, facts, stubs)
             finally:
