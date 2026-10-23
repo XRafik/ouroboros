@@ -214,8 +214,13 @@ def test_closed_after_another_actors_queue_keeps_our_proven_refusal(chain):
     ("rebase", refusal(DIRTY) + AUTO + hint("rebase", base="release/2026.10")),
 ], ids=["short", "merge-hint", "rebase-hint"])
 def test_proven_conflict_refusal_frees_custody_and_a_repaired_head_merges_once(chain, method, stderr):
+    from ouroboros.update_qualification import commit_qualification
     from tests.test_batch4_producer_custody import _consumers
 
+    owner_intro = "Summary of the change.\n\nOwner notes keep `literal code` and  spacing.\n\n"
+    owner_footer = "\n\nOwner follow-up:\n  Preserve this indentation and punctuation: →."
+    chain.fake.pr["body"] = (owner_intro + "<!-- ouroboros:merge-receipt ab -->\nprior receipt\n"
+                             "<!-- /ouroboros:merge-receipt -->" + owner_footer)
     chain.answers += [(1, "", stderr), "merged"]
     first = _merge(chain, HEAD, method)
     assert first.text.startswith("⚠️ PR_MERGE_REFUSED"), first.text
@@ -230,8 +235,25 @@ def test_proven_conflict_refusal_frees_custody_and_a_repaired_head_merges_once(c
     assert "head_moved" in stale.text and len(chain.merges) == 1
     second = _merge(chain, REPAIRED, method)
     assert second.meta["operation_outcome"] == "completed", second.text
-    assert chain.merges == [["pr", "merge", "7", f"--{method}", "--match-head-commit", HEAD],
-                            ["pr", "merge", "7", f"--{method}", "--match-head-commit", REPAIRED]]
+    assert len(chain.merges) == 2
+    for call, head, retained in zip(chain.merges, (HEAD, REPAIRED), _receipts(chain)):
+        expected_args = ["pr", "merge", "7", f"--{method}", "--match-head-commit", head]
+        if method == "rebase":
+            assert call == expected_args  # rebase has no merge commit to carry a receipt
+            continue
+        assert call[:7] == [*expected_args, "--body"] and len(call) == 8
+        body = call[7]
+        prose, summary = body.split("\n\nOuroboros qualification receipt", 1)
+        assert prose == owner_intro + owner_footer
+        qualification = commit_qualification(body)
+        assert qualification == retained["qualification"]
+        assert {(row["name"], row["status"], row["source"]) for row in qualification["checks"]} == {
+            ("full_battery", "unknown", "missing"), ("cost_contract", "unknown", "missing")}
+        assert qualification["review"] == {"observed": "unknown", "declared": "unknown"}
+        assert qualification["post_merge"]["status"] == "not_run"
+        assert "declarations are not host-observed PASS" in summary
+        assert "Post-merge check: not run yet." in summary
+    assert chain.fake.pr["body"].startswith(owner_intro) and chain.fake.pr["body"].endswith(owner_footer)
     assert [(r["outcome"]["status"], r["requested"]["expected_head_sha"]) for r in _receipts(chain)] == [
         ("refused", HEAD), ("merged", REPAIRED)]
     assert _receipts(chain)[1]["outcome"]["attribution"] == "this_call"
