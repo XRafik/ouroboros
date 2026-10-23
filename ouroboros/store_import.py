@@ -325,6 +325,8 @@ def _upgrade_review_collection(txn: Txn) -> None:
         txn.conn.execute(index)
     if "drive_retention_at" not in columns:
         txn.conn.execute("ALTER TABLE tasks ADD COLUMN drive_retention_at TEXT")
+    for index in store.ROOT_WINDOWS:  # schema 8: each built once, committed with the version
+        txn.conn.execute(index)
     if int(txn.meta("schema_version") or 1) < store.SCHEMA_VERSION:
         txn.set_meta("schema_version", store.SCHEMA_VERSION)
 

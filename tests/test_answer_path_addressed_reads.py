@@ -179,17 +179,30 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
 
 # ---- owner-message intake: the routing manifests over k-scaled task history ----------------------
 
-HISTORY_ROOTS_PER_K, HISTORY_CHILDREN_PER_K, ELSEWHERE_ROOTS_PER_K = 10, 4, 6
+HISTORY_ROOTS_PER_K, HISTORY_CHILDREN_PER_K, ELSEWHERE_ROOTS_PER_K, WAVE_CHILDREN_PER_K = 10, 4, 6, 10
 
 
 def _stored(txn, template, task_id, ts, **fields):
     txn.store_task({**template, "task_id": task_id, "ts": ts, "updated_at": ts, **fields}, pending_drive=False)
 
 
+def _wave(txn, template, unit, project=""):
+    """``WAVE_CHILDREN_PER_K`` finished subagent children newer than every current row and as many
+    dated between the current roots (``2026-09-01T00:MM:00``/``:30``): the newest-first walk meets
+    them all before its last root."""
+    for index in range(WAVE_CHILDREN_PER_K):
+        between = unit * WAVE_CHILDREN_PER_K + index
+        for name, ts in ((f"hist-{unit}-wave-{index}", f"2026-09-{3 + unit // 24:02d}T{unit % 24:02d}:{index:02d}:00+00:00"),
+                         (f"hist-{unit}-between-{index}", f"2026-09-01T00:{between % 17:02d}:{10 + between // 17:02d}+00:00")):
+            _stored(txn, template, name, ts, project_id=project, parent_task_id=f"hist-{unit}-0",
+                    root_task_id=f"hist-{unit}-0", delegation_role="subagent")
+
+
 def _task_history(root, k):
     """The same current results at every size: ``cap + 1`` newest roots and two newer children in
     Main and in the project room (one root past the cap in each). Unrelated history grows with k:
-    older Main roots and children and another project's roots, each with a 4 KB result body."""
+    older Main roots and children, another project's roots, and a finished swarm wave of an older
+    Main root (``_wave``), each with a 4 KB result body."""
     from ouroboros import store
     from ouroboros.projects_registry import create_project
     from ouroboros.runtime_limits import get_routing_manifest_result_rows
@@ -222,14 +235,16 @@ def _task_history(root, k):
             for index in range(ELSEWHERE_ROOTS_PER_K):
                 _stored(txn, template, f"hist-{unit}-elsewhere-{index}", f"{day}T03:{index:02d}:00+00:00",
                         project_id="elsewhere")
+            _wave(txn, template, unit)
     return {"room_chat_id": int(room["chat_id"])}
 
 
 @pytest.mark.parametrize("room", ["main", "project"])
 def test_owner_message_intake_reads_the_newest_roots_not_every_task(tmp_path, monkeypatch, room):
-    """The supervisor loop routes an owner message: the Main manifest walks the store's newest
-    rows until its window is full, a project room sorts only its own rows; bodies are decoded for
-    the offered rows alone. Both sizes offer the same newest roots, children never among them."""
+    """The supervisor loop routes an owner message: the Main manifest walks the store's root-only
+    index until its window is full (no child of the swarm wave is visited), a project room walks
+    its own; bodies are decoded for the offered rows alone. Both sizes offer the same newest
+    roots, children never among them."""
     from ouroboros import server_owner_routing
 
     def boundary(root, facts):
@@ -262,11 +277,74 @@ def test_owner_message_intake_reads_the_newest_roots_not_every_task(tmp_path, mo
         metadata = directed[-1]
         manifest = metadata["main_routing_manifest" if room == "main" else "project_routing_manifest"]
         manifests[k] = [row["task_id"] for row in manifest["final_results"]]
-    # Main offers every lane's roots (the room's current roots are a minute newer); a room its own.
+    # Main offers every lane's roots (the room's current roots are half a minute newer); a room its own.
     newest = sorted(((f"2026-09-01T00:{index:02d}:{30 if scope == 'room' else 0:02d}", f"cur-{scope}-{index:02d}")
                      for scope in (("main", "room") if room == "main" else ("room",)) for index in range(17)),
                     reverse=True)
     assert manifests[K_SMALL] == manifests[K_LARGE] == [task_id for _ts, task_id in newest[:16]]
+
+
+@pytest.mark.parametrize("scope", ["main", "project"])
+def test_the_newest_roots_are_walked_without_visiting_a_child(tmp_path, monkeypatch, scope):
+    """The window walks a root-only index, so ``limit`` bounds the entries read: the scope's own swarm
+    waves (children newer than every root, children dated between its roots) are never visited, in
+    Main and in a project room. Both sizes return the same newest roots."""
+    from ouroboros import store
+    from ouroboros.task_results import write_task_result
+    from ouroboros.task_store import newest_root_ids, read_document
+
+    project = "room" if scope == "project" else ""
+
+    def build(root, k):
+        write_task_result(root, "template", "completed", chat_id=1, result="r" * 4000, ts="2023-01-01T00:00:00+00:00")
+        template = read_document(root, "template")
+        with store.open_store(root, write=True) as txn:
+            for index in range(17):
+                _stored(txn, template, f"cur-{index:02d}", f"2026-09-01T00:{index:02d}:00+00:00", project_id=project)
+        for unit in range(k):
+            with store.open_store(root, write=True) as txn:
+                _stored(txn, template, f"hist-{unit}-0", f"2024-01-{1 + unit % 28:02d}T00:00:00+00:00", project_id=project)
+                _wave(txn, template, unit, project)
+        return {}
+
+    def boundary(root, _facts):
+        newest_root_ids(root, 17, project_id=project)
+        return lambda: newest_root_ids(root, 17, project_id=project)
+
+    answers = _flat(tmp_path, monkeypatch, build, boundary)
+    assert answers[K_SMALL] == answers[K_LARGE] == [f"cur-{index:02d}" for index in reversed(range(17))]
+
+
+def test_a_store_an_older_body_published_gains_the_root_windows_at_boot(tmp_path, monkeypatch):
+    """Schema 8's root-only indexes are DDL of the boot's schema step, committed with the version and
+    built once; before that step the window cannot be read (``StoreError``: the manifest says the
+    store is unreadable), never answered by walking every row. Afterwards both windows read through
+    their indexes and a room's counts stay exact."""
+    from ouroboros import store
+    from ouroboros.store_import import ensure_current_store
+    from ouroboros.task_results import write_task_result
+    from ouroboros.task_store import newest_root_ids, project_result_counts
+
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(tmp_path))
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_SCHEMA", store._SCHEMA.replace("".join(store.ROOT_WINDOWS), ""))
+        patch.setattr(store, "SCHEMA_VERSION", 7)
+        for index in range(3):
+            write_task_result(tmp_path, f"root{index}", "completed", project_id="room", ts=f"2026-09-01T00:0{index}:00Z")
+        write_task_result(tmp_path, "child", "completed", project_id="room", parent_task_id="root0",
+                          root_task_id="root0", delegation_role="subagent", ts="2026-09-02T00:00:00Z")
+    store.close_connections(store.store_path(tmp_path))
+    names = "SELECT name FROM sqlite_master WHERE name IN ('tasks_root_ts', 'tasks_project_root_ts')"
+    with store.open_store(tmp_path, write=False) as txn:
+        assert txn.meta("schema_version") == 7 and not txn.conn.execute(names).fetchall()
+    with pytest.raises(store.StoreError, match="no such index"):
+        newest_root_ids(tmp_path, 2)
+    ensure_current_store(tmp_path)  # the boot's schema step
+    with store.open_store(tmp_path, write=False) as txn:
+        assert txn.meta("schema_version") == store.SCHEMA_VERSION == 8
+        assert sorted(row[0] for row in txn.conn.execute(names)) == ["tasks_project_root_ts", "tasks_root_ts"]
+    assert newest_root_ids(tmp_path, 2) == newest_root_ids(tmp_path, 2, project_id="room") == ["root2", "root1"]
+    assert project_result_counts(tmp_path, "room") == (3, 1)
 
 
 def _spy_sidecars(monkeypatch):
