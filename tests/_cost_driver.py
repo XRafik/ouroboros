@@ -417,8 +417,8 @@ def _duty_rows(sm: Any) -> List[Any]:
               ("reconcile-maintenance", "_RECONCILE_SWEEP_LOCK", "_run_periodic_reconcile_sweep"),
               ("maintenance-child", "", "_tick_maintenance_child"),
               ("schedule-admission", "_SCHEDULE_SWEEP_LOCK", "_run_schedule_duty"))
-    return [SimpleNamespace(name=name, latch=getattr(sm, latch) if latch else None, cadence="(undeclared)",
-                            run=getattr(sm, runner)) for name, latch, runner in legacy]
+    return [SimpleNamespace(name=name, latch=getattr(sm, latch) if latch else None, run=getattr(sm, runner))
+            for name, latch, runner in legacy]
 
 
 def _one_pass(sm: Any, duty: Any, root: pathlib.Path, stop: threading.Event) -> None:

@@ -1011,43 +1011,37 @@ def _tick_maintenance_child() -> None:
 
 class HostDuty(NamedTuple):
     """One recurring pass the supervisor tick starts off-loop: its journal name (``host_duty_stall``),
-    the single-flight latch the tick takes before starting it (``None``: the pass keeps its own slot),
-    the source of its cadence (a named constant or the fact that makes it due; never a number of its
-    own) and the function that runs ONE pass on the thread the tick starts."""
+    the single-flight latch the tick takes before starting it (``None``: the pass keeps its own slot)
+    and the function that runs ONE pass on the thread the tick starts. Its cadence is the due
+    condition beside its start in ``_periodic_supervisor_maintenance``, never a number of its own."""
     name: str
     latch: Optional[threading.Lock]
-    cadence: str
     run: Callable[..., Any]
 
 
 # The reconciled duty inventory (ARCHITECTURE §5 "Maintenance and custody", invariant 24): every
-# recurring pass ``_periodic_supervisor_maintenance`` starts, with the latch and cadence it uses
-# there; the 20 s group is dispatched from this table, the others keep their own due conditions
-# above and are started under the latch named here. The delegated body's tick
+# recurring pass ``_periodic_supervisor_maintenance`` starts, with the latch it takes there; the
+# 20 s group is dispatched from this table, the others keep their own due conditions above and
+# are started under the latch named here. The delegated body's tick
 # (``delegate_collection.BodyRuntime``, the lifespan's own thread) and ``maintenance.JOBS`` (the
 # child's) are the two other recurring passes of a server process. tests/test_cost_contract.py B7
 # drives each of the three families twice over a scale root and requires the second pass to rest;
 # tests/test_duty_inventory.py fails when the tick starts a pass this table does not name, or a
 # row here names a pass the tick never starts.
 HOST_DUTIES: Tuple[HostDuty, ...] = (
-    HostDuty("cancel_intent_sweep", _CANCEL_INTENT_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
-    HostDuty("terminal_delivery_replay", _DELIVERY_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC, or _DELIVERY_WAKE",
-             _run_terminal_duty),
-    HostDuty("question_delivery_replay", _QUESTION_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
-    HostDuty("pause_notice_replay", _PAUSE_NOTICE_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
-    HostDuty("abandoned_usage_reconciliation", _USAGE_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
-    HostDuty("post_task_synthesis_recovery", _SYNTHESIS_SWEEP_LOCK, "BODY_MAINTENANCE_INTERVAL_SEC", _run_terminal_duty),
-    HostDuty("held_continuation_recheck", _CONTINUATION_SWEEP_LOCK,
-             "BODY_MAINTENANCE_INTERVAL_SEC while a writer-held Continue waits in queue.PENDING", _run_terminal_duty),
-    HostDuty("owner_pause_settlement", _OWNER_PAUSE_SWEEP_LOCK, "every tick while queue.BUDGET_ROOT_FENCES",
-             _run_terminal_duty),
-    HostDuty("cold-custody", _COLD_CUSTODY_SWEEP_LOCK, "delegate_supervision._TICK_SEC while any actor exists",
-             _run_cold_custody),
-    HostDuty("custody-maintenance", _CUSTODY_SWEEP_LOCK, "CUSTODY_SWEEP_SEC", _run_periodic_custody_sweep),
-    HostDuty("reconcile-maintenance", _RECONCILE_SWEEP_LOCK, "RECONCILE_SWEEP_SEC", _run_periodic_reconcile_sweep),
-    HostDuty("maintenance-child", None, "maintenance.child.owed(): a process's first tick, request(), a reconcile pass's end",
-             _tick_maintenance_child),
-    HostDuty("schedule-admission", _SCHEDULE_SWEEP_LOCK, "every tick", _run_schedule_duty),
+    HostDuty("cancel_intent_sweep", _CANCEL_INTENT_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("terminal_delivery_replay", _DELIVERY_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("question_delivery_replay", _QUESTION_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("pause_notice_replay", _PAUSE_NOTICE_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("abandoned_usage_reconciliation", _USAGE_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("post_task_synthesis_recovery", _SYNTHESIS_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("held_continuation_recheck", _CONTINUATION_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("owner_pause_settlement", _OWNER_PAUSE_SWEEP_LOCK, _run_terminal_duty),
+    HostDuty("cold-custody", _COLD_CUSTODY_SWEEP_LOCK, _run_cold_custody),
+    HostDuty("custody-maintenance", _CUSTODY_SWEEP_LOCK, _run_periodic_custody_sweep),
+    HostDuty("reconcile-maintenance", _RECONCILE_SWEEP_LOCK, _run_periodic_reconcile_sweep),
+    HostDuty("maintenance-child", None, _tick_maintenance_child),
+    HostDuty("schedule-admission", _SCHEDULE_SWEEP_LOCK, _run_schedule_duty),
 )
 TWENTY_SECOND_DUTIES = HOST_DUTIES[:6]  # the one cadence stamped by _LAST_CANCEL_INTENT_SWEEP
 
@@ -1082,7 +1076,8 @@ def _run_drive_custody_pass(stop_event: Any = None) -> None:
     of a drive left young) are the ``drive_settlement`` job row; the verdicts of retained drives are
     the ``drive_settlement_verdicts`` meta row, decoded only by a lap that walks. Both are written
     only when they move, so a restart neither restarts the lap nor re-hashes an unchanged retained
-    drive, and a layout whose inputs stand is not even listed. A drive kept because its custody is not
+    drive, a layout whose inputs stand is not even listed, and a task completing elsewhere costs one
+    indexed read of the rows written terminal since. A drive kept because its custody is not
     proven is material evidence in the event. The moved drives' deletion and the pending child-ref
     promotions are the maintenance child's jobs."""
     from ouroboros import maintenance_jobs, store
