@@ -23,6 +23,17 @@ measured numbers and the unit that removes it, so this file is green now and tur
 the moment the fix lands; the marker is then removed. The k=100 variant runs in the opt-in
 ``integration`` lane (``-m integration -o addopts=''``). ``B6`` is the rest law of the named
 maintenance jobs: a second run over unchanged inputs commits nothing and reads no history.
+
+``B7`` is the rest law of every recurring pass of a server process: the reconciled duty
+inventory ``server_maintenance.HOST_DUTIES`` (read from production, so a pass added without a row
+is a pass this file never measured: tests/test_duty_inventory.py) and the delegated body's tick,
+each driven in the booted driver process (tests/_cost_driver.py ``D:<duty>:<pass>``): a second
+pass over unchanged inputs writes nothing, opens nothing of the history or the evidence packs and
+walks or copies nothing under the delegated execution roots, with every thread, pool work item
+and wake the pass dispatched joined into its count; its counts are equal at k=1 and k=30; and a
+positive companion per duty (an addressed input change) shows the work still happens. ``B8`` holds
+the producer and loop boundaries (``P:*``) flat on their FIRST pass. The scale root carries the
+shapes of the 22.10 class in counted numbers (tests/_scale_root.py).
 """
 
 from __future__ import annotations
@@ -39,14 +50,14 @@ from typing import Any, Callable, Dict, Iterable, List
 
 import pytest
 
-from tests._cost_meter import HISTORY, VM_STEP, CostMeter, tagged
+from tests._cost_meter import EXECUTION, HISTORY, VM_STEP, CostMeter, tagged
 
 pytestmark = pytest.mark.scale
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 K_SMALL = 1
 CHILD_TIMEOUT_SEC = 900  # a transport bound for one child, not a judgment about the boot
-LOCATIONS = ("root", *HISTORY)
+LOCATIONS = ("root", *HISTORY, EXECUTION)
 # Counted per location; lock files (``lock``) are left out: how often a lock is probed and retried
 # follows the contention between this process's threads at that instant, not the history.
 WORK = ("connect", "statements", "begins", "commits", "writes", "json_loads", "json_chars", "popen", "thread_start",
@@ -205,6 +216,12 @@ def test_b2_publication_to_dialogue_is_flat(measured):
     assert_publication_flat(measured, "B2_dialogue")
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "A custody publication at boot walks the event chain: the startup custody sweep publishes a custody event "
+    "per pending start request it recovers (delegate_custody_current.publish -> flush_outbox -> "
+    "delegate_custody.chain_length), and chain_length stats every archive events segment "
+    "(utils._closed_segments: stat:archive 7 -> 65 at k=1 -> k=30 for the same three events). The chain's length "
+    "after this store's own last row is a stored fact (CHAIN_BOUNDARY), not a walk. Removed by lane D2a."))
 def test_b2_publication_to_supervisor_ready_is_flat(measured):
     assert_publication_flat(measured, "B2_ready")
 
@@ -222,6 +239,12 @@ def _assert_state_questions(measured, tag):
         assert measured[k]["responses"][tag]["decisions"] == expected
 
 
+@pytest.mark.xfail(strict=True, reason=(
+    "The cold /api/state reads the consciousness allowance window for its status view "
+    "(consciousness.status_snapshot -> consciousness_allowance.allowance_window -> usage_store.attempts): every "
+    "money row of every consciousness root in the last 24 h is decoded (statements 142 -> 258, vm_steps 1600 -> "
+    "12000 at k=1 -> k=30) instead of an addressed daily-spend fact; the same read is boundary P:allowance. "
+    "Removed by lane D2b."))
 def test_b3_state_cold_is_flat(measured):
     _assert_state_questions(measured, "B3")
     assert_flat(measured, "B3")
@@ -269,9 +292,13 @@ def second_run(run: Callable[[pathlib.Path], Any], root: pathlib.Path) -> Dict[s
 
 def rest_breaches(counts: Dict[str, int]) -> Dict[str, int]:
     """A second run writes nothing (a read transaction of the store also ends with COMMIT, so the
-    written statements are what counts) and opens or reads nothing of the history. Looking whether a
-    history directory is empty is allowed; that it does not grow is the k-equality's to check."""
-    keys = ("writes", *(f"{kind}:{where}" for kind in ("open", "os_open", "read_bytes") for where in HISTORY))
+    written statements are what counts), opens or reads nothing of the history or the evidence packs,
+    and walks or copies nothing under the delegated execution roots: there a ``stat`` is a walk and
+    the open of a source is a copy (the bytes move in the kernel), so even one ``lexists`` per held
+    candidate breaches, by design — the attempt's outcome belongs on the custody row, not on disk.
+    Looking whether a history directory is empty is allowed; that it does not grow is the k-equality's to check."""
+    keys = ("writes", *(f"{kind}:{where}" for kind in ("open", "os_open", "read_bytes") for where in HISTORY),
+            *(f"{kind}:{EXECUTION}" for kind in ("stat", "scandir", "listdir", "open", "os_open", "read_bytes")))
     return {key: counts[key] for key in keys if counts.get(key)}
 
 
@@ -317,6 +344,151 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
     if maintenance is None or not callable(getattr(maintenance, "run", None)):
         pytest.skip("the maintenance child's pass does not exist on this tree yet")
     _rests_at_every_size(measured, lambda root: maintenance.run(root, should_stop=lambda: False), "maintenance.run")
+
+
+# ---- B7: the rest law of every recurring pass; B8: the producer and loop boundaries --------------------
+
+def _host_duty_names() -> tuple:
+    """The dispatcher's inventory; on an older body without the declaration, the passes its dispatcher
+    started (the driver's shim for the negative control on the body that broke the owner's install)."""
+    try:
+        from ouroboros import server_maintenance
+    except ImportError:
+        return ()
+    from tests._cost_driver import _duty_rows
+
+    return tuple(duty.name for duty in _duty_rows(server_maintenance))
+
+
+DUTY_NAMES = (*_host_duty_names(), "delegated-body")  # the dispatcher's inventory plus the lifespan's body tick
+
+# Where today's code breaks the law: the measured cause (k=1 -> k=30, the readers that grow) and the
+# change that removes it (lane D2a: the usage duty, the metrics projection, pending invocations and the
+# ended plan asks leave the server's passes; lane D2b: intake, send and the allowance read addressed).
+REST_LAW_GAPS = {
+    "abandoned_usage_reconciliation": (
+        "R2: the usage duty re-selects every dirty owner whose task row is gone on every pass "
+        "(terminal_cost_reconciliation._refresh_costs: usage_store.dirty_owners, then task_facts over all of "
+        "them) instead of resting on an explicit successful-absence observation; the pass writes nothing and "
+        "its vm_steps go 900 -> 6500 at k=1 -> k=30. Removed by lane D2a."),
+    "reconcile-maintenance": (
+        "The reconcile pass redoes history-sized work at rest: late_review_marks._collect_ended_plan_asks "
+        "re-collects every ended task's pending plan seat and rewrites its body each pass "
+        "(plan_record._update_plan_record; writes 10 -> 244 at k=1 -> k=30), the age-only retirers read every "
+        "settled task's body (headless._prune_*: load_task_result) and the zombie reconcile opens every child "
+        "drive's store (connect:headless 0 -> 16, read_bytes:headless 0 -> 6400); statements 541 -> 7871, "
+        "vm_steps 8600 -> 162200, the packing job it wakes included. Removed by lane D2a (ended plan-ask "
+        "collection and the retirers become child jobs)."),
+    "maintenance-child": (
+        "The dispatcher's look at the job facts grows with history: maintenance.due reads every job row and "
+        "the drive-settlement job row carries a per-task map (maintenance_jobs.jobs: json_chars +20665 at "
+        "k=30), and dialogue_import.import_status counts pending segments (vm_steps 800 -> 2100). Removed by "
+        "lane D2a (the look reads addressed facts)."),
+}
+BOUNDARY_GAPS = {
+    "P:metrics_run": (
+        "M7 (#2196): subagent_metrics.catch_up folds the whole event suffix inside a write transaction when the "
+        "cursor is absent (swarm_rollup.fold_event_suffix: open:archive 4 -> 62, read_bytes:archive 44 KB -> "
+        "1.34 MB, json_loads 347 -> 9047 at k=1 -> k=30) on a delegated run's measurement publication. Removed "
+        "by lane D2a."),
+    "P:metrics_review": (
+        "M7 (#2196): the same fold on a review publication over a stale cursor (open:archive 3 -> 61, "
+        "read_bytes:archive 22 KB -> 1.32 MB). Removed by lane D2a."),
+    "P:intake": (
+        "Owner-message intake reads task_facts over every task and the bodies of the offered roots "
+        "(server_routing_context._recent_root_results via _decision_turn_metadata) on the loop thread before "
+        "the turn starts: vm_steps 5300 -> 18700, json_chars +91 KB at k=1 -> k=30. Removed by lane D2b "
+        "(addressed recent-root facts)."),
+    "P:send": (
+        "The loop's send_message retains the answer through artifacts.store_actor_source_bytes -> "
+        "evidence_packs.handle_info, whose first touch of the pack index validates the whole cache "
+        "(evidence_packs._index_valid: vm_steps 1400 -> 5900 at k=1 -> k=30). Removed by lane D2b."),
+    "P:allowance": (
+        "The consciousness allowance read decodes every money row of every consciousness root in the window "
+        "(consciousness_allowance._window_rows -> usage_store.attempts: statements 15 -> 131, vm_steps 300 -> "
+        "10700 at k=1 -> k=30) instead of an addressed daily-spend fact. Removed by lane D2b."),
+}
+# The counter a duty's companion makes appear (work > rest at every size); the body's walk and copy are
+# the two execution-root counters the 22.10 control fails on at rest.
+COMPANION_COUNTERS = {
+    "delegated-body": ("scandir:execution", "open:execution", "writes"),
+    "abandoned_usage_reconciliation": ("writes",),
+    "custody-maintenance": ("writes",),
+    "reconcile-maintenance": ("writes",),
+    "maintenance-child": ("child_spawn",),
+    "question_delivery_replay": ("writes",),
+    "terminal_delivery_replay": ("open",),
+    "cancel_intent_sweep": ("writes",),
+}
+COMPANIONS_NOT_BUILT = {
+    "pause_notice_replay": "a pause notice obligation needs a parked episode's fence and its notice row",
+    "post_task_synthesis_recovery": "a pending root synthesis dispatches a model turn (refused here)",
+    "held_continuation_recheck": "a writer-held Continue needs a pending continuation under queue custody",
+    "cold-custody": "sleep custody needs a live actor in the queue or the direct registry",
+    "owner_pause_settlement": "a requested owner pause stops members through the daemon (absent here)",
+    "schedule-admission": "a due schedule admits a task into the queue the held supervisor never serves",
+}
+
+
+def _gap(table: Dict[str, str], name: str) -> tuple:
+    return (pytest.mark.xfail(strict=True, reason=table[name]),) if name in table else ()
+
+
+def _duty_pass(measured: Dict[Any, Any], name: str, k: int, phase: str) -> Dict[str, Any]:
+    entry = measured[k].get("duties", {}).get(name)
+    assert entry is not None, f"{name} was not driven at k={k}"
+    snapshot = entry.get(phase)
+    assert snapshot is not None, f"{name} has no {phase} pass at k={k} (companion: {entry.get('companion')!r})"
+    return snapshot
+
+
+def _writes(snapshot: Dict[str, Any]) -> List[str]:
+    return [text for text in snapshot.get("statements", {})
+            if text.split(None, 1)[0].upper() in ("INSERT", "UPDATE", "DELETE", "REPLACE")][:6]
+
+
+def _growing(little: Dict[str, Any], big: Dict[str, Any]) -> List[tuple]:
+    return sorted(((source, amount - little.get("callers", {}).get(source, 0))
+                   for source, amount in big.get("callers", {}).items()
+                   if amount > little.get("callers", {}).get(source, 0)), key=lambda item: -item[1])[:8]
+
+
+def _companion_counter(measured: Dict[Any, Any], name: str, k: int, phase: str, counter: str) -> int:
+    if counter == "child_spawn":  # the child's spawn is recorded under the boundary that requested the look
+        return measured[k].get("child_spawns", []).count(f"D:{name}:{phase}")
+    return _duty_pass(measured, name, k, phase)["counts"].get(counter, 0)
+
+
+@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(REST_LAW_GAPS, name)) for name in DUTY_NAMES])
+def test_b7_each_duty_rests_on_its_second_pass(measured, name):
+    """Second pass, inputs unchanged, the duty's own clock advanced: zero writes, zero history or pack reads,
+    zero execution-root walks or copies, and the same counts (VM steps included) at k=1 and k=30."""
+    large = measured["large"]
+    rested = {k: _duty_pass(measured, name, k, "rest") for k in (K_SMALL, large)}
+    for k, snapshot in rested.items():
+        breaches = rest_breaches(snapshot["counts"])
+        assert not breaches, (name, k, breaches, _writes(snapshot), sorted(snapshot.get("paths", {}).items())[:8])
+    breaches = contract_breaches(rested[K_SMALL]["counts"], rested[large]["counts"], large)
+    assert not breaches, (name, breaches, _growing(rested[K_SMALL], rested[large]))
+
+
+@pytest.mark.parametrize("name", sorted(COMPANION_COUNTERS))
+def test_b7_each_duty_works_again_when_its_input_changes(measured, name):
+    """The rest is not death: after one addressed input change the duty does the work and its counts appear."""
+    for k in (K_SMALL, measured["large"]):
+        for counter in COMPANION_COUNTERS[name]:
+            rest, work = (_companion_counter(measured, name, k, phase, counter) for phase in ("rest", "work"))
+            assert work > rest, (name, k, counter, rest, work, measured[k]["duties"][name].get("companion"))
+
+
+def test_b7_every_duty_has_a_companion_or_a_named_reason():
+    assert set(DUTY_NAMES) == set(COMPANION_COUNTERS) | set(COMPANIONS_NOT_BUILT)
+    assert not set(COMPANION_COUNTERS) & set(COMPANIONS_NOT_BUILT)
+
+
+@pytest.mark.parametrize("tag", [pytest.param(tag, marks=_gap(BOUNDARY_GAPS, tag)) for tag in BOUNDARY_GAPS])
+def test_b8_producer_and_loop_boundaries_are_flat_on_the_first_pass(measured, tag):
+    assert_flat(measured, tag)
 
 
 # ---- the instrument itself, both directions --------------------------------------------------------
@@ -408,6 +580,58 @@ def test_child_header_allowance_rejects_history_work(tmp_path, monkeypatch, extr
         assert bool(breaches) is (extra != "none"), breaches
     finally:
         store.close_connections()
+
+
+@pytest.mark.parametrize("walks", [False, True])
+def test_the_rest_law_catches_a_walk_or_copy_under_an_execution_root(tmp_path, walks):
+    """A pass that reads its own row touches no checkout; one that re-walks a declared evidence tree
+    and copies a file shows the walk as ``scandir``/``stat`` and the copy as the source's ``open`` under
+    ``execution`` (``shutil.copy2`` moves the bytes in the kernel: no ``read_bytes`` to count)."""
+    import shutil
+
+    exec_root, data = tmp_path / "exec", tmp_path / "data"
+    tree = exec_root / "run" / ".review-evidence"
+    tree.mkdir(parents=True)
+    data.mkdir()
+    (tree / "object").write_bytes(b"x" * 10_000)
+    os.chmod(tree / "object", 0o444)
+    (data / "row.json").write_text("{}", encoding="utf-8")
+
+    def second_pass():
+        json.loads((data / "row.json").read_text(encoding="utf-8"))
+        if walks:
+            for _current, _dirs, _files in os.walk(exec_root / "run"):
+                pass
+            shutil.copy2(tree / "object", tmp_path / "copy")
+
+    with CostMeter(data, execution_root=exec_root) as meter:
+        tagged("rest", second_pass)
+    counts = meter.snapshot("rest")["counts"]
+    assert bool(rest_breaches(counts)) is walks, counts
+    if walks:
+        assert counts["scandir:execution"] >= 1 and counts["open:execution"] == 1, counts
+
+
+@pytest.mark.parametrize("by_boundary", [True, False])
+def test_the_meter_credits_pool_work_to_the_boundary_that_submitted_it(tmp_path, by_boundary):
+    """A pass that submits to a pool owns what the pool does for it; work a background thread submits
+    stays the pool worker's own."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="run-collect")
+    try:
+        with CostMeter(tmp_path) as meter:
+            if by_boundary:
+                tagged("pass", lambda: pool.submit(os.stat, tmp_path).result())
+            else:
+                starter = threading.Thread(target=lambda: pool.submit(os.stat, tmp_path).result(), name="bg-starter")
+                starter.start()
+                starter.join()
+    finally:
+        pool.shutdown()
+    assert (meter.snapshot("pass")["counts"].get("stat", 0) == 1) is by_boundary
+    assert (meter.snapshot("bg:run-collect")["counts"].get("stat", 0) == 1) is not by_boundary
 
 
 @pytest.mark.parametrize("rests", [False, True])

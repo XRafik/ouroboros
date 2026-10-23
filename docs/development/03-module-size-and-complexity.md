@@ -81,7 +81,7 @@ addressed store, outside queue locks, released before display consumers; unavail
 unknown for that request (`tests/test_hot_facts*.py` fix Stop/custody results while settled
 history grows 20→2,000 rows). Main batches question display views and warms lineage by
 generation, keeping strict per-member gaps if a batch fails (`tests/test_main_decisions_reads.py`);
-B3/B3w in `tests/test_cost_contract.py` fix visible questions while delivered history grows.
+`tests/test_cost_contract.py` fixes every boundary and recurring pass as history grows.
 
 - **Measure the growing operation:** history, object count, nesting, cold caches and
   contention. Where responsiveness suffers, use existing spans and real-reader spies;
