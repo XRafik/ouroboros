@@ -19,7 +19,8 @@ def _index(repo):
 
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-dirty-same-content", "real-content"])
 @pytest.mark.parametrize("reader", ["capture", "bounded", "shell", "attribution", "review", "tool",
-                                    "preflight", "checkpoint", "patch", "streamed_patch", "subject", "pr", "drift"])
+                                    "preflight", "checkpoint", "patch", "streamed_patch", "subject", "pr", "drift",
+                                    "vcs_names", "selection"])
 def test_host_observations_never_write_the_index(tmp_path, monkeypatch, changed, reader):
     from ouroboros import mutation_attribution, utils
     from ouroboros.tools import review_file_pack, shell_effects, vcs_read
@@ -74,6 +75,14 @@ def test_host_observations_never_write_the_index(tmp_path, monkeypatch, changed,
     elif reader == "pr":
         from ouroboros.tools.git_pr import _g
         output = _g(["status", "--porcelain"], repo).stdout
+    elif reader == "vcs_names":
+        from ouroboros.tools.registry import ToolContext
+        output = vcs_read._vcs_read(ToolContext(repo_dir=repo, drive_root=tmp_path / "data"),
+                                    action="diff", root="system_repo", name_only=True)
+        assert "VCS target:" in output and "ERROR" not in output, output
+    elif reader == "selection":
+        from ouroboros.test_selection import changed_paths
+        output = "".join(changed_paths(repo, "HEAD")[1])
     else:
         from ouroboros.delegate_target_drift import _target_drift_evidence
         entry = SimpleNamespace(target_root=repo, baseline_sha=_git(repo, "rev-parse", "HEAD"))
@@ -87,6 +96,105 @@ def test_host_observations_never_write_the_index(tmp_path, monkeypatch, changed,
     assert not [row for row in rows if row.get("label") == "do_write_index"]
     # The ordinary tool command seam shares the same convention.
     assert bool(utils.run_cmd(["git", "diff", "--stat"], cwd=repo)) is changed
+    assert _index(repo) == before
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
+@pytest.mark.parametrize("operation", ["cherry_pick", "stage_merge"])
+def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, changed, operation):
+    from ouroboros.tools import git_pr
+    from ouroboros.tools.registry import ToolContext
+
+    repo = _repo(tmp_path)
+    ctx = ToolContext(repo_dir=repo, drive_root=tmp_path / "data", branch_dev="ouroboros")
+    _git(repo, "checkout", "-qb", "integrate/pr-1")
+    (repo / "feature.txt").write_text("incoming work\n", encoding="utf-8")
+    _git(repo, "add", "feature.txt")
+    _git(repo, "commit", "-qm", "feature")
+    feature = _git(repo, "rev-parse", "HEAD")
+    if operation == "cherry_pick":
+        _git(repo, "reset", "--hard", "HEAD~1")
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+
+    def dirty_stat():
+        seed = repo / "seed.txt"
+        if changed:
+            seed.write_text("owner work\n", encoding="utf-8")
+        info = seed.stat()
+        os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+
+    observed = []
+    original = git_pr._g
+
+    def capture(args, cwd, **kwargs):
+        before = _index(repo)
+        result = original(args, cwd, **kwargs)
+        if args[0] in {"status", "diff"}:
+            observed.append(args)
+            assert _index(repo) == before, args
+            assert not (repo / ".git" / "index.lock").exists()
+        if operation == "stage_merge" and args == ["checkout", "ouroboros"]:
+            # Checkout may refresh stat data; exercise the target-tree reader itself.
+            assert result.returncode == 0
+            dirty_stat()
+        return result
+
+    monkeypatch.setattr(git_pr, "_g", capture)
+    if operation == "cherry_pick":
+        dirty_stat()
+        result = git_pr._cherry_pick_pr_commits(ctx, [feature])
+    else:
+        # The initial integration-branch status reader also sees the stat-only case.
+        if not changed:
+            dirty_stat()
+        result = git_pr._stage_pr_merge(ctx, "integrate/pr-1")
+    assert observed
+    if changed:
+        assert "Working tree" in result and "changes" in result, result
+        assert (repo / "seed.txt").read_text(encoding="utf-8") == "owner work\n"
+        assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "integrate/pr-1"
+    else:
+        assert result.startswith("✅"), result
+        assert (repo / "feature.txt").read_text(encoding="utf-8") == "incoming work\n"
+        if operation == "stage_merge":
+            assert _git(repo, "rev-parse", "MERGE_HEAD") == feature
+        else:
+            assert _git(repo, "log", "-1", "--format=%s") == "feature"
+
+
+@pytest.mark.parametrize("comparison", ["worktree", "staged", "tree"])
+def test_vcs_names_keep_binary_mode_and_rename_changes(tmp_path, monkeypatch, comparison):
+    from ouroboros.tools.registry import ToolContext
+    from ouroboros.tools.vcs_read import _vcs_read
+
+    repo = _repo(tmp_path)
+    binary = repo / "binary.dat"
+    binary.write_bytes(b"\0before")
+    (repo / "mode.sh").write_text("exit 0\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "fixtures")
+    binary.write_bytes(b"\0after")
+    rename = 'renamed\t"file.txt'
+    _git(repo, "mv", "seed.txt", rename)
+    _git(repo, "update-index", "--chmod=+x", "mode.sh")
+    _git(repo, "add", "binary.dat")
+    # Preserve filename quoting and rename destinations, including zero-line changes.
+    if comparison == "worktree":
+        options, refs = {"base": "HEAD"}, ["HEAD"]
+    elif comparison == "staged":
+        options, refs = {"staged": True}, ["--cached"]
+    else:
+        _git(repo, "commit", "-qm", "changes")
+        options, refs = {"base": "HEAD~1", "head": "HEAD"}, ["HEAD~1", "HEAD"]
+    expected = _git(repo, "diff", "--name-only", *refs)
+    assert "binary.dat" in expected and "renamed" in expected
+    if comparison != "worktree":
+        assert "mode.sh" in expected
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    before = _index(repo)
+    ctx = ToolContext(repo_dir=repo, drive_root=tmp_path / "data")
+    output = _vcs_read(ctx, action="diff", root="system_repo", name_only=True, **options)
+    assert output.split("\n\nVCS target:", 1)[0] == expected
     assert _index(repo) == before
 
 

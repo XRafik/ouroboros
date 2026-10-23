@@ -2,8 +2,7 @@
 
 Owns the git-worktree discovery and status/diff projections, the bounded
 shallow listing and tree fingerprints used to notice a filesystem effect in a
-non-git cwd, the effect gate behind the user_files artifact nudge, the
-protected-runtime dirty/restore pair, and the declared ``scratch`` lifecycle
+non-git cwd, the effect gate behind the user_files artifact nudge, and the declared ``scratch`` lifecycle
 (confinement and git-untracked preconditions plus the sha fingerprints that let
 workspace patch capture exclude an ephemeral verification file). The handlers
 that call this surface stay with ``tools/shell.py``.
@@ -20,9 +19,6 @@ import subprocess
 from typing import List
 
 from ouroboros.artifacts import record_task_scratch
-from ouroboros.runtime_mode_policy import (
-    is_protected_runtime_path,
-)
 from ouroboros.tools.registry import (
     ToolContext,
 )
@@ -97,47 +93,6 @@ def _user_files_run_had_effect(
     if before_listing is not None:
         return _shallow_listing(work_dir) != before_listing
     return False
-
-
-def _protected_runtime_dirty_paths(repo_dir: pathlib.Path) -> list[str]:
-    dirty: set[str] = set()
-    for cmd in (["git", "diff", "--name-only"], ["git", "diff", "--cached", "--name-only"]):
-        try:
-            res = subprocess.run(
-                cmd,
-                cwd=str(repo_dir),
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env=host_git_env(),
-            )
-            if res.returncode == 0:
-                dirty.update(rel for rel in res.stdout.splitlines() if is_protected_runtime_path(rel))
-        except Exception:
-            pass
-    return sorted(dirty)
-
-
-def _restore_protected_runtime_paths(repo_dir: pathlib.Path, paths: list[str]) -> list[str]:
-    restored: list[str] = []
-    for rel in sorted(set(paths)):
-        try:
-            subprocess.run(
-                ["git", "reset", "HEAD", "--", rel],
-                cwd=str(repo_dir),
-                capture_output=True,
-                timeout=5,
-            )
-            subprocess.run(
-                ["git", "checkout", "--", rel],
-                cwd=str(repo_dir),
-                capture_output=True,
-                timeout=5,
-            )
-            restored.append(rel)
-        except Exception:
-            pass
-    return restored
 
 
 def _tree_fingerprint(path: pathlib.Path) -> str:

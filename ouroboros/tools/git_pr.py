@@ -310,8 +310,7 @@ def _cherry_pick_pr_commits(
         return resolved_or_error
     resolved = resolved_or_error
 
-    if (_g(["diff", "--cached", "--name-only"], repo_dir).stdout.strip()
-            or _g(["diff", "--name-only"], repo_dir).stdout.strip()):
+    if _g(["status", "--porcelain", "--untracked-files=no"], repo_dir).stdout.strip():
         return (
             "⚠️ CHERRY_PICK_ERROR: Working tree has staged or unstaged changes.\n"
             "Commit or restore to HEAD before cherry-picking."
@@ -541,7 +540,7 @@ def _stage_pr_merge(
                 f"{_sanitize_git_error((co.stderr or '').strip())}"
             )
 
-        if _g(["diff", "--name-only"], repo_dir).stdout.strip():
+        if _g(["diff", "--numstat"], repo_dir).stdout.strip():
             _restore_on_error()
             return (
                 f"⚠️ PR_MERGE_ERROR: Working tree on '{target_branch}' has unstaged "

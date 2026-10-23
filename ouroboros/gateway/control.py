@@ -479,7 +479,13 @@ def _pins_match(plan: dict, base_sha: str, target_sha: str) -> bool:
 def _index_lock_precondition() -> JSONResponse | None:
     from supervisor.git_ops_reset import observe_index_lock
 
-    fact = observe_index_lock()
+    try:
+        fact = observe_index_lock()
+    except (OSError, RuntimeError) as exc:
+        return JSONResponse({
+            "error": f"Not applied: could not check Git's index lock: {exc}. No work was stopped.",
+            "reason": "index_lock_check_failed", "outcome": "not_applied",
+        }, status_code=409)
     if fact["exists"]:
         return JSONResponse({
             "error": f"Not applied: Git index lock exists at {fact['path']}. No work was stopped.",
