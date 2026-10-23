@@ -146,6 +146,71 @@ def test_failed_loop_rounds_match_live_saved_facts_and_history(tmp_path, monkeyp
                 ("live", "saved", "facts", "history"), expected)
 
 
+@pytest.mark.parametrize("lane", ["ordinary", "split", "split-project"])
+@pytest.mark.parametrize("skip_post", [False, True], ids=["post", "skip-post"])
+@pytest.mark.parametrize("usage, expected", [
+    ({"rounds": 3}, 3), ({"rounds": 0}, 0), ({}, 0),
+    ({"rounds": 17, "loop_evidence_unavailable": True}, None),
+], ids=["accepted", "zero", "no-response", "unknown"])
+def test_emitted_rounds_survive_split_dispatch_and_result_pruning(
+    tmp_path, monkeypatch, lane, skip_post, usage, expected,
+):
+    from ouroboros import llm, post_task_evolution
+    from tests import _dialogue
+    from tests._store_shared import delete_result
+
+    canonical = tmp_path / "canonical"
+    actor = canonical if lane == "ordinary" else tmp_path / "actor"
+    for root in {canonical, actor}:
+        (root / "logs").mkdir(parents=True)
+    task = {"id": "root-counter", "root_task_id": "root-counter", "type": "task",
+            "chat_id": 7, "text": "Check the result", "drive_root": str(actor),
+            "budget_drive_root": str(canonical), "_is_direct_chat": lane == "ordinary",
+            "_skip_post_task_synthesis": skip_post}
+    if lane == "split-project":
+        task["project_id"] = "counter-project"
+    trace = {"tool_calls": [], "reasoning_notes": [],
+             "loop_evidence_unavailable": bool(usage.get("loop_evidence_unavailable"))}
+    post_roots = []
+    # Keep real dispatch, snapshots, checkpoint and facts writes. Only paid work is replaced.
+    monkeypatch.setattr(llm, "LLMClient", SimpleNamespace)
+    monkeypatch.setattr(pipeline, "_run_memory_fallback_draft",
+                        lambda env, *_args: post_roots.append(env.drive_root))
+    monkeypatch.setattr(pipeline, "_run_scratchpad_consolidation", lambda *_args: None)
+    monkeypatch.setattr(post_task_evolution, "maybe_promote", lambda *_args: None)
+    monkeypatch.setattr(pipeline, "_task_cost_fields", lambda *_args: {"total_rounds": 99})
+    events = []
+    pipeline.emit_task_results(
+        SimpleNamespace(drive_root=actor, repo_dir=tmp_path), None, None, events, task,
+        "Checked the result.", dict(usage), trace, 0.0, actor / "logs",
+    )
+    assert post_roots == ([] if skip_post else [canonical if lane == "split" else actor])
+    metrics = next(event for event in events if event["type"] == "task_metrics")
+    assert metrics["total_rounds"] == 99, "ledger attempts differ from accepted loop replies"
+    stored = pipeline.load_task_result(actor, task["id"])
+    if actor != canonical:
+        assert "loop_outcome" not in (pipeline.load_task_result(canonical, task["id"]) or {}), (
+            "the facts must survive before the actor result is copied back")
+    [facts] = [row for row in _dialogue.chat_rows(canonical)
+               if row.get("summary_kind") == "host_task_facts" and row.get("task_id") == task["id"]]
+
+    # Remove both result copies, then use the real cold-history consumer of the retained facts.
+    for root in {canonical, actor}:
+        delete_result(root, task["id"])
+        assert pipeline.load_task_result(root, task["id"]) is None
+    response = asyncio.run(make_chat_history_endpoint(canonical)(
+        SimpleNamespace(query_params={"chat_id": "7"})))
+    assert response.status_code == 200
+    summaries = [row for row in json.loads(response.body)["messages"]
+                 if row.get("system_type") == "task_summary" and row.get("task_id") == task["id"]
+                 and "rounds" in row]
+    assert summaries, "pruned results still have retained counter facts in history"
+    assert {"live": metrics["rounds"], "saved": stored["loop_outcome"]["usage"]["total_rounds"],
+            "facts": facts["rounds"], "history": summaries[0]["rounds"]} == dict.fromkeys(
+                ("live", "saved", "facts", "history"), expected)
+    assert all(row["rounds"] == expected for row in summaries)
+
+
 @pytest.mark.parametrize("snapshot, expected", [
     ({}, None), ({"loop_outcome": {"usage": {"total_rounds": None}}}, None),
     ({"loop_outcome": {"usage": {"total_rounds": 0}}}, 0),

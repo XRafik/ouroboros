@@ -1,14 +1,8 @@
-"""The single classifier answers exactly what the retired loop pair answered,
-except on a table of deltas the owner approved.
+"""Compare the classifier with the retired loop pair, except owner-approved deltas.
 
-The oracle is a golden snapshot of the OLD pair's answers, captured from the tree
-named in ``GOLDEN_SOURCE_SHA``, not a copy of the old parser: a copy is dead code
-that invites cleanup, a data file cannot drift silently.
-
-Both directions fail. An unapproved divergence fails because the cutover would then
-be changing behaviour nobody signed off. An APPROVED delta that no longer fires ALSO
-fails, so the table cannot rot into a permanent excuse list — once a delta is gone,
-its row goes with it.
+The oracle is the OLD pair's golden answers from ``GOLDEN_SOURCE_SHA``.
+An unapproved divergence fails; an approved delta that no longer fires also fails,
+so obsolete exceptions cannot survive silently.
 """
 
 from __future__ import annotations
@@ -361,7 +355,7 @@ def _golden() -> dict[str, dict]:
 # New producer contracts have no historical answer: the recorded old SHA is
 # unavailable. Keep the historical corpus intact and assert the new observed
 # outcome explicitly rather than manufacture old evidence (04-AGENCY S1/S3).
-CURRENT_PRODUCER_CONTRACTS = {
+CURRENT_PRODUCER_CONTRACTS = {"WORLD_SIZE_NOTICE": (False, "ok"),  # the map's size notice rides a successful update_world
     # D1 per-target mutation custody: the existing INTEGRATE_ family reports a
     # busy target as a substrate refusal; no historical answer is fabricated.
     "INTEGRATE_DELEGATED_TARGET_BUSY": (True, "integration_blocked"),
@@ -408,6 +402,17 @@ CURRENT_PRODUCER_CONTRACTS = {
     "native:TOOL_ERROR:PR_MERGE_": (True, "error"),
     "native:TOOL_ERROR:PR_MERGE_REFUSED": (True, "error"),
     "native:TOOL_ARG_ERROR:PR_MERGE_REFUSED": (True, "argument_error"),
+    # PR detail markers: native errors vs bare-text legacy warnings; public writes carry the shared receipt.
+    "PR_CREATE_UNKNOWN": (False, "ok"),
+    "PR_EXISTS": (False, "ok"),
+    "PR_PRECHECK_FAILED": (True, "error"),
+    "PR_READY_UNKNOWN": (False, "ok"),
+    "PR_UPDATE_UNKNOWN": (False, "ok"),
+    "native:TOOL_ERROR:PR_CREATE_UNKNOWN": (True, "error"),
+    "native:TOOL_ERROR:PR_EXISTS": (True, "error"),
+    "native:TOOL_ERROR:PR_PRECHECK_FAILED": (True, "error"),
+    "native:TOOL_ERROR:PR_READY_UNKNOWN": (True, "error"),
+    "native:TOOL_ERROR:PR_UPDATE_UNKNOWN": (True, "error"),
     # Saved-setting selection uses the existing process access authority; its new
     # foreground refusal remains blocked through both text and native ACCESS_BLOCKED.
     "PROCESS_ENV_REFERENCE_BLOCKED": (True, "blocked"),
