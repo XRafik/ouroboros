@@ -10,10 +10,10 @@ own refs/stash/config/hooks, borrowed read-only objects, HEAD at the parent and 
 at the frozen tree; a retained skill view; or an empty folder beside a live workspace.
 Rejoin keeps the copy; remaking uses its frozen tree, original root and retained views.
 
-At terminal, ``capture_seat_evidence`` retains whole Git deltas or changed skill entries
-(same-stat bytes compared), plus whole ``.review-evidence/``; workspace folders have no delta.
-Nothing is applied. Its receipt precedes one-shot deletion regardless of process census
-(owner 2026-10-12). Named gaps release; unreadable/unlistable paths keep copies for recovery.
+At terminal, ``capture_seat_evidence`` retains whole Git deltas or changed skill entries,
+comparing same-stat bytes, plus whole ``.review-evidence/``; workspace folders have no delta.
+Nothing is applied. Receipts precede one-shot deletion regardless of process census (owner 2026-10-12).
+Named gaps release; unreadable/unlistable paths keep copies for recovery.
 Threads keep their active copy; a failed predecessor moves under its operation for retry.
 Git omits untracked special entries, ignored outputs outside ``.review-evidence/`` (listed)
 and frozen ``.review-drive`` inputs. Full access is not an OS sandbox.
@@ -400,7 +400,7 @@ def checking_instructions(area: str, source: Mapping[str, Any], root: str = "", 
 
 
 def _retain_files(area: pathlib.Path, paths: List[str], files_dir: pathlib.Path, budget: List[float],
-                  gaps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+                  gaps: List[Dict[str, Any]], *, preserve_mode=True) -> List[Dict[str, Any]]:
     """Copy regular files byte-exact into the evidence store within the caller's byte budget."""
     from ouroboros.delegate_named_evidence import private_directory
 
@@ -415,13 +415,14 @@ def _retain_files(area: pathlib.Path, paths: List[str], files_dir: pathlib.Path,
             continue
         target = files_dir / relative
         private_directory(target.parent, files_dir.parent)
-        # Never overwrite a retained inode or follow a leaf link. Filesystem modes
-        # stay writable for Windows GC; the receipt keeps the source's actual mode.
+        # Fresh regular files: ordinary delegates keep writable copies; reviewers preserve modes.
         with _open_regular(source) as src, target.open("xb") as dst:
             shutil.copyfileobj(src, dst, 1 << 20)
+        mode = stat.S_IMODE(source.stat().st_mode)
+        if preserve_mode:
+            target.chmod(mode)
         budget[0] -= size
-        kept.append({"path": relative, "size": size, "sha256": _sha(target),
-                     "mode": stat.S_IMODE(source.stat().st_mode)})
+        kept.append({"path": relative, "size": size, "sha256": _sha(target), "mode": mode})
     return kept
 
 
@@ -448,7 +449,7 @@ def named_evidence_witness(area: pathlib.Path) -> str:
 
 
 def retain_named_evidence(area: pathlib.Path, files_dir: pathlib.Path, budget: List[float],
-                          gaps: List[Dict[str, Any]], *, product_paths=()) -> List[Dict[str, Any]]:
+                          gaps: List[Dict[str, Any]], *, product_paths=(), preserve_mode=True) -> List[Dict[str, Any]]:
     """Retain declared checking outputs independently of product-patch filters.
 
     Links are not dereferenced: a linked output is a gap and keeps the working
@@ -479,7 +480,7 @@ def retain_named_evidence(area: pathlib.Path, files_dir: pathlib.Path, budget: L
                     paths.append(relative)
                 elif name in files:
                     gaps.append({"path": relative, "reason": "unsupported_entry_type"})
-    return _retain_files(area, sorted(paths), files_dir, budget, gaps)
+    return _retain_files(area, sorted(paths), files_dir, budget, gaps, preserve_mode=preserve_mode)
 
 
 def _git_delta(area: pathlib.Path, source: Mapping[str, Any], evidence: pathlib.Path,

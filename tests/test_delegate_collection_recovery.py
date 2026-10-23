@@ -293,7 +293,7 @@ def test_unchanged_money_debt_rests_but_facts_and_explicit_request_are_immediate
     clock[0] += config.BODY_MAINTENANCE_INTERVAL_SEC
     tick()
     assert len(attempts) == 1, "elapsed time does not change retry eligibility"
-    runtime.request(entry.run_id)
+    runtime._collect(entry.run_id, recapture=True)
     tick()
     assert len(attempts) == 2
     body.observe_run(tmp_path, entry, terminal(text="new exact result", seq=6))
@@ -304,7 +304,7 @@ def test_unchanged_money_debt_rests_but_facts_and_explicit_request_are_immediate
     warnings = [r for r in caplog.records if "money remains owed" in r.message and r.levelno >= logging.WARNING]
     assert len(warnings) == 2
     monkeypatch.setattr(usage_accounting, "record_subscription_session", lambda *a, **kw: None)
-    runtime.request(entry.run_id)
+    runtime._collect(entry.run_id, recapture=True)
     tick()
     tick()
     assert current.run(tmp_path, entry.run_id).settled
@@ -334,6 +334,7 @@ def test_incomplete_output_does_not_republish_identical_preview_on_each_retry(tm
     entry = started(tmp_path)
     detail = terminal()
     detail["primaryOutput"].update(truncated=True, bytes=1000)
+    runtime.gateway_factory = lambda: SimpleNamespace(get_run=lambda *a, **k: detail, close=lambda: None)
     body.collect_terminal(tmp_path, entry.run_id, detail=detail)
     before = [r for r in custody.custody_rows(tmp_path) if r.get("type") == custody.OUTPUT_SPILLED]
     tick()

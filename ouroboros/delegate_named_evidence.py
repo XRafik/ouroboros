@@ -16,7 +16,7 @@ import stat
 import uuid
 
 from ouroboros import delegate_custody as custody
-from ouroboros.delegate_capture_attempt import POLICY
+from ouroboros.delegate_capture_attempt import POLICY, failure_retry
 from ouroboros.utils import atomic_write_json
 
 
@@ -151,12 +151,16 @@ def retain_named(root, entry, *, whole=False, recapture=False, reread=False, pub
         if error is not None:
             raise error
         files = retain_named_evidence(area, staging / "files",
-            [float("inf") if whole else EVIDENCE_RETAIN_BYTES], gaps, product_paths=products)
+            [float("inf") if whole else EVIDENCE_RETAIN_BYTES], gaps, product_paths=products, preserve_mode=False)
         summary = {"status": "partial" if gaps else "retained", "files": files, "gaps": gaps}
     except Exception as exc:
-        summary = {"status": "capture_failed", "files": files, "gaps": gaps,
+        # A raised copier has no complete inventory. Keep the source, not unlisted
+        # partial copies in every immutable retry generation.
+        if (staging / "files").exists():
+            shutil.rmtree(staging / "files")
+        summary = {"status": "capture_failed", "files": [], "gaps": gaps,
                    "error": f"{type(exc).__name__}: {exc}",
-                   "retry": "transient" if isinstance(exc, OSError) else "changed_input"}
+                   "retry": failure_retry(exc)}
     summary.update(evidence_dir=str(final), inputs=source, witness=source["witness"],
         summary_read={"root": "artifact_store", "path": f"delegated_runs/{home.name}/{name}/summary.json"})
     try:

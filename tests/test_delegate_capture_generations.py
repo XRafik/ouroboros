@@ -7,6 +7,7 @@ witness walk would violate this law even if the saved summary were never decoded
 from __future__ import annotations
 
 import json
+import errno
 import os
 import pathlib
 import shutil
@@ -39,6 +40,29 @@ def _captured(tmp_path, monkeypatch, *, partial=False):
     result = body.collect_terminal(tmp_path, entry.run_id, detail=terminal(entry.run_id))
     assert result["workspace_capture"]["named_evidence"]["status"] == ("partial" if partial else "retained")
     return current.run(tmp_path, entry.run_id), area
+
+
+def test_failed_generations_publish_receipts_without_unlisted_bytes(tmp_path, monkeypatch):
+    entry, area = _captured(tmp_path, monkeypatch)
+    original, receipt = body.saved_named_evidence(tmp_path, entry)
+    original_bytes = original.read_bytes()
+    copy = shutil.copyfileobj
+    def interrupted(src, dst, *args):
+        dst.write(src.read(7))
+        raise OSError(errno.EBUSY, "capture interrupted after writing bytes")
+    with monkeypatch.context() as broken:
+        broken.setattr(shutil, "copyfileobj", interrupted)
+        for _ in range(2):
+            failed = named.run_named_evidence(tmp_path, entry, recapture=True)
+            home = pathlib.Path(failed["evidence_dir"])
+            assert failed["status"] == "capture_failed" and failed["retry"] == "transient"
+            assert failed["files"] == [] and sorted(p.name for p in home.iterdir()) == ["summary.json"]
+            assert original.read_bytes() == original_bytes
+    assert shutil.copyfileobj is copy
+    healed = named.run_named_evidence(tmp_path, entry, recapture=True)
+    assert healed["status"] == "retained" and healed["files"] == receipt["files"]
+    assert (pathlib.Path(healed["evidence_dir"]) / "files" / checking.EVIDENCE_DIRNAME / "result.bin").read_bytes() == EVIDENCE
+    assert area.is_dir() and original.read_bytes() == original_bytes
 
 
 def test_clock_advanced_partial_is_quiet_but_changed_terminal_and_explicit_capture_work(
@@ -80,9 +104,9 @@ def test_clock_advanced_partial_is_quiet_but_changed_terminal_and_explicit_captu
     assert len(submissions) == 2 and walks and copies
     assert first.read_bytes() == first_bytes
     walks.clear(); copies.clear(); probes.clear(); submissions.clear()
-    runtime.request(entry.run_id)
+    runtime._collect(entry.run_id, recapture=True)
     tick()
-    assert len(submissions) == 2 and walks and copies
+    assert len(submissions) == 1 and walks and copies
     walks.clear(); copies.clear(); probes.clear(); submissions.clear()
     clock[0] += 10000
     tick()
@@ -153,7 +177,7 @@ def test_partial_investigation_reuses_its_receipt_and_changed_input_finishes(tmp
 def test_a_missing_or_unreadable_receipt_is_a_new_fact(tmp_path, monkeypatch, damage, driven_runtime):  # noqa: F811
     runtime, clock, tick = driven_runtime
     entry, area = _captured(tmp_path, monkeypatch)
-    runtime.request(entry.run_id)
+    runtime._collect(entry.run_id, recapture=True)
     tick()  # Exercise loss after a child result has already been accepted, too.
     entry = current.run(tmp_path, entry.run_id)
     assert entry.capture_job["state"] == "consumed"
@@ -183,12 +207,12 @@ def test_plain_result_reads_do_not_request_recapture(tmp_path, monkeypatch, driv
     entry, _ = _captured(tmp_path, monkeypatch, partial=True)
     ctx = ToolContext(repo_dir=tmp_path, drive_root=tmp_path, task_id=entry.task_id)
     with monkeypatch.context() as patch:
-        patch.setattr(runtime, "request", lambda *a: pytest.fail("reading is not an explicit recapture"))
+        patch.setattr(runtime, "_collect", lambda *a, **k: pytest.fail("reading is not an explicit recapture"))
         for read in (lambda: retained_terminal_result(ctx, entry.run_id),
                      lambda: collect_and_deliver_terminal(ctx, entry.run_id, terminal(entry.run_id), body._shape(entry), entry, None)):
             assert read()["workspace_capture"]["named_evidence"]["status"] == "partial"
     old = body.saved_named_evidence(tmp_path, entry)[0]
-    runtime.request(entry.run_id)
+    runtime._collect(entry.run_id, recapture=True)
     tick()
     assert body.saved_named_evidence(tmp_path, current.run(tmp_path, entry.run_id))[0] != old
 
@@ -196,7 +220,7 @@ def test_plain_result_reads_do_not_request_recapture(tmp_path, monkeypatch, driv
 def test_transient_capture_retries_once_in_the_next_generation(tmp_path, monkeypatch):
     entry, area, _ = _prepared(tmp_path)
     copy = shutil.copyfileobj
-    monkeypatch.setattr(shutil, "copyfileobj", lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked file")))
+    monkeypatch.setattr(shutil, "copyfileobj", lambda *a, **k: (_ for _ in ()).throw(OSError(errno.EBUSY, "locked file")))
     first = body.collect_terminal(tmp_path, entry.run_id, detail=terminal(entry.run_id), generation="one")
     assert first["workspace_capture"]["named_evidence"]["status"] == "capture_failed"
     fresh = current.run(tmp_path, entry.run_id)
@@ -206,6 +230,32 @@ def test_transient_capture_retries_once_in_the_next_generation(tmp_path, monkeyp
     fresh = current.run(tmp_path, entry.run_id)
     assert fresh.named_evidence["status"] == "retained" and not current.collection_pending(fresh)
     assert not collection_due(fresh, generation="three") and area.is_dir()
+
+
+def test_permission_failure_rests_until_named_source_changes(tmp_path, monkeypatch):
+    entry, area, _ = _prepared(tmp_path)
+    attempts, copy = [], shutil.copyfileobj
+    def denied(*args, **kwargs):
+        attempts.append(True)
+        raise PermissionError(errno.EACCES, "source is unreadable")
+    monkeypatch.setattr(shutil, "copyfileobj", denied)
+    body.collect_terminal(tmp_path, entry.run_id, detail=terminal(entry.run_id), generation="one")
+    failed = current.run(tmp_path, entry.run_id)
+    receipt, saved = body.saved_named_evidence(tmp_path, failed)
+    assert saved["status"] == "capture_failed" and saved["retry"] == "changed_input"
+    contents = receipt.read_bytes()
+    for generation in ("two", "three"):
+        assert not collection_due(failed, generation=generation)
+        body.collect_terminal(tmp_path, entry.run_id, generation=generation)
+    assert attempts == [True] and receipt.read_bytes() == contents
+    assert list(receipt.parent.parent.glob("evidence*")) == [receipt.parent]
+    monkeypatch.setattr(shutil, "copyfileobj", copy)
+    source = area / checking.EVIDENCE_DIRNAME / "result.bin"
+    source.write_bytes(b"changed readable source")
+    latest = named.run_named_evidence(tmp_path, failed)
+    assert latest["status"] == "retained" and latest["evidence_dir"] != saved["evidence_dir"]
+    assert receipt.read_bytes() == contents
+    assert (pathlib.Path(latest["evidence_dir"]) / "files" / checking.EVIDENCE_DIRNAME / "result.bin").read_bytes() == source.read_bytes()
 
 
 @pytest.mark.parametrize("staging", ["directory", "linked_receipt"])

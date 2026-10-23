@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import pytest
+
+from tests._delegate_capture_child import capture_child  # noqa: F401
 
 from ouroboros import delegate_collection as body
 from ouroboros import delegate_custody as custody
@@ -47,6 +50,7 @@ def recover(root, entry, factory, surface):
 @pytest.mark.parametrize("pending", [False, True])
 def test_settled_local_capture_recovers_without_remote_run(tmp_path, monkeypatch, money, surface, transport, pending):  # noqa: F811
     from ouroboros import claudexor_daemon
+    from ouroboros import delegate_capture_job
     from ouroboros.subagent_worktrees import find_execution_snapshot
     from ouroboros.tools import delegate_integration
     from tests.test_delegated_run_isolation import TestCaptureAndIntegrate, _isolated_entry
@@ -83,10 +87,21 @@ def test_settled_local_capture_recovers_without_remote_run(tmp_path, monkeypatch
         assert _pending_ids(root, entry.task_id) == [INVOCATION]
         retained = [row for row in outcomes if row.get("action") == "invocation_retained"]
         assert bool(retained) == (surface == "orphan")
+    capture = delegate_capture_job._capture
+    entered, release = threading.Event(), threading.Event()
+    def gated_capture(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), "child capture gate was not released"
+        return capture(*args, **kwargs)
+    monkeypatch.setattr(delegate_capture_job, "_capture", gated_capture)
     runtime = body.start_body_runtime(root, gateway_factory=factory)
     try:
+        _until(entered.is_set)
+        assert not current.run(root, entry.run_id).patch_captured
+        release.set()
         _until(lambda: current.run(root, entry.run_id).patch_captured)
     finally:
+        release.set()
         runtime.close(wait=True)
     after = current.run(root, entry.run_id)
     assert after.patch_captured and not body.collection_pending(after)

@@ -342,7 +342,7 @@ def test_slow_capture_does_not_block_another_terminal_observation(tmp_path, monk
         assert available["status"] == "terminal" and available["output_delivery"]["complete"]
         assert available["workspace_capture"]["status"] == "pending"
         assert available["settlement"]["settled"] and not release.is_set()
-        runtime.request(b.run_id)
+        assert runtime.ensure_runs([(b.run_id, b.invocation_id)])
         _until(lambda: current.run(tmp_path, b.run_id).terminal_state)
         assert not release.is_set()
         body.stop_body_runtime(tmp_path, wait=False)

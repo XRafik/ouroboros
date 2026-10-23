@@ -13,7 +13,7 @@ import pathlib
 import uuid
 
 from ouroboros import delegate_custody as custody, delegate_custody_current as current
-from ouroboros.delegate_capture_attempt import GENERATION, POLICY
+from ouroboros.delegate_capture_attempt import GENERATION, POLICY, failure_retry
 
 NAME = "delegate_capture"
 READY = {"ready", "ready_with_changes", "ready_no_changes"}
@@ -38,7 +38,6 @@ def _record(root, entry, outcome):
 def request_or_result(root, entry, *, generation, recapture=False):
     """Server-only, under its disposition lock. Return prepared bytes or owe one child job."""
     from ouroboros.delegate_collection import _read_source
-    from ouroboros.maintenance import child
 
     job, binding = entry.capture_job, identity(entry)
     recapture |= entry.named_evidence.get("status") == "unreadable"
@@ -59,9 +58,7 @@ def request_or_result(root, entry, *, generation, recapture=False):
                "generation": generation, "recapture": recapture}
         if not _record(root, entry, job):
             raise OSError("capture request publication failed")
-        child.request()
-    elif job.get("generation") != generation:
-        child.request()  # revival wakes the existing addressed work, never creates a second attempt
+    # collect_terminal wakes maintenance after releasing its publication/lock boundary.
     return {"status": "pending", "note": "The maintenance child owes this capture; no patch was applied."}
 
 
@@ -116,7 +113,9 @@ def _capture(root, entry, should_stop):
     from ouroboros.tools.delegate_integration import capture_terminal_patch_for_drive
 
     path = custody.disposition_lock_path(root, entry)
-    fd = acquire_exclusive_file_lock(path, timeout_sec=0, owner_aware_stale=True)
+    # Only the child may wait: reclaiming a dead owner's name needs another acquisition,
+    # and the server that just requested capture may still be publishing its attempt.
+    fd = acquire_exclusive_file_lock(path, owner_aware_stale=True)
     if fd is None:
         return False
     try:
@@ -147,7 +146,7 @@ def _capture(root, entry, should_stop):
                         result["named_evidence"] = named
             except Exception as exc:
                 result = {"status": "failed", "note": f"{type(exc).__name__}: {exc}",
-                          "retry": "transient" if isinstance(exc, OSError) else "changed_input"}
+                          "retry": failure_retry(exc)}
         source = _retain(root, entry, result, "capture-" + request["id"])
         return _record(root, entry, {**request, "state": "ready", "source": source,
                                     "child_generation": GENERATION})
