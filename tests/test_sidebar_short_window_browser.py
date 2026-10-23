@@ -131,3 +131,50 @@ def test_a_row_reached_with_tab_is_never_left_under_a_pinned_bar(chromium_ui, tm
     hidden = [(way, stop['name']) for way, stops in (('down', down), ('up', up)) for stop in stops
               if stop['underFoot'] or stop['underHead']]
     assert not hidden, ('a focused row under a pinned bar', hidden, facts)
+
+
+# The two pinned bars: the heights the column's scroll padding holds against their real border boxes.
+BARS = """() => {
+    const side = document.getElementById('primary-sidebar');
+    const css = getComputedStyle(side);
+    return {head: side.querySelector('.sidebar-head').getBoundingClientRect().height,
+            foot: side.querySelector('.sidebar-foot-meta').getBoundingClientRect().height,
+            headPad: parseFloat(css.getPropertyValue('--sidebar-head-h')),
+            footPad: parseFloat(css.getPropertyValue('--sidebar-foot-h'))};
+}"""
+LATE = {
+    # The macOS shell writes its title band once the window has measured it (launcher_window_chrome.py).
+    'title-band': "() => { const r = document.documentElement; r.dataset.windowChrome = 'integrated';"
+                  " r.style.setProperty('--window-chrome-top', '52px'); }",
+    # Telegram reports its safe area after the app has started (host_telegram.js mirrorInsets).
+    'safe-area': "() => document.documentElement.style.setProperty('--tg-safe-area-inset-bottom', '34px')",
+}
+
+
+@pytest.mark.parametrize(('width', 'height', 'touch', 'late', 'bar', 'grows'),
+                         [(1100, 500, False, 'title-band', 'head', 52), (390, 570, True, 'safe-area', 'foot', 34)],
+                         ids=['desk-title-band', 'drawer-safe-area'])
+def test_the_scroll_padding_follows_a_band_or_a_safe_area_that_arrives_later(shell_ui, tmp_path, width, height,
+                                                                             touch, late, bar, grows):
+    """The bars' measured heights stay their real heights when only their padding changes after the first paint, so
+    the scroll padding still keeps a focused row clear of both."""
+    page = seed_page(shell_ui, width, height, touch=touch)
+    facts = {'engine': shell_ui['engine'], 'late': late}
+    try:
+        boot(page, shell_ui)
+        if width < 720:
+            open_drawer(page)
+        facts['short'] = page.evaluate(SHORT)
+        facts['before'] = page.evaluate(BARS)
+        page.evaluate(LATE[late])
+        settle(page)
+        page.wait_for_timeout(150)
+        facts['after'] = page.evaluate(BARS)
+    finally:
+        evidence(tmp_path, f'sidebar-short-late-{late}-{shell_ui["engine"]}', facts)
+        page.close()
+    before, after = facts['before'], facts['after']
+    assert facts['short'] is True, facts
+    assert abs(after[bar] - before[bar] - grows) <= 1, ('the late padding reached the bar', facts)
+    for state in (before, after):
+        assert abs(state['headPad'] - state['head']) <= 0.5 and abs(state['footPad'] - state['foot']) <= 0.5, facts

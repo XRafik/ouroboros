@@ -107,11 +107,12 @@ test('measurePinnedBars writes the pinned head and foot heights as the column\'s
     let disconnected = false;
     class Observer {
         constructor(callback) { fire = callback; }
-        observe(el) { observed.push(el); }
+        observe(el, options) { observed.push([el, options?.box]); }
         disconnect() { disconnected = true; }
     }
     const dispose = measurePinnedBars(sidebar, { Observer });
-    assert.deepEqual(observed, [head, foot]);
+    // The border box: a band or a safe area that arrives later changes only the bars' padding.
+    assert.deepEqual(observed, [[head, 'border-box'], [foot, 'border-box']]);
     assert.equal(props.get('--sidebar-head-h'), '104px');
     assert.equal(props.get('--sidebar-foot-h'), '60.5px');
     foot.getBoundingClientRect = () => ({ height: 88 });  // an update capsule wrapped onto a second line

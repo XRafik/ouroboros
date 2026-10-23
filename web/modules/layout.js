@@ -44,7 +44,9 @@ export function pinchMagnified(w = win()) {
 
 /** A window too short for the sidebar's zones pins its head and its foot over the one scroller (style.css). Their
  * measured heights are the column's scroll padding there, so a row reached with Tab or brought into view is never
- * left under either bar. Returns the disposer. */
+ * left under either bar. Their border boxes are watched: the macOS title band and the safe area are their padding
+ * and can arrive after the first paint (a Telegram inset, a page zoom), which a content box never reports. Returns
+ * the disposer. */
 export function measurePinnedBars(sidebar, { Observer = globalThis.ResizeObserver } = {}) {
     const head = sidebar?.querySelector('.sidebar-head');
     const foot = sidebar?.querySelector('.sidebar-foot-meta');
@@ -54,8 +56,8 @@ export function measurePinnedBars(sidebar, { Observer = globalThis.ResizeObserve
         sidebar.style.setProperty('--sidebar-foot-h', `${foot.getBoundingClientRect().height}px`);
     };
     const observer = new Observer(write);
-    observer.observe(head);
-    observer.observe(foot);
+    observer.observe(head, { box: 'border-box' });
+    observer.observe(foot, { box: 'border-box' });
     write();
     return () => observer.disconnect();
 }
