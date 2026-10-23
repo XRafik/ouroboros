@@ -511,7 +511,7 @@ def _usage_owners(root: pathlib.Path, k: int) -> Dict[str, int]:
             delete_result(root, task_id)
             absent += 1
         for index in range(CONSCIOUSNESS_PER_K):
-            _settled_task(root, f"hist-wake-{unit}-{index}")
+            _settled_task(root, f"hist-wake-{unit}-{index}", ts=_iso(OLD))  # history: older than current work
     return {"absent_owners": absent}
 
 
@@ -566,7 +566,7 @@ def _packed(root: pathlib.Path, k: int) -> Dict[str, Any]:
                     {"call_id": f"llm_{call}", "task_id": task_id, "full_payload_ref": ref}), encoding="utf-8")
             store_actor_source_bytes(root, task_id, category="context_checkpoints", source_id=f"focus_{task_id}",
                                      data=b"# focus\n" + b"y" * 3000, extension="md")
-            _settled_task(root, task_id)
+            _settled_task(root, task_id, ts=_iso(OLD))  # history: older than current work
     report = evidence_packer.run_pass(root)
     return {"packed": report["packed"], "faults": report["faults"]}
 

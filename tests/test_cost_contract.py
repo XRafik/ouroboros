@@ -355,15 +355,7 @@ DUTY_NAMES = (*_host_duty_names(), "delegated-body")  # the dispatcher's invento
 # marker turns the known breach into a strict xfail that flips the moment the cause is gone.
 REST_LAW_GAPS: Dict[str, str] = {}
 BOUNDARIES = ("P:metrics_run", "P:metrics_review", "P:intake", "P:send", "P:allowance")
-BOUNDARY_GAPS: Dict[str, str] = {
-    "P:intake": (
-        "Owner-message intake decodes the WHOLE body of every offered newest root (server_routing_context."
-        "_recent_root_results: load_task_result per id of newest_root_ids, :257) on the loop thread before the "
-        "turn starts. The window is addressed now (lane D2b: 70 decodes and 218 statements at both sizes, "
-        "vm_steps 4500 -> 4700 inside the allowance), but the offered roots' bodies are what they are: at k=30 "
-        "the newest roots carry the 20-200 KB settled bodies, json_chars +91 KB at k=1 -> k=30. The decision "
-        "needs each root's facts (status, terminal line), not its body; the row's typed columns hold them."),
-}
+BOUNDARY_GAPS: Dict[str, str] = {}
 # The counter a duty's companion makes appear (work > rest at every size); the body's walk and copy are
 # the two execution-root counters the 22.10 control fails on at rest. A copy opens its source through
 # either door: ``io.open`` (``shutil.copy2``, the 22.10 body) or ``os.open`` (the exclusive byte copy of
