@@ -1,8 +1,6 @@
-"""Housekeeping on the two cadences a running server already has (owner 3A: a server that stays
-up for weeks retires its leftovers too). The age-only retirers of small planes run on every 300 s
-reconcile pass, task trees and service logs behind the startup recovery gate; the working copies'
-retirers (worktrees, delegated snapshots, review checkouts) run on every 600 s custody pass with
-the supervisor's settlement probe; the memory-journal observation stays once per generation."""
+"""Housekeeping stays live across a server generation. Age-only retirement runs in the child
+on producer/deadline/startup facts, with task sources behind the recovery gate. Working copies
+stay on the custody pass; the memory-journal observation stays once per generation."""
 from __future__ import annotations
 
 import os
@@ -49,7 +47,8 @@ def _reconcile_pass(monkeypatch):
 
 
 def test_the_age_only_retirers_run_again_on_a_later_pass_and_trees_wait_out_a_recovery_gap(root, monkeypatch):
-    from ouroboros import memory_journal_compaction, subagent_worktrees
+    from ouroboros import maintenance_jobs, maintenance_retirement, memory_journal_compaction, subagent_worktrees
+    from ouroboros.retention import get_gc_retention_days
 
     observations = []
     observe = memory_journal_compaction.compact_memory_journal_snapshots
@@ -73,8 +72,21 @@ def test_the_age_only_retirers_run_again_on_a_later_pass_and_trees_wait_out_a_re
 
     later = [_aged(root / "uploads" / "screenshots" / "later.png"),
              _aged(root / "state" / "delegate_supervision" / "settled.json", "{}")]
+    stamp = time.time()
+    for path in later:
+        os.utime(path, (stamp, stamp))
+        maintenance_retirement.artifact_changed(root, timestamp=stamp)
+    deadline = stamp + get_gc_retention_days() * 86400
+    assert maintenance_jobs.job(root, "runtime_retirement")["next_due"] == deadline
     _reconcile_pass(monkeypatch)
-    assert not any(path.exists() for path in later), "the second pass of the same process retires again"
+    assert all(path.exists() for path in later), "publication schedules age eligibility, not immediate deletion"
+    with monkeypatch.context() as clock:
+        clock.setattr("ouroboros.retention.time.time", lambda: deadline - 1)
+        _reconcile_pass(monkeypatch)
+        assert all(path.exists() for path in later)
+        clock.setattr("ouroboros.retention.time.time", lambda: deadline + 1)
+        _reconcile_pass(monkeypatch)
+    assert not any(path.exists() for path in later), "the recorded deadline wakes retirement in the same process"
     assert tree.exists() and service.exists()
     assert observations == [root], "the journal observation is boot's, never a pass's"
 
