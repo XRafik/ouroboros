@@ -2,7 +2,9 @@
 
 Tracks in-flight direct conversational turns so
 the Gateway (/api/state) and WebSocket activity pipeline have authoritative,
-thread-safe visibility into in-progress work without creating spurious queue records.
+thread-safe visibility into in-progress work without creating spurious queue records,
+and each turn's execution (its thread and the start facts it passed) so the
+liveness watchdog can say where a turn that stopped advancing stands.
 """
 
 from __future__ import annotations
@@ -10,11 +12,59 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
+
+# The start facts a direct turn's own thread passes before its first model request, in
+# order. Each is stamped by the code that has just passed it; the liveness watchdog reads
+# them (server_liveness) and never waits on them.
+TURN_PHASES = ("accepted", "admitted", "started", "context_building", "context_built", "dispatched")
+_LOG_FACTS = {"context_building_started": "context_building", "context_building_finished": "context_built"}
+
+
+def _calling_thread() -> Tuple[int, str]:
+    current = threading.current_thread()
+    return current.ident or 0, current.name
+
+
+@dataclass(eq=False)
+class TurnExecution:
+    """One execution of a direct turn: the thread running it, a process-local identity and
+    ``marks``, each start fact it passed (``TURN_PHASES``) with the monotonic instant it was
+    stamped. Facts only move forward, so there is at most one mark per phase; the list is
+    only appended to, so a reader's copy never pairs one fact with another fact's instant."""
+
+    chat_id: int
+    client_message_id: str = ""
+    task_id: str = ""
+    execution_id: str = field(default_factory=lambda: f"turn_{uuid.uuid4().hex[:12]}")
+    thread: Tuple[int, str] = field(default_factory=_calling_thread)
+    marks: List[Tuple[str, float]] = field(default_factory=lambda: [("accepted", time.monotonic())])
+
+    @property
+    def phase(self) -> str:
+        return self.marks[-1][0]
+
+    def bind_thread(self) -> None:
+        """The calling thread runs this execution from now on (a wake is admitted on its alarm's thread)."""
+        self.thread = _calling_thread()
+
+    def advance(self, phase: str) -> bool:
+        if TURN_PHASES.index(phase) <= TURN_PHASES.index(self.phase):
+            return False
+        self.marks.append((phase, time.monotonic()))
+        return True
+
+    def observe(self, kind: str, data: Dict[str, Any]) -> None:
+        """One of the turn's own frames (``TurnEventQueue``); a start fact among them advances the phase."""
+        if kind == "main_llm_call_state" and data.get("phase") == "started":
+            self.advance("dispatched")
+        elif kind == "log_event" and data.get("type") in _LOG_FACTS:
+            self.advance(_LOG_FACTS[data["type"]])
 
 
 @dataclass
@@ -34,6 +84,7 @@ class DirectActivityEntry:
     reply_handed_off: bool = False
 
     actor: Any = field(default=None, repr=False, compare=False)
+    execution: Optional[TurnExecution] = field(default=None, repr=False, compare=False)
     active_llm_call: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
     parked_wait: Optional[Dict[str, Any]] = field(default=None, repr=False, compare=False)
     parked_root: Any = field(default=None, repr=False, compare=False)
@@ -100,6 +151,8 @@ class DirectActivityEntry:
             "phase": self.phase,
             "started_at": self.started_at,
         }
+        if self.execution is not None:
+            row["turn_phase"] = self.execution.phase
         # Keep the historical static shape for an actor that has not entered
         # its task context yet. Once the direct turn owns a live model wait,
         # publish the same optional fields as managed/post-task activities.
@@ -121,6 +174,25 @@ class DirectActivityRegistry:
     def __init__(self) -> None:
         self._lock = threading.Condition()
         self._activities: Dict[str, DirectActivityEntry] = {}
+        # Every running turn execution, from its thread's first fact (before registration) to its end.
+        self._executions: Dict[str, TurnExecution] = {}
+
+    def begin_execution(self, chat_id: int, *, client_message_id: str = "") -> TurnExecution:
+        """The calling thread starts one direct turn (``accepted``), before admission decides it."""
+        execution = TurnExecution(int(chat_id or 0), str(client_message_id or ""))
+        with self._lock:
+            self._executions[execution.execution_id] = execution
+        return execution
+
+    def end_execution(self, execution: Optional[TurnExecution]) -> None:
+        if execution is not None:
+            with self._lock:
+                self._executions.pop(execution.execution_id, None)
+
+    def executions(self) -> List[TurnExecution]:
+        """Every running execution, registered or not yet: what the liveness watchdog reads."""
+        with self._lock:
+            return list(self._executions.values())
 
     def register(
         self,
@@ -135,9 +207,19 @@ class DirectActivityRegistry:
         actor: Any = None,
         reply_expected: bool = False,
     ) -> DirectActivityEntry:
+        """Register one turn. It adopts the execution the calling thread began and has not
+        registered yet (``begin_execution``), else one begins here; the entry's unregister ends it."""
         aid = str(activity_id or "").strip()
         if not aid:
             raise ValueError("activity_id cannot be empty")
+        ident = threading.get_ident()
+        with self._lock:
+            begun = next((row for row in self._executions.values()
+                          if row.thread[0] == ident and not row.task_id), None)
+        execution = begun or TurnExecution(int(chat_id or 0))
+        execution.task_id = aid
+        execution.client_message_id = execution.client_message_id or str(client_message_id or "")
+        execution.advance("admitted")
         entry = DirectActivityEntry(
             activity_id=aid,
             chat_id=int(chat_id or 0),
@@ -149,9 +231,14 @@ class DirectActivityRegistry:
             origin_message_ref=dict(origin_message_ref or {}),
             actor=actor,
             reply_expected=bool(reply_expected),
+            execution=execution,
         )
         with self._lock:
+            replaced = self._activities.get(aid)
+            if replaced is not None and replaced.execution is not None:
+                self._executions.pop(replaced.execution.execution_id, None)
             self._activities[aid] = entry
+            self._executions[execution.execution_id] = execution
         log.debug("Registered direct activity: %s (chat_id=%s, kind=%s)", aid, chat_id, kind)
         return entry
 
@@ -159,6 +246,8 @@ class DirectActivityRegistry:
         aid = str(activity_id or "").strip()
         with self._lock:
             entry = self._activities.pop(aid, None)
+            if entry is not None and entry.execution is not None:
+                self._executions.pop(entry.execution.execution_id, None)
             self._lock.notify_all()
         if entry:
             log.debug("Unregistered direct activity: %s (chat_id=%s)", aid, entry.chat_id)
@@ -235,6 +324,7 @@ class DirectActivityRegistry:
         """Clear registry — primarily for tests and process resets."""
         with self._lock:
             self._activities.clear()
+            self._executions.clear()
             self._lock.notify_all()
 
 

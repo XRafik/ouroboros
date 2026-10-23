@@ -1244,7 +1244,9 @@ reconciliation.
 ### Room work status
 
 Each room's bar has one status, right after its title: the short word in its
-status ink, then one mark, as on the sidebar's rows; no frame at rest, a neutral
+status ink (a turn still preparing adds the start step it stands at, `Preparing ·
+Building context`, and nothing reads `Thinking` before a model call is sent),
+then one mark, as on the sidebar's rows; no frame at rest, a neutral
 tint on hover and while open, a caret when it opens. A work is one request with
 its Continue episodes and whatever of them still lives (helpers, delegated
 runs still working, post-answer upkeep); the server gives each work and each room
