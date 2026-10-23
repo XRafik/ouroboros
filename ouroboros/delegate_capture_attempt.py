@@ -19,6 +19,8 @@ def failure_retry(exc):
     from ouroboros.gateways.claudexor import ClaudexorUnavailable, DAEMON_BUSY_CODES
 
     if isinstance(exc, ClaudexorUnavailable):
+        if exc.status_code in (410, 413):
+            return "changed_input"  # Reclaimed/over-cap bytes cannot heal with another generation.
         problem = getattr(exc, "problem", {})
         retryable = problem.get("retryable") if isinstance(problem, dict) else None
         if retryable is None:
@@ -71,10 +73,13 @@ def collection_due(entry, *, generation=GENERATION, recapture=False):
             or (attempt.get("retry") == "transient" and attempt.get("generation") != generation))
 
 
-def record_attempt(root, entry, *, generation=GENERATION, retry="", errors=()):
+def record_attempt(root, entry, *, generation=GENERATION, retry="", errors=(), output=None):
     from ouroboros import delegate_custody as custody
 
     outcome = {"inputs": inputs(entry), "generation": generation, "retry": retry, "errors": list(errors)}
+    output = entry.collection_attempt.get("output") if output is None else output
+    if output:
+        outcome["output"] = output
     if entry.collection_attempt == outcome:
         return True
     return custody.emit(root, custody.COLLECTION_ATTEMPTED,

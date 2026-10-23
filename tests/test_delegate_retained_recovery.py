@@ -72,7 +72,9 @@ def test_settled_local_capture_recovers_without_remote_run(tmp_path, monkeypatch
     if pending:
         _pending(root, task_id=entry.task_id)
     gateway = AbsentGateway(handshake_error=transport == "handshake")
+    connections = []
     def factory():
+        connections.append(True)
         if transport == "factory":
             raise ClaudexorUnavailable("daemon_unreachable", "controlled factory gap")
         return gateway
@@ -110,7 +112,7 @@ def test_settled_local_capture_recovers_without_remote_run(tmp_path, monkeypatch
     assert not after.patch_disposed and find_execution_snapshot(handle.snapshot_id)
     assert (target / "tracked.txt").read_text(encoding="utf-8") != "retained work\n"
     assert gateway.reads == 0 and len(money) == 1
-    assert gateway.closed == (transport != "factory")
+    assert not connections and not gateway.closed, "local capture neither opens nor closes an unused gateway"
     assert not any(row["type"] == custody.CLOSED_ABSENT for row in custody.custody_rows(root))
 
 
@@ -145,6 +147,7 @@ def test_unsettled_absence_keeps_existing_recovery_semantics(tmp_path, review):
     gateway = AbsentGateway()
     result = recover(tmp_path, entry, lambda: gateway, "orphan")
     assert result[0]["action"] == "absent" and gateway.reads == 1
+    assert gateway.closed, "an acquired observation client is still closed"
     assert len([row for row in custody.custody_rows(tmp_path) if row["type"] == custody.CLOSED_ABSENT]) == 1
 
 

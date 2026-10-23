@@ -26,6 +26,30 @@ SIGNAL_INGRESS = [pytest.param(name, marks=pytest.mark.skipif(
     for name in ("sigint", "sigterm")]
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_capture_gate_publishes_only_complete_json(tmp_path, monkeypatch, existing):
+    from tests._server_capture_exit import record
+
+    target = tmp_path / "entered.json"
+    if existing:
+        target.write_text('{"generation": "old"}', encoding="utf-8")
+    writes = []
+    write_bytes = Path.write_bytes
+
+    def interrupted_write(path, data):
+        write_bytes(path, data[:1])
+        writes.append(path)
+        if target.exists():
+            assert json.loads(target.read_text(encoding="utf-8")) == {"generation": "old"}
+        assert target.exists() is existing
+        return write_bytes(path, data)
+
+    monkeypatch.setattr(Path, "write_bytes", interrupted_write)
+    monkeypatch.setattr(Path, "write_text", lambda path, text, **kw: interrupted_write(path, text.encode("utf-8")))
+    record(tmp_path, "entered", announce=False, generation="new")
+    assert writes and json.loads(target.read_text(encoding="utf-8"))["generation"] == "new"
+
+
 def wait_for(predicate, proc, timeout=20):
     deadline = time.monotonic() + timeout
     while not predicate():

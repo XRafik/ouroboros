@@ -19,7 +19,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from ouroboros import delegate_custody as c
 from ouroboros import delegate_custody_current as current
 from ouroboros.delegate_custody_current import collection_pending
-from ouroboros.delegate_capture_attempt import collection_due, record_attempt, GENERATION, failure_retry, output_owed
+from ouroboros.delegate_capture_attempt import collection_due, record_attempt, GENERATION, failure_retry, output_owed, capture_required
 from ouroboros.delegate_named_evidence import saved_named_evidence
 from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
 
@@ -219,16 +219,18 @@ def _retain_output(root, entry, detail, gateway, staging_task_id="", output_auth
     text = json.dumps(full, ensure_ascii=False, indent=2)
     artifact = retain_terminal_bytes(root, staging_task_id or entry.task_id, entry.run_id, text, text.encode("utf-8"))
     if artifact is None:
-        return {}
+        return {"retry": "transient"}
+    retry = "" if complete else (disclosure or {}).get("retry", "changed_input")
     if (entry.output_sha == artifact["sha256"] and entry.output_source == artifact["source"]
             and entry.output_complete == complete
             and entry.output_terminal_sha == entry.terminal_source.get("sha256")):
-        return {"artifact": artifact, "complete": complete, "published": True}
+        return {"artifact": artifact, "complete": complete, "published": True, "retry": retry}
     published = c.emit(root, c.OUTPUT_SPILLED, {"run_id": entry.run_id, "task_id": entry.task_id,
         "artifact": artifact["source"]["path"], "source": artifact["source"], "bytes": artifact["bytes"],
         "sha256": artifact["sha256"], "terminal_sha": entry.terminal_source.get("sha256", ""),
         "total_chars": len(text), "staged": True, "full_content": complete})
-    return {"artifact": artifact, "complete": complete, "published": published}
+    return {"artifact": artifact, "complete": complete, "published": published,
+            "retry": retry if published else "transient"}
 
 
 def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = None,
@@ -279,24 +281,48 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
         if not due and not (output_retry and (output_owed(entry) or not entry.settled)):
             return {"status": "pending" if collection_pending(entry) else "collected",
                     "workspace_capture": capture_projection(root, entry), "errors": []}
-        if gateway is None and gateway_factory is not None:
+        output_attempt = entry.collection_attempt.get("output") or {}
+        retry_output = output_owed(entry) and (output_retry or recapture or not output_attempt
+            or output_attempt.get("terminal_sha") != entry.terminal_source.get("sha256")
+            or (output_attempt.get("retry") == "transient" and output_attempt.get("generation") != generation))
+        if (gateway is None and gateway_factory is not None
+                and (retry_output or (not background and capture_required(entry)))):
             try:
                 owned_gateway = gateway = gateway_factory()
             except Exception:
                 pass  # Retained output, local capture and money do not require transport.
         retry_capture = recapture or (entry.collection_attempt.get("generation") != generation
             and (entry.named_evidence.get("retry") == "transient" or entry.capture_job.get("retry") == "transient"))
-        detail = _read_source(root, entry, entry.terminal_source)
-        if output_owed(entry):
+        if (background and retry_output and gateway is not None and entry.collection_attempt
+                and entry.collection_attempt.get("generation") != generation):
+            # One new body may refresh owed output. Money alone never needs engine I/O.
+            from ouroboros.gateways.claudexor import SHORT_POLL_TIMEOUT_SEC
+            try:
+                observe_run(root, entry, gateway.get_run(run_id, timeout_sec=SHORT_POLL_TIMEOUT_SEC))
+            except Exception as exc:
+                _collection_failure(entry, "observation", exc, failures)
+            entry = current.run(root, run_id)
+        try:
+            detail = _read_source(root, entry, entry.terminal_source)
+        except (OSError, ValueError, RuntimeError) as exc:
+            _collection_failure(entry, "terminal_source", exc, failures)
+            if due:
+                record_attempt(root, entry, generation=generation, retry=failure_retry(exc),
+                               errors=[f"terminal_source:{type(exc).__name__}"])
+            return {"status": "pending", "reason": "terminal_source_unavailable"}
+        if retry_output:
             try:
                 retention = _retain_output(root, entry, detail, gateway, staging_task_id, output_authority)
             except Exception as exc:
                 errors.append(f"output:{type(exc).__name__}")
-                transient |= failure_retry(exc) == "transient"
+                retention = {"retry": failure_retry(exc)}
                 _collection_failure(entry, "output", exc, failures)
             else:
                 if failures is not None:
                     failures.pop("output", None)
+            output_attempt = {"terminal_sha": entry.terminal_source.get("sha256"),
+                              "generation": generation, "retry": retention.get("retry", "")}
+        transient |= output_attempt.get("retry") == "transient"
         entry = current.run(root, run_id)
         closing = stopped is not None and stopped()
         money = ({"settled": entry.settled, "ledger_recorded": entry.ledger_recorded}
@@ -340,10 +366,10 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
                 c.retire_project(root, gateway, entry)  # records kept, never deletes the project
             fresh = current.run(root, run_id)
             named = fresh.named_evidence
-            retry = ("transient" if closing or transient or not fresh.settled or not fresh.output_complete
-                     or named.get("retry") == "transient" else "")
-            if due:  # an output-only fetch is not a capture attempt
-                record_attempt(root, fresh, generation=generation, retry=retry, errors=errors)
+            retry = ("transient" if closing or transient or not fresh.settled
+                     or named.get("retry") == "transient" else "changed_input" if output_owed(fresh) else "")
+            if due or retry_output:
+                record_attempt(root, fresh, generation=generation, retry=retry, errors=errors, output=output_attempt)
             return {"status": "collected" if not collection_pending(fresh) else "pending",
                     "settlement": money, "workspace_capture": capture, "output_retention": retention, "errors": errors}
         return {"status": "unavailable", "reason": "custody_missing"}
@@ -528,6 +554,9 @@ class BodyRuntime:
             detail = gateway.get_run(entry.run_id, timeout_sec=SHORT_POLL_TIMEOUT_SEC)
         except BaseException as exc:
             self._remember(entry, None, error=exc)
+            entry = current.run(self.root, entry.run_id) or entry
+            if c.daemon_says_absent(exc) and entry.terminal_source:
+                return  # Retention loss cannot erase a terminal fact, including an in-flight publication.
             if c.daemon_says_absent(exc, gateway=gateway, run=entry):
                 c.close_absent_run(self.root, gateway, entry, "body_observation_absent")
                 return
@@ -604,9 +633,7 @@ class BodyRuntime:
             if entry.review_owned or not self.active:
                 continue
             with self.lock:
-                retry_observation = (entry.collection_attempt.get("retry") == "transient"
-                                     and (not entry.settled or output_owed(entry)))
-                if (not entry.terminal_source and (not entry.settled or entry.terminal_state)) or retry_observation:
+                if not entry.terminal_source and (not entry.settled or entry.terminal_state):
                     previous = self.reads.get(entry.run_id)
                     if (previous is None or previous.done()) and self.observation_gaps.get(entry.run_id) != self._observation_key(entry):
                         self.reads[entry.run_id] = self.observers.submit(self._observe, entry)

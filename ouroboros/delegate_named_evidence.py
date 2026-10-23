@@ -157,7 +157,11 @@ def retain_named(root, entry, *, whole=False, recapture=False, reread=False, pub
         # A raised copier has no complete inventory. Keep the source, not unlisted
         # partial copies in every immutable retry generation.
         if (staging / "files").exists():
-            shutil.rmtree(staging / "files")
+            shutil.rmtree(staging / "files", ignore_errors=True)
+            if (staging / "files").exists():
+                # A busy handle leaves bytes to the staging remover, never in a published receipt.
+                staging = home / f".evidence-{uuid.uuid4().hex}.pending"
+                staging.mkdir()
         summary = {"status": "capture_failed", "files": [], "gaps": gaps,
                    "error": f"{type(exc).__name__}: {exc}",
                    "retry": failure_retry(exc)}

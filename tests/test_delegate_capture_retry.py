@@ -71,7 +71,7 @@ def test_directory_capture_uses_typed_retry_facts(tmp_path, monkeypatch, failure
 
 
 @pytest.mark.parametrize("debt", ["money", "output"])
-def test_body_observes_changed_terminal_while_own_retention_is_transient(
+def test_body_collects_changed_terminal_but_unchanged_debt_does_not_poll(
         tmp_path, monkeypatch, driven_runtime, debt):  # noqa: F811
     from ouroboros import usage_accounting
 
@@ -98,8 +98,9 @@ def test_body_observes_changed_terminal_while_own_retention_is_transient(
     broken[0] = False
     clock[0] = 10000
     tick()
-    assert reads and attempts == [debt], "an unchanged read does not retry retention"
+    assert not reads and attempts == [debt], "elapsed time earns neither observation nor retention"
     detail[0] = terminal(text="new terminal facts", seq=5)
+    assert body.observe_run(tmp_path, entry, detail[0])
     tick()
     tick()
     assert attempts == [debt, debt]

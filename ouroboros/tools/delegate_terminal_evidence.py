@@ -584,9 +584,12 @@ def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
         return payload
     fresh = run(root, rid) or entry
     if not fresh.settled or retained_payload(root, fresh) is None:
+        from ouroboros.delegate_capture_attempt import GENERATION
+        runtime = body_runtime(root)
         collection = collect_terminal(root, rid, gateway=gateway,
                                       staging_task_id=str(getattr(ctx, "task_id", "") or ""),
-                                      output_authority=authority, background=body_runtime(root) is not None,
+                                      output_authority=authority, background=runtime is not None,
+                                      generation=runtime.runtime_id if runtime is not None else GENERATION,
                                       output_retry=True)
     else:
         collection = {"status": "pending" if not fresh.settled else "retained",
@@ -676,7 +679,10 @@ def retained_terminal_result(ctx, run_id, *, complete_only=True, retry_money=Fal
     if (full is None or full.get("run_id") != run_id or full.get("state") != entry.terminal_state):
         return None
     if retry_money and not entry.settled:
-        collect_terminal(root, run_id, output_retry=True, background=body_runtime(root) is not None)
+        from ouroboros.delegate_capture_attempt import GENERATION
+        runtime = body_runtime(root)
+        collect_terminal(root, run_id, output_retry=True, background=runtime is not None,
+                         generation=runtime.runtime_id if runtime is not None else GENERATION)
         entry = run(root, run_id) or entry
     payload = _retained_terminal_payload(ctx, entry, full=full)
     if payload is not None:
