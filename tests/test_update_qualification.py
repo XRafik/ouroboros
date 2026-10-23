@@ -1,5 +1,6 @@
 """Qualification is portable evidence of the exact proposed range, never a veto."""
 import json
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -79,6 +80,121 @@ def test_later_finished_run_covers_earlier_merges_only(status, conclusion, cover
     assert fact["runs"][0].get("covered_shas", []) == (["earlier"] if covers else [])
     if replaced_pending:
         assert fact["runs"][1]["conclusion"] == "cancelled"  # the direct observation survives coverage
+
+
+@pytest.mark.parametrize("older_run", ["failure", "success", None])
+def test_paging_observes_older_runs_before_inferring_coverage(monkeypatch, older_run):
+    commits = [{"sha": f"{i:040x}", "subject": f"Integration {i}"} for i in range(150, 0, -1)]
+    older = commits[130]["sha"]
+    rows = [{"head_sha": c["sha"], "status": "completed",
+             "conclusion": older_run if c["sha"] == older else "success"}
+            for c in commits if c["sha"] != older or older_run is not None]
+    pages = []
+
+    def get(url):
+        page = int(parse_qs(urlparse(url).query)["page"][0])
+        pages.append(page)
+        return {"workflow_runs": rows[(page - 1) * 100:page * 100]}
+
+    monkeypatch.setattr(qualification, "_get_json", get)
+    material = {"base_sha": "base", "target_sha": commits[0]["sha"], "first_parent_commits": commits}
+    fact = qualification.range_qualification(material, "https://github.com/owner/repo")
+
+    def assert_evidence(observed):
+        runs = {r["sha"]: r for r in observed["runs"]}
+        covered = {sha for r in runs.values() for sha in r.get("covered_shas", [])}
+        assert observed["status"] == "observed" and observed["missing_shas"] == []
+        assert observed["absent_shas"] == ([older] if older_run is None else [])
+        assert covered == ({older} if older_run is None else set())
+        assert {r["sha"] for r in runs.values() if r["conclusion"] == "failure"} == (
+            {older} if older_run == "failure" else set())
+        if older_run is not None:
+            assert runs[older]["conclusion"] == older_run
+
+    assert_evidence(fact["github"])
+    assert pages == [1, 2]
+    # Later upstream activity moves the same range farther down the API listing.
+    rows[:0] = [{"head_sha": "outside", "status": "completed", "conclusion": "failure"}] * 60
+    pages.clear()
+    refreshed, changed = qualification.refresh_qualification(fact, "https://github.com/owner/repo")
+    assert_evidence(refreshed["github"])
+    assert pages == [1, 2, 3] and not changed
+
+
+@pytest.mark.parametrize("ending", ["exhausted", "oldest", "predates", "budget", "unavailable"])
+def test_coverage_requires_reading_through_the_range(ending, monkeypatch):
+    commits = [{"sha": sha, "subject": sha, "date": "2026-10-23T03:00:00+03:00"}
+               for sha in ("newest", "middle", "oldest")]
+    green = {"head_sha": "newest", "status": "completed", "conclusion": "success",
+             "created_at": "2026-10-23T00:01:00Z"}
+    filler = {**green, "head_sha": "outside"}
+    pages = []
+
+    def get(url):
+        page = int(parse_qs(urlparse(url).query)["page"][0])
+        pages.append(page)
+        if page == 1:
+            return {"workflow_runs": [green, *[filler] * 99]}
+        if ending == "unavailable":
+            raise OSError("offline")
+        if ending == "exhausted":
+            return {"workflow_runs": []}
+        tail = ({**green, "head_sha": "oldest"} if ending == "oldest" else
+                {**filler, "created_at": "2026-10-22T23:59:59Z"} if ending == "predates" else filler)
+        return {"workflow_runs": [*[filler] * 99, tail]}
+
+    monkeypatch.setattr(qualification, "_get_json", get)
+    fact = qualification.range_qualification(
+        {"base_sha": "base", "target_sha": "newest", "first_parent_commits": commits},
+        "https://github.com/owner/repo")
+    observed = fact["github"]
+    complete = ending in ("exhausted", "oldest", "predates")
+    absent = ["middle"] if ending == "oldest" else ["middle", "oldest"]
+    assert pages == (list(range(1, 11)) if ending == "budget" else [1, 2])
+    assert observed["status"] == ("observed" if complete else "partial" if ending == "budget" else "unavailable")
+    assert observed["missing_shas"] == ([] if complete else absent)
+    assert observed["absent_shas"] == (absent if complete else [])
+    assert observed["runs"][0].get("covered_shas", []) == (absent if complete else [])
+    # Refresh must use the saved date boundary, and cannot invent coverage after a short read.
+    pages.clear()
+    refreshed, changed = qualification.refresh_qualification(fact, "https://github.com/owner/repo")
+    assert refreshed == fact and not changed
+    assert pages == (list(range(1, 11)) if ending == "budget" else [1, 2])
+
+
+def test_refresh_preserves_proven_absence_until_a_direct_run_is_observed(monkeypatch):
+    commits = [{"sha": sha, "subject": sha} for sha in ("newest", "earlier", "oldest")]
+    rows = [{"head_sha": sha, "status": "completed", "conclusion": "success"} for sha in ("newest", "oldest")]
+    monkeypatch.setattr(qualification, "_get_json", lambda _: {"workflow_runs": rows})
+    authored = qualification.range_qualification({"base_sha": "base", "target_sha": "newest",
+                                                 "commits": commits}, "https://github.com/owner/repo")
+    assert authored["github"]["runs"][0]["covered_shas"] == ["earlier"]
+    previous = authored
+    for conclusion in (None, None, "failure"):
+        def get(url):
+            if "page=2" in url or conclusion is None:
+                raise OSError("offline")
+            return {"workflow_runs": [{"head_sha": "earlier", "status": "completed", "conclusion": conclusion},
+                                      *[{"head_sha": "outside"}] * 99]}
+
+        monkeypatch.setattr(qualification, "_get_json", get)
+        previous, changed = qualification.refresh_qualification(authored, "https://github.com/owner/repo",
+                                                               previous=previous)
+        runs = {r["sha"]: r for r in previous["github"]["runs"]}
+        assert previous["github"]["status"] == "unavailable"
+        assert changed is (conclusion is not None)
+        assert runs["newest"].get("covered_shas", []) == (["earlier"] if conclusion is None else [])
+        if conclusion is not None:
+            assert runs["earlier"]["conclusion"] == "failure"
+            assert previous["github"]["absent_shas"] == []
+
+    # Older saved coverage has no proof of absence; an outage cannot ratify it.
+    legacy = json.loads(json.dumps(authored))
+    legacy["github"].pop("absent_shas")
+    monkeypatch.setattr(qualification, "_get_json", lambda _: (_ for _ in ()).throw(OSError()))
+    refreshed, changed = qualification.refresh_qualification(legacy, "https://github.com/owner/repo")
+    assert changed and refreshed["github"]["missing_shas"] == ["earlier"]
+    assert not any(r.get("covered_shas") for r in refreshed["github"]["runs"])
 
 
 def test_github_availability_changes_preserve_authored_text(tmp_path, monkeypatch):

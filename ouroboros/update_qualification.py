@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 TRAILER = "Ouroboros-Qualification: "
 CHECKS = ("full_battery", "cost_contract")
@@ -60,11 +61,12 @@ def _get_json(url: str) -> dict:
         return json.load(response)
 
 
-def _missing_runs(commits: list[dict], runs: dict) -> list[str]:
+def _missing_runs(commits: list[dict], runs: dict, absent: set[str]) -> list[str]:
     """First-parent order is newest first; completed checks cover skipped pushes.
 
     Match post_merge_check.choose_base: cancelled/skipped runs are not coverage.
-    Keep direct observations, including earlier reds, beside inferred coverage.
+    Only proven absences or observed replaced runs receive coverage. Unread pages
+    prove nothing; direct observations, including earlier reds, stay visible.
     """
     for run in runs.values():
         run.pop("covered_shas", None)
@@ -74,18 +76,27 @@ def _missing_runs(commits: list[dict], runs: dict) -> list[str]:
         run = runs.get(sha)
         if run and run.get("status") == "completed" and run.get("conclusion") in ("success", "failure"):
             covering = run
-        elif covering is not None:
+        elif covering is not None and (run is not None or sha in absent):
             covering.setdefault("covered_shas", []).append(sha)
         elif run is None:
             missing.append(sha)
     return sorted(missing)
 
 
+def _date(value) -> datetime | None:
+    try:
+        date = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return date if date.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
 def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> dict:
     """Read runs for first-parent integrations, newest first, including squash.
 
-    Stop when every integration has an observation or later completed coverage,
-    or history ends. A physical 10-page response budget stays disclosed.
+    Page through the oldest integration before inferring skipped-run coverage.
+    Its own row, exhausted history or a run predating it establishes absence;
+    a physical 10-page response budget stays partial, never proof of absence.
     Public GitHub needs no credential. Offline/rate-limit failures remain unknown.
     """
     if not commits:
@@ -97,8 +108,9 @@ def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> d
         return {"status": "unavailable", "reason": "The update source has no supported GitHub check reader.",
                 "runs": [], "missing_shas": sorted(c["sha"] for c in commits)}
     wanted = {c["sha"] for c in commits}
+    oldest = _date(commits[-1].get("date"))
     runs = {}
-    complete = False
+    status, reason = "partial", "GitHub response page budget reached."
     try:
         for page in range(1, 11):
             data = get_json(f"https://api.github.com/repos/{'/'.join(parts)}/actions/workflows/"
@@ -110,22 +122,22 @@ def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> d
                     runs[sha] = {"sha": sha, "status": row.get("status"), "conclusion": row.get("conclusion"),
                                  "url": row.get("html_url"), "run_id": row.get("id"),
                                  "attempt": row.get("run_attempt")}
-            missing = _missing_runs(commits, runs)
-            if len(rows) < 100 or not missing:
-                complete = True
+            if (len(rows) < 100 or commits[-1]["sha"] in runs or
+                    (oldest is not None and any((created := _date(row.get("created_at"))) is not None
+                                               and created < oldest for row in rows))):
+                status, reason = "observed", "No matching run is not a passing check."
                 break
     except Exception as exc:
-        return {"status": "unavailable", "reason": type(exc).__name__, "runs": list(runs.values()),
-                "missing_shas": _missing_runs(commits, runs)}
-    return {"status": "observed" if complete else "partial", "runs": list(runs.values()),
-            "missing_shas": missing,
-            "reason": "No matching run is not a passing check." if complete else "GitHub response page budget reached."}
+        status, reason = "unavailable", type(exc).__name__
+    absent = wanted - runs.keys() if status == "observed" else set()
+    return {"status": status, "reason": reason, "runs": list(runs.values()), "absent_shas": sorted(absent),
+            "missing_shas": _missing_runs(commits, runs, absent)}
 
 
 def range_qualification(material: dict, repo_url: str) -> dict:
     commits = material.get("first_parent_commits", material.get("commits")) or []
     return {"base_sha": material["base_sha"], "target_sha": material["target_sha"],
-            "commits": [{"sha": c["sha"], "subject": c["subject"],
+            "commits": [{"sha": c["sha"], "subject": c["subject"], "date": c.get("date"),
                          "receipt": c.get("qualification", commit_qualification(c.get("body") or "")),
                          "body_read": c.get("body_read", True)}
                         for c in commits],
@@ -144,7 +156,11 @@ def refresh_qualification(authored: dict, repo_url: str, *, previous: dict | Non
     if github.get("status") in ("unavailable", "partial"):
         runs = {r["sha"]: dict(r) for r in previous.get("github", {}).get("runs", [])}
         runs.update({r["sha"]: dict(r) for r in github.get("runs", [])})
-        github = {**github, "missing_shas": _missing_runs(authored["commits"], runs), "runs": list(runs.values())}
+        # A failed read cannot establish new absences. Retain only proven ones;
+        # a newly observed run supersedes absence, including a prior coverage claim.
+        absent = set(previous.get("github", {}).get("absent_shas", [])) - runs.keys()
+        github = {**github, "absent_shas": sorted(absent),
+                  "missing_shas": _missing_runs(authored["commits"], runs, absent), "runs": list(runs.values())}
     old = authored.get("github") or {}
     changed = ({r["sha"]: r for r in github.get("runs", [])} != {r["sha"]: r for r in old.get("runs", [])}
                or github.get("missing_shas", []) != old.get("missing_shas", []))
