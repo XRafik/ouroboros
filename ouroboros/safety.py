@@ -56,8 +56,6 @@ TOOL_POLICY: Dict[str, str] = {
     "maintain_harness": POLICY_SKIP,
     "read_file": POLICY_SKIP,
     "list_files": POLICY_SKIP,
-    "vcs_status": POLICY_SKIP,
-    "vcs_diff": POLICY_SKIP,
     "chat_history": POLICY_SKIP,
     "recent_tasks": POLICY_SKIP,
     "live_roots": POLICY_SKIP,
