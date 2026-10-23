@@ -1228,17 +1228,18 @@ def layout_basis(parent: pathlib.Path, base: pathlib.Path, days: int) -> Dict[st
 def record_drive_arrival(canonical: pathlib.Path, base: pathlib.Path, task_id: str) -> bool:
     """A drive creator's publication once its drive exists under the layout directory BASE: the
     layout's next lap looks at this drive alone instead of walking the layout (``layout_basis``,
-    ``headless._prune_drives``). Best-effort and never the creator's failure: a store that is absent
-    (a root nothing imported yet), busy, migrating, retired or foreign takes no row, and the layout
-    directory's moved mtime makes the next lap walk whole, as every lap did before the publication
-    existed. Returns whether the publication landed."""
-    from ouroboros.store import open_store, probe
+    ``headless._prune_drives``). Best-effort, never the creator's failure and never its wait: a store
+    that is absent (a root nothing imported yet), busy, migrating, retired or foreign takes no row,
+    and the layout directory's moved mtime makes the next lap walk whole, as every lap did before the
+    publication existed. The write spends no acquisition budget: a missed publication costs one whole
+    walk, a wait would cost every task creation up to the store's. Returns whether it landed."""
+    from ouroboros.store import acquisition_budget, open_store, probe
 
     tid = validate_task_id(task_id)
     try:
         if probe(canonical)[0] != "present":
             return False
-        with open_store(canonical, write=True) as txn:
+        with acquisition_budget(0), open_store(canonical, write=True) as txn:
             txn.set_meta(DRIVE_ARRIVALS, int(txn.meta(DRIVE_ARRIVALS) or 0) + 1)
             txn.put_row(DRIVE_ARRIVALS, f"{base.name}/{tid}", {"layout": base.name, "task_id": tid})
         return True

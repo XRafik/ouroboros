@@ -614,3 +614,53 @@ def test_a_published_drive_arrival_is_looked_at_alone_consumed_once_and_best_eff
     listings.clear()
     sm._run_drive_custody_pass()
     assert "headless_tasks" in listings and rest(), "an unpublished drive moved the directory: the pass walked whole and rests"
+
+
+def test_the_arrival_publication_never_waits_for_a_busy_store_and_lands_on_a_free_one(data, monkeypatch):
+    """Task creation publishes the new drive's arrival under a zero acquisition budget: a store another
+    writer holds costs the creator no wait (the drive exists, no row lands, and the next pass walks the
+    layout whole and rests, as every pass did before the publication existed); a free store still takes
+    the row, and the next pass looks at the drive alone. With the budget removed the creation spends the
+    store's whole wait (``store.STORE_WAIT_SEC``) on every task admitted while the store is held."""
+    import contextlib
+    import sqlite3
+    import time
+
+    from ouroboros import headless, server_maintenance as sm, task_custody
+    from ouroboros.startup_migrations import prepare_startup_state
+    from ouroboros.task_results import write_task_result
+
+    prepare_startup_state(data)
+    monkeypatch.setattr(sm, "DATA_DIR", data)
+    monkeypatch.setattr("supervisor.queue.task_settlement_liveness", lambda _task: False)
+    listings = []
+    names = headless._drive_names
+    monkeypatch.setattr(headless, "_drive_names", lambda base: listings.append(base.name) or names(base))
+    (data / "state" / "headless_tasks").mkdir(parents=True)
+
+    def arrivals():
+        with store.open_store(data, write=False) as txn:
+            return sorted(txn.set_rows(task_custody.DRIVE_ARRIVALS))
+
+    sm._run_drive_custody_pass()  # the lap rests on the empty layout
+    with contextlib.closing(sqlite3.connect(store.store_path(data), isolation_level=None)) as holder:
+        holder.execute("BEGIN IMMEDIATE")  # another writer holds the store throughout the creation
+        try:
+            started = time.monotonic()
+            held = headless.prepare_task_drive(data, "held", "empty")
+            elapsed = time.monotonic() - started
+        finally:
+            holder.execute("ROLLBACK")
+    assert held.is_dir() and arrivals() == [], "the creator keeps its drive; no row landed"
+    assert elapsed < 1, f"a busy store cost the creator {elapsed:.1f} s: the publication waited for it"
+    write_task_result(data, "held", "running", child_drive_root=str(held))
+    listings.clear()
+    sm._run_drive_custody_pass()
+    assert "headless_tasks" in listings, "the unpublished drive moved the directory: the pass walked whole"
+
+    free = headless.prepare_task_drive(data, "free", "empty")
+    assert free.is_dir() and arrivals() == ["headless_tasks/free"], "a free store still takes the publication"
+    write_task_result(data, "free", "running", child_drive_root=str(free))
+    listings.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and arrivals() == [], "the next pass looks at the published drive alone"
