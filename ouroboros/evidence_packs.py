@@ -133,6 +133,21 @@ def _own_sidecar(name: str, task_id: str) -> bool:
     return prefix == task_id or (prefix.startswith(task_id + ".") and prefix[len(task_id) + 1:].isdigit())
 
 
+def _task_sidecar_names(root: Any, task_id: str) -> set[str]:
+    """This task's sidecar names, found by their spelling instead of listing the directory. The
+    packer gives a task the first free generation after its newest and no published name is ever
+    removed, so the task's occupied generations run from 1 (a torn pack, or a homonym's sidecar
+    such as ``a.2`` generation 1 for ``a``, occupies one too) and the first free one ends them."""
+    directory, names, generation = packs_dir(root), set(), 1
+    while True:
+        name = sidecar_name(task_id, generation)
+        if (directory / name).exists():
+            names.add(name)
+        elif not (directory / pack_name(task_id, generation)).exists():
+            return names
+        generation += 1
+
+
 def list_sidecars(root: Any, *, errors: Optional[list] = None,
                   names: Optional[set[str]] = None) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
     """Read pack authority, or a rebuild's filename delta; cache builders may collect faults."""
@@ -419,16 +434,16 @@ def _task_handles(root: pathlib.Path, task_id: str, rel_path: str = "") -> List[
     A handle is named by its task and the task's own sidecars are its authority, so no other
     task's pack is read: the index answers while this process has validated its current bytes and
     its lock is free now; otherwise, and for an absence it cannot prove (it recorded unreadable
-    sidecars), the task's own sidecars answer. Only when one of them is unreadable does a valid
-    index that still holds the placement keep it (checked, never rebuilt). The ordinary read
-    never waits for, re-validates or rebuilds the shared cache: those whole-index passes stay
-    with the readers that need every pack (``blob_bytes``) and with the packer."""
+    sidecars), the task's own sidecars answer, found by name (``_task_sidecar_names``). Only when
+    one of them is unreadable does a valid index that still holds the placement keep it (checked,
+    never rebuilt). The ordinary read never lists the directory or waits for, re-validates or
+    rebuilds the shared cache: those whole-pack passes stay with the readers that need every pack
+    (``blob_bytes``) and with the packer."""
     rows = _indexed_handles(root, task_id, rel_path, validated=True)
     if rows is not None:
         return rows
     errors, found = [], []
-    names = {name for name in _sidecar_names(root) if _own_sidecar(name, task_id)}
-    for sidecar_path, sidecar in list_sidecars(root, errors=errors, names=names):
+    for sidecar_path, sidecar in list_sidecars(root, errors=errors, names=_task_sidecar_names(root, task_id)):
         for member in sidecar["members"]:
             if sidecar["task_id"] == task_id and member["kind"] == CHECKPOINT and member.get("path") and (
                     not rel_path or member["path"] == rel_path):

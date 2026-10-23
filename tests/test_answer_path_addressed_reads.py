@@ -22,7 +22,7 @@ import json
 import threading
 from collections import deque
 from types import SimpleNamespace
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Tuple
 
 import pytest
 
@@ -35,13 +35,15 @@ K_LARGE = 30
 TAG = "answer_path"
 
 
-def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any],
-          boundary: Callable[[Any, Any], Callable[[], Any]]) -> Dict[int, Dict[str, Any]]:
+def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any], boundary: Callable[[Any, Any], Callable[[], Any]],
+          *, unlisted: Tuple[str, ...] = ()) -> Dict[int, Dict[str, Any]]:
     """Build each root, let ``boundary(root, facts)`` warm up and return the counted call; compare.
 
     Cached store connections are closed after the build, so every connection the boundary uses
     is opened under the meter and its SQL is counted (a connection opened before the meter is
-    installed carries no trace callback)."""
+    installed carries no trace callback). The meter counts a directory listing once, whatever it
+    returns, so a location in ``unlisted`` must not be listed at all: the names the call examines
+    there are its counted stats and opens, compared like every other count."""
     from ouroboros import store
 
     counted, answers = {}, {}
@@ -57,6 +59,10 @@ def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any],
             assert not meter.join_spawned(TAG), "a thread the boundary started is still running"
         counted[k] = meter.snapshot(TAG)
         assert counted[k]["counts"].get("statements"), "the counted call ran no SQL the meter could see"
+        listed = {key: amount for key, amount in counted[k]["counts"].items()
+                  if key.split(":")[0] in ("listdir", "scandir") and key.partition(":")[2] in unlisted}
+        assert not listed, f"k={k}: the counted call listed {listed}: " + "; ".join(
+            source for source in counted[k]["callers"] if source.split(" <- ")[0] in listed)
     breaches = contract_breaches(counted[K_SMALL]["counts"], counted[K_LARGE]["counts"], K_LARGE)
     growing = sorted(((source, amount - counted[K_SMALL]["callers"].get(source, 0))
                       for source, amount in counted[K_LARGE]["callers"].items()
@@ -115,14 +121,16 @@ def _owed_answer(root, task_id):
 
 @pytest.mark.parametrize("index", ["validated", "stale", "contended", "damaged"])
 def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, monkeypatch, index):
-    """The delivering task names its own handle, so the capture reads that task's own sidecars.
+    """The delivering task names its own handle, so the capture reads that task's own sidecars,
+    found by their names: the packs directory is never listed (one listing returns every pack's
+    names), and the names the capture probes are counted and compared at both sizes.
 
-    ``validated``: the pack index was checked by this process (the quiet case even before the
-    fix); ``stale``: the packer wrote the index since (re-validation is a whole-index
-    ``quick_check``); ``contended``: the packer holds the index lock past the send's
-    acquisition slice (the 22.10 stalls: every sidecar opened and parsed); ``damaged``: the
-    cache must be rebuilt from every sidecar. The answer still reaches the chat and keeps its
-    retained receipt on both sizes."""
+    ``validated``: a whole-pack reader of this process checked the index the packer left (the
+    quiet case even before the fix: the index answers); ``stale``: the packer wrote the index
+    since (re-validation is a whole-index ``quick_check``); ``contended``: the packer holds the
+    index lock past the send's acquisition slice (the 22.10 stalls: every sidecar opened and
+    parsed); ``damaged``: the cache must be rebuilt from every sidecar. The answer still reaches
+    the chat and keeps its retained receipt on both sizes."""
     from ouroboros import evidence_packs, store
     from supervisor import events_chat_delivery
 
@@ -131,7 +139,10 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
         assert events_chat_delivery._handle_send_message(_owed_answer(root, "warm-up"), ctx)
         event = _owed_answer(root, "turn")
         holder = None
-        if index == "stale":
+        if index == "validated":
+            with evidence_packs.open_index(root):
+                pass  # a whole-pack reader of this process checked the bytes the packer left
+        elif index == "stale":
             evidence_packs._VALIDATED.clear()
         elif index == "damaged":
             (evidence_packs.packs_dir(root) / evidence_packs.INDEX_NAME).write_bytes(b"not a database")
@@ -161,7 +172,7 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
                     receipt["source_ref"]["path"].startswith("source_handles/context_checkpoints/"))
         return send
 
-    answers = _flat(tmp_path, monkeypatch, _packed_history, boundary)
+    answers = _flat(tmp_path, monkeypatch, _packed_history, boundary, unlisted=("packs",))
     assert answers[K_SMALL] == answers[K_LARGE] == (True, True, True)
 
 
@@ -294,6 +305,28 @@ def test_a_task_handle_is_answered_by_its_own_sidecars_only(tmp_path, monkeypatc
     (packs.packs_dir(tmp_path) / packs.INDEX_NAME).unlink()  # no cache that could still vouch for it
     with pytest.raises(packs.SidecarCorrupt, match="evidence_corrupt"):
         packs.handle_bytes(tmp_path, "a", handles["a"]["path"])
+
+
+def test_a_torn_generation_does_not_hide_the_next_one(tmp_path, monkeypatch):
+    """A task's sidecars are probed by name, generation after generation: a pack published without
+    its sidecar (a crash between the two) still occupies its generation, the packer moves past it,
+    and so does the probe; the first generation holding neither name ends the task."""
+    from ouroboros import evidence_packer, evidence_packs as packs
+    from ouroboros.artifacts import store_actor_source_bytes, task_artifact_dir_path
+    from tests.test_evidence_packs import _task
+
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(tmp_path))
+    _refs, first = _task(tmp_path, "torn", blobs=1)
+    assert evidence_packer.run_pass(tmp_path)["faults"] == 0
+    (packs.packs_dir(tmp_path) / packs.pack_name("torn", 2)).write_bytes(b"a pack whose sidecar never landed")
+    later = store_actor_source_bytes(tmp_path, "torn", category="context_checkpoints", source_id="focus_source_later",
+                                     data=b"# later focus\n", extension="md")
+    assert evidence_packer.run_pass(tmp_path)["packed"] == 1
+    assert not (task_artifact_dir_path(tmp_path, "torn") / later["path"]).exists()  # only its pack holds it now
+    assert packs._task_sidecar_names(tmp_path, "torn") == {"torn.members.json", "torn.3.members.json"}
+    packs._VALIDATED.clear()  # nothing validated the cache in this process: the sidecars answer
+    assert packs.handle_bytes(tmp_path, "torn", later["path"]) == b"# later focus\n"
+    assert packs.packed_handle_names(tmp_path, "torn") == sorted(ref["path"].rsplit("/", 1)[-1] for ref in (first, later))
 
 
 @pytest.mark.parametrize("index", ["valid", "absent"])
