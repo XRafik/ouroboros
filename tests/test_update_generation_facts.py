@@ -1,6 +1,12 @@
 """Update facts survive generations and reach both consumers without host speech."""
 import asyncio
+import builtins
+import concurrent.futures
+import io
 import json
+import os
+import queue
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -16,9 +22,58 @@ from tests.test_update_progress import (isolated_progress, _boot, _next_server, 
 def samples(monkeypatch):
     monkeypatch.setattr(facts, "_duties", {})
     monkeypatch.setattr(facts, "_direct", None)
+    monkeypatch.setattr(facts, "_dispatch_pending", False)
     monkeypatch.setattr(facts, "_cpu_sample", None)
     monkeypatch.setattr(facts, "_rss", lambda: (512 * 1024 * 1024, "current"))
     monkeypatch.setattr(server_process, "server_source_baseline", lambda: "a" * 40)
+
+
+def test_direct_dispatch_does_no_io_until_supervisor_handles_its_frame(isolated_progress, monkeypatch):  # noqa: F811
+    from supervisor import events
+    from supervisor.active_activity import TurnExecution
+    from supervisor.log_addressing import TurnEventQueue
+
+    _restart_requested_attempt()
+    _next_server(isolated_progress, monkeypatch)
+    _boot(monkeypatch, _seen("applied"))
+    execution = TurnExecution(chat_id=1, task_id="owner", owner_turn=True)
+    frames = queue.Queue()
+    turn = TurnEventQueue(frames, "owner", 1, on_frame=execution.observe)
+    frame = {"type": "main_llm_call_state", "task_id": "owner", "phase": "started", "task_attempt": 1,
+             "llm_call_id": "call-1", "execution_id": "execution-1", "round_id": "round-1", "call_attempt": 1}
+    calls = []
+
+    def watch(owner, name):
+        original = getattr(owner, name)
+
+        def observed(*args, **kwargs):
+            calls.append((name, threading.get_ident()))
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(owner, name, observed)
+
+    for owner, name in ((builtins, "open"), (io, "open"), (os, "open"),
+                        (progress, "_read_saved"), (facts, "sample"), (progress, "_store")):
+        watch(owner, name)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as producer:
+        producer.submit(turn.put, frame).result()
+    assert execution.phase == "dispatched"
+    assert calls == [], "the turn observer must not read state, sample or write before model dispatch"
+    assert isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"]["direct_message_first_dispatch"] is None
+
+    # The turn can have ended before the supervisor drains the frame: no live registry entry is needed.
+    events._handle_main_llm_call_state(frames.get_nowait(), SimpleNamespace(RUNNING={}))
+    after = isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"]["direct_message_first_dispatch"]
+    assert after == {"task_id": "owner", "attempt_id": execution.execution_id,
+                     "accepted_at": execution.marks[0][1], "dispatched_at": execution.marks[-1][1],
+                     "seconds": execution.marks[-1][1] - execution.marks[0][1]}
+    assert calls == [(name, threading.get_ident()) for name in ("_read_saved", "sample", "_store")]
+    calls.clear()
+    # A repeat and another round carry no new first-dispatch fact and do no persistence work.
+    events._handle_main_llm_call_state(frame, SimpleNamespace(RUNNING={}))
+    turn.put({**frame, "round_id": "round-2", "llm_call_id": "call-2"})
+    events._handle_main_llm_call_state(frames.get_nowait(), SimpleNamespace(RUNNING={}))
+    assert calls == []
 
 
 def test_update_records_before_and_after_and_events_update_only_its_generation(isolated_progress, monkeypatch):  # noqa: F811
@@ -47,6 +102,7 @@ def test_update_records_before_and_after_and_events_update_only_its_generation(i
     # A later ordinary restart cannot relabel the prior generation's evidence.
     _next_server(isolated_progress, monkeypatch, generation="server-c")
     facts.observe_direct_dispatch(task_id="other-generation", accepted_at=0, dispatched_at=1)
+    facts.publish_pending_dispatch()
     assert isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"] == after
     # One attempt, no growing sample history: admission replaces it.
     progress.begin(base_sha="c" * 40, target_sha="d" * 40)
@@ -60,6 +116,7 @@ def test_refusal_or_unconfirmed_boot_does_not_claim_an_after_sample(isolated_pro
     _next_server(isolated_progress, monkeypatch)
     _boot(monkeypatch, _seen(outcome), bootstrap_ok=bootstrap)
     facts.observe_direct_dispatch(task_id="unconfirmed", accepted_at=1, dispatched_at=2)
+    facts.publish_pending_dispatch()
     assert isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"] is None
 
 
@@ -70,6 +127,7 @@ def test_record_reaches_panel_api_and_real_context_builder_without_chat(isolated
     _next_server(isolated_progress, monkeypatch)
     _boot(monkeypatch, _seen("applied"))
     facts.observe_direct_dispatch(task_id="visible-task", accepted_at=1, dispatched_at=4)
+    facts.publish_pending_dispatch()
     state_file = tmp_path / "state" / "state.json"
     atomic_write_json(state_file, isolated_progress.saved)
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)

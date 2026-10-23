@@ -133,6 +133,10 @@ def _handle_main_llm_call_state(evt: Dict[str, Any], ctx: Any) -> None:
         return
     if task_attempt < 1 or call_attempt < 1:
         return
+    if phase == "started":
+        from ouroboros.update_generation_facts import publish_pending_dispatch
+
+        publish_pending_dispatch()
     running = getattr(ctx, "RUNNING", None)
     meta = running.get(task_id) if isinstance(running, dict) else None
     direct = None
