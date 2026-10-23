@@ -2139,12 +2139,12 @@ from Main remains visibly inherited while its account can be pinned
 independently. Fallbacks use the same row in their saved order, with adjacent
 move/remove controls and the group's Add action.
 
-Context details distinguish the exact route's advertised Auto window from a
-manual value labelled "set by you". Changing an account withdraws the previous
-account's metadata immediately, including during a failed or pending catalog
-read. Unknown limits stay unknown. Catalog updates keep the edited field and
-caret in place and never assign a model. `model_roles.js` and `model_roles.css`
-own the shared Settings/wizard editor.
+Context details show the server-built sourced window line: "set in Settings"
+labels a manual value; the Clear confirmation button removes the route acknowledgement.
+Account changes withdraw old metadata during pending or failed catalog reads.
+Unknown stays unknown. Catalog updates preserve the edited field and caret
+without assigning a model. `model_roles.js` and `model_roles.css` own the shared
+Settings/wizard editor.
 
 A source is chosen, never spelled. Every surface that assigns a model — the
 Models roles, Available subagents (reviewers included), the first-run wizard and
