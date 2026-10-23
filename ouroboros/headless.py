@@ -151,6 +151,9 @@ def prepare_task_drive(parent_drive_root: pathlib.Path, task_id: str, memory_mod
     )
     if mode == "forked":
         _copy_stable_memory(parent, child, project_id=str(project_id or "").strip())
+    from ouroboros.task_custody import record_drive_arrival
+
+    record_drive_arrival(parent, parent / HEADLESS_TASKS_DIR, task_id)  # the settlement lap looks at it alone
     return child
 
 
@@ -245,13 +248,18 @@ def _earliest(known: Optional[float], instant: float) -> float:
     return float(instant) if known is None else min(float(known), float(instant))
 
 
-def _only_the_counter_moved(recorded: Any, basis: Dict[str, Any]) -> bool:
-    """The layout's recorded basis differs from the current one in the terminal-write counter alone:
-    rows were written terminal somewhere, nothing else about the layout changed."""
-    return (isinstance(recorded, dict) and isinstance(recorded.get("terminal"), int)
-            and recorded["terminal"] != basis.get("terminal")
-            and {key: value for key, value in recorded.items() if key != "terminal"}
-            == {key: value for key, value in basis.items() if key != "terminal"})
+def _moved_inputs(recorded: Any, basis: Dict[str, Any]) -> Optional[set]:
+    """The inputs of the layout's recorded basis that differ from the current one, when each has an
+    addressed reading: the terminal-write counter (rows were written terminal somewhere: look at the
+    drives whose rows those are), the published arrivals (drive creators published: look at those
+    drives), the layout directory together with the arrivals (the moved mtime is the published drives').
+    ``None`` when another input moved, or the directory moved and nobody published: a whole walk."""
+    if not isinstance(recorded, dict):
+        return None
+    moved = {key for key in set(recorded) | set(basis) if recorded.get(key) != basis.get(key)}
+    explained = (moved <= {"terminal", "arrivals", "directory"} and ("directory" not in moved or "arrivals" in moved)
+                 and ("terminal" not in moved or isinstance(recorded.get("terminal"), int)))
+    return moved if explained else None
 
 
 def _changed_drives(base: pathlib.Path, parent: pathlib.Path, since: int) -> List[str]:
@@ -280,21 +288,26 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
     most ``budget`` attempts per call; ``cursor`` is the last attempted drive, ``deferred`` the unreached rest
     (no verdict is read and no row decoded for it). ``rested`` is the caller's durable verdicts
     (``task_custody.rested_verdict``), updated in place, or a callable that loads them: a pass that walks reads
-    them, one at rest never does. ``rest`` is the layout's durable rest, updated in place: the inputs
+    them, one that looks at named drives only when one of them reaches a verdict (a running or young drive
+    never does), one at rest never. ``rest`` is the layout's durable rest, updated in place: the inputs
     (``task_custody.layout_basis``) and the earliest retention instant of a drive it left young; while both
-    hold, the pass lists nothing (``rested`` in the report). When the terminal-write counter alone moved
-    (rows were written terminal somewhere), the pass looks only at the drives whose own rows those were
-    (``_changed_drives``): a completion elsewhere leaves the rest standing under the moved counter, still
-    without a listing. A whole pass that attempted nothing records the rest; any other pass clears it.
+    hold, the pass lists nothing (``rested`` in the report). When only inputs with an addressed reading moved
+    (``_moved_inputs``: the terminal-write counter, rows written terminal somewhere; the published arrivals,
+    with or without the directory's mtime they moved), the pass looks only at the drives whose own rows
+    those were (``_changed_drives``) and at the drives published (``task_custody.arrived_drives``; the
+    report's ``arrivals``, which the caller forgets in the transaction recording the pass): a completion
+    elsewhere or a new drive leaves the rest standing under the moved inputs, still without a listing. A
+    whole pass that attempted nothing records the rest; any other pass clears it.
     ``only`` restricts the pass to those task ids (the free action's previewed folders; every other drive is
     untouched, no rest is kept); ``progress`` is called with the report after each settlement attempt."""
     from ouroboros.retention import age_cutoff
-    from ouroboros.task_custody import forget_departed, layout_basis, record_rest, rested_verdict, settle_child_drive
+    from ouroboros.task_custody import (arrived_drives, forget_departed, layout_basis, record_rest, rested_verdict,
+                                        settle_child_drive)
 
     days = _resolve_retention_days(retention_days)
     cutoff = age_cutoff(days, now)
     report: Dict[str, Any] = {"retention_days": days, "scanned": 0, "pruned": [], "skipped": [], "errors": [],
-                              "deferred": [], "cursor": after, "rested": False}
+                              "deferred": [], "cursor": after, "rested": False, "arrivals": []}
     if not base.is_dir():
         return report
     chosen = None if only is None else {str(task_id) for task_id in only}
@@ -304,15 +317,22 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
         report["rested"] = True
         return report  # nothing listed, decoded, copied or hashed: what the last whole pass saw still stands
     names = None
-    if basis is not None and not young_due and _only_the_counter_moved(rest.get("basis"), basis):
-        names = _changed_drives(base, parent, rest["basis"]["terminal"])
+    if basis is not None:
+        report["arrivals"] = arrived_drives(parent, base)  # looked at by this pass, alone or inside the walk
+    if basis is not None and not young_due and (moved := _moved_inputs(rest.get("basis"), basis)) is not None:
+        changed = _changed_drives(base, parent, rest["basis"]["terminal"]) if "terminal" in moved else []
+        names = sorted({*changed, *report["arrivals"]})
         if not names:
-            rest["basis"] = basis  # the rows written were none of this layout's: its rest stands under the moved counter
+            rest["basis"] = basis  # the rows written and the drives published were none of this layout's: its rest stands
             report["rested"] = True
             return report
-    rested = rested() if callable(rested) else rested
+    def verdicts() -> Any:  # the durable verdicts, decoded by the first drive whose verdict is compared or kept
+        nonlocal rested
+        rested = rested() if callable(rested) else rested
+        return rested
+
     if names is None:
-        forget_departed(rested, base.name, _drive_names(base))
+        forget_departed(verdicts(), base.name, _drive_names(base))
     attempts, youngest = 0, (None if names is None else rest.get("youngest"))
     for task_id, status, retention_at, inside_wait, fact in drive_candidates(base, parent, cutoff, stop, after=after,
                                                                                names=names):
@@ -333,7 +353,7 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
             if (stop is not None and stop()) or (budget is not None and attempts >= budget):
                 report["deferred"].append(task_id)  # unreached this pass: its turn comes after the cursor
                 continue
-            if verdict := rested_verdict(rested, parent, task_id, task_dir, drive_of(task_dir)):
+            if verdict := rested_verdict(verdicts(), parent, task_id, task_dir, drive_of(task_dir)):
                 report["skipped"].append({"task_id": task_id, "reason": "custody_unchanged", "retained": verdict.get("reason")})
                 continue
             # A hint never authorizes removal. In particular a date changed after
@@ -357,7 +377,7 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
             if (outcome := settle_child_drive(parent, task_id, drive_of(task_dir), live=live, guard=guard, stop=stop,
                                               report=report))["status"] == "removed":
                 report["pruned"].append({"task_id": task_id, "path": str(task_dir)})
-            record_rest(rested, base.name, parent, task_id, task_dir, drive_of(task_dir), outcome)
+            record_rest(verdicts(), base.name, parent, task_id, task_dir, drive_of(task_dir), outcome)
             if progress is not None:
                 progress(report)
         except Exception as exc:

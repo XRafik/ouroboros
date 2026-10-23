@@ -442,9 +442,10 @@ def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data,
     """After a whole pass finds nothing to settle, the next passes read the layout's basis and stop: the
     drives are not listed, no verdict is compared, no body decoded, nothing written. A task completing
     elsewhere costs one indexed read of the rows written since and leaves the rest standing; a drive's
-    own closed task written again is looked at alone, without a listing. A drive added, a changed
-    retention setting, a new server generation and a young drive reaching its retention instant each
-    make the next pass walk again; a pass stopped by the generation token records no rest."""
+    own closed task written again, and a drive its creator published, are looked at alone, without a
+    listing. A drive added without a publication, a changed retention setting, a new server generation
+    and a young drive reaching its retention instant each make the next pass walk again; a pass stopped
+    by the generation token records no rest."""
     from ouroboros import headless, maintenance_retirement, server_maintenance as sm, task_custody
     from ouroboros.startup_migrations import prepare_startup_state
     from ouroboros.task_results import write_task_result
@@ -490,10 +491,16 @@ def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data,
     assert listings == [] and compared == [] and decodes == [] and _revision(data) == before, "a resting layout was walked"
     assert drive.is_dir()
 
-    fresh = headless.prepare_task_drive(data, "fresh", "empty")
+    fresh = headless.prepare_task_drive(data, "fresh", "empty")  # the creator publishes the arrival
     write_task_result(data, "fresh", "completed", result="answer", child_drive_root=str(fresh), ts=old,
                       root_phase_checkpoint={"post_task_synthesis": "running"})
-    walks_then_rests("a drive added")
+    listings.clear(), compared.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and compared == ["fresh"], "a drive its creator published is looked at alone, without a listing"
+    assert sm.settlement_verdicts(data)["fresh"]["reason"] == "post_work_open" and not rest()
+    walks_then_rests("the whole pass after the published drive was attempted")
+    (data / "state" / "headless_tasks" / "copied" / "data").mkdir(parents=True)  # a drive nobody published
+    walks_then_rests("a drive added without a publication")
     write_task_result(data, "elsewhere", "completed", result="an ordinary finished turn")  # no drive of this layout
     listings.clear(), compared.clear(), decodes.clear()
     counter = rest()["basis"]["terminal"]
@@ -509,12 +516,13 @@ def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data,
     walks_then_rests("the retention setting changed")
     maintenance_retirement.record_startup(data, gaps=False)
     walks_then_rests("a new server generation")
-    young = headless.prepare_task_drive(data, "young", "empty")
+    young = headless.prepare_task_drive(data, "young", "empty")  # published: looked at alone, its instant kept
     write_task_result(data, "young", "completed", result="answer", child_drive_root=str(young),
                       ts="2027-01-14T16:00:00+00:00")  # a day before the clock: inside the two-day retention
-    walks_then_rests("a young drive")
-    assert rest()["youngest"] is not None
-    listings.clear()
+    listings.clear(), compared.clear(), decodes.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and compared == [] and decodes == [], "a published young drive is skipped alone: no verdict decoded"
+    assert rest()["youngest"] is not None, "the rest stands and keeps the young drive's instant"
     sm._run_drive_custody_pass()
     assert listings == [], "a young drive is not a reason to walk before its instant"
     clock[0] = now + 2 * day
@@ -523,3 +531,86 @@ def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data,
     kept: dict = {}
     report = headless.prune_headless_task_drives(data, live=lambda _task: False, stop=lambda: True, rested={}, rest=kept)
     assert report["deferred"] and kept == {}, "a stopped pass records no rest"
+
+
+def test_a_published_drive_arrival_is_looked_at_alone_consumed_once_and_best_effort(data, monkeypatch):
+    """The drive creator publishes the new drive (``task_custody.record_drive_arrival`` at the end of
+    ``headless.prepare_task_drive``): the next pass looks at that drive alone, with no listing and no
+    other verdict compared, leaves the rest standing under the moved inputs, and forgets the publication
+    in the transaction that records the pass; a publication landing during a walking pass survives it
+    and is looked at by the next. The publication is best-effort: a root nothing imported gets no store
+    built for it, and a store that cannot take the write loses nothing (the creator still returns the
+    drive; the layout directory's moved mtime makes the next pass walk whole, as every pass did before)."""
+    from ouroboros import headless, server_maintenance as sm, task_custody
+    from ouroboros.startup_migrations import prepare_startup_state
+    from ouroboros.task_results import write_task_result
+
+    prepare_startup_state(data)
+    monkeypatch.setattr(sm, "DATA_DIR", data)
+    monkeypatch.setattr("supervisor.queue.task_settlement_liveness", lambda _task: False)
+    listings, compared = [], []
+    names = headless._drive_names
+    monkeypatch.setattr(headless, "_drive_names", lambda base: listings.append(base.name) or names(base))
+    verdict = task_custody.rested_verdict
+    monkeypatch.setattr(task_custody, "rested_verdict",
+                        lambda rested, parent, task_id, *a: compared.append(task_id) or verdict(rested, parent, task_id, *a))
+    layout = data / "state" / "headless_tasks"
+
+    def rest():
+        return (maintenance_jobs.job(data, "drive_settlement") or {}).get("rest", {}).get("headless") or {}
+
+    def arrivals():
+        with store.open_store(data, write=False) as txn:
+            return sorted(txn.set_rows(task_custody.DRIVE_ARRIVALS))
+
+    def at_work(task_id):
+        drive = headless.prepare_task_drive(data, task_id, "empty")
+        write_task_result(data, task_id, "running", child_drive_root=str(drive))
+        return drive
+
+    layout.mkdir(parents=True)
+    sm._run_drive_custody_pass()  # an empty layout: listed once, the lap rests
+    assert rest() and "headless_tasks" in listings and rest()["basis"]["arrivals"] is None
+    at_work("atwork")
+    assert arrivals() == ["headless_tasks/atwork"]
+    listings.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and set(compared) <= {"atwork"} and arrivals() == [], "the published drive is looked at alone and forgotten"
+    assert rest()["basis"]["arrivals"] == 1, "the rest stands under the moved inputs"
+    revision = _revision(data)
+    sm._run_drive_custody_pass()
+    assert listings == [] and _revision(data) == revision, "and the layout rests again"
+
+    (layout / "copied" / "data").mkdir(parents=True)  # a drive nobody published: the next pass walks whole ...
+    published = []
+
+    def listing_with_an_arrival(base):  # ... and while it walks, a creator publishes another drive
+        if not published:
+            published.append(at_work("late"))
+        return names(base)
+    monkeypatch.setattr(headless, "_drive_names", listing_with_an_arrival)
+    sm._run_drive_custody_pass()
+    assert published and arrivals() == ["headless_tasks/late"] and rest(), "a publication during the walk survives it"
+    monkeypatch.setattr(headless, "_drive_names", lambda base: listings.append(base.name) or names(base))
+    listings.clear(), compared.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and set(compared) <= {"late"} and arrivals() == [] and rest(), "the next pass looks at it alone"
+
+    bare = data.parent / "bare"  # a root nothing imported: the creator builds no store to publish into
+    drive = headless.prepare_task_drive(bare, "orphan", "empty")
+    assert drive.is_dir() and not (bare / "state" / "current.sqlite").exists()
+    opening = store.open_store
+
+    def refusing(root, *, write, **kwargs):  # a store that cannot take the publication's write
+        if write:
+            raise store.StoreBusy("held elsewhere", reason="contention")
+        return opening(root, write=write, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "open_store", refusing)
+        assert task_custody.record_drive_arrival(data, layout, "unpublished") is False
+        drive = headless.prepare_task_drive(data, "unpublished", "empty")
+    assert drive.is_dir() and arrivals() == []
+    write_task_result(data, "unpublished", "running", child_drive_root=str(drive))
+    listings.clear()
+    sm._run_drive_custody_pass()
+    assert "headless_tasks" in listings and rest(), "an unpublished drive moved the directory: the pass walked whole and rests"

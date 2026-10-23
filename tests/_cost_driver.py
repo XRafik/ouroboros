@@ -73,7 +73,7 @@ from types import SimpleNamespace
 from typing import Any, Callable, Dict, List
 
 from tests._cost_meter import BOUNDARY, CostMeter, tag_of, tagged
-from tests._scale_root import CURRENT, terminal_detail
+from tests._scale_root import CURRENT, money, spend_limit_usd, terminal_detail
 
 READY_TIMEOUT_SEC = 240.0  # the transport bound of this measurement, not a judgment about the boot
 # The supervisor is held before its first tick, and the body's driver parked, for the whole measurement;
@@ -591,6 +591,44 @@ def _companions(srv: Any, root: pathlib.Path, facts: Dict[str, Any]) -> Dict[str
             "terminal_delivery_replay": delivery, "cancel_intent_sweep": cancel}
 
 
+def _completion(root: pathlib.Path, who: str, _k: int) -> None:
+    """One ordinary task nobody here owns completes: a terminal row write, the terminal-write counter moves."""
+    from ouroboros.task_results import write_task_result
+
+    write_task_result(root, f"cur-unrelated-{who}", "completed", chat_id=1, result="an ordinary finished turn")
+
+
+def _money_write(root: pathlib.Path, who: str, k: int) -> None:
+    """One task at work records one LLM attempt through the real ledger, as every model call on a live
+    install does: the usage store's publication marker moves and the task is a dirty usage owner."""
+    from ouroboros.task_results import write_task_result
+
+    task_id = f"cur-money-{who}"
+    write_task_result(root, task_id, "running", chat_id=1, text="a task at work, making one model call")
+    money(root, task_id, limit=spend_limit_usd(k))
+
+
+def _new_drive(root: pathlib.Path, who: str, _k: int) -> None:
+    """One new child drive appears for a task at work (a forked or empty-memory task, an external-workspace
+    task), as admission creates it (``headless.prepare_task_drive``, then the row naming the drive): the
+    layout directory's mtime moves."""
+    from ouroboros.headless import prepare_task_drive
+    from ouroboros.task_results import write_task_result
+
+    task_id = f"cur-drive-{who}"
+    child = prepare_task_drive(root, task_id, "empty")
+    write_task_result(root, task_id, "running", chat_id=1, text="a task at work on its own drive",
+                      child_drive_root=str(child))
+
+
+# The ordinary activities of an install that is never idle, one between two passes of every duty and job
+# (tests/test_cost_contract.py: the pass after each costs the same at every size). Each moves one
+# install-wide fact a rest could wrongly key on: the terminal-write counter, the usage ledger's marker,
+# a layout directory's mtime. Each takes the root, the name of the duty or job it happens beside, and k.
+ACTIVITIES: Dict[str, Callable[[pathlib.Path, str, int], None]] = {
+    "unrelated": _completion, "money": _money_write, "drive": _new_drive}
+
+
 def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pathlib.Path, facts: Dict[str, Any],
                     stubs: Dict[str, Any]) -> None:
     from ouroboros import server_maintenance as sm
@@ -598,9 +636,9 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
     from ouroboros.delegate_collection import body_runtime
     from ouroboros.headless import DRIVE_SETTLEMENTS_PER_PASS
     from ouroboros.maintenance import child
-    from ouroboros.task_results import write_task_result
 
     stop = threading.Event()
+    k = int(facts.get("k") or 1)
     companions = _companions(srv, root, facts)
     duties = result.setdefault("duties", {})
     runtime, park, clock = body_runtime(root), stubs["park"], stubs["clock"]
@@ -620,10 +658,10 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
         """``first`` over the root as the boot left it; then, while the previous pass wrote (a duty
         whose first pass changed its own inputs, e.g. recorded a member's rest after writing its
         row, or a budgeted lap still settling), up to ``settle_passes`` ``settle`` passes; then
-        ``rest``, the pass over unchanged inputs the law holds to; then ``unrelated``, the pass
-        after one ordinary task nobody here owns completed (the install is never idle: a pass may
-        do the addressed work that completion owes it, never history-sized work); then ``work``
-        after the companion's input change."""
+        ``rest``, the pass over unchanged inputs the law holds to; then one pass after each ordinary
+        activity of ``ACTIVITIES`` nobody here owns (the install is never idle: a pass may do the
+        addressed work the activity owes it, never history-sized work); then ``work`` after the
+        companion's input change."""
         entry: Dict[str, Any] = {"first": one_pass(f"D:{name}:first", one)}
         settled = entry["first"]
         for attempt in range(1, settle_passes + 1):
@@ -633,9 +671,10 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
             settled = entry[f"settle{attempt}"] = one_pass(f"D:{name}:settle{attempt}", one)
         before_rest()
         entry["rest"] = one_pass(f"D:{name}:rest", one)
-        write_task_result(root, f"cur-unrelated-{name}", "completed", chat_id=1, result="an ordinary finished turn")
-        before_rest()
-        entry["unrelated"] = one_pass(f"D:{name}:unrelated", one)
+        for phase, happen in ACTIVITIES.items():
+            happen(root, name, k)
+            before_rest()
+            entry[phase] = one_pass(f"D:{name}:{phase}", one)
         companion = companions.get(name)
         if companion is None:
             entry["companion"] = None
