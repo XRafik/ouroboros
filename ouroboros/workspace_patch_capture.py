@@ -26,6 +26,7 @@ from typing import Any, BinaryIO, Dict, Iterable, List, Optional, Sequence, Tupl
 
 from ouroboros.artifact_storage import compress_in_place
 from ouroboros.contracts.task_constraint import normalize_task_constraint
+from ouroboros.git_observation import numstat_paths
 from ouroboros.headless_status import (
     ARTIFACT_STATUS_FAILED,
     ARTIFACT_STATUS_READY_NO_CHANGES,
@@ -122,11 +123,10 @@ def write_workspace_patch_artifacts(
     except (OSError, ValueError) as exc:
         errors.append({"type": "file_capture_failed", "message": f"{type(exc).__name__}: {exc}"})
         file_baseline = {}
-    # Numstat omits stat-only dirt without index writes, keeping unchanged large files out of outputs.
-    changed_tracked = [row.split("\t", 2)[2] for row in _git_path_list(
-        ["git", "diff", "--numstat", "--no-renames", "-z", "--no-ext-diff", "--no-color", base_ref, "--"],
-        root, errors,
-    )]
+    # Confirm binary rows too, keeping unchanged large files out of outputs without index writes.
+    cmd = ["git", "diff", "--numstat", "--no-renames", "-z", "--no-ext-diff", "--no-color", base_ref, "--"]
+    changed_tracked = numstat_paths(_git_bytes(cmd, root, errors=errors), cmd,
+                                   lambda args: _git_bytes(args, root, errors=errors))
     # A tracked WAL index (committed beside its database, or staged in a copy) is shared memory as an
     # untracked one is: never diffed, and never named for an integration to stage over the target's own.
     wal_indexes = {rel: reason for rel in changed_tracked if (reason := _wal_index_reason(root, rel))}

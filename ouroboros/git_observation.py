@@ -1,10 +1,36 @@
-"""Shared Git environment for host observations, including runtime-only entrypoints."""
+"""Host Git observations: no index writes and content-confirmed changed paths."""
 
 from __future__ import annotations
 
 import os
 import re
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Sequence, Union
+
+
+def numstat_paths(output: Union[str, bytes], command: Sequence[str],
+                  read: Callable[[Sequence[str]], Union[str, bytes]]) -> list[str]:
+    """Read ``--numstat -z`` paths, confirming binary rows through the same reader.
+
+    Without index refresh, Git can emit ``-\t-`` for identical binary bytes.
+    A plain patch compares content and emits only a binary summary (no --binary
+    payload); it also preserves mode changes and both sides of renames/copies.
+    Keep the comparison's refs/options but scope each probe to literal paths.
+    """
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", "surrogateescape")
+    fields, paths = iter(output.split("\0")), []
+    scope = list(command[:command.index("--")] if "--" in command else command)
+    probe = [arg for arg in scope if arg not in {"--numstat", "-z"}]
+    probe.extend(["--patch", "--no-ext-diff", "--no-textconv", "--"])
+    for row in fields:
+        if not row:
+            continue
+        added, deleted, path = row.split("\t", 2)
+        sources = [path] if path else [next(fields), next(fields)]
+        if added == deleted == "-" and not read([*probe, *(f":(literal){p}" for p in sources)]):
+            continue
+        paths.append(sources[-1])
+    return paths
 
 
 def host_git_env(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:

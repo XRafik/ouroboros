@@ -14,6 +14,7 @@ import pathlib
 import posixpath
 from typing import List, Optional
 
+from ouroboros.git_observation import numstat_paths
 from ouroboros.runtime_mode_policy import format_protected_paths
 from ouroboros.tools.registry import ToolContext
 from ouroboros.tool_access import ResolvedResourceBinding
@@ -167,16 +168,9 @@ def _git_diff(
             return _git()._vcs_result(protected_block, binding)
         output = _git().run_cmd(cmd, cwd=repo_dir)
         if name_only:
-            fields, paths = iter(output.split("\0")), []
-            for row in fields:
-                if not row:
-                    continue
-                path = row.split("\t", 2)[2]
-                if not path:  # numstat -z gives a rename/copy as counts, old path, new path.
-                    next(fields)
-                    path = next(fields)
-                paths.append(json.dumps(path, ensure_ascii=False) if any(ord(c) < 32 or c in '\\"' for c in path) else path)
-            output = "\n".join(paths)
+            paths = numstat_paths(output, cmd, lambda args: _git().run_cmd(args, cwd=repo_dir))
+            output = "\n".join(json.dumps(path, ensure_ascii=False)
+                               if any(ord(c) < 32 or c in '\\"' for c in path) else path for path in paths)
         text = _git()._vcs_result(_git()._limit_git_output(output, max_chars), binding)
         if comparison:
             comparison["kind"] = "tree_to_tree" if head else "tree_to_index" if staged else "tree_to_worktree"

@@ -101,11 +101,16 @@ def test_host_observations_never_write_the_index(tmp_path, monkeypatch, changed,
 
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
 @pytest.mark.parametrize("operation", ["cherry_pick", "stage_merge"])
-def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, changed, operation):
+@pytest.mark.parametrize("binary", [False, True], ids=["text", "binary"])
+def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, changed, operation, binary):
     from ouroboros.tools import git_pr
     from ouroboros.tools.registry import ToolContext
 
     repo = _repo(tmp_path)
+    if binary:
+        (repo / "seed.txt").write_bytes(b"\0original\n")
+        _git(repo, "add", "seed.txt")
+        _git(repo, "commit", "-qm", "binary seed")
     ctx = ToolContext(repo_dir=repo, drive_root=tmp_path / "data", branch_dev="ouroboros")
     _git(repo, "checkout", "-qb", "integrate/pr-1")
     (repo / "feature.txt").write_text("incoming work\n", encoding="utf-8")
@@ -119,7 +124,7 @@ def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, cha
     def dirty_stat():
         seed = repo / "seed.txt"
         if changed:
-            seed.write_text("owner work\n", encoding="utf-8")
+            seed.write_bytes(b"\0owner work\n" if binary else b"owner work\n")
         info = seed.stat()
         os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
 
@@ -151,7 +156,7 @@ def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, cha
     assert observed
     if changed:
         assert "Working tree" in result and "changes" in result, result
-        assert (repo / "seed.txt").read_text(encoding="utf-8") == "owner work\n"
+        assert (repo / "seed.txt").read_bytes() == (b"\0owner work\n" if binary else b"owner work\n")
         assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "integrate/pr-1"
     else:
         assert result.startswith("✅"), result
@@ -163,7 +168,8 @@ def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, cha
 
 
 @pytest.mark.parametrize("comparison", ["worktree", "staged", "tree"])
-def test_vcs_names_keep_binary_mode_and_rename_changes(tmp_path, monkeypatch, comparison):
+@pytest.mark.parametrize("binary_metadata", [False, True], ids=["text-metadata", "binary-metadata"])
+def test_vcs_names_keep_binary_mode_and_rename_changes(tmp_path, monkeypatch, comparison, binary_metadata):
     from ouroboros.tools.registry import ToolContext
     from ouroboros.tools.vcs_read import _vcs_read
 
@@ -171,6 +177,9 @@ def test_vcs_names_keep_binary_mode_and_rename_changes(tmp_path, monkeypatch, co
     binary = repo / "binary.dat"
     binary.write_bytes(b"\0before")
     (repo / "mode.sh").write_text("exit 0\n", encoding="utf-8")
+    if binary_metadata:
+        (repo / "mode.sh").write_bytes(b"\0mode only")
+        (repo / "seed.txt").write_bytes(b"\0rename only")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "fixtures")
     binary.write_bytes(b"\0after")
@@ -269,16 +278,21 @@ def test_inherited_config_count_keeps_gits_own_result(tmp_path, monkeypatch, cou
 
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
 @pytest.mark.parametrize("file_reference", [False, True], ids=["patch", "file-reference"])
-def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch, changed, file_reference):
+@pytest.mark.parametrize("binary", [False, True], ids=["text", "binary"])
+def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch, changed, file_reference, binary):
     from ouroboros import workspace_patch_capture as capture
 
     repo = _repo(tmp_path)
+    if binary:
+        (repo / "seed.txt").write_bytes(b"\0original payload\n")
+        _git(repo, "add", "seed.txt")
+        _git(repo, "commit", "-qm", "binary seed")
     monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
     if file_reference:
         monkeypatch.setattr(capture, "_PATCH_FILE_REFERENCE_BYTES", 8)
     seed = repo / "seed.txt"
     if changed:
-        seed.write_text("changed payload\n", encoding="utf-8")
+        seed.write_bytes(b"\0changed payload!\n" if binary else b"changed payload\n")
     info = seed.stat()
     os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
     before = _index(repo)
@@ -292,3 +306,51 @@ def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch
     assert any(row["kind"] == "workspace_patch" for row in artifacts) is (changed and not file_reference)
     assert _index(repo) == before
     assert not (repo / ".git" / "index.lock").exists()
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
+@pytest.mark.parametrize("reader", ["vcs_names", "selection", "drift"])
+@pytest.mark.parametrize("name", ["binary.dat", "binary[1].dat"])
+def test_binary_path_observers_compare_content(tmp_path, monkeypatch, changed, reader, name):
+    """Binary numstat rows alone prove neither edits nor an unchanged tree."""
+    from ouroboros.git_observation import host_git_env
+
+    repo = _repo(tmp_path)
+    seed = repo / name
+    seed.write_bytes(b"\0before")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "binary seed")
+    baseline = _git(repo, "rev-parse", "HEAD")
+    trace = tmp_path / "git-trace.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    if changed:
+        seed.write_bytes(b"\0after!")  # same size, different content
+    info = seed.stat()
+    os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+    before = _index(repo)
+    if reader == "selection":
+        from ouroboros.test_selection import changed_paths
+        paths = list(changed_paths(repo, "HEAD")[1])
+    elif reader == "drift":
+        from ouroboros.delegate_target_drift import _target_drift_evidence
+        evidence = _target_drift_evidence(SimpleNamespace(target_root=repo, baseline_sha=baseline))
+        assert evidence["checked"], evidence
+        paths = evidence["paths"]
+    else:
+        from ouroboros.tools.registry import ToolContext
+        from ouroboros.tools.vcs_read import _vcs_read
+        ctx = ToolContext(repo_dir=repo, drive_root=tmp_path / "data")
+        output = _vcs_read(ctx, action="diff", root="system_repo", name_only=True)
+        assert "VCS target:" in output and "ERROR" not in output, output
+        names = output.split("VCS target:", 1)[0].rstrip("\n")
+        paths = [json.loads(path) if path.startswith('"') else path for path in names.splitlines()]
+    assert paths == ([name] if changed else [])
+    assert _index(repo) == before
+    assert not (repo / ".git" / "index.lock").exists()
+    rows = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    assert not [row for row in rows if row.get("label") == "do_write_index"]
+    # The content oracle also reads without refreshing the index.
+    result = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=repo, env=host_git_env())
+    assert result.returncode == int(changed)
+    assert _index(repo) == before

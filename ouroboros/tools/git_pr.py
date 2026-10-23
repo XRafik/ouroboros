@@ -9,6 +9,7 @@ import re
 import subprocess
 from typing import List, Optional
 
+from ouroboros.git_observation import numstat_paths
 from ouroboros.tools.registry import ToolContext, ToolEntry
 from ouroboros.tools.git import _acquire_git_lock, _release_git_lock, _sanitize_git_error
 
@@ -540,7 +541,8 @@ def _stage_pr_merge(
                 f"{_sanitize_git_error((co.stderr or '').strip())}"
             )
 
-        if _g(["diff", "--numstat"], repo_dir).stdout.strip():
+        cmd = ["git", "diff", "--numstat", "-z"]
+        if numstat_paths(_g(cmd[1:], repo_dir).stdout, cmd, lambda args: _g(args[1:], repo_dir).stdout):
             _restore_on_error()
             return (
                 f"⚠️ PR_MERGE_ERROR: Working tree on '{target_branch}' has unstaged "
