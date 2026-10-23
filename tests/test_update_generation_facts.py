@@ -41,6 +41,8 @@ def test_direct_dispatch_does_no_io_until_supervisor_handles_its_frame(isolated_
     turn = TurnEventQueue(frames, "owner", 1, on_frame=execution.observe)
     frame = {"type": "main_llm_call_state", "task_id": "owner", "phase": "started", "task_attempt": 1,
              "llm_call_id": "call-1", "execution_id": "execution-1", "round_id": "round-1", "call_attempt": 1}
+    # Dispatch is the first observed send of the call (lane O), not its start.
+    sent = {**frame, "phase": "observed", "model_activity": {"phase": "dispatching"}}
     calls = []
 
     def watch(owner, name):
@@ -57,11 +59,16 @@ def test_direct_dispatch_does_no_io_until_supervisor_handles_its_frame(isolated_
         watch(owner, name)
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as producer:
         producer.submit(turn.put, frame).result()
+        assert execution.phase == "requested"
+        # The supervisor handles the start frame before any send: nothing is pending, nothing is read.
+        events._handle_main_llm_call_state(frames.get_nowait(), SimpleNamespace(RUNNING={}))
+        producer.submit(turn.put, sent).result()
     assert execution.phase == "dispatched"
     assert calls == [], "the turn observer must not read state, sample or write before model dispatch"
     assert isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"]["direct_message_first_dispatch"] is None
 
-    # The turn can have ended before the supervisor drains the frame: no live registry entry is needed.
+    # The send frame publishes the fact its observer stamped. The turn can have ended before the
+    # supervisor drains it: no live registry entry is needed.
     events._handle_main_llm_call_state(frames.get_nowait(), SimpleNamespace(RUNNING={}))
     after = isolated_progress.saved[progress.STATE_KEY]["generation_facts"]["after"]["direct_message_first_dispatch"]
     assert after == {"task_id": "owner", "attempt_id": execution.execution_id,
