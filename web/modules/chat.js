@@ -11,7 +11,7 @@ import { ORIGIN_ADDRESSED_NOTICE_TYPES, childRowPlacement, replayConcludesTask }
 import { appendProjectRow, decorateProjectRow, PROJECT_ROW_TYPES, refreshProjectAnswerFold, syncSavedProjectContext } from './project_answer.js';
 import { createWorkPortals, isPortal, reconcilePortalNotes } from './work_portal.js';
 import { createTaskEpisodes } from './task_episodes.js';
-import { createChatMedia, showTaskIncidentToast } from './chat_media.js';
+import { createChatMedia, decorateContactSource, showTaskIncidentToast } from './chat_media.js';
 import { attachmentCaption, attachmentViews, createUnconfirmedSends } from './chat_attachments.js';
 import { createChatDecision } from './chat_decision.js';
 import { createRoomWork } from './room_work.js';
@@ -2190,6 +2190,7 @@ export function createChatInstance({
                 originProjected: !!opts.originProjected, terminalTime: opts.terminalTime || null,
                 completionNotice: opts.completionNotice || null,
                 skillReview: opts.skillReview || null, evidenceRef: opts.evidenceRef || null,
+                presenceContact: opts.presenceContact || null,
                 attachments: attachments.length ? attachments : null,
                 textPlaceholder: opts.textPlaceholder === true,
             });
@@ -2236,6 +2237,7 @@ export function createChatInstance({
             ${pendingHtml}
             ${timeHtml}
         `;
+        decorateContactSource(bubble, opts.presenceContact);
         if (attachments.length) chatMedia.mountAttachments(bubble, attachments, shown);
         if (!isProgress && shown) chatMedia.attachCopyControl(bubble, String(shown));
         if (!isProgress) replies.decorate(bubble, opts.reply);
@@ -2433,6 +2435,7 @@ export function createChatInstance({
                 }
                 // A stored row as its bubble: its own identity and labels, plus what its kind adds.
                 const addStoredRow = (msg, taskId, extra) => addMessage(msg.text, msg.role, !!msg.markdown, msg.ts || null, false, {
+                    presenceContact: msg.presence_contact,
                     historyId: msg.history_id, historyPosition: msg.history_position,
                     systemType: msg.system_type || '', narration: msg.narration, taskId,
                     source: msg.source || '', initiator: msg.initiator || '',
@@ -3420,6 +3423,7 @@ export function createChatInstance({
             }
             const routingCleared = clearTransientRoutingAnnotations(messagesDiv);
             const added = addMessage(msg.content, msg.role, msg.markdown, msg.ts || null, false, {
+                presenceContact: msg.presence_contact,
                 systemType: msg.system_type || '', narration: msg.narration,
                 source: msg.source || '',
                 initiator: msg.initiator || '',
