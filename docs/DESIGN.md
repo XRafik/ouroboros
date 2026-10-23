@@ -1453,8 +1453,9 @@ Anatomy, top to bottom:
 1. **Head** — one 28px row in every room: neutral `Question` chip (`--type-meta`,
    neutral pair), the status beside it as a 7 px status mark + text, amber while
    the task waits for the answer. The row never wraps (a narrow card's long status
-   takes two lines in place). The voice line above names who asks and a Main copy's
-   Project. The lifecycle word family is closed and leads with the one
+   takes two lines in place). The voice line names who asks and a Main copy's
+   Project; private Presence questions and reports add the linked place/thread
+   source beside the name, outside authored text. The lifecycle family leads with the one
    word that answers "is there an unanswered question for me?":
    `Waiting for your answer` needs positive wait evidence (the task's live wait
    record, or the original required flag before any record exists); a resumed

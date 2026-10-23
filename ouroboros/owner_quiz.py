@@ -574,10 +574,10 @@ def record_answered(
     task itself received. First-wins is untouched — an already ``answered``
     block stays a refusal on any other ``request_id``.
 
-    ``wait_for_answer`` stays on the answered block on purpose: the answer
-    frame (``gateway.task_decision._quiz_answer_frame``) reads it to say the
-    task was waiting rather than proceeding under its assumption, and every
-    surface settles the card on ``answered`` regardless of wait facts.
+    The answer frame keeps a required wait distinct from proceeding under an
+    assumption. Terminal reconciliation retires the live flag, so its matching
+    wait-ended/reconciled stamps preserve that distinction for late answers.
+    Every surface settles the card on ``answered`` regardless of wait facts.
 
     Returns ``{"ok", "state", "duplicate", "error", "block"}``:
     - unknown quiz_id → ``error="quiz_not_found"``;
@@ -761,7 +761,11 @@ def quiz_answer_frame(
         lines.append(f"The owner chose option {option_index + 1}: {label}")
         if comment:
             lines.append(f"Owner comment (verbatim): {comment}")
-    if str(block.get("assumption") or "") and not block.get("wait_for_answer"):
+    ended_at_terminal = bool(block.get("wait_ended_at")) and (
+        block.get("wait_ended_at") == block.get("reconciled_at")
+    )
+    if (str(block.get("assumption") or "") and not block.get("wait_for_answer")
+            and not ended_at_terminal):
         lines.append(
             f"You continued under the assumption: {block.get('assumption')} — "
             "judge yourself whether work has moved past the answered fork."

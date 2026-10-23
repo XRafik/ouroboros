@@ -84,6 +84,24 @@ def test_projection_admits_the_late_answer_only_under_the_explicit_flag(tmp_path
     assert quiz_states(tmp_path, "t1")["q1"]["answered_index"] == 1
 
 
+@pytest.mark.parametrize("wait_mode", ["optional", "waiting", "resumed"])
+def test_late_frame_does_not_invent_continuation_after_terminal(tmp_path, monkeypatch, wait_mode):
+    from ouroboros import owner_quiz
+
+    record_asked(tmp_path, "t1", quiz_id="q1", question="Which?", options=["A"],
+                 assumption="assume A", wait_for_answer=wait_mode != "optional")
+    if wait_mode == "resumed":
+        monkeypatch.setattr(owner_quiz, "utc_now_iso", lambda: "2026-01-01T00:00:01Z")
+        assert owner_quiz.mark_wait_ended(tmp_path, "t1", "q1")
+    monkeypatch.setattr(owner_quiz, "utc_now_iso", lambda: "2026-01-01T00:00:02Z")
+    reconcile_terminal(tmp_path, "t1")
+    answer = record_answered(tmp_path, "t1", quiz_id="q1", option_index=0,
+                             request_id="late", allow_expired=True)
+    frame = owner_quiz.recorded_answer_frame(answer["block"])
+    assert ("You continued under the assumption" in frame) == (wait_mode != "waiting")
+    assert "The owner chose option 1: A" in frame
+
+
 def test_projection_refuses_out_of_range_and_unknown(tmp_path):
     record_asked(tmp_path, "t1", quiz_id="q1", question="?", options=["A", "B"])
     out = record_answered(tmp_path, "t1", quiz_id="q1", option_index=7, request_id="r")
