@@ -311,6 +311,7 @@ def _status(**over):
 
 def _material():
     return {
+        "base_sha": "a" * 40, "target_sha": "b" * 40,
         "commits": [{"sha": "b" * 40, "date": "2026-09-03", "subject": "s", "body": ""}],
         "releases": [{"version": "6.114.0", "date": "2026-09-01", "text": "row", "commit": "b" * 40}],
         "bodies_omitted": 0, "omitted_rows": 0,
@@ -389,10 +390,9 @@ def test_write_letter_shares_one_ceiling_between_the_slot_wait_and_the_call(lett
 
     @contextmanager
     def slow_slot(model, use_local, deadline_ts=None):
-        monkeypatch.setattr(ul.time, "time", lambda: real_now + 7.0)
+        monkeypatch.setattr(ul.time, "time", lambda: deadline_ts - 3.0)
         yield
 
-    real_now = ul.time.time()
     monkeypatch.setattr(mc, "model_call_scope", slow_slot)
     seen = {}
 
@@ -403,7 +403,7 @@ def test_write_letter_shares_one_ceiling_between_the_slot_wait_and_the_call(lett
     monkeypatch.setattr(ul, "_chat", fake_chat)
     record = ul.write_letter(_status(), _material(), drive_root=letter_env["drive"])
     assert record["state"] == "ready"
-    assert 2.5 < seen["timeout"] < 3.5, f"the call gets what the slot left, not 10s: {seen['timeout']}"
+    assert seen["timeout"] == pytest.approx(3.0), "the call gets what the slot left, not 10s"
 
 
 def test_write_letter_reports_a_ceiling_spent_on_the_slot_as_a_timeout(letter_env, monkeypatch):

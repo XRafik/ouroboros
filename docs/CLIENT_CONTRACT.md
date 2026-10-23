@@ -684,10 +684,11 @@ Connected coding subscriptions use Claudexor. Its API v2 objects (`job`, mainten
   - `available` and `safe_to_apply`;
   - `update_tx`: the update transaction in progress (`{active: false}` when none);
   - `update_progress`: the last admitted update attempt (`{}` only when absent; unreadable state is `outcome:unknown`). `operation_id` and `generation` identify it; `current_generation`, `stage`, `active`, `result`, `outcome` and `concluded_by` separate progress from conclusion. `base_sha`, `target_sha`, `keep_branch` and `stash_note` retain exact source/local-work facts when known. `outcome` is applied/not_applied/rolled_back/failed/unknown, empty while unresolved. It is observation, never recovery authority; a pre-admission refusal remains its HTTP answer;
-  - `letter`: the written description of the update, when there is one;
+  - `letter`: the written description with its exact range key and optional `qualification` (per-commit receipts and GitHub run observations). Missing receipts, unread bodies, unavailable checks and non-green results remain distinct;
+  - `after_update`: the retained attempt's `operation_id`, `outcome`, base/target and nullable `before`/`after` generation samples. Each names source SHA, generation, time and server-process scope, RSS bytes with `rss_measure` current/peak/unobserved, cumulative CPU seconds and nullable interval percent, duty-overrun counts, and nullable latest direct-message first-dispatch timing with task/attempt identity. These are observations, not an update verdict or chat message;
   - `check_ok`: null on status.
 - `POST /api/update/check` fetches first, may write the update letter and broadcasts `update_progress_changed`.
-- `POST /api/update/preflight` returns a `merge_plan` with `base_sha` and the target.
+- `POST /api/update/preflight` returns a `merge_plan` with `base_sha` and the target. Optional `letter` and `qualification` describe exactly those pins; a client must discard other-range prose before confirming. Absence means unknown, never qualified.
 
 **Applying an update.** Send `POST /api/update/apply` (`UpdateApplyRequest`) with `strategy`, `expected_base_sha` and `expected_target_sha` from the preflight:
 - **Release moved:** 409 `release_moved` means the release changed since the preflight. Run the preflight again.
