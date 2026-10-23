@@ -18,21 +18,34 @@ from tests.test_terminal_cost_reconciliation import attempt, dirty, env as env  
 
 @pytest.mark.parametrize("stale", [False, True])
 @pytest.mark.parametrize("producer", ["execution", "review", "api"])
-def test_first_publication_never_folds_a_cold_suffix(tmp_path, monkeypatch, stale, producer):
+@pytest.mark.parametrize("archived", [False, True])
+def test_first_publication_never_folds_a_cold_suffix(tmp_path, monkeypatch, stale, producer, archived):
+    from ouroboros import utils
     counts = []
     for scale in (1, 30):
         root = tmp_path / f"root{scale:02}"
         root.mkdir()
+        with store.open_store(root, write=True):
+            pass  # serving has published its store; only the metrics cursor is cold
         if stale:
             metrics.publish(root, event("prior"))
         path = root / "logs/events.jsonl"
         path.parent.mkdir(exist_ok=True)
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write('{"type":"old_event"}\n' * (40 * scale))
+        if archived:
+            (root / "archive").mkdir()
+            if stale:
+                path.rename(root / "archive/events_20261021T000000.jsonl")
+            for index in range(scale):
+                (root / f"archive/events_20261022T{index:06}.jsonl").write_text(
+                    '{"type":"old_event"}\n' * 40, encoding="utf-8")
+        else:
+            with path.open("a", encoding="utf-8") as stream:
+                stream.write('{"type":"old_event"}\n' * (40 * scale))
         calls = []
         original = swarm_rollup.fold_event_suffix
         with monkeypatch.context() as foreground:
             foreground.setattr(swarm_rollup, "fold_event_suffix", lambda *a, **k: calls.append(1) or original(*a, **k))
+            foreground.setattr(utils, "jsonl_archive_segments", lambda *a, **k: pytest.fail("publisher enumerated archives"))
             if producer == "execution":
                 record_session_execution(root, RunCustody(task_id="task", run_id="run", route_id="route",
                     model="model", selected_subagent_id="worker"), {"summary": {"state": "succeeded", "answer_received": True}}, {})
@@ -53,6 +66,11 @@ def test_first_publication_never_folds_a_cold_suffix(tmp_path, monkeypatch, stal
         facts = metrics.read(root, "worker")
         assert facts["coverage"]["stream"] == "complete" and facts["rows"]
         assert maintenance.run_job(root, "subagent_metrics") is None
+        utils._CLOSED_SEGMENTS.clear()  # warm cursor in a fresh answering process
+        with monkeypatch.context() as foreground:
+            foreground.setattr(utils, "jsonl_archive_segments", lambda *a, **k: pytest.fail("warm publisher enumerated archives"))
+            metrics.publish(root, event("warm-next"))
+        assert metrics.read(root, "worker")["coverage"]["stream"] == "complete"
     assert counts == [0, 0]
 
 
@@ -85,6 +103,7 @@ def test_fold_and_projection_never_hold_a_store_write_transaction(tmp_path, monk
     monkeypatch.setattr(swarm_rollup, "fold_event_suffix", fold)
     monkeypatch.setattr(metrics, "fold", project)
     metrics.publish(tmp_path, event())
+    metrics.catch_up(tmp_path)
     assert {"suffix", "projection"} <= set(visited)
     assert metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 1
 
@@ -110,6 +129,34 @@ def test_suffix_commit_uses_its_captured_horizon_and_does_not_erase_a_racing_cur
     assert metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 3
     assert maintenance.run_job(tmp_path, "subagent_metrics")["state"] == "done"
     assert metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 3
+
+
+def test_child_batches_keep_cursor_and_projection_atomic_and_retry_a_repaired_torn_tail(tmp_path, monkeypatch):
+    from ouroboros.utils import append_jsonl
+    with store.open_store(tmp_path, write=True):
+        pass
+    path = tmp_path / "logs/events.jsonl"
+    for index in range(5):
+        append_jsonl(path, event(str(index), type=metrics.EVENT))
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write('{"type":"tail"}')
+    monkeypatch.setattr(metrics, "BATCH_BYTES", 600)
+    commit, checkpoints = metrics._commit_suffix, []
+    def observed(root, cursor, events, through, upper, source):
+        result = commit(root, cursor, events, through, upper, source)
+        if result:
+            with store.open_store(root, write=False) as txn:
+                checkpoints.append((txn.meta(metrics.CURSOR)["through"], len(txn.set_rows(metrics.PRODUCERS))))
+        return result
+    monkeypatch.setattr(metrics, "_commit_suffix", observed)
+    assert maintenance.run_job(tmp_path, "subagent_metrics")["state"] == "failed"
+    assert len(checkpoints) > 1 and checkpoints[-1][1] == 5
+    assert all(a[0] < b[0] and a[1] < b[1] for a, b in zip(checkpoints, checkpoints[1:]) if a != b)
+    assert maintenance.run_job(tmp_path, "subagent_metrics") is None
+    with path.open("a", encoding="utf-8") as stream:
+        stream.write("\n")
+    assert maintenance.run_job(tmp_path, "subagent_metrics")["state"] == "done"
+    assert metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 5
 
 
 def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch):

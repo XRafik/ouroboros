@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import pathlib
 
 from ouroboros import store
@@ -141,10 +142,11 @@ def _projection(root, events):
     return updates, observed, tasks
 
 
-def _defer(root, upper):
+def _defer(root):
     from ouroboros import maintenance_jobs
     from ouroboros.maintenance import child
 
+    source = _source_stamp(root)
     with store.open_store(root, write=True) as txn:
         cursor = txn.meta(CURSOR) or {}
         coverage = {**cursor.get("coverage", {}), "state": "unknown", "stream": "pending",
@@ -152,55 +154,93 @@ def _defer(root, upper):
         if cursor.get("coverage") != coverage:
             txn.set_meta(CURSOR, {**cursor, "coverage": coverage})
         job = txn.meta("job:" + JOB) or {}
-        if job.get("state") != "pending" or job.get("requested_through", -1) < upper:
-            maintenance_jobs.record_in(txn, JOB, state="pending", requested_through=upper)
+        if job.get("state") != "pending" or job.get("requested_source") != source:
+            maintenance_jobs.record_in(txn, JOB, state="pending", requested_source=source)
     child.request()
 
 
-def catch_up(root, *, foreground_from=None, should_stop=None):
-    """Fold a stable suffix outside writes, CAS each bounded projection with its cursor.
+def _commit_suffix(root, cursor, events, through, upper, source):
+    updates, observed, tasks = _projection(root, events)
+    missing = sorted(set(cursor.get("missing_producers") or ()) - observed)
+    next_cursor = {"through": through, "source_root": str(pathlib.Path(root).resolve()),
+        "missing_producers": missing, "source": source if through == upper else None,
+        "coverage": {"state": "partial" if missing else "observed_window", "history_before_window": "unknown",
+                     "missing_publications": len(missing), "stream": "complete" if through == upper else "incomplete"}}
+    if next_cursor != cursor or updates:
+        with store.open_store(root, write=True) as txn:
+            if (txn.meta(CURSOR) or {}) != cursor:
+                return False  # another fold or publication-gap observation won
+            for address, value in updates.items():
+                txn.put_row(*address, value)
+            txn.set_meta(CURSOR, next_cursor)
+    from ouroboros.swarm_receipt import refresh_for_task
+    for task_id in tasks:
+        refresh_for_task(root, task_id)
+    return True
 
-    A producer supplies its pre-append horizon. Missing/stale coverage before that
-    publication belongs to the child; it never makes the answering process replay.
-    Explicit repair and the maintenance job omit that horizon and drain the suffix.
+
+def _publish_suffix(root, before):
+    """A warm publisher reads only its bounded live suffix, with an inode/EOF proof.
+
+    Missing/stale cursor, rotation, or a large suffix schedules the child before
+    any history discovery. Pinning the live handle avoids an archive search even
+    if rotation races this read. The absolute cursor includes its consumed prefix.
     """
+    with store.open_store(root, write=False) as txn:
+        cursor = txn.meta(CURSOR) or {}
+    if cursor.get("source") != before and (cursor or any(before)):
+        _defer(root)
+        return False
+    current = _source_stamp(root)
+    old_live, live = before[0], current[0]
+    start = old_live[1] if old_live else 0
+    if (not live or current[1] != before[1] or (old_live and old_live[0] != live[0])
+            or not 0 <= live[1] - start <= BATCH_BYTES):
+        _defer(root)
+        return False
+    with (pathlib.Path(root) / "logs/events.jsonl").open("rb") as handle:
+        actual = os.fstat(handle.fileno())
+        if (actual.st_ino, actual.st_size, actual.st_mtime_ns) != tuple(live):
+            _defer(root)
+            return False
+        handle.seek(start)
+        raw = handle.read(live[1] - start)
+    if len(raw) != live[1] - start or raw and not raw.endswith(b"\n"):
+        _defer(root)
+        return False
+    try:
+        events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    except ValueError:
+        _defer(root)
+        return False
+    events = [event for event in events if isinstance(event, dict)]
+    through = int(cursor.get("through", 0)) + len(raw)
+    if not _commit_suffix(root, cursor, events, through, through, current):
+        _defer(root)
+        return False
+    return True
+
+
+def catch_up(root, *, should_stop=None):
+    """Child/explicit repair: fold one stable chain outside writes; CAS bounded batches."""
     from ouroboros.swarm_rollup import fold_event_suffix
     from ouroboros.jsonl_tail import JsonlChainSnapshot
 
     root, cursor = pathlib.Path(root), None
     try:
+        stamp = _source_stamp(root)
         source = JsonlChainSnapshot(root / "logs/events.jsonl")
         while not (should_stop and should_stop()):
             with store.open_store(root, write=False) as txn:
                 cursor = txn.meta(CURSOR) or {}
             start = int(cursor.get("through", 0))
-            if foreground_from is not None and (start != foreground_from or source.upper - start > BATCH_BYTES):
-                _defer(root, source.upper)
-                return False
             events = []
             through = fold_event_suffix(root, start, events.append, source=source, max_bytes=BATCH_BYTES)
-            updates, observed, tasks = _projection(root, events)
-            missing = sorted(set(cursor.get("missing_producers") or ()) - observed)
-            next_cursor = {"through": through, "source_root": str(root.resolve()), "missing_producers": missing,
-                "coverage": {"state": "partial" if missing else "observed_window", "history_before_window": "unknown",
-                             "missing_publications": len(missing), "stream": "complete" if through == source.upper else "incomplete"}}
-            if next_cursor != cursor or updates:
-                with store.open_store(root, write=True) as txn:
-                    if (txn.meta(CURSOR) or {}) != cursor:
-                        # Another fold or a publication-gap observation won. Retry in
-                        # the child, never overwrite its projection or spin in a caller.
-                        break
-                    for address, value in updates.items():
-                        txn.put_row(*address, value)
-                    txn.set_meta(CURSOR, next_cursor)
-            from ouroboros.swarm_receipt import refresh_for_task
-            for task_id in tasks:
-                refresh_for_task(root, task_id)
+            if not _commit_suffix(root, cursor, events, through, source.upper, stamp):
+                break
             if through == source.upper or through == start:
                 return through == source.upper
-            if foreground_from is not None:
-                break
-        _defer(root, source.upper)
+        _defer(root)
         return False
     except Exception:
         with store.open_store(root, write=True) as txn:
@@ -265,8 +305,7 @@ def publish(root, event):
     if not root or not event.get("producer_id"):
         return
     try:
-        from ouroboros.jsonl_tail import JsonlChainSnapshot
-        before = JsonlChainSnapshot(pathlib.Path(root) / "logs/events.jsonl").upper
+        before = _source_stamp(root)
         event = {**copy.deepcopy(event), "type": EVENT}
         with store.open_store(root, write=False) as txn:
             previous = txn.get_row(PRODUCERS, str(event["producer_id"])) or {}
@@ -282,7 +321,11 @@ def publish(root, event):
                     txn.set_meta(CURSOR, {**cursor, "missing_producers": missing,
                         "coverage": {**cursor.get("coverage", {}), "state": "partial", "missing_publications": len(missing)}})
                 raise OSError("measurement journal append failed")
-        catch_up(root, foreground_from=before)
+        try:
+            _publish_suffix(root, before)
+        except Exception:
+            _defer(root)  # failed projection is unknown even when the old prefix was complete
+            raise
         from ouroboros.swarm_receipt import refresh_for_task
         refresh_for_task(root, event.get("task_id"))
     except Exception:
