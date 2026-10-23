@@ -9,7 +9,8 @@ task later becomes its next generation. Loose blobs stay for the tasks whose row
 open review (the keep-set, read through the status and review indexes) and for the manifests published
 during a pass (the publication journal). A pass's census is the tasks whose rows were written terminal
 since the position its last pass recorded (``tasks.terminal_seq``) plus the candidates that pass left
-unfinished; it lists the evidence folders whole only without a readable position (``census_since``).
+unfinished; a position holds only under the store's body fact it was recorded with (``store_body``: an
+older body's writes stamp no ``terminal_seq``), else the pass lists the evidence folders whole (``census_since``).
 """
 from __future__ import annotations
 
@@ -152,15 +153,25 @@ def loose_task_ids_since(root: pathlib.Path, since: int, owed=()) -> set:
     return ids
 
 
-def census_since(row: Dict[str, Any], counter: int) -> Optional[int]:
+def store_body(root: pathlib.Path) -> Optional[Dict[str, Any]]:
+    """The store's body fact, ``meta.last_store_body`` (``store_import._ensure``: the HEAD that last booted
+    on the store, rewritten only when it differs): one meta read, the fact a position is recorded under."""
+    with store.open_store(root, write=False) as txn:
+        body = txn.meta("last_store_body")
+    return dict(body) if isinstance(body, dict) else None
+
+
+def census_since(row: Dict[str, Any], counter: int, body: Optional[Dict[str, Any]]) -> Optional[int]:
     """The counter position the job row's last pass covered, when the rows written since can be
-    addressed: this body's pass records ``census`` beside ``terminal`` (the same value) and ``pending``
-    as the ids it left, so a pass of a body that stamps no ``terminal_seq`` (it moves ``terminal`` alone
-    and counts ``pending``) and a store restored from a copy (the counter below the position) both
-    read as ``None``: a whole census is owed, as at the first run."""
+    addressed: this body's pass records ``census`` beside ``terminal`` (the same value), ``pending``
+    as the ids it left and ``body`` as the store's body fact (BODY: the fact now), so a pass of a body
+    that stamps no ``terminal_seq`` (it moves ``terminal`` alone and counts ``pending``), a store restored
+    from a copy (the counter below the position) and another HEAD booted on the store since (its writes
+    moved the counter without a stamp, whether or not its packer ran) all read as ``None``: a whole
+    census is owed, as at the first run."""
     census, pending = row.get("census"), row.get("pending")
     if (isinstance(census, int) and census == row.get("terminal") and 0 <= census <= int(counter)
-            and (not pending or isinstance(pending, list))):
+            and (not pending or isinstance(pending, list)) and row.get("body") == body):
         return census
     return None
 
