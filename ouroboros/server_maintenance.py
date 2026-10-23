@@ -1076,14 +1076,16 @@ def _run_drive_custody_pass(stop_event: Any = None) -> None:
     of a drive left young) are the ``drive_settlement`` job row; the verdicts of retained drives are
     the ``drive_settlement_verdicts`` meta row, decoded only by a lap that walks. Both are written
     only when they move, so a restart neither restarts the lap nor re-hashes an unchanged retained
-    drive, a layout whose inputs stand is not even listed, and a task completing elsewhere costs one
-    indexed read of the rows written terminal since. A drive kept because its custody is not
-    proven is material evidence in the event. The moved drives' deletion and the pending child-ref
-    promotions are the maintenance child's jobs."""
+    drive, a layout whose inputs stand is not even listed, a task completing elsewhere costs one
+    indexed read of the rows written terminal since, and a new drive its creator published
+    (``task_custody.record_drive_arrival``) one look at that drive, its row forgotten here. A drive
+    kept because its custody is not proven is material evidence in the event. The moved drives'
+    deletion and the pending child-ref promotions are the maintenance child's jobs."""
     from ouroboros import maintenance_jobs, store
-    from ouroboros.headless import DRIVE_SETTLEMENTS_PER_PASS, prune_headless_task_drives, prune_task_drives
+    from ouroboros.headless import (DRIVE_SETTLEMENTS_PER_PASS, HEADLESS_TASKS_DIR, TASK_DRIVES_DIR,
+                                    prune_headless_task_drives, prune_task_drives)
     from ouroboros.owner_mailbox import sweep_settled_owner_mailboxes
-    from ouroboros.task_custody import sweep_custody_leftovers
+    from ouroboros.task_custody import forget_arrivals, sweep_custody_leftovers
     from supervisor.queue import task_settlement_interlock, task_settlement_liveness
 
     def stop() -> bool:
@@ -1107,23 +1109,27 @@ def _run_drive_custody_pass(stop_event: Any = None) -> None:
             loaded["before"] = json.dumps(loaded["map"], sort_keys=True)
         return loaded["map"]
 
-    reports = {}
-    for key, prune in (("headless", prune_headless_task_drives), ("direct", prune_task_drives)):
+    reports, looked = {}, {}
+    layouts = (("headless", prune_headless_task_drives, HEADLESS_TASKS_DIR), ("direct", prune_task_drives, TASK_DRIVES_DIR))
+    for key, prune, base in layouts:
         if stop():
             return
         reports[key] = prune(root, live=task_settlement_liveness, guard=lambda: task_settlement_interlock(stop=stop),
                              stop=stop, budget=DRIVE_SETTLEMENTS_PER_PASS, after=cursors.get(key, ""), rested=rested,
                              rest=rests.setdefault(key, {}))
         cursors[key] = str(reports[key].get("cursor") or "")
+        looked[base.name] = list(reports[key].get("arrivals") or ())
     moved_map = "map" in loaded and json.dumps(loaded["map"], sort_keys=True) != loaded["before"]
     moved_row = json.dumps([cursors, rests], sort_keys=True) != before or "retained" in row
-    if moved_map or moved_row:
+    if moved_map or moved_row or any(looked.values()):
         with store.open_store(root, write=True) as txn:  # one transaction: the lap's facts and its verdicts move together
             if moved_map:
                 txn.set_meta(SETTLEMENT_VERDICTS, loaded["map"])
             if "retained" in row:
                 maintenance_jobs.forget_in(txn, "drive_settlement", "retained")
             maintenance_jobs.record_in(txn, "drive_settlement", cursor=cursors, rest=rests)
+            for base_name, task_ids in looked.items():
+                forget_arrivals(txn, base_name, task_ids)  # the published drives this lap looked at
     _prune_event("headless_task_drive_prune", ("pruned", "errors", "custody_pending", "removed"),
                  report=reports["headless"], task_drives=reports["direct"], mailboxes=mailboxes)
 
