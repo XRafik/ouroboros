@@ -262,7 +262,8 @@ _OWNER_CLIENT_NOTE = (
     "SEND time (delivery can lag it — received_at is the honest arrival mark). "
     "runtime_env.presentation is the server process's own shell, NOT the sender. "
     "When owner_client is absent, the surface is unknown: ask or hedge rather than "
-    "assuming a browser."
+    "assuming a browser. interface_size is the owner's size in percent where that window sets it (Settings → "
+    "Appearance; ⌘/Ctrl + − 0 in the desktop app): you can say where to change it, never change it yourself."
 )
 
 
