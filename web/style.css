@@ -460,6 +460,8 @@ html[data-layout="stack"] .resize-handle { display: none; }
     padding-block: var(--space-3);
 }
 
+/* The layered reference tint keeps the shared colour transition. */
+@property --project-reference-fill { syntax: '<color>'; inherits: true; initial-value: transparent; }
 /* === design-system:migrated-begin (chat: Project reference) === */
 /* The Project reference (project_reference.js; docs/DESIGN.md "References and actions"): the Projects glyph, the
    Project's name and ↗ in the Project's ink on the Project's fill, in two forms only. The whole control is the
@@ -470,17 +472,18 @@ html[data-layout="stack"] .resize-handle { display: none; }
     align-items: center;
     gap: var(--space-2);
     border: 0;
-    background: var(--project-08);
+    --project-reference-fill: var(--project-08);
+    background: linear-gradient(var(--project-reference-fill), var(--project-reference-fill)), var(--project-reference-backing, transparent);
     color: var(--project);
     font: inherit;
     font-size: var(--type-body);
     line-height: var(--line-body);
     text-align: left;
     cursor: pointer;
-    transition: var(--motion-tone);
+    transition: var(--motion-tone), --project-reference-fill 0.12s ease;
 }
 @media (hover: hover) {
-    .chat-live-project-card-btn:hover { background: var(--project-12); }
+    .chat-live-project-card-btn:hover { --project-reference-fill: var(--project-12); }
 }
 .chat-live-project-card-btn:active { filter: var(--press); }
 .chat-live-project-icon { display: inline-flex; flex: none; line-height: 1; }
@@ -555,16 +558,36 @@ html[data-layout="stack"] .resize-handle { display: none; }
 /* === design-system:migrated-begin (chat: Project completion mirror) === */
 /* A Project root's final answer in Main is an ordinary Ouroboros message (docs/DESIGN.md
    "Project completion mirror"): folded when it is long, with the Project chip under it. The
-   clamp is unconditional CSS over the complete text (never a cut, the text stays selectable);
-   `is-folded` adds the fade only when the fold hides text. The Project opens the complete answer. */
+   seven-line footprint stays fixed while the painted tail borrows footer whitespace. JS
+   compensates the actual extension (including answers shorter than the tail); full text stays selectable. */
 .chat-bubble.project-answer {
-    --project-answer-fold: calc(var(--type-section) * var(--line-body) * 7);
+    --project-reference-backing: var(--voice-ouroboros);
+    --project-answer-line: calc(var(--type-section) * var(--line-body));
+    --project-answer-lines: 7;
+    --project-answer-fold: calc(var(--project-answer-line) * var(--project-answer-lines));
+    --project-answer-tail: calc(var(--project-answer-line) * 2);
 }
 .chat-bubble.project-answer > .message { max-height: var(--project-answer-fold); overflow: hidden; }
 .chat-bubble.project-answer.is-folded > .message {
+    max-height: calc(var(--project-answer-fold) + var(--project-answer-tail));
+    margin-bottom: var(--project-answer-compensation, 0px);
+    -webkit-mask-image: linear-gradient(to bottom, black 0, black calc(var(--project-answer-line) * 25 / 6), rgba(0,0,0,.94) calc(var(--project-answer-line) * 31 / 6), rgba(0,0,0,.65) calc(var(--project-answer-line) * 6), rgba(0,0,0,.25) var(--project-answer-fold), rgba(0,0,0,.07) calc(var(--project-answer-line) * 95 / 12), transparent calc(var(--project-answer-line) * 9));
+    mask-image: linear-gradient(to bottom, black 0, black calc(var(--project-answer-line) * 25 / 6), rgba(0,0,0,.94) calc(var(--project-answer-line) * 31 / 6), rgba(0,0,0,.65) calc(var(--project-answer-line) * 6), rgba(0,0,0,.25) var(--project-answer-fold), rgba(0,0,0,.07) calc(var(--project-answer-line) * 95 / 12), transparent calc(var(--project-answer-line) * 9));
+}
+/* Width changes defer measurement: retain the CSS-only footprint until the feed settles. */
+[data-resizing] .chat-bubble.project-answer.is-folded > .message {
+    max-height: var(--project-answer-fold);
+    margin-bottom: 0;
     -webkit-mask-image: linear-gradient(180deg, black 60%, transparent 100%);
     mask-image: linear-gradient(180deg, black 60%, transparent 100%);
 }
+/* A limitation and its disclosure own the space before Project; never paint over their words. */
+.chat-bubble.project-answer:has(> .project-answer-limitation, > .project-ending-details) { --project-answer-tail: 0px; }
+.chat-bubble.project-answer.is-folded:has(> .project-answer-limitation, > .project-ending-details) > .message {
+    -webkit-mask-image: linear-gradient(180deg, black 60%, transparent 100%);
+    mask-image: linear-gradient(180deg, black 60%, transparent 100%);
+}
+.chat-bubble.project-answer > :is(.system-message-actions, .msg-time) { position: relative; z-index: 1; }
 .chat-bubble.project-answer > .message > :first-child { margin-top: 0; }
 .chat-bubble.project-answer > .system-message-actions,
 .chat-bubble.assistant > .system-message-actions { align-items: center; padding-block: var(--space-2) var(--space-1); }
@@ -2920,22 +2943,30 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
         padding-inline: 0;
     }
 
-    /* A COLLAPSED nested child keeps its one-line identity row — status chip ·
-       role · `N notes` · chevron — over its model/executor metadata (DESIGN.md
+    /* A COLLAPSED nested child keeps its identity row — status chip ·
+       role · Details · chevron — over its model/executor metadata (DESIGN.md
        §5) instead of dropping the title to a third band once its own inline
        width crosses this threshold (#623). The row never wraps: the side
-       controls keep their size and the role (nowrap/ellipsis, below) takes the
-       rest, so a long role ellipsizes before its `N notes` count would drop to
-       a row of its own. Higher specificity than the .chat-live-title rule
-       above, so the cascade decides, not source order. */
+       controls keep their size and the role reserves a readable fragment before
+       ellipsizing. A long waiting status wraps inside its chip. Higher specificity
+       than the .chat-live-title rule above, so the cascade decides, not source order. */
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button > .chat-live-summary {
         flex-wrap: nowrap;
+    }
+
+    .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-summary-main {
+        flex: 0 1 auto;
+    }
+
+    .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-phase {
+        min-width: 0;
+        white-space: normal;
     }
 
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-title {
         order: 0;
         flex: 1 1 0;
-        min-width: 0;
+        min-width: 4em;
     }
 
     .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-summary-side {
@@ -2972,8 +3003,7 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
 }
 
 /* A nested child is subordinate to its root: quieter ink, and collapsed it is
-   an identity row (chip · role · notes + chevron; the `Show details`
-   label is the root's) over its metadata row (model, harness chip with the run count,
+   an identity row (chip · role · Details + chevron) over its metadata row (model, harness chip with the run count,
    cost, last update, docked Reviews count). Only its narration line waits for
    expansion. The title stays on one line and stays IN the identity row at every
    width (in the narrow regime above it ellipsizes before the side controls
@@ -10177,6 +10207,7 @@ body.keyboard-open .project-panel {
         border-color: transparent; background: var(--chip-float-hover); box-shadow: var(--elev-rest);
     }
     :root[data-theme] .chat-header-btn.danger.ui-chrome-control:hover { background: linear-gradient(var(--tone-red-hover), var(--tone-red-hover)), var(--chip-float); }
+    :root:not([data-theme="light"]) .chat-header-btn.danger.ui-chrome-control:hover { background: var(--chip-float-hover); }
     :root[data-theme] .chat-budget-pill.ui-chrome-control:hover { border-color: transparent; background: var(--chip-float-hover); }
     :root[data-theme] .chat-budget-pill.ui-chrome-control[data-attention="1"]:hover { background: linear-gradient(var(--tone-amber-hover), var(--tone-amber-hover)), var(--chip-float); }
     :root[data-theme] .chat-header-menu > :is(.chat-header-btn.ui-chrome-control, .chat-budget-pill.ui-chrome-control):hover {
@@ -10185,6 +10216,8 @@ body.keyboard-open .project-panel {
 }
 :root[data-theme] :is(.project-panel-close, .mobile-nav-toggle, .nav-drawer-close) { border-radius: var(--pill-radius); }
 :root[data-theme] .chat-header-btn.danger.ui-chrome-control { background: linear-gradient(var(--tone-red), var(--tone-red)), var(--chip-float); color: var(--panic-ink); }
+/* The dark danger tone is already the capsule's neutral veil. Stacking it twice washes out Panic's red ink. */
+:root:not([data-theme="light"]) .chat-header-btn.danger.ui-chrome-control { background: var(--chip-float); }
 :root[data-theme] .chat-header-more > summary.has-active.ui-chrome-control { background: var(--tone-crimson-soft); color: var(--tone-crimson-soft-ink); }
 :root[data-theme] .chat-budget-pill.ui-chrome-control {
     border-color: transparent; background: var(--chip-float); box-shadow: var(--elev-rest); transition: var(--motion-tone);
