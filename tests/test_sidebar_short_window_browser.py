@@ -234,3 +234,29 @@ def test_a_pinned_bars_own_control_leaves_the_column_where_it_is(shell_ui, tmp_p
     for name, move in facts['bars'].items():
         assert move['before'] > 0 and abs(move['after'] - move['before']) <= 1, ('the column stayed put', name, facts)
     assert facts['hidden'] == [], ('a row brought into view under a pinned bar', facts)
+
+
+def test_the_bars_measured_heights_follow_a_tall_window_that_turns_short(shell_ui, tmp_path):
+    """A phone's drawer made short after the first paint (a browser bar or a keyboard takes height): finger rows keep
+    their height, so the only change is the foot taking the column's bottom padding as its own, and the measured
+    heights follow it."""
+    page = seed_page(shell_ui, 390, 700, touch=True)
+    facts = {'engine': shell_ui['engine']}
+    try:
+        boot(page, shell_ui)
+        open_drawer(page)
+        facts['tall_short'] = page.evaluate(SHORT)
+        facts['tall'] = page.evaluate(BARS)
+        page.set_viewport_size({'width': 390, 'height': 570})
+        settle(page)
+        page.wait_for_timeout(150)
+        facts['short'] = page.evaluate(SHORT)
+        facts['after'] = page.evaluate(BARS)
+    finally:
+        evidence(tmp_path, f'sidebar-short-flip-{shell_ui["engine"]}', facts)
+        page.close()
+    tall, after = facts['tall'], facts['after']
+    assert facts['tall_short'] is False and facts['short'] is True, facts
+    assert abs(after['head'] - tall['head']) <= 0.5 and after['foot'] > tall['foot'], ('only the foot changed', facts)
+    for state in (tall, after):
+        assert abs(state['headPad'] - state['head']) <= 0.5 and abs(state['footPad'] - state['foot']) <= 0.5, facts
