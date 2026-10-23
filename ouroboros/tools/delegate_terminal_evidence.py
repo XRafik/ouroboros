@@ -586,7 +586,8 @@ def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
     if retained_payload(root, fresh) is None:
         collection = collect_terminal(root, rid, gateway=gateway,
                                       staging_task_id=str(getattr(ctx, "task_id", "") or ""),
-                                      output_authority=authority, background=body_runtime(root) is not None)
+                                      output_authority=authority, background=body_runtime(root) is not None,
+                                      output_retry=True)
     else:
         collection = {"status": "pending" if not fresh.settled else "retained",
                       "reason": "available_output"}

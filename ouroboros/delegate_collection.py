@@ -233,11 +233,15 @@ def _retain_output(root, entry, detail, gateway, staging_task_id="", output_auth
 
 def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = None,
                      allow_review: bool = False, staging_task_id: str = "", stopped=None, failures=None,
-                     output_authority=None, recapture=False, generation=GENERATION, background=False) -> dict:
+                     output_authority=None, recapture=False, generation=GENERATION, background=False,
+                     output_retry=False) -> dict:
     """One result-owner entry for foreground collection and the body, including recovered debt.
 
     A contending caller reads committed facts; it never times out an integration
     or evicts a live collector. No queue/root/money lock is held at this entry.
+    ``output_retry`` is an explicit reader's wait: owed output (missing, partial or for an older
+    terminal) is fetched again even when this generation's attempt already ran; capture and named
+    evidence still follow ``collection_due``.
     """
     from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
     from ouroboros.delegate_continuation import disposition_refusal
@@ -271,7 +275,10 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
             return {"status": "unavailable", "reason": "custody_missing"}
         if entry.named_evidence:
             saved_named_evidence(root, entry)  # addressed validation; never called by tick
-        if not collection_due(entry, generation=generation, recapture=recapture) and not allow_review:
+        due = allow_review or collection_due(entry, generation=generation, recapture=recapture)
+        output_owed = (not entry.output_source or not entry.output_complete
+                       or entry.output_terminal_sha != entry.terminal_source.get("sha256"))
+        if not due and not (output_retry and output_owed):
             return {"status": "pending" if collection_pending(entry) else "collected",
                     "workspace_capture": capture_projection(root, entry), "errors": []}
         retry_capture = recapture or (entry.collection_attempt.get("generation") != generation
@@ -295,7 +302,7 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
         entry = current.run(root, run_id)
         # This lock is shared with continue/apply. A possibly-started successor
         # owns the mutable snapshot, even before it has a bound run id.
-        if (entry is not None and not (stopped is not None and stopped())
+        if (due and entry is not None and not (stopped is not None and stopped())
                 and not disposition_refusal(root, entry)):
             try:
                 if background and (entry.execution_root or entry.resource_ref.get("workspace_kind") == "directory"):
@@ -333,7 +340,8 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
             named = fresh.named_evidence
             retry = ("transient" if closing or transient or not fresh.settled or not fresh.output_complete
                      or named.get("retry") == "transient" else "")
-            record_attempt(root, fresh, generation=generation, retry=retry, errors=errors)
+            if due:  # an output-only fetch is not a capture attempt
+                record_attempt(root, fresh, generation=generation, retry=retry, errors=errors)
             return {"status": "collected" if not collection_pending(fresh) else "pending",
                     "settlement": money, "workspace_capture": capture, "output_retention": retention, "errors": errors}
         return {"status": "unavailable", "reason": "custody_missing"}

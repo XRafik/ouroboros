@@ -221,7 +221,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         "_list_remotes", "_managed_remote_branch_for", "_managed_remote_name",
         "_read_managed_repo_meta", "_run_git_process_bounded", "append_jsonl",
         "atomic_write_text", "rescue_before_destructive_rollback",
-        "rescue_git_capture", "utc_now_iso",
+        "rescue_git_capture", "utc_now_iso", "host_git_env",
     })),
     "supervisor/git_ops_reset.py": ("supervisor/git_ops.py", "_go", frozenset({
         "BOOTSTRAP_PIN_MARKER_NAME", "BRANCH_DEV", "BRANCH_STABLE", "DRIVE_ROOT", "REPO_DIR",
