@@ -261,6 +261,8 @@ def _executor_outcome(body: dict, code: int, error: Exception | None, mutating: 
         return ""
     if not mutating:
         return "not_applied"
+    if code == 409 and body.get("outcome") == "not_applied":
+        return "not_applied"  # the physical first step refused; recovery verified no tree effect
     if code == 409 and body.get("rolled_back") is True:
         return "rolled_back"  # rollback_managed_update verified the restored checkout
     if code == 409 and body.get("abandoned") is True:

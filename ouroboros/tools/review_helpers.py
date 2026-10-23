@@ -640,6 +640,7 @@ def check_worktree_readiness(
     *, information: "list[str] | None" = None,
 ) -> "list[str]":
     """Run cheap deterministic pre-advisory checks; never crash."""
+    from supervisor.git_ops import host_git_env
     repo_dir = Path(repo_dir)
     warnings: list = []
 
@@ -649,7 +650,7 @@ def check_worktree_readiness(
         path_args = (["--"] + list(paths)) if paths else []
         status_result = subprocess.run(
             ["git", "status", "--porcelain"] + path_args,
-            cwd=str(repo_dir), capture_output=True, text=True, timeout=10,
+            cwd=str(repo_dir), capture_output=True, text=True, timeout=10, env=host_git_env(),
         )
         if status_result.returncode != 0:
             stderr_text = (status_result.stderr or "").strip()

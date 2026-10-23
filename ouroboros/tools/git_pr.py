@@ -24,10 +24,11 @@ BODY_WORKTREE_TOOLS = frozenset({
 
 def _g(args: List[str], cwd: pathlib.Path,
        env: Optional[dict] = None, timeout: int = 60) -> subprocess.CompletedProcess:
+    from supervisor.git_ops import host_git_env
     return subprocess.run(
         ["git"] + args, cwd=str(cwd),
         capture_output=True, text=True, timeout=timeout,
-        **({"env": env} if env is not None else {}),
+        env=host_git_env(env),
     )
 
 

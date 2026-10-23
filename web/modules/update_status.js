@@ -165,6 +165,7 @@ export function updateAttemptView(progress) {
     const outcome = OUTCOMES[key];
     if (outcome && !progress.active) {
         return { ...base, terminal: true, tone: outcome.tone, pill: outcome.pill, headline: outcome.headline,
+            restoreTarget: key === 'applied' ? String(progress.base_sha || '') : '',
             text: [attemptText({ ...progress, outcome: key }), retention].filter(Boolean).join(' ') };
     }
     // Not concluded: this server's stage, a restart it needs, a reviewed resolution, or a later server's checks.

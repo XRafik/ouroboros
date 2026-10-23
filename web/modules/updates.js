@@ -4,6 +4,7 @@ import { showToast } from './toast.js';
 import { apiClient, apiFetch } from './api_client.js';
 import { UPDATE_STAGE_LABELS, attemptTime, dismissUpdateAttempt, dismissedUpdateAttempt, updateAttemptView, verifiedUpdatePlan } from './update_status.js';
 import { destroyChatMarkdown, enhanceChatMarkdown, mountChatMarkdown } from './chat_markdown.js';
+import { updateEffectsText } from './update_effects.js';
 
 // Known non-state warnings are folded into their verdict states; everything
 // else is surfaced verbatim so a backend warning class can never vanish.
@@ -478,6 +479,7 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
                             <dl class="updates-attempt-facts" id="updates-attempt-facts"></dl>
                         </details>
                         <button type="button" class="btn btn-ghost btn-sm" id="updates-attempt-dismiss">Dismiss indicator result</button>
+                        <button type="button" class="btn btn-default btn-sm" id="updates-attempt-restore" hidden>Restore previous version</button>
                     </div>
                 </section>
                 <div class="updates-meta" id="updates-meta"></div>
@@ -537,6 +539,7 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
     const attemptText = page.querySelector('#updates-attempt-text');
     const attemptFacts = page.querySelector('#updates-attempt-facts');
     const attemptDismiss = page.querySelector('#updates-attempt-dismiss');
+    const attemptRestore = page.querySelector('#updates-attempt-restore');
     const meta = page.querySelector('#updates-meta');
     const actionNote = page.querySelector('#updates-action-note');
     const current = page.querySelector('#updates-current');
@@ -700,6 +703,10 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
             `<dt>${escapeHtml(row.label)}</dt><dd>${escapeHtml(row.value)}</dd>`)).join('');
         attemptDismiss.dataset.attempt = view.id;
         attemptDismiss.hidden = !view.terminal || dismissedUpdateAttempt() === view.id;
+        attemptRestore.hidden = !view.restoreTarget;
+        attemptRestore.dataset.target = view.restoreTarget || '';
+        attemptRestore.disabled = replaceInFlight || Boolean(latestStatus?.update_tx?.active)
+            || ['preflighting', 'updating', 'restarting'].includes(phase);
     }
 
     function render() {
@@ -895,9 +902,9 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
 
     async function rollback(target) {
         const confirmed = await openConfirmDialog({
-            title: 'Roll back',
-            body: `Roll back to ${target}?\n\nA rescue snapshot of the current state will be saved. The server will restart.`,
-            confirmLabel: 'Roll back',
+            title: 'Restore version',
+            body: `Restore ${target} locally?\n\nRunning work will be interrupted, a rescue snapshot will be saved, and the server will restart. Nothing will be pushed. Engine data cannot be downgraded.`,
+            confirmLabel: 'Restore',
             danger: true,
         });
         if (!confirmed) return;
@@ -943,9 +950,10 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
             const assisted = strategy === 'assisted';
             const proceed = await openConfirmDialog({
                 title: `Update ${String(plan.base_sha).slice(0, 8)} -> ${String(plan.target_sha).slice(0, 8)}`,
-                body: assisted
+                body: (assisted
                     ? `${conflictCount} conflict(s) need resolution. Ouroboros will resolve the merge as a reviewed task (model spend applies); progress lands in chat, and the server restarts after the reviewed commit.`
-                    : `Git applies this update directly (${plan.local_dirty_count || 0} uncommitted file(s) are stashed and restored). The server restarts when it lands.`,
+                    : `Git applies this update directly (${plan.local_dirty_count || 0} uncommitted file(s) are stashed and restored). The server restarts when it lands.`)
+                    + '\n\n' + updateEffectsText(preflight),
                 confirmLabel: assisted ? 'Start reviewed resolution' : 'Update now',
             });
             if (!proceed) {
@@ -981,13 +989,6 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
     }
 
     async function replaceWithOfficial() {
-        const proceed = await openConfirmDialog({
-            title: 'Replace with official version',
-            body: 'Recovery will replace the active checkout with the exact official version from the selected channel.\n\nA rescue snapshot and a local keep branch preserve a copy, but the active branch will be reset. Continue?',
-            confirmLabel: 'Replace checkout',
-            danger: true,
-        });
-        if (!proceed) return;
         // In-flight latch, not a bare .disabled: a tab reopen re-renders the
         // panel mid-request, and render() would otherwise re-enable Replace
         // while this destructive recovery is still pending (final-review
@@ -1000,6 +1001,13 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
             if (!plan.base_sha || !plan.target_sha) {
                 throw new Error(plan.error || 'Could not resolve an exact recovery target.');
             }
+            const proceed = await openConfirmDialog({
+                title: 'Replace with official version',
+                body: 'Recovery will reset the active checkout to the exact official version. A rescue snapshot and local keep branch preserve your work.\n\n'
+                    + updateEffectsText(preflight, { replace: true }),
+                confirmLabel: 'Replace checkout', danger: true,
+            });
+            if (!proceed) return;
             const data = await apiClient.updateApply('replace', plan, { confirmRecovery: true });
             if (data.status === 'restart_required') {
                 showToast('Recovery needs a restart that could not be requested. Restart Ouroboros to finish.', 'error');
@@ -1054,6 +1062,7 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
         }
     });
     replaceBtn.addEventListener('click', replaceWithOfficial);
+    attemptRestore.addEventListener('click', () => rollback(attemptRestore.dataset.target));
     attemptDismiss.addEventListener('click', () => {
         // The indicator only: no request is sent, and this section keeps the attempt until the next one.
         dismissUpdateAttempt(attemptDismiss.dataset.attempt);
