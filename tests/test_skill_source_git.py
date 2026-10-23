@@ -212,3 +212,129 @@ def test_fetch_errors_redact_credentials_from_messages_logs_and_cache(
     assert ("Retrying with the configured GitHub token failed too" in meta["error"]) == (phase == "authenticated")
     rendered = json.dumps(meta) + caplog.text + (transport.repo_cache_dir(tmp_path / "data", row) / "meta.json").read_text(encoding="utf-8")
     assert TOKEN not in rendered and ENCODED not in rendered
+
+
+@pytest.fixture
+def newline_source(tmp_path, monkeypatch):
+    """Real Git objects with isolated Windows-style defaults on every platform."""
+    import subprocess
+
+    config = tmp_path / "newline.gitconfig"
+    config.write_bytes(b"[core]\n\tautocrlf = true\n\teol = crlf\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("GIT_CONFIG_COUNT", raising=False)
+    source = tmp_path / "source"
+    source.mkdir()
+
+    def git(root, *args):
+        return subprocess.check_output(["git", "-C", str(root), *args], stderr=subprocess.STDOUT, timeout=30)
+
+    git(source, "init", "--quiet")
+    git(source, "config", "core.autocrlf", "false")
+    (source / "SKILL.md").write_bytes(b"---\nname: newline-skill\ntype: instruction\n---\nExact bytes.\n")
+    (source / "empty").write_bytes(b"")
+    (source / "binary.dat").write_bytes(b"\x00binary\r\n\xff\n")
+    git(source, "add", ".")
+    git(source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "source")
+    return source, git, config
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_source_checkout_preserves_release_bytes_with_host_autocrlf(newline_source, tmp_path, existing):
+    from ouroboros.skill_loader import compute_content_hash
+
+    source, git, config = newline_source
+    before = config.read_bytes()
+    target = tmp_path / "cache"
+    commit = git(source, "rev-parse", "HEAD").decode().strip()
+    if existing:
+        git(tmp_path, "clone", "--quiet", str(source), str(target))
+        assert b"\r\n" in (target / "SKILL.md").read_bytes()
+    assert transport.fetch_tree(target, str(source), commit) == commit
+    for name in ("SKILL.md", "empty", "binary.dat"):
+        assert (target / name).read_bytes() == (source / name).read_bytes()
+    assert compute_content_hash(target) == compute_content_hash(source)
+    assert config.read_bytes() == before
+    # An ordinary refresh at exactly the same revision stays correct.
+    assert transport.fetch_tree(target, str(source), commit) == commit
+    assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+
+
+def test_cached_pointer_repairs_crlf_without_network(newline_source, tmp_path, monkeypatch):
+    source, git, _config = newline_source
+    commit = git(source, "rev-parse", "HEAD").decode().strip()
+    url = "https://github.com/example/newline-skills"
+    target = transport.sources_state_root(tmp_path) / "pointers" / transport._key(url, commit) / "repo"
+    target.parent.mkdir(parents=True)
+    git(tmp_path, "clone", "--quiet", str(source), str(target))
+    assert b"\r\n" in (target / "SKILL.md").read_bytes()
+    real_git = transport._git
+
+    def local_only(args, **kwargs):
+        assert args[0] != "fetch", "same-commit pointers must remain offline"
+        return real_git(args, **kwargs)
+
+    monkeypatch.setattr(transport, "_git", local_only)
+    for _ in range(2):
+        assert transport.checkout_at_commit(tmp_path, url, commit) == target
+        assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+
+
+def test_source_checkout_keeps_repository_authored_attributes(newline_source, tmp_path):
+    source, git, _config = newline_source
+    (source / ".gitattributes").write_bytes(b"*.cmd text eol=crlf\n")
+    (source / "run.cmd").write_bytes(b"echo explicit\n")
+    git(source, "add", ".")
+    git(source, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "attributes")
+    target = tmp_path / "cache"
+    transport.fetch_tree(target, str(source), "HEAD")
+    assert (target / "run.cmd").read_bytes() == b"echo explicit\r\n"
+    assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+
+
+def test_prepared_pointer_is_stable_while_consumer_reads(newline_source, tmp_path, monkeypatch):
+    source, git, _config = newline_source
+    commit = git(source, "rev-parse", "HEAD").decode().strip()
+    url = source.as_uri()
+    target = transport.checkout_at_commit(tmp_path, url, commit)
+    real_git = transport._git
+
+    def concurrent_lookup(args, **kwargs):
+        assert args[0] not in {"rm", "checkout", "fetch"}, "a matching reader must not rewrite a published pointer"
+        return real_git(args, **kwargs)
+
+    monkeypatch.setattr(transport, "_git", concurrent_lookup)
+    # Pause a consumer between opening its manifest and reading another payload;
+    # a second catalog/install lookup must preserve both paths and their bytes.
+    with (target / "SKILL.md").open("rb") as manifest:
+        assert transport.checkout_at_commit(tmp_path, url, commit) == target
+        assert manifest.read() == (source / "SKILL.md").read_bytes()
+        assert (target / "binary.dat").read_bytes() == (source / "binary.dat").read_bytes()
+
+
+def test_failed_pointer_repair_is_retried_offline(newline_source, tmp_path, monkeypatch):
+    source, git, _config = newline_source
+    commit = git(source, "rev-parse", "HEAD").decode().strip()
+    url = source.as_uri()
+    target = transport.sources_state_root(tmp_path) / "pointers" / transport._key(url, commit) / "repo"
+    target.parent.mkdir(parents=True)
+    git(tmp_path, "clone", "--quiet", str(source), str(target))
+    real_git = transport._git
+    failed = False
+
+    def fail_checkout_once(args, **kwargs):
+        nonlocal failed
+        assert args[0] != "fetch"
+        if args[0] == "checkout" and not failed:
+            failed = True
+            raise transport.SkillSourceFetchError("synthetic interrupted checkout")
+        return real_git(args, **kwargs)
+
+    monkeypatch.setattr(transport, "_git", fail_checkout_once)
+    with pytest.raises(transport.SkillSourceFetchError, match="synthetic interrupted"):
+        transport.checkout_at_commit(tmp_path, url, commit)
+    assert git(target, "config", "--local", "--get", "ouroboros.sourceCheckoutPolicy").strip() == b"pending"
+    assert transport.checkout_at_commit(tmp_path, url, commit) == target
+    assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+    assert git(target, "config", "--local", "--get", "ouroboros.sourceCheckoutPolicy").strip() == b"1"

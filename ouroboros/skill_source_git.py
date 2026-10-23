@@ -132,6 +132,22 @@ def _origin_text(url: str) -> str:
     return url if "://" in url or "@" in url else pathlib.Path(url).as_uri()
 
 
+def _checkout_source(target: pathlib.Path, revision: str) -> None:
+    """Materialize a disposable source cache without host-default newline conversion.
+
+    Removing tracked entries first also repairs stat-clean CRLF files at the same
+    commit: changing config plus a forced checkout alone can leave those untouched.
+    Repository-authored attributes still apply; release hashes remain authoritative.
+    Callers hold the source lock (or own a fresh private probe directory).
+    """
+    _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "pending"], cwd=target)
+    _git(["config", "--local", "core.autocrlf", "false"], cwd=target)
+    _git(["config", "--local", "core.eol", "lf"], cwd=target)
+    _git(["rm", "-r", "--force", "--ignore-unmatch", "--", "."], cwd=target)
+    _git(["checkout", "--quiet", "--force", "--detach", revision], cwd=target)
+    _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "1"], cwd=target)
+
+
 def fetch_tree(target: pathlib.Path, url: str, selector: str, *, depth: int = 1) -> str:
     """Make ``target`` a shallow checkout of ``selector`` (branch, commit or '' for the default branch)
     holding its last ``depth`` commits."""
@@ -144,7 +160,7 @@ def fetch_tree(target: pathlib.Path, url: str, selector: str, *, depth: int = 1)
     else:
         _git(["remote", "set-url", "origin", _origin_text(url)], cwd=target)
     _git(["fetch", "--depth", str(depth), "--no-tags", "--quiet", "origin", selector or "HEAD"], cwd=target, url=url)
-    _git(["checkout", "--quiet", "--force", "--detach", "FETCH_HEAD"], cwd=target)
+    _checkout_source(target, "FETCH_HEAD")
     _git(["clean", "-ffdxq"], cwd=target)
     return _git(["rev-parse", "HEAD"], cwd=target).strip()
 
@@ -266,10 +282,17 @@ def checkout_at_commit(drive_root: pathlib.Path, url: str, commit: str) -> pathl
     try:
         if (target / ".git").is_dir():
             try:
-                if _git(["rev-parse", "HEAD"], cwd=target, timeout=30).strip() == commit:
-                    return target
+                current = _git(["rev-parse", "HEAD"], cwd=target, timeout=30).strip()
             except SkillSourceFetchError:
-                pass
+                current = ""
+            if current == commit:
+                # Matching pointers are immutable once prepared: consumers keep
+                # reading after this lock is released. Publish only after success.
+                policy = _git(["config", "--local", "--default", "", "--get",
+                               "ouroboros.sourceCheckoutPolicy"], cwd=target).strip()
+                if policy != "1":
+                    _checkout_source(target, commit)
+                return target
         if fetch_tree(target, url, commit) != commit:
             raise SkillSourceFetchError(f"the repository did not serve commit {commit}")
         return target
