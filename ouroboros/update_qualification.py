@@ -72,12 +72,11 @@ def _missing_runs(commits: list[dict], runs: dict) -> list[str]:
     for commit in commits:
         sha = commit["sha"]
         run = runs.get(sha)
-        if run:
-            if run.get("status") == "completed" and run.get("conclusion") in ("success", "failure"):
-                covering = run
+        if run and run.get("status") == "completed" and run.get("conclusion") in ("success", "failure"):
+            covering = run
         elif covering is not None:
             covering.setdefault("covered_shas", []).append(sha)
-        else:
+        elif run is None:
             missing.append(sha)
     return sorted(missing)
 

@@ -68,13 +68,17 @@ def test_qualification_checks_only_first_parent_integrations(merged_range, monke
     ("completed", "success", True), ("completed", "failure", True),
     ("in_progress", None, False), ("completed", "cancelled", False),
 ])
-def test_later_finished_run_covers_earlier_merges_only(status, conclusion, covers):
+@pytest.mark.parametrize("replaced_pending", [False, True])
+def test_later_finished_run_covers_earlier_merges_only(status, conclusion, covers, replaced_pending):
     commits = [{"sha": sha} for sha in ("newest", "checked", "earlier")]
+    cancelled = [{"head_sha": "earlier", "status": "completed", "conclusion": "cancelled"}] if replaced_pending else []
     fact = qualification.post_merge_checks(commits, "https://github.com/owner/repo", get_json=lambda _: {
-        "workflow_runs": [{"head_sha": "checked", "status": status, "conclusion": conclusion},
+        "workflow_runs": [{"head_sha": "checked", "status": status, "conclusion": conclusion}, *cancelled,
                           {"head_sha": "outside", "status": "completed", "conclusion": "success"}]})
-    assert fact["missing_shas"] == (["newest"] if covers else ["earlier", "newest"])
+    assert fact["missing_shas"] == (["newest"] if covers or replaced_pending else ["earlier", "newest"])
     assert fact["runs"][0].get("covered_shas", []) == (["earlier"] if covers else [])
+    if replaced_pending:
+        assert fact["runs"][1]["conclusion"] == "cancelled"  # the direct observation survives coverage
 
 
 def test_github_availability_changes_preserve_authored_text(tmp_path, monkeypatch):
