@@ -264,6 +264,12 @@ def _duty_busy(latch: Any, cadence_sec: float) -> None:
             "cadence_sec": cadence_sec, **flags, **({"stack": stack} if stack else {})})
     except Exception:
         log.debug("host_duty_stall row failed", exc_info=True)
+    try:
+        from ouroboros.update_generation_facts import observe_duty_overrun
+
+        observe_duty_overrun(duty["name"])  # once per alerted pass: the after-update facts count it
+    except Exception:
+        log.debug("generation duty observation failed", exc_info=True)
 
 
 def _duty_ended(latch: Any, duty: Dict[str, Any]) -> None:

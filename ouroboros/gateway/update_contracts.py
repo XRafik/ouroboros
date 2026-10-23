@@ -40,6 +40,8 @@ class UpdatePreflightRequest(TypedDict, total=False):
 class UpdatePreflightResponse(TypedDict):
     merge_plan: UpdateMergePlan
     effects: NotRequired[Dict[str, Any]]  # target-bound engine transition, active_work and interpreter facts
+    letter: NotRequired[Optional[Dict[str, Any]]]  # prose of exactly these pins; absent or null means unknown
+    qualification: NotRequired[Optional[Dict[str, Any]]]  # declared/observed checks of exactly these pins
 
 
 class UpdateApplyRequest(TypedDict):

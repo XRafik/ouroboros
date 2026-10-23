@@ -9,7 +9,7 @@ import threading
 
 import pytest
 
-from ouroboros import claudexor_daemon, server_restart, update_impact
+from ouroboros import claudexor_daemon, server_restart, update_impact, update_qualification
 from ouroboros.gateway import control
 from supervisor import git_ops, update_merge
 from tests.test_git_lock_owners import _commit, _repo
@@ -30,6 +30,8 @@ def scene(tmp_path, monkeypatch):
     monkeypatch.setattr(claudexor_daemon, "owned_daemon_provisioned", lambda: True)
     monkeypatch.setattr(claudexor_daemon, "ensure_owned_gateway", lambda **kw: pytest.fail("preflight cannot start an engine"))
     monkeypatch.setattr(update_merge, "plan_managed_update_merge", lambda **kw: plan)
+    monkeypatch.setattr(update_qualification, "preflight_description",
+                        lambda p, **kw: {"letter": None, "qualification": None})
     monkeypatch.setattr(server_restart, "_next_generation_pin", lambda: update_impact._pin_at(plan["merge_commit"]))
     stops = []
     monkeypatch.setattr(server_restart, "_stop_owned_daemon", lambda label: stops.append(label))
@@ -128,3 +130,29 @@ def test_bundle_unknown_is_not_filled_from_the_running_install(scene):
     target = _commit(repo, "no runtime claim", {"README.md": "No bundle metadata.\n"})
     assert update_impact._bundle_runtime(target)["sqlite"] is None
     assert update_impact._bundle_runtime(plan["target_sha"])["sqlite"] == "3.53.1"
+
+
+def test_preflight_carries_its_exact_range_description_and_survives_its_failure(scene, monkeypatch):
+    _repo, plan, _stops = scene
+    monkeypatch.setattr(claudexor_daemon, "read_owned_gateway", lambda: Gateway(("4.6.0", "a" * 40)))
+    seen = []
+
+    def described(p, **_kw):
+        seen.append((p["base_sha"], p["target_sha"]))
+        return {"letter": {"text": "range letter"}, "qualification": {"base_sha": p["base_sha"], "target_sha": p["target_sha"]}}
+
+    monkeypatch.setattr(update_qualification, "preflight_description", described)
+    body = json.loads(asyncio.run(control.api_update_preflight(None)).body)
+    assert seen == [(plan["base_sha"], plan["target_sha"])]
+    assert body["qualification"] == {"base_sha": plan["base_sha"], "target_sha": plan["target_sha"]}
+    assert body["letter"] == {"text": "range letter"} and body["effects"]["target_sha"] == plan["target_sha"]
+
+    def unavailable(_p, **_kw):
+        raise OSError("letter store unreadable")
+
+    monkeypatch.setattr(update_qualification, "preflight_description", unavailable)
+    response = asyncio.run(control.api_update_preflight(None))
+    body = json.loads(response.body)
+    assert response.status_code == 200 and body["merge_plan"] == plan
+    assert body["letter"] is None and body["qualification"] is None, "unknown, never a refusal or a stale range"
+

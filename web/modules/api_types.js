@@ -1455,6 +1455,8 @@
  * @typedef {Object} UpdatePreflightResponse
  * @property {UpdateMergePlan} merge_plan
  * @property {Object=} effects
+ * @property {?Object=} letter
+ * @property {?Object=} qualification
  */
 
 /**

@@ -435,9 +435,20 @@ async def api_update_preflight(_request: Request) -> JSONResponse:
 
         plan = await asyncio.to_thread(plan_managed_update_merge, fetch=True)
         effects = await asyncio.to_thread(update_effects, plan)
-        return JSONResponse({"merge_plan": plan, "effects": effects})
+        return JSONResponse({"merge_plan": plan, "effects": effects, **await _preflight_description(plan)})
     except Exception as exc:
         return json_exception(exc)
+
+
+async def _preflight_description(plan: dict) -> dict:
+    """Prose and qualification of exactly this plan's range; unavailable means unknown, never a refusal."""
+    from ouroboros.update_qualification import preflight_description
+
+    try:
+        return await asyncio.to_thread(preflight_description, plan)
+    except Exception:
+        log.warning("update preflight: range description unavailable", exc_info=True)
+        return {"letter": None, "qualification": None}
 
 
 _KNOWN_UPDATE_PLAN_KINDS = frozenset({"clean", "conflicting"})
