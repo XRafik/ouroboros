@@ -179,10 +179,9 @@ def test_notice_receipts_import_once_and_publication_never_reads_chat(tmp_path, 
 
 
 def test_prunes_wait_off_ready_path_and_trees_wait_for_readable_recovery_links(tmp_path, monkeypatch):
-    """Startup prunes nothing (off the ready path); task trees go on a reconcile pass only once the
-    recovery links read, and on every pass after that, never once per process. The worktree family
-    is the custody pass's, never the reconcile pass's."""
-    from ouroboros import headless, subagent_worktrees
+    """Startup prunes nothing; a due child needs readable recovery links before retiring trees.
+    Repair re-arms a resting pass. The worktree family remains the custody pass's."""
+    from ouroboros import headless, maintenance_jobs, subagent_worktrees
     migrations.prepare_startup_state(tmp_path)
     monkeypatch.setattr(maintenance, "DATA_DIR", tmp_path)
     monkeypatch.setattr(maintenance, "_STARTUP_RECOVERY_GAPS", [False])
@@ -195,8 +194,10 @@ def test_prunes_wait_off_ready_path_and_trees_wait_for_readable_recovery_links(t
     _retire(tmp_path)
     assert calls == [], "a recovery link that cannot be read keeps every tree for this pass"
     o.remove(tmp_path, "pending_drives", "task")
+    assert _retire(tmp_path) is None and calls == [], "a recovery-set change alone does not walk history"
+    maintenance_jobs.record(tmp_path, "runtime_retirement", state="pending")  # explicit repair after the gap clears
     _retire(tmp_path)
-    _retire(tmp_path)
+    assert _retire(tmp_path) is None
     assert calls == ["trees"], "an unchanged generation rests"
 
 
