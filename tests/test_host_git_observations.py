@@ -102,15 +102,22 @@ def test_host_observations_never_write_the_index(tmp_path, monkeypatch, changed,
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
 @pytest.mark.parametrize("operation", ["cherry_pick", "stage_merge"])
 @pytest.mark.parametrize("binary", [False, True], ids=["text", "binary"])
-def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, changed, operation, binary):
+@pytest.mark.parametrize("tight_budget", [False, True], ids=["one-batch", "chunked"])
+def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, changed, operation, binary, tight_budget):
+    from ouroboros import argv_budget
+    from ouroboros.git_observation import host_git_env
     from ouroboros.tools import git_pr
     from ouroboros.tools.registry import ToolContext
 
     repo = _repo(tmp_path)
     if binary:
         (repo / "seed.txt").write_bytes(b"\0original\n")
-        _git(repo, "add", "seed.txt")
-        _git(repo, "commit", "-qm", "binary seed")
+    # Put unconfirmed rows before a text edit, after a binary edit.
+    others = [repo / f"{'z' if binary else 'a'}-other-{i:03}.dat" for i in range(12)]
+    for path in others:
+        path.write_bytes(b"\0unchanged")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "binary fixtures")
     ctx = ToolContext(repo_dir=repo, drive_root=tmp_path / "data", branch_dev="ouroboros")
     _git(repo, "checkout", "-qb", "integrate/pr-1")
     (repo / "feature.txt").write_text("incoming work\n", encoding="utf-8")
@@ -120,13 +127,18 @@ def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, cha
     if operation == "cherry_pick":
         _git(repo, "reset", "--hard", "HEAD~1")
     monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    if tight_budget:
+        limit = (argv_budget.argv_env_bytes([], host_git_env())
+                 + argv_budget.DEFAULT_HEADROOM_BYTES + 300)
+        monkeypatch.setattr(argv_budget, "system_argv_limit_bytes", lambda: limit)
 
     def dirty_stat():
         seed = repo / "seed.txt"
         if changed:
             seed.write_bytes(b"\0owner work\n" if binary else b"owner work\n")
-        info = seed.stat()
-        os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+        for path in [seed, *others]:
+            info = path.stat()
+            os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
 
     observed = []
     original = git_pr._g
@@ -154,6 +166,14 @@ def test_pr_integration_checks_content_before_writing(tmp_path, monkeypatch, cha
             dirty_stat()
         result = git_pr._stage_pr_merge(ctx, "integrate/pr-1")
     assert observed
+    probes = [args for args in observed if "--patch" in args]
+    if operation == "stage_merge":
+        if changed and not binary:
+            assert probes == [], "a text row already proves the tree changed"
+        elif changed or not tight_budget:
+            assert len(probes) == 1, "stop after the first confirmed binary batch"
+        else:
+            assert len(probes) > 1, "an unchanged tree must examine every argv chunk"
     if changed:
         assert "Working tree" in result and "changes" in result, result
         assert (repo / "seed.txt").read_bytes() == (b"\0owner work\n" if binary else b"owner work\n")
@@ -279,22 +299,29 @@ def test_inherited_config_count_keeps_gits_own_result(tmp_path, monkeypatch, cou
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
 @pytest.mark.parametrize("file_reference", [False, True], ids=["patch", "file-reference"])
 @pytest.mark.parametrize("binary", [False, True], ids=["text", "binary"])
-def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch, changed, file_reference, binary):
+@pytest.mark.parametrize("count", [1, 30])
+def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch, changed, file_reference, binary, count):
     from ouroboros import workspace_patch_capture as capture
 
     repo = _repo(tmp_path)
+    others = [repo / f"unchanged-{i:03}.dat" for i in range(count - 1)]
     if binary:
         (repo / "seed.txt").write_bytes(b"\0original payload\n")
-        _git(repo, "add", "seed.txt")
-        _git(repo, "commit", "-qm", "binary seed")
+    for path in others:
+        path.write_bytes(b"\0original payload\n" if binary else b"original payload\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "--allow-empty", "-qm", "fixtures")
     monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
+    trace = tmp_path / "git-trace.jsonl"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     if file_reference:
         monkeypatch.setattr(capture, "_PATCH_FILE_REFERENCE_BYTES", 8)
     seed = repo / "seed.txt"
     if changed:
         seed.write_bytes(b"\0changed payload!\n" if binary else b"changed payload\n")
-    info = seed.stat()
-    os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+    for path in [seed, *others]:
+        info = path.stat()
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
     before = _index(repo)
     artifacts, manifest = capture.write_workspace_patch_artifacts(repo, tmp_path / "artifacts", task={})
     assert manifest["errors"] == []
@@ -306,18 +333,26 @@ def test_workspace_capture_lists_only_real_tracked_changes(tmp_path, monkeypatch
     assert any(row["kind"] == "workspace_patch" for row in artifacts) is (changed and not file_reference)
     assert _index(repo) == before
     assert not (repo / ".git" / "index.lock").exists()
+    rows = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    probes = [row["argv"] for row in rows if row.get("event") == "start" and "--patch" in row["argv"]]
+    assert len(probes) == int(binary), probes
+    assert not [row for row in rows if row.get("label") == "do_write_index"]
 
 
 @pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
 @pytest.mark.parametrize("reader", ["vcs_names", "selection", "drift"])
 @pytest.mark.parametrize("name", ["binary.dat", "binary[1].dat"])
-def test_binary_path_observers_compare_content(tmp_path, monkeypatch, changed, reader, name):
+@pytest.mark.parametrize("count", [1, 30, 100])
+def test_binary_path_observers_compare_content(tmp_path, monkeypatch, changed, reader, name, count):
     """Binary numstat rows alone prove neither edits nor an unchanged tree."""
     from ouroboros.git_observation import host_git_env
 
     repo = _repo(tmp_path)
     seed = repo / name
     seed.write_bytes(b"\0before")
+    others = [repo / f"unchanged-{i:03}.dat" for i in range(count - 1)]
+    for path in others:
+        path.write_bytes(b"\0before")
     _git(repo, "add", ".")
     _git(repo, "commit", "-qm", "binary seed")
     baseline = _git(repo, "rev-parse", "HEAD")
@@ -326,8 +361,9 @@ def test_binary_path_observers_compare_content(tmp_path, monkeypatch, changed, r
     monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "1")
     if changed:
         seed.write_bytes(b"\0after!")  # same size, different content
-    info = seed.stat()
-    os.utime(seed, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+    for path in [seed, *others]:
+        info = path.stat()
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
     before = _index(repo)
     if reader == "selection":
         from ouroboros.test_selection import changed_paths
@@ -350,7 +386,57 @@ def test_binary_path_observers_compare_content(tmp_path, monkeypatch, changed, r
     assert not (repo / ".git" / "index.lock").exists()
     rows = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
     assert not [row for row in rows if row.get("label") == "do_write_index"]
+    starts = [row["argv"] for row in rows if row.get("event") == "start"]
+    probes = [args for args in starts if "--patch" in args]
+    assert len(probes) == 1, probes
+    assert len(starts) == {"selection": 4, "drift": 4, "vcs_names": 2}[reader], starts
     # The content oracle also reads without refreshing the index.
     result = subprocess.run(["git", "diff", "--quiet", "HEAD"], cwd=repo, env=host_git_env())
     assert result.returncode == int(changed)
     assert _index(repo) == before
+
+
+@pytest.mark.parametrize("changed", [False, True], ids=["stat-only", "content"])
+@pytest.mark.parametrize("quoted", [False, True])
+@pytest.mark.parametrize("text_reader", [False, True], ids=["bytes", "text"])
+def test_binary_batches_keep_literal_and_git_quoted_paths(tmp_path, monkeypatch, changed, quoted, text_reader):
+    from ouroboros import argv_budget
+    from ouroboros.git_observation import host_git_env, numstat_paths
+
+    repo = _repo(tmp_path)
+    names = ["space file.dat", "binary[1].dat", "binary1.dat", "é猫.dat"]
+    if os.name != "nt":
+        names += ['quote".dat', "tab\t.dat", "line\n.dat", "slash\\.dat", ":(glob)*.dat"]
+    for name in names:
+        (repo / name).write_bytes(b"\0before")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "literal fixtures")
+    _git(repo, "config", "core.quotePath", str(quoted).lower())
+    _git(repo, "config", "diff.mnemonicPrefix", "true")
+    _git(repo, "config", "color.ui", "always")
+    for i, name in enumerate(names):
+        path = repo / name
+        if changed and i % 2 == 0:
+            path.write_bytes(b"\0after!")
+        info = path.stat()
+        os.utime(path, ns=(info.st_atime_ns, info.st_mtime_ns - 10_000_000_000))
+    env = host_git_env()
+    limit = argv_budget.argv_env_bytes([], env) + argv_budget.DEFAULT_HEADROOM_BYTES + 300
+    monkeypatch.setattr(argv_budget, "system_argv_limit_bytes", lambda: limit)
+    calls = []
+
+    def read(args):
+        calls.append(args)
+        output = subprocess.run(args, cwd=repo, env=env, capture_output=True, check=True).stdout
+        return output.decode("utf-8", "surrogateescape") if text_reader else output
+
+    command = ["git", "diff", "--numstat", "-z", "HEAD", "--"]
+    before = _index(repo)
+    paths = numstat_paths(read(command), command, read)
+    assert set(paths) == (set(names[::2]) if changed else set())
+    assert len(calls) > 2, "exercise multiple transport chunks"
+    for args in calls[1:]:
+        assert argv_budget.argv_budget_excess(args, env=env) == ""
+        assert all(spec.startswith(":(literal)") for spec in args[args.index("--") + 1:])
+    assert _index(repo) == before
+    assert not (repo / ".git" / "index.lock").exists()

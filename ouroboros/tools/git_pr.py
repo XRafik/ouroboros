@@ -542,7 +542,8 @@ def _stage_pr_merge(
             )
 
         cmd = ["git", "diff", "--numstat", "-z"]
-        if numstat_paths(_g(cmd[1:], repo_dir).stdout, cmd, lambda args: _g(args[1:], repo_dir).stdout):
+        if numstat_paths(_g(cmd[1:], repo_dir).stdout, cmd,
+                         lambda args: _g(args[1:], repo_dir).stdout, first_only=True):
             _restore_on_error()
             return (
                 f"⚠️ PR_MERGE_ERROR: Working tree on '{target_branch}' has unstaged "
