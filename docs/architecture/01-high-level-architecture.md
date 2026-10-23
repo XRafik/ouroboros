@@ -41,7 +41,7 @@ web/ — Web UI, a SPA of ES modules; chapter 3 owns the pages and the modules n
     widgets.js, widget_render.js, widget_module.js, widget_frame.js, widget_card.js, widget_reorder.js, widget_list.js, widget_size.js, widget_chart.js, widget_job.js, masonry.js — Widgets page leaves: host and card registry, the declarative renderer, framed mounts, card chrome, list-request policy, helpers and masonry (§3)
 skills/browser_speech/, skills/device_voice/, skills/templates/ — built-ins (`skills/builtin.json`): speech engines (ui/stt.js, ui/tts.js) and the "+" starters
 supervisor/ — background thread inside server.py (§5)
-  active_activity.py — process-local direct actors/call observations for `/api/state`; private reply expectation/handoff facts, no spurious queue rows (§3 Direct turns and the activity block)
+  active_activity.py — process-local direct actors/start phases/call observations for `/api/state`; private reply expectation/handoff facts, no queue rows (§3 Direct turns and the activity block)
   message_bus.py — local message bus for the Web UI and transport skills; re-exports the ingress names
   message_ingress.py — one accepted row per message id, its dispatch a durable obligation (§4 WebSocket chat)
   workers.py — worker pool: forkserver on Linux, spawn elsewhere, never fork (a child forked from the multi-threaded supervisor inherits a held import lock and wedges)
