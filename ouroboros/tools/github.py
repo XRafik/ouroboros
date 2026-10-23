@@ -353,6 +353,7 @@ def _gh_run(args: List[str], ctx: ToolContext, timeout: int = 30, input_data: Op
             cwd=str(cwd),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=timeout,
             input=input_data,
             env=env,
