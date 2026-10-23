@@ -71,6 +71,10 @@ _TASK_PAGE_SQL = ("SELECT attempt_id, state, settle_reason, model, provider, ts_
                   "WHERE task_id=? AND category=? AND seq_first<? ORDER BY seq_first DESC LIMIT ?")
 _TASK_CURSOR_SQL = "SELECT seq_first FROM attempts WHERE attempt_id=? AND task_id=? AND category=?"
 
+# One root's money rows of a recent window by range, never the root's whole life (the consciousness
+# allowance, ``consciousness_allowance``); a store an older body created gains it at the lifespan boot.
+ROOT_TIME_INDEX = "CREATE INDEX IF NOT EXISTS attempts_root_time ON attempts(root_task_id, ts_last_epoch)"
+
 _SCHEMA = f"""
 CREATE TABLE attempts (
   attempt_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, seq INTEGER NOT NULL, seq_first INTEGER NOT NULL,
@@ -94,6 +98,7 @@ CREATE INDEX attempts_group ON attempts(billing_group_id);
 CREATE INDEX attempts_task ON attempts(task_id);
 CREATE INDEX attempts_open ON attempts(state) WHERE {_OPEN_PREDICATE};
 CREATE INDEX attempts_category_time ON attempts(category, ts_last_epoch);
+{ROOT_TIME_INDEX};
 CREATE INDEX attempts_review ON attempts(review_skill, review_wave_id);
 CREATE INDEX attempts_route ON attempts(subscription_route);
 CREATE TABLE summaries (
@@ -846,6 +851,7 @@ def migrate_from_journal(root: pathlib.Path | str, *, initialize_journal: bool =
                 report = {"status": "already_completed", **_retire_journal(root, status)}
                 if initialize_journal and not stored.get("export"):  # an exporting store stays as it is handed off
                     report["journal_selected"] = _select_journal(root, path, tier)
+                    report["window_index"] = _ensure_window_index(root, path, tier)
             else:
                 tier = TIER_ENFORCED if kernel_file_locks_enforced(root / LOCK_REL) else TIER_NAME
                 report = _import(root, path, tier)
@@ -857,6 +863,26 @@ def migrate_from_journal(root: pathlib.Path | str, *, initialize_journal: bool =
     except Exception:
         log.warning("usage store migration report not recorded", exc_info=True)
     return report
+
+
+def _ensure_window_index(root: pathlib.Path, path: pathlib.Path, tier: str) -> str:
+    """``ROOT_TIME_INDEX`` on a store an older body created: built once at the lifespan boot while
+    writers are quiescent, never by a reader; ``present`` costs one schema lookup. A failed build
+    leaves readers on ``attempts_root`` (the same answer, the root's whole life read) and is retried
+    at the next boot."""
+    try:
+        with contextlib.ExitStack() as stack:
+            if tier == TIER_NAME:
+                stack.enter_context(_named_lock(root, LOCK_REL.name, timeout_sec=USAGE_LOCK_TIMEOUT_SEC, stale_sec=90.0))
+            conn = stack.enter_context(_core.connection(path, tier, wait_sec=USAGE_LOCK_TIMEOUT_SEC, opener=_connect))
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='attempts_root_time'").fetchone():
+                return "present"
+            with _core.transaction(conn, write=True, commit_wait_sec=USAGE_LOCK_TIMEOUT_SEC):
+                conn.execute(ROOT_TIME_INDEX)
+        return "created"
+    except (sqlite3.Error, _core.StoreError, UsageAccountingError) as exc:
+        log.warning("usage store window index deferred to the next boot: %s", exc)
+        return f"deferred: {type(exc).__name__}"
 
 
 def _select_journal(root: pathlib.Path, path: pathlib.Path, tier: str) -> bool:

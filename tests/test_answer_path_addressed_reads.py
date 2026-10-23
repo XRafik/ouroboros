@@ -317,3 +317,114 @@ def test_a_valid_index_keeps_a_placement_whose_own_sidecar_was_damaged(tmp_path,
         assert packs.handle_bytes(tmp_path, "kept", handle["path"]).startswith(b"# focus")
         assert packs.handle_info(tmp_path, "kept", handle["path"]) == {
             "size": handle["size"], "sha256": handle["sha256"], "loose": False}
+
+
+# ---- the consciousness tick: its allowance read over k days of usage history ---------------------
+
+NOW = 1_790_000_000.0  # a fixed clock: the window and the horizon are measured from it
+DAY = 86_400.0
+
+
+def _journal_rows(attempt_id, ts, root_task_id, task_id, category, cost=0.01):
+    """One settled attempt in the retired journal format the store's one-time import reads."""
+    import datetime as dt
+
+    base = {"attempt_id": attempt_id, "kind": "attempt", "ts": dt.datetime.fromtimestamp(ts, dt.timezone.utc).isoformat(),
+            "model": "m", "provider": "p", "category": category, "source": "test", "task_id": task_id,
+            "root_task_id": root_task_id, "parent_task_id": ""}
+    return [{**base, "state": "reserved", "reservation_upper_bound_usd": "1"}, {**base, "state": "dispatched"},
+            {**base, "state": "settled", "cost_usd": str(cost), "cost_final": True, "pricing_known": True}]
+
+
+def _usage_history(shape):
+    def build(root, k):
+        """The same last-24-hours window at every size (two own wakes, one started root); each older day
+        adds three own wakes and three owner tasks, and ``long_lived`` adds rows of one started root
+        that is still at work today."""
+        from tests._usage_store_testing import write_journal
+
+        rows = []
+        for wake in range(2):
+            for index in range(5):
+                rows += _journal_rows(f"now-wake{wake}-{index}", NOW - 3600 * (wake + 1) - index,
+                                      f"now-wake-{wake}", f"now-wake-{wake}", "consciousness")
+        for index in range(5):
+            rows += _journal_rows(f"now-started-{index}", NOW - 7200 - index, "now-started", "now-started",
+                                  "consciousness_task")
+        if shape == "long_lived":
+            rows += _journal_rows("long-today", NOW - 1800, "long-root", "long-root", "consciousness_task")
+        for day in range(1, k + 1):
+            at = NOW - day * DAY - 3 * 3600
+            for root_kind, category in (("wake", "consciousness"), ("task", "task")):
+                for number in range(3):
+                    for index in range(5):
+                        rows += _journal_rows(f"d{day}-{root_kind}{number}-{index}", at - 60 * number - index,
+                                              f"d{day}-{root_kind}-{number}", f"d{day}-{root_kind}-{number}", category)
+            if shape == "long_lived":
+                for index in range(5):
+                    rows += _journal_rows(f"d{day}-long-{index}", at - index, "long-root", f"long-step-{day}",
+                                          "consciousness_task" if index == 0 else "task")
+        (root / "state").mkdir(parents=True, exist_ok=True)
+        write_journal(root, rows)
+        return {}
+    return build
+
+
+@pytest.mark.parametrize("shape", ["separate_trees", "long_lived"])
+def test_one_tick_allowance_read_costs_the_same_with_1_or_30_days_of_usage(tmp_path, monkeypatch, shape):
+    """The tick reads exactly the addressed window: the consciousness roots of the last 48 hours by
+    their category and time, then each root's money rows of the last 24 hours by root and time. Older
+    trees are never visited (the quiet case even before the fix); a root still at work today is read
+    for its last day, not its whole life. The decision is the same at both sizes."""
+    from ouroboros import consciousness_allowance as allowance, usage_store
+
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_DAILY_USD", "20")
+    monkeypatch.setenv("OUROBOROS_SETTINGS_PATH", str(tmp_path / "settings.json"))
+
+    def boundary(root, _facts):
+        assert usage_store.read_usage_records(root)  # the one-time import an upgraded install ran at boot
+        usage_store.migrate_from_journal(root, initialize_journal=True)  # the lifespan's boot step
+        allowance.allowance_window(root, now=NOW)
+
+        def tick_read():
+            window = allowance.allowance_window(root, now=NOW)  # exact, as the tick admits a wake
+            return {key: window[key] for key in ("status", "settled_usd", "remaining_usd", "roots", "window_rows",
+                                                 "resets_at")}
+        return tick_read
+
+    try:
+        answers = _flat(tmp_path, monkeypatch, _usage_history(shape), boundary)
+    finally:
+        for k in (K_SMALL, K_LARGE):
+            usage_store.forget(tmp_path / f"k{k:03d}" / "data")
+    assert answers[K_SMALL] == answers[K_LARGE]
+    assert answers[K_SMALL]["status"] == "available" and answers[K_SMALL]["window_rows"] == 15 + (shape == "long_lived")
+
+
+def test_a_store_an_older_body_created_gains_the_window_index_once_at_boot(tmp_path, monkeypatch):
+    """The index is built by the lifespan's boot step, never by the tick: before it the tick still
+    answers (through the root index alone), the boot creates it once and later boots only look."""
+    from ouroboros import consciousness_allowance as allowance, usage_store
+
+    root = tmp_path / "data"
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(root))
+    monkeypatch.setenv("OUROBOROS_SETTINGS_PATH", str(root / "settings.json"))
+    monkeypatch.setenv("OUROBOROS_CONSCIOUSNESS_DAILY_USD", "20")
+    _usage_history("long_lived")(root, 3)
+    try:
+        assert usage_store.read_usage_records(root)
+        with usage_store.hold(root, write=True) as txn:
+            txn.conn.execute("DROP INDEX attempts_root_time")  # as an older body created the store
+        before = allowance.allowance_window(root, now=NOW)
+        with usage_store.read(root) as txn:
+            assert txn.conn.execute("SELECT 1 FROM sqlite_master WHERE name='attempts_root_time'").fetchone() is None
+        assert usage_store.migrate_from_journal(root, initialize_journal=True)["window_index"] == "created"
+        assert usage_store.migrate_from_journal(root, initialize_journal=True)["window_index"] == "present"
+        with usage_store.read(root) as txn:
+            plan = [tuple(row)[-1] for row in txn.conn.execute(
+                f"EXPLAIN QUERY PLAN SELECT * FROM attempts WHERE root_task_id = ? AND ts_last_epoch >= ? "
+                f"AND {allowance._MONEY_KIND} ORDER BY seq", ("long-root", NOW - DAY))]
+        assert any("attempts_root_time" in step for step in plan), plan
+        assert allowance.allowance_window(root, now=NOW) == before
+    finally:
+        usage_store.forget(root)
