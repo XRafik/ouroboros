@@ -651,6 +651,7 @@ def capture_terminal_patch_for_drive(drive: Any, entry: _RunCustody, *, gateway=
             return finish(block, gateway)
         except Exception as exc:
             return {"status": "failed", "capture_kind": "engine_directory", "authority_target_root": entry.target_root,
+                    "retry": "transient" if isinstance(exc, OSError) else "changed_input",
                     "note": f"Directory capture unavailable: {type(exc).__name__}: {exc}. The engine result is retained; no new run was started."}
         finally:
             if owned_gateway is not None:
@@ -726,6 +727,7 @@ def capture_terminal_patch_for_drive(drive: Any, entry: _RunCustody, *, gateway=
         log.warning("Delegated run patch capture failed for %s", entry.run_id, exc_info=True)
         return {
             "status": "failed",
+            "retry": "transient" if isinstance(exc, OSError) else "changed_input",
             "baseline_id": entry.baseline_sha,
             "execution_root": entry.execution_root,
             "authority_target_root": entry.target_root,

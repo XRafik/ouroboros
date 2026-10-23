@@ -263,7 +263,7 @@ def driven_runtime(tmp_path, monkeypatch):
         runtime.close(wait=True)
 
 
-def test_unchanged_money_debt_waits_for_maintenance_but_facts_and_explicit_request_are_immediate(
+def test_unchanged_money_debt_rests_but_facts_and_explicit_request_are_immediate(
         tmp_path, monkeypatch, driven_runtime, caplog):
     from ouroboros import usage_accounting, config
     runtime, clock, tick = driven_runtime
@@ -286,13 +286,13 @@ def test_unchanged_money_debt_waits_for_maintenance_but_facts_and_explicit_reque
     assert attempts == [0.0], "passive cold ownership checks do not force bookkeeping retries"
     clock[0] += config.BODY_MAINTENANCE_INTERVAL_SEC
     tick()
-    assert len(attempts) == 2
+    assert len(attempts) == 1, "elapsed time does not change retry eligibility"
     runtime.request(entry.run_id)
     tick()
-    assert len(attempts) == 3
+    assert len(attempts) == 2
     body.observe_run(tmp_path, entry, terminal(text="new exact result", seq=6))
     tick()
-    assert len(attempts) == 4
+    assert len(attempts) == 3
     failures = [r for r in custody.custody_rows(tmp_path) if r.get("type") == custody.SETTLE_FAILED]
     assert len(failures) == 2, "one durable report for each changed failed source, no unchanged failure storm"
     warnings = [r for r in caplog.records if "money remains owed" in r.message and r.levelno >= logging.WARNING]
@@ -302,7 +302,8 @@ def test_unchanged_money_debt_waits_for_maintenance_but_facts_and_explicit_reque
     tick()
     tick()
     assert current.run(tmp_path, entry.run_id).settled
-    assert entry.run_id not in runtime.collection_attempts and entry.run_id not in runtime.collection_failures
+    assert entry.run_id not in runtime.collection_failures
+    assert current.run(tmp_path, entry.run_id).collection_attempt["retry"] == ""
 
 
 def test_new_terminal_observation_is_independent_of_another_runs_paced_collection(tmp_path, monkeypatch, driven_runtime):

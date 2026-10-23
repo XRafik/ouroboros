@@ -543,5 +543,5 @@ def test_a_typed_capture_failure_stays_owed(tmp_path, monkeypatch, money):
     first = body.collect_terminal(tmp_path, entry.run_id, detail=terminal(), failures=failures)
     assert "capture:RuntimeError" in first["errors"] and "capture" in failures
     assert first["workspace_capture"]["status"] == "failed"
-    second = body.collect_terminal(tmp_path, entry.run_id, detail=terminal(), failures=failures)
+    second = body.collect_terminal(tmp_path, entry.run_id, detail=terminal(), failures=failures, recapture=True)
     assert not any(error.startswith("capture:") for error in second["errors"]) and "capture" not in failures
