@@ -198,8 +198,9 @@ def test_executable_quit_preserves_owed_capture_for_next_generation(tmp_path, en
 
     try:
         with running(tmp_path, "held", entrypoint, ingress) as (proc, gates):
+            # The ordinary capture enters in the maintenance child: allow its cold start, as recovery does.
             wait_for(lambda: all((gates / name).exists() for name in (
-                "ready.json", "ordinary-entered.json", "review-entered.json")), proc)
+                "ready.json", "ordinary-entered.json", "review-entered.json")), proc, timeout=45)
             assert json.loads((gates / "ordinary-entered.json").read_text(encoding="utf-8"))["pid"] != proc.pid
             assert json.loads((gates / "review-entered.json").read_text(encoding="utf-8"))["pid"] == proc.pid
             pending()
