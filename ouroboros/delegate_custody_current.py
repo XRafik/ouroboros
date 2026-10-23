@@ -431,30 +431,39 @@ CHAIN_LIVE = "custody_chain_live"
 
 def flush_outbox(root) -> int:
     """Append every parked event to the chain, oldest first; delete each row once its append
-    confirmed. Idempotent: a replayed append carries the same ``event_id`` the fold dedups."""
+    confirmed. Idempotent: a replayed append carries the same ``event_id`` the fold dedups. The
+    chain is measured between the append and the delete, under no store transaction (a listing of
+    the archive never runs inside the store's write lock); the delete's transaction records it."""
     from ouroboros.delegate_custody import event_log_path
 
+    path = event_log_path(root)
     try:
         with store.open_store(root, write=False) as txn:
             # BEGIN IMMEDIATE serializes insertion; clocks and event ids do not.
             # rowid also preserves pending legacy events written before ordinals.
             parked = [json_loads(row["event"]) for row in
                       txn.conn.execute("SELECT event FROM custody_outbox ORDER BY rowid")]
+            known = txn.meta(CHAIN_LIVE)
     except store.StoreError:
         return 0
     appended = 0
     for event in parked:
         try:
-            live = _append_durable(event_log_path(root), event)
+            live = _append_durable(path, event)
             if not live:
                 break
+            measured = _chain_live(path, live, known)
             with store.open_store(root, write=True) as txn:
                 txn.outbox_delete(str(event.get("event_id") or ""))
-                boundary = _chain_boundary(txn, event_log_path(root), live)  # this store's own rows end here: P6' applies only what follows
-                txn.set_meta(CHAIN_BOUNDARY, max(int(txn.meta(CHAIN_BOUNDARY) or 0), boundary))
+                if "ino" in measured:
+                    txn.set_meta(CHAIN_LIVE, measured)
+                # This store's own rows end here: P6' applies only what follows.
+                txn.set_meta(CHAIN_BOUNDARY, max(int(txn.meta(CHAIN_BOUNDARY) or 0), measured["offset"]))
         except (store.StoreError, OSError):
             log.warning("custody outbox flush interrupted under %s", root, exc_info=True)
             break
+        if "ino" in measured:
+            known = measured
         appended += 1
     return appended
 
@@ -467,27 +476,28 @@ def _archive_stamp(path) -> Optional[int]:
         return None
 
 
-def _chain_boundary(txn, path, live: Dict[str, int]) -> int:
-    """The chain's length right after the append that left its live segment at ``live`` (device,
-    inode, size): the previous flush's measurement plus the live file's growth while the closed
-    segments cannot have changed (the same live inode, the same archive directory, a live file
-    that only grew); otherwise — the first flush, a rotation, a removed segment — one listing
-    (``chain_measure``). The measurement is recorded for the next flush."""
+def _chain_live(path, live: Dict[str, int], known: Any) -> Dict[str, Any]:
+    """The ``CHAIN_LIVE`` record of the chain right after the append that left its live segment at
+    ``live`` (device, inode, size): ``known``, the previous flush's record, advanced by the live
+    file's growth while the closed segments cannot have changed (the same live inode, the same
+    archive directory, a live file that only grew); otherwise — the first flush, a rotation, a
+    removed segment — one listing (``chain_measure``) with the live stat it was read with. Only
+    ``offset`` when the live file is gone between its append and the measurement (nothing to
+    advance from, no record to keep). A pure measurement under no transaction: a record another
+    flusher wrote meanwhile agrees with this one (``offset - size`` is the same on the same inode and
+    archive), so a stale ``known`` costs at most one listing, never a wrong boundary."""
     from ouroboros.delegate_custody import chain_measure
 
-    stamp, known = _archive_stamp(path), txn.meta(CHAIN_LIVE)
+    stamp = _archive_stamp(path)
     if (isinstance(known, dict) and isinstance(known.get("size"), int) and isinstance(known.get("offset"), int)
             and [known.get("dev"), known.get("ino"), known.get("archive")] == [live["dev"], live["ino"], stamp]
             and live["size"] >= known["size"]):
-        offset = known["offset"] + live["size"] - known["size"]
-    else:
-        offset, measured = chain_measure(path)
-        if measured is None:
-            return offset  # the live file is gone between its append and this measurement: nothing to advance from
-        live = {"dev": measured.st_dev, "ino": measured.st_ino, "size": measured.st_size}
-        stamp = _archive_stamp(path)
-    txn.set_meta(CHAIN_LIVE, {**live, "archive": stamp, "offset": offset})
-    return offset
+        return {**live, "archive": stamp, "offset": known["offset"] + live["size"] - known["size"]}
+    offset, measured = chain_measure(path)
+    if measured is None:
+        return {"offset": offset}
+    return {"dev": measured.st_dev, "ino": measured.st_ino, "size": measured.st_size,
+            "archive": _archive_stamp(path), "offset": offset}
 
 
 def _append_durable(path, event: Dict[str, Any]) -> Optional[Dict[str, int]]:

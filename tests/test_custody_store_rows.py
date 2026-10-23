@@ -406,12 +406,31 @@ def test_a_flush_records_the_chain_length_exactly_and_lists_the_archive_only_aft
     segment is removed. It reads that length from the previous flush's measurement (``CHAIN_LIVE``:
     the live segment's identity and size, the archive directory's stamp): while the closed segments
     are unchanged a flush lists no archive and opens no segment (one stat of the directory), and a
-    rotation or a removed segment is measured once by the walk, never on every emit."""
+    rotation or a removed segment is measured once by the walk, never on every emit and never inside
+    a store transaction (the chain is measured between the append and the row's delete)."""
     from supervisor.state import rotate_jsonl_log_if_needed
     from tests._cost_meter import CostMeter, tagged
 
     path = c.event_log_path(tmp_path)
     archive = tmp_path / "archive"
+    open_transactions, measured_inside = [0], []
+    real_open, real_measure = store.open_store, c.chain_measure
+
+    @contextmanager
+    def counted(root, **kwargs):
+        with real_open(root, **kwargs) as txn:
+            open_transactions[0] += 1
+            try:
+                yield txn
+            finally:
+                open_transactions[0] -= 1
+
+    def measure(chain):
+        measured_inside.append(open_transactions[0] > 0)
+        return real_measure(chain)
+
+    monkeypatch.setattr(store, "open_store", counted)
+    monkeypatch.setattr(c, "chain_measure", measure)
 
     def emit(number):
         """Commit the event with its append parked, then meter the flush alone."""
@@ -451,3 +470,5 @@ def test_a_flush_records_the_chain_length_exactly_and_lists_the_archive_only_aft
     assert emit(9)[1] == rested
     rows = [row["run_id"] for row in c.custody_rows(tmp_path)]  # every flush landed; the removed segment took 1-3
     assert rows == [f"run-{number}" for number in range(4, 10)], rows
+    # The first flush, two rotations and the removal each measured the chain; none did so under a store transaction.
+    assert len(measured_inside) >= 4 and not any(measured_inside), measured_inside
