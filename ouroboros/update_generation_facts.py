@@ -1,10 +1,10 @@
 """Before/after observations on the one retained managed-update attempt.
 
 Facts, never a verdict or chat notification. Samples run at update admission,
-confirmed boot adoption, and observed duty/first-dispatch events; no poller or
-history replay. Each side holds one sample and the latest observed direct turn.
-The next update replaces this record with its existing attempt. Producer hooks
-accept already observed facts, never infer a dispatch from an active heartbeat.
+confirmed boot adoption, duty overruns and supervisor dispatch-event handling.
+The turn's observer records memory only; no poller or history replay. Each side
+holds one sample and the latest observed direct turn. The next update replaces
+the record. Producer hooks never infer dispatch from an active heartbeat.
 """
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _duties: dict[str, int] | None = None
 _direct: dict | None = None
+_dispatch_pending = False
 _cpu_sample: tuple[float, float] | None = None
 
 
@@ -104,15 +105,30 @@ def observe_direct_dispatch(*, task_id: str, accepted_at: float, dispatched_at: 
                             attempt_id: str = "") -> None:
     """The direct-turn owner calls at its first actual model dispatch, once per turn.
 
+    Memory only: the supervisor publishes on the queued main_llm_call_state frame.
     Both stamps use the same clock. Unobserved admission or dispatch produces no
     row; an unfinished turn remains unobserved rather than becoming zero latency.
     """
-    global _direct
+    global _direct, _dispatch_pending
     if dispatched_at < accepted_at:
         return
     with _lock:
         _direct = {"task_id": task_id, "attempt_id": attempt_id, "accepted_at": accepted_at,
                    "dispatched_at": dispatched_at, "seconds": dispatched_at - accepted_at}
+        _dispatch_pending = True
+
+
+def publish_pending_dispatch() -> None:
+    """Supervisor-side flush, even if the observed turn has already left the registry.
+
+    Repeated frames and later rounds do no I/O without a new first-dispatch fact.
+    Only the latest observation is retained; the lock never spans sampling or I/O.
+    """
+    global _dispatch_pending
+    with _lock:
+        if not _dispatch_pending:
+            return
+        _dispatch_pending = False
     _publish_after()
 
 
