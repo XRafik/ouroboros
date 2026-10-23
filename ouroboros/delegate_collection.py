@@ -19,7 +19,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from ouroboros import delegate_custody as c
 from ouroboros import delegate_custody_current as current
 from ouroboros.delegate_custody_current import collection_pending
-from ouroboros.delegate_capture_attempt import collection_due, record_attempt, GENERATION
+from ouroboros.delegate_capture_attempt import collection_due, record_attempt, GENERATION, failure_retry, output_owed
 from ouroboros.delegate_named_evidence import saved_named_evidence
 from ouroboros._usage_rows import REVIEW_ATTRIBUTION_KEYS
 
@@ -234,14 +234,13 @@ def _retain_output(root, entry, detail, gateway, staging_task_id="", output_auth
 def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = None,
                      allow_review: bool = False, staging_task_id: str = "", stopped=None, failures=None,
                      output_authority=None, recapture=False, generation=GENERATION, background=False,
-                     output_retry=False) -> dict:
+                     output_retry=False, gateway_factory=None) -> dict:
     """One result-owner entry for foreground collection and the body, including recovered debt.
 
     A contending caller reads committed facts; it never times out an integration
     or evicts a live collector. No queue/root/money lock is held at this entry.
-    ``output_retry`` is an explicit reader's wait: owed output (missing, partial or for an older
-    terminal) is fetched again even when this generation's attempt already ran; capture and named
-    evidence still follow ``collection_due``.
+    ``output_retry`` is an explicit wait: owed output and money retry even when this generation's
+    attempt already ran; capture and named evidence still follow ``collection_due``.
     """
     from ouroboros.platform_layer import acquire_exclusive_file_lock, release_exclusive_file_lock
     from ouroboros.delegate_continuation import disposition_refusal
@@ -269,6 +268,7 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
     transient = False
     retention = {}
     errors = []
+    owned_gateway = None
     try:
         entry = current.run(root, run_id)
         if entry is None:
@@ -276,21 +276,23 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
         if entry.named_evidence:
             saved_named_evidence(root, entry)  # addressed validation; never called by tick
         due = allow_review or collection_due(entry, generation=generation, recapture=recapture)
-        output_owed = (not entry.output_source or not entry.output_complete
-                       or entry.output_terminal_sha != entry.terminal_source.get("sha256"))
-        if not due and not (output_retry and output_owed):
+        if not due and not (output_retry and (output_owed(entry) or not entry.settled)):
             return {"status": "pending" if collection_pending(entry) else "collected",
                     "workspace_capture": capture_projection(root, entry), "errors": []}
+        if gateway is None and gateway_factory is not None:
+            try:
+                owned_gateway = gateway = gateway_factory()
+            except Exception:
+                pass  # Retained output, local capture and money do not require transport.
         retry_capture = recapture or (entry.collection_attempt.get("generation") != generation
             and (entry.named_evidence.get("retry") == "transient" or entry.capture_job.get("retry") == "transient"))
         detail = _read_source(root, entry, entry.terminal_source)
-        if (not entry.output_source or not entry.output_complete
-                or entry.output_terminal_sha != entry.terminal_source.get("sha256")):
+        if output_owed(entry):
             try:
                 retention = _retain_output(root, entry, detail, gateway, staging_task_id, output_authority)
             except Exception as exc:
                 errors.append(f"output:{type(exc).__name__}")
-                transient |= isinstance(exc, OSError)
+                transient |= failure_retry(exc) == "transient"
                 _collection_failure(entry, "output", exc, failures)
             else:
                 if failures is not None:
@@ -316,7 +318,7 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
                     raise RuntimeError(str(capture.get("note") or "patch capture failed"))
             except Exception as exc:
                 errors.append(f"capture:{type(exc).__name__}")
-                transient |= isinstance(exc, OSError) or (capture or {}).get("retry") == "transient"
+                transient |= failure_retry(exc) == "transient" or (capture or {}).get("retry") == "transient"
                 _collection_failure(entry, "capture", exc, failures)
             else:
                 if failures is not None:
@@ -332,7 +334,7 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
                                                   named=(capture.get("named_evidence") or {}) if background else None)
                 except Exception as exc:
                     errors.append(f"named_evidence:{type(exc).__name__}")
-                    transient |= isinstance(exc, OSError)
+                    transient |= failure_retry(exc) == "transient"
                     _collection_failure(entry, "named_evidence", exc, failures)
             if not closing and entry.project_persistent and entry.project_owned:
                 c.retire_project(root, gateway, entry)  # records kept, never deletes the project
@@ -347,6 +349,11 @@ def collect_terminal(root, run_id: str, *, gateway=None, detail: dict | None = N
         return {"status": "unavailable", "reason": "custody_missing"}
     finally:
         release_exclusive_file_lock(lock, fd)
+        if background and capture and capture.get("status") == "pending":
+            from ouroboros.maintenance import child
+            child.request()  # Its zero-wait lookup must follow our final store publication.
+        if owned_gateway is not None:
+            owned_gateway.close()
 
 
 def retained_payload(root, entry, *, require_complete: bool = True) -> dict | None:
@@ -423,7 +430,6 @@ class BodyRuntime:
         self.reads: dict[str, Future] = {}
         self.collections: dict[str, Future] = {}
         self.requested: set[str] = set()
-        self.retry_requested: set[str] = set()
         self.collection_failures: dict[str, dict] = {}
         # Each held run's latest dated execution fact, as the last observation read it.
         self.observed: dict[str, dict] = {}
@@ -463,14 +469,6 @@ class BodyRuntime:
             self.requested.update(ids)
             self.changed.set()
         return True
-
-    def request(self, run_id: str):
-        with self.lock:
-            if self.active:
-                self.requested.add(str(run_id))
-                self.retry_requested.add(str(run_id))
-                self.observation_gaps.pop(str(run_id), None)
-                self.changed.set()
 
     def _gateway(self):
         if self.gateway_factory is not None:
@@ -573,18 +571,10 @@ class BodyRuntime:
             return dict(self.observed.get(str(run_id)) or {})
 
     def _collect(self, run_id, recapture=False):
-        try:
-            gateway = self._gateway()
-        except Exception:
-            gateway = None  # Local retained output, Git capture and money still work.
-        try:
-            with self.lock:
-                failures = self.collection_failures.setdefault(run_id, {})
-            return collect_terminal(self.root, run_id, gateway=gateway, stopped=lambda: not self.active,
-                                    failures=failures, recapture=recapture, generation=self.runtime_id, background=True)
-        finally:
-            if gateway is not None:
-                gateway.close()
+        with self.lock:
+            failures = self.collection_failures.setdefault(run_id, {})
+        return collect_terminal(self.root, run_id, gateway_factory=self._gateway, stopped=lambda: not self.active,
+                                failures=failures, recapture=recapture, generation=self.runtime_id, background=True)
 
     def tick(self):
         if not self.active:
@@ -614,16 +604,16 @@ class BodyRuntime:
             if entry.review_owned or not self.active:
                 continue
             with self.lock:
-                if not entry.terminal_source and (not entry.settled or entry.terminal_state):
+                retry_observation = (entry.collection_attempt.get("retry") == "transient"
+                                     and (not entry.settled or output_owed(entry)))
+                if (not entry.terminal_source and (not entry.settled or entry.terminal_state)) or retry_observation:
                     previous = self.reads.get(entry.run_id)
                     if (previous is None or previous.done()) and self.observation_gaps.get(entry.run_id) != self._observation_key(entry):
                         self.reads[entry.run_id] = self.observers.submit(self._observe, entry)
-                explicit = entry.run_id in self.retry_requested
-                if self.collection_ready() and collection_due(entry, generation=self.runtime_id, recapture=explicit):
+                if self.collection_ready() and collection_due(entry, generation=self.runtime_id):
                     previous = self.collections.get(entry.run_id)
                     if previous is None or previous.done():
-                        self.retry_requested.discard(entry.run_id)
-                        self.collections[entry.run_id] = self.observers.submit(self._collect, entry.run_id, explicit)
+                        self.collections[entry.run_id] = self.observers.submit(self._collect, entry.run_id)
 
     def _drive(self):
         from ouroboros.delegate_supervision import _TICK_SEC

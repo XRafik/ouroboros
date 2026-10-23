@@ -57,7 +57,7 @@ def retry_terminal_result(ctx: ToolContext, run_id: str, *, gateway: Any = None)
     if status != custody.OWNED or entry is None or not predecessor:
         refusal, _ = _owned_run(ctx, "delegate_wait", run_id)
         return refusal or _fail("delegate_wait", "run_not_owned", "No retry result authority.")
-    retained = retained_terminal_result(ctx, run_id)
+    retained = retained_terminal_result(ctx, run_id, retry_money=True)
     if retained is not None:
         return delegate_result({**retained, "owner_task_id": predecessor,
             "result_reader_task_id": str(getattr(ctx, "task_id", "") or ""), "terminal_result_only": True})
@@ -583,7 +583,7 @@ def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
         _record_containment(ctx, entry, payload)
         return payload
     fresh = run(root, rid) or entry
-    if retained_payload(root, fresh) is None:
+    if not fresh.settled or retained_payload(root, fresh) is None:
         collection = collect_terminal(root, rid, gateway=gateway,
                                       staging_task_id=str(getattr(ctx, "task_id", "") or ""),
                                       output_authority=authority, background=body_runtime(root) is not None,
@@ -660,10 +660,10 @@ def _record_terminal_delivery(ctx, entry, payload):
         emit_retained(ctx, entry.run_id)
 
 
-def retained_terminal_result(ctx, run_id, *, complete_only=True):
+def retained_terminal_result(ctx, run_id, *, complete_only=True, retry_money=False):
     """Read exact owned bytes before transport; pending collection is a separate fact."""
     from ouroboros.delegate_custody_current import run
-    from ouroboros.delegate_collection import capture_projection, retained_payload, collection_pending
+    from ouroboros.delegate_collection import capture_projection, retained_payload, collection_pending, collect_terminal, body_runtime
     from ouroboros.delegate_shared import retry_result_status
     root = _delegate().custody.custody_root(ctx)
     entry = run(root, run_id)
@@ -675,6 +675,9 @@ def retained_terminal_result(ctx, run_id, *, complete_only=True):
     full = retained_payload(root, entry, require_complete=complete_only)
     if (full is None or full.get("run_id") != run_id or full.get("state") != entry.terminal_state):
         return None
+    if retry_money and not entry.settled:
+        collect_terminal(root, run_id, output_retry=True, background=body_runtime(root) is not None)
+        entry = run(root, run_id) or entry
     payload = _retained_terminal_payload(ctx, entry, full=full)
     if payload is not None:
         pending = collection_pending(entry, root)

@@ -7,10 +7,33 @@ generation. Readers disclose debt without requesting another attempt.
 from __future__ import annotations
 
 import copy
+import errno
 import uuid
 
 POLICY = "immutable-named-evidence-v1"
 GENERATION = uuid.uuid4().hex
+
+
+def failure_retry(exc):
+    """Retry typed transport/IO failures; permission repairs need new input or an explicit attempt."""
+    from ouroboros.gateways.claudexor import ClaudexorUnavailable, DAEMON_BUSY_CODES
+
+    if isinstance(exc, ClaudexorUnavailable):
+        problem = getattr(exc, "problem", {})
+        retryable = problem.get("retryable") if isinstance(problem, dict) else None
+        if retryable is None:
+            retryable = exc.observation_timeout or exc.code in DAEMON_BUSY_CODES
+    elif isinstance(exc, OSError):
+        retryable = (getattr(exc, "winerror", None) in (32, 33) or not (
+            isinstance(exc, PermissionError) or exc.errno in (errno.EACCES, errno.EPERM)))
+    else:
+        retryable = False
+    return "transient" if retryable else "changed_input"
+
+
+def output_owed(entry):
+    return (not entry.output_source or not entry.output_complete
+            or entry.output_terminal_sha != entry.terminal_source.get("sha256"))
 
 
 def capture_required(entry):

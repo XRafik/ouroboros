@@ -28,7 +28,7 @@ def _queued(tmp_path, monkeypatch):
 
 def _child(root, *, fail_named=False):
     code = '''
-import json, os, pathlib, sys
+import errno, json, os, pathlib, sys
 from ouroboros import delegate_custody as c, delegate_collection as body, maintenance
 def forbidden(*a, **kw):
     raise AssertionError("a child tried to make a server ownership decision")
@@ -38,7 +38,7 @@ body.record_terminal_money = forbidden
 if sys.argv[2] == "fail":
     from ouroboros import review_checking
     def locked(*a, **kw):
-        raise PermissionError("a native capture handle is busy")
+        raise OSError(errno.EBUSY, "a native capture handle is busy")
     review_checking.retain_named_evidence = locked
 result = maintenance.run_job(pathlib.Path(sys.argv[1]), "delegate_capture")
 print(json.dumps({"pid": os.getpid(), "result": result}))
@@ -63,6 +63,23 @@ def test_real_child_prepares_bytes_and_server_settles_and_publishes(tmp_path, mo
     assert final.patch_captured and not final.patch_disposed and not current.collection_pending(final)
     assert _child(root)["result"] is None
     assert current.run(root, entry.run_id).collection_attempt == final.collection_attempt
+
+
+def test_capture_wake_follows_server_publication_and_lock_release(tmp_path, monkeypatch):
+    root = tmp_path / "data"
+    entry, area, _ = prepared(tmp_path, root, "ordinary")
+    wakes = []
+    def request():
+        fresh = current.run(root, entry.run_id)
+        if fresh.capture_job.get("state") == "pending":
+            wakes.append((custody.disposition_lock_path(root, entry).exists(), bool(fresh.collection_attempt)))
+    monkeypatch.setattr(maintenance.child, "request", request)
+    body.collect_terminal(root, entry.run_id, detail=terminal(entry.run_id), background=True)
+    assert wakes == [(False, True)]
+    assert _child(root)["result"] == {"state": "done", "items": 1}
+    wakes.clear()
+    body.collect_terminal(root, entry.run_id, background=True)
+    assert not wakes and area.is_dir()
 
 
 def test_transient_waits_for_another_child_generation_without_spawning_it(tmp_path, monkeypatch):
@@ -112,3 +129,18 @@ def test_a_child_contending_with_the_disposition_owner_does_not_capture(tmp_path
     finally:
         release_exclusive_file_lock(path, fd)
     assert _child(root)["result"] == {"state": "done", "items": 1} and area.is_dir()
+
+
+def test_first_child_after_owner_exit_reclaims_and_captures(tmp_path, monkeypatch):
+    root, entry, area = _queued(tmp_path, monkeypatch)
+    path = custody.disposition_lock_path(root, entry)
+    code = """
+import os, pathlib, sys
+from ouroboros.platform_layer import acquire_exclusive_file_lock
+assert acquire_exclusive_file_lock(pathlib.Path(sys.argv[1]), owner_aware_stale=True) is not None
+os._exit(0)  # Leave the name behind, exactly as a stopped capture child does.
+"""
+    subprocess.run([sys.executable, "-c", code, str(path)], check=True, timeout=30)
+    assert path.is_file()
+    assert _child(root)["result"] == {"state": "done", "items": 1}
+    assert current.run(root, entry.run_id).capture_job["state"] == "ready" and area.is_dir()

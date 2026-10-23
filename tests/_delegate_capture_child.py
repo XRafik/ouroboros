@@ -22,7 +22,8 @@ def capture_child(monkeypatch):
 
     def with_transport(root, entry, **kwargs):
         runtime = body._RUNTIMES.get(str(root.resolve()))
-        if kwargs.get("publish") is False and runtime is not None and runtime.gateway_factory is not None:
+        if (kwargs.get("publish") is False and entry.resource_ref.get("workspace_kind") == "directory"
+                and runtime is not None and runtime.gateway_factory is not None):
             kwargs["gateway"] = runtime.gateway_factory()
         return capture(root, entry, **kwargs)
 
