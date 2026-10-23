@@ -1056,6 +1056,19 @@ def host_duty(name: str) -> HostDuty:
     return next(duty for duty in HOST_DUTIES if duty.name == name)
 
 
+SETTLEMENT_VERDICTS = "drive_settlement_verdicts"  # meta: each retained drive's verdict with its basis (task_custody)
+
+
+def settlement_verdicts(root: pathlib.Path) -> Dict[str, Any]:
+    """The retained drives' durable verdicts (``task_custody.rested_verdict``): decoded by a settlement lap
+    that walks, never by a pass whose layouts rest."""
+    from ouroboros import store
+
+    with store.open_store(root, write=False) as txn:
+        value = txn.meta(SETTLEMENT_VERDICTS)
+    return {key: dict(item) for key, item in value.items() if isinstance(item, dict)} if isinstance(value, dict) else {}
+
+
 def _run_drive_custody_pass(stop_event: Any = None) -> None:
     """The settled canonical mailboxes the loop thread's seam left (unread inputs to carry),
     then settle terminal child and direct drives past retention (a cancelled subagent's at
@@ -1063,12 +1076,16 @@ def _run_drive_custody_pass(stop_event: Any = None) -> None:
     ownership interlock, at most ``DRIVE_SETTLEMENTS_PER_PASS`` attempts per layout and
     pass, continuing from the previous pass's cursor; crashed-settlement staging is swept
     first. Off the loop thread: each settlement may copy and hash a child store. It stays in
-    the server: the queue lock and the liveness probe are this process's. The cursor and the
-    verdicts of retained drives are the ``drive_settlement`` job row (written only when they
-    move), so a restart neither restarts the lap nor re-hashes an unchanged retained drive. A
-    drive kept because its custody is not proven is material evidence in the event. The moved
-    drives' deletion and the pending child-ref promotions are the maintenance child's jobs."""
-    from ouroboros import maintenance_jobs
+    the server: the queue lock and the liveness probe are this process's. The cursor and each
+    layout's rest (``task_custody.layout_basis``: the layout directory, the terminal-write counter,
+    the server generation, the retention setting, the release, plus the earliest retention instant
+    of a drive left young) are the ``drive_settlement`` job row; the verdicts of retained drives are
+    the ``drive_settlement_verdicts`` meta row, decoded only by a lap that walks. Both are written
+    only when they move, so a restart neither restarts the lap nor re-hashes an unchanged retained
+    drive, and a layout whose inputs stand is not even listed. A drive kept because its custody is not
+    proven is material evidence in the event. The moved drives' deletion and the pending child-ref
+    promotions are the maintenance child's jobs."""
+    from ouroboros import maintenance_jobs, store
     from ouroboros.headless import DRIVE_SETTLEMENTS_PER_PASS, prune_headless_task_drives, prune_task_drives
     from ouroboros.owner_mailbox import sweep_settled_owner_mailboxes
     from ouroboros.task_custody import sweep_custody_leftovers
@@ -1084,17 +1101,34 @@ def _run_drive_custody_pass(stop_event: Any = None) -> None:
     mailboxes = sweep_settled_owner_mailboxes(root, stop=stop)
     row = maintenance_jobs.job(root, "drive_settlement") or {}
     cursors = {key: str(value or "") for key, value in (row.get("cursor") or {}).items()}
-    rested = {key: value for key, value in (row.get("retained") or {}).items() if isinstance(value, dict)}
-    before = json.dumps([cursors, rested], sort_keys=True)
+    rests = {key: dict(value) for key, value in (row.get("rest") or {}).items() if isinstance(value, dict)}
+    before = json.dumps([cursors, rests], sort_keys=True)
+    legacy = row.get("retained")  # an older body kept the verdicts on this row: they move to their own once
+    loaded: Dict[str, Any] = {"map": dict(legacy), "before": ""} if isinstance(legacy, dict) else {}
+
+    def rested() -> Dict[str, Any]:
+        if "map" not in loaded:
+            loaded["map"] = settlement_verdicts(root)
+            loaded["before"] = json.dumps(loaded["map"], sort_keys=True)
+        return loaded["map"]
+
     reports = {}
     for key, prune in (("headless", prune_headless_task_drives), ("direct", prune_task_drives)):
         if stop():
             return
         reports[key] = prune(root, live=task_settlement_liveness, guard=lambda: task_settlement_interlock(stop=stop),
-                             stop=stop, budget=DRIVE_SETTLEMENTS_PER_PASS, after=cursors.get(key, ""), rested=rested)
+                             stop=stop, budget=DRIVE_SETTLEMENTS_PER_PASS, after=cursors.get(key, ""), rested=rested,
+                             rest=rests.setdefault(key, {}))
         cursors[key] = str(reports[key].get("cursor") or "")
-    if json.dumps([cursors, rested], sort_keys=True) != before:
-        maintenance_jobs.record(root, "drive_settlement", cursor=cursors, retained=rested)
+    moved_map = "map" in loaded and json.dumps(loaded["map"], sort_keys=True) != loaded["before"]
+    moved_row = json.dumps([cursors, rests], sort_keys=True) != before or "retained" in row
+    if moved_map or moved_row:
+        with store.open_store(root, write=True) as txn:  # one transaction: the lap's facts and its verdicts move together
+            if moved_map:
+                txn.set_meta(SETTLEMENT_VERDICTS, loaded["map"])
+            if "retained" in row:
+                maintenance_jobs.forget_in(txn, "drive_settlement", "retained")
+            maintenance_jobs.record_in(txn, "drive_settlement", cursor=cursors, rest=rests)
     _prune_event("headless_task_drive_prune", ("pruned", "errors", "custody_pending", "removed"),
                  report=reports["headless"], task_drives=reports["direct"], mailboxes=mailboxes)
 

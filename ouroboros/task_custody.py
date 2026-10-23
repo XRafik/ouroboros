@@ -1199,6 +1199,27 @@ def settlement_basis(parent: pathlib.Path, task_id: str, task_dir: pathlib.Path,
         identity(_mailbox_path(drive, task_id)), str(__version__)], default=str))
 
 
+def layout_basis(parent: pathlib.Path, base: pathlib.Path, days: int) -> Dict[str, Any]:
+    """What can give a layout's lap work again, cheaply: the layout directory's identity (a drive
+    added or removed moves its mtime), the store's terminal-write counter (a task closing, or a
+    closed task written again: the receipts a retained verdict waits on ride row writes), the
+    server generation (one full lap per boot), the retention setting and the release that judged
+    the last lap. A drive younger than retention is not here: its instant is kept beside the basis."""
+    from ouroboros import __version__
+    from ouroboros.maintenance_retirement import STARTUP
+    from ouroboros.store import TERMINAL_WRITES, open_store
+
+    try:
+        info = base.lstat()
+        directory: Any = [info.st_ino, info.st_mtime_ns]
+    except OSError as exc:
+        directory = type(exc).__name__
+    with open_store(parent, write=False) as txn:
+        terminal, startup = txn.meta(TERMINAL_WRITES), txn.meta(STARTUP)
+    return json.loads(json.dumps({"directory": directory, "terminal": terminal, "startup": startup,
+                                  "days": int(days), "release": str(__version__)}, default=str))
+
+
 def rested_verdict(rested: Optional[Dict[str, Any]], parent: pathlib.Path, task_id: str, task_dir: pathlib.Path,
                    drive: pathlib.Path) -> Optional[Dict[str, Any]]:
     """A retained drive's durable verdict while nothing it was read from changed (``settlement_basis``):

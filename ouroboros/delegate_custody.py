@@ -408,11 +408,19 @@ def actor_decision_lock(drive_root: Any, task_id: str) -> Iterator[None]:
 
 def chain_length(path: pathlib.Path) -> int:
     """The chain's byte length across its segments (strict): the boundary a store records."""
+    return chain_measure(path)[0]
+
+
+def chain_measure(path: pathlib.Path) -> Tuple[int, Optional[Any]]:
+    """``chain_length`` with the live segment's stat the length was read with (``None`` when the live
+    file is absent): one listing, so the two describe the same instant of the chain."""
     from ouroboros.utils import jsonl_chain_handles
 
     snapshot: Dict[str, Any] = {}
     with jsonl_chain_handles(path, strict=True, snapshot=snapshot):
-        return int(snapshot.get("total") or 0)
+        pass
+    live = next((stat for _segment, stat, was_live in snapshot.get("entries", ()) if was_live), None)
+    return int(snapshot.get("total") or 0), live
 
 
 def rows_after(path: pathlib.Path, offset: int) -> Tuple[List[Dict[str, Any]], int]:

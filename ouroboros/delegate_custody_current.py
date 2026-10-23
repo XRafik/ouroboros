@@ -423,12 +423,16 @@ def _refresh_owed_receipt(root, task_id: str) -> None:
 
 
 CHAIN_BOUNDARY = "custody_chain_offset"  # meta: the chain's length after this store's last own row
+# meta: the live segment that length was last measured on (device, inode, size, the archive directory's
+# mtime) and the offset it stood at, so the next flush advances the boundary by the live file's growth
+# and lists the rotated segments only after a rotation or a removed segment changed what they add up to.
+CHAIN_LIVE = "custody_chain_live"
 
 
 def flush_outbox(root) -> int:
     """Append every parked event to the chain, oldest first; delete each row once its append
     confirmed. Idempotent: a replayed append carries the same ``event_id`` the fold dedups."""
-    from ouroboros.delegate_custody import chain_length, event_log_path
+    from ouroboros.delegate_custody import event_log_path
 
     try:
         with store.open_store(root, write=False) as txn:
@@ -441,11 +445,12 @@ def flush_outbox(root) -> int:
     appended = 0
     for event in parked:
         try:
-            if not _append_durable(event_log_path(root), event):
+            live = _append_durable(event_log_path(root), event)
+            if not live:
                 break
-            boundary = chain_length(event_log_path(root))  # this store's own rows end here: P6' applies only what follows
             with store.open_store(root, write=True) as txn:
                 txn.outbox_delete(str(event.get("event_id") or ""))
+                boundary = _chain_boundary(txn, event_log_path(root), live)  # this store's own rows end here: P6' applies only what follows
                 txn.set_meta(CHAIN_BOUNDARY, max(int(txn.meta(CHAIN_BOUNDARY) or 0), boundary))
         except (store.StoreError, OSError):
             log.warning("custody outbox flush interrupted under %s", root, exc_info=True)
@@ -454,27 +459,60 @@ def flush_outbox(root) -> int:
     return appended
 
 
-def _append_durable(path, event: Dict[str, Any]) -> bool:
+def _archive_stamp(path) -> Optional[int]:
+    """The archive directory's mtime: a rotation into it or a segment removed from it moves it."""
+    try:
+        return os.stat(path.parent.parent / "archive").st_mtime_ns
+    except OSError:
+        return None
+
+
+def _chain_boundary(txn, path, live: Dict[str, int]) -> int:
+    """The chain's length right after the append that left its live segment at ``live`` (device,
+    inode, size): the previous flush's measurement plus the live file's growth while the closed
+    segments cannot have changed (the same live inode, the same archive directory, a live file
+    that only grew); otherwise — the first flush, a rotation, a removed segment — one listing
+    (``chain_measure``). The measurement is recorded for the next flush."""
+    from ouroboros.delegate_custody import chain_measure
+
+    stamp, known = _archive_stamp(path), txn.meta(CHAIN_LIVE)
+    if (isinstance(known, dict) and isinstance(known.get("size"), int) and isinstance(known.get("offset"), int)
+            and [known.get("dev"), known.get("ino"), known.get("archive")] == [live["dev"], live["ino"], stamp]
+            and live["size"] >= known["size"]):
+        offset = known["offset"] + live["size"] - known["size"]
+    else:
+        offset, measured = chain_measure(path)
+        if measured is None:
+            return offset  # the live file is gone between its append and this measurement: nothing to advance from
+        live = {"dev": measured.st_dev, "ino": measured.st_ino, "size": measured.st_size}
+        stamp = _archive_stamp(path)
+    txn.set_meta(CHAIN_LIVE, {**live, "archive": stamp, "offset": offset})
+    return offset
+
+
+def _append_durable(path, event: Dict[str, Any]) -> Optional[Dict[str, int]]:
     """The chain append an outbox delete may follow: under the chain's append lock (never the
     unlocked fallback), the line boundary restored when the file ends mid-line, the bytes
-    fsynced — and the directory on create — before ``True``. A death after ``True`` leaves at
-    most a replayed ``event_id`` the fold dedups; a death before it leaves the outbox row. The
-    general ``append_jsonl`` keeps its fast path for the observational logs."""
+    fsynced — and the directory on create — before the live segment's identity and size after
+    the append are returned. A death after that leaves at most a replayed ``event_id`` the fold
+    dedups; a death before it (``None``) leaves the outbox row. The general ``append_jsonl``
+    keeps its fast path for the observational logs."""
     created = not path.exists()
     if not append_jsonl(path, event, ensure_record_boundary=True, require_lock=True):
-        return False
+        return None
     try:
         fd = os.open(str(path), os.O_RDWR | os.O_APPEND)
         try:
             os.fsync(fd)
+            written = os.fstat(fd)
         finally:
             os.close(fd)
     except OSError:
         log.warning("custody chain append not durable under %s", path.parent, exc_info=True)
-        return False
+        return None
     if created:
         store.fsync_directory(path.parent)
-    return True
+    return {"dev": written.st_dev, "ino": written.st_ino, "size": written.st_size}
 
 
 def outbox_depth(root) -> int:

@@ -559,6 +559,7 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
     from ouroboros import server_maintenance as sm
     from ouroboros.config import BODY_MAINTENANCE_INTERVAL_SEC
     from ouroboros.delegate_collection import body_runtime
+    from ouroboros.headless import DRIVE_SETTLEMENTS_PER_PASS
     from ouroboros.maintenance import child
 
     stop = threading.Event()
@@ -578,14 +579,20 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
         _mark(result, tag)
         return _summary(meter, tag)
 
+    # A duty that works through a budgeted lap (drive settlement: DRIVE_SETTLEMENTS_PER_PASS attempts per
+    # pass and layout) settles the root's drives over as many passes as its layouts need, then one more
+    # pass records that the lap found nothing to do.
+    settle_passes = 2 + -(-int(facts.get("child_drives", 0)) // DRIVE_SETTLEMENTS_PER_PASS)
+
     def passes(name: str, one: Callable[[], None], before_rest: Callable[[], None]) -> None:
         """``first`` over the root as the boot left it; then, while the previous pass wrote (a duty
         whose first pass changed its own inputs, e.g. recorded a member's rest after writing its
-        row), up to two ``settle`` passes; then ``rest``, the pass over unchanged inputs the law
-        holds to; then ``work`` after the companion's input change."""
+        row, or a budgeted lap still settling), up to ``settle_passes`` ``settle`` passes; then
+        ``rest``, the pass over unchanged inputs the law holds to; then ``work`` after the
+        companion's input change."""
         entry: Dict[str, Any] = {"first": one_pass(f"D:{name}:first", one)}
         settled = entry["first"]
-        for attempt in (1, 2):
+        for attempt in range(1, settle_passes + 1):
             if not settled["counts"].get("writes"):
                 break
             before_rest()
