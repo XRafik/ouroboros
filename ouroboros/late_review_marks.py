@@ -229,11 +229,12 @@ def replay_owed_late_reviews(drive_root: Any, *, stop: Any = None) -> Dict[str, 
     return report
 
 
-def _collect_ended_plan_asks(drive_root: Any, stop: Any, *, candidates=None) -> int:
+def _collect_ended_plan_asks(drive_root: Any, stop: Any, *, candidates=None, on_examined=None) -> int:
     """The crash window of a plan reply: a seat of an ended task whose producer completed while nobody was
     listening settles at $0 through the organ's own collector (``plan_ask.collect_pending``), whose settlement
     keeps the reply in its room. The ask's pending seat is the duty, so nothing else is written for it; a seat
-    with no retained outcome stays pending and is never cleaned."""
+    with no retained outcome stays pending and is never cleaned. ``on_examined`` acknowledges only a
+    successful observation, including a still-running author or seat; a failed read keeps its wake."""
     from ouroboros import plan_record  # D15->D06 is lazy-only
     from ouroboros.task_store import plan_collection_candidates  # D15->D17 is lazy-only
     from ouroboros.tools.plan_ask import collect_pending  # D15->D06 is lazy-only
@@ -246,14 +247,15 @@ def _collect_ended_plan_asks(drive_root: Any, stop: Any, *, candidates=None) -> 
             try:
                 record = plan_record.load_plan_record(root, task_id)
                 pending = {(ask.get("ask_id"), seat.get("seat_id")) for ask, seat in plan_record.pending_participants(record)}
-                if not pending or ended_task_row(root, task_id) is None:
-                    continue
-                after = collect_pending(None, record, state_root=root, task_id=task_id)
+                if pending and ended_task_row(root, task_id, strict=True) is not None:
+                    after = collect_pending(None, record, state_root=root, task_id=task_id)
+                    settled += sum(1 for ask in after.get("asks") or [] for seat in ask.get("participants") or []
+                                   if (ask.get("ask_id"), seat.get("seat_id")) in pending and seat.get("status") != "pending")
+                if on_examined is not None:
+                    on_examined(task_id)
             except Exception:
                 log.warning("plan record of %s: its pending seats stay pending", task_id, exc_info=True)
                 continue
-            settled += sum(1 for ask in after.get("asks") or [] for seat in ask.get("participants") or []
-                           if (ask.get("ask_id"), seat.get("seat_id")) in pending and seat.get("status") != "pending")
     except Exception:
         log.warning("plan records are unreadable; their pending seats stay pending", exc_info=True)
     return settled
@@ -300,14 +302,16 @@ def _owed(drive_root: Any, mark_id: str, row: Optional[Dict[str, Any]]) -> bool:
         return False
 
 
-def ended_task_row(drive_root: Any, task_id: str) -> Optional[Dict[str, Any]]:
+def ended_task_row(drive_root: Any, task_id: str, *, strict: bool = False) -> Optional[Dict[str, Any]]:
     """The canonical row of a task whose terminal status is recorded (a latch), else ``None``; unreadable is
-    not ended. A writer reads its owning chat from the same row."""
+    not ended. Strict readers propagate failures before acknowledging a wake. A writer reads its owning chat here."""
     from ouroboros.task_results import _TRULY_TERMINAL_STATUSES, load_task_result  # D15->D17 is lazy-only
 
     try:
         row = load_task_result(drive_root, task_id) or {}
     except Exception:
+        if strict:
+            raise
         log.debug("task %s status unreadable; an owed late review keeps waiting", task_id, exc_info=True)
         return None
     return row if str(row.get("status") or "") in _TRULY_TERMINAL_STATUSES else None

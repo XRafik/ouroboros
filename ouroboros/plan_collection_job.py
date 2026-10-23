@@ -1,8 +1,9 @@
 """Collect changed plan candidates at zero spend; a pending seat remains the debt.
 
 Task writes and durable producer publications queue the candidate's own signature.
-The child acknowledges only what it examined. Legacy classification and explicit
-repair select all candidates once; unrelated task completions never wake collection.
+The child acknowledges successful examinations; failures stay due for its next pass.
+Legacy classification and explicit repair select all candidates once; unrelated task
+completions never wake collection.
 """
 from ouroboros import maintenance_jobs, store
 from ouroboros.utils import machine_json
@@ -44,6 +45,7 @@ def run(root, should_stop):
 
     row = maintenance_jobs.job(root, JOB) or {}
     complete = False
+    examined = set()
 
     def selected():
         nonlocal complete
@@ -65,13 +67,13 @@ def run(root, should_stop):
             with store.open_store(root, write=False) as txn:
                 observed = txn.get_row(CHANGED, task_id)
             yield task_id
-            if observed is not None:
+            if task_id in examined and observed is not None:
                 with store.open_store(root, write=True) as txn:
                     txn.conn.execute("DELETE FROM obligations WHERE set_name=? AND id=? AND facts=?",
                                      (CHANGED, task_id, machine_json(observed)))
-        complete = True
+        complete = seen <= examined
 
-    settled = _collect_ended_plan_asks(root, should_stop, candidates=selected())
+    settled = _collect_ended_plan_asks(root, should_stop, candidates=selected(), on_examined=examined.add)
     state = "done" if complete and not should_stop() else "pending"
     with store.open_store(root, write=True) as txn:
         maintenance_jobs.forget_in(txn, JOB, "inputs")
