@@ -120,9 +120,21 @@ _LOCK_REFUSAL = re.compile(r"fatal: Unable to create '(.+)': File exists\.")
 def effective_index_path() -> pathlib.Path:
     """Ask Git, including linked worktrees and an inherited GIT_INDEX_FILE."""
     rc, path, error = _go().git_capture(["git", "rev-parse", "--path-format=absolute", "--git-path", "index"])
-    if rc != 0 or not path:
+    if rc != 0:
         raise RuntimeError(error or "Git could not locate its index")
-    return pathlib.Path(path)
+    if len(path.splitlines()) == 1 and pathlib.Path(path).is_absolute():
+        return pathlib.Path(path)
+    # Git < 2.31 echoes the unknown --path-format flag and still exits zero.
+    # Resolve the per-worktree Git directory, retaining alternate-index semantics.
+    alternate = os.environ.get("GIT_INDEX_FILE")
+    if alternate:
+        index = pathlib.Path(alternate)
+    else:
+        rc, git_dir, error = _go().git_capture(["git", "rev-parse", "--git-dir"])
+        if rc != 0 or len(git_dir.splitlines()) != 1:
+            raise RuntimeError(error or "Git could not locate its directory")
+        index = pathlib.Path(git_dir) / "index"
+    return (_go().current_repo_dir() / index).absolute()
 
 
 def observe_index_lock() -> dict:

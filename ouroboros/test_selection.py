@@ -56,14 +56,17 @@ _CUTOVER = frozenset({
 
 def _git(repo: Path, *args: str) -> bytes:
     # Git inspection is bounded transport, never a test-runner timeout.
+    from ouroboros.git_observation import host_git_env
+
     return subprocess.run(["git", *args], cwd=repo, capture_output=True,
-                          check=True, timeout=30).stdout
+                          check=True, timeout=30, env=host_git_env()).stdout
 
 
 def changed_paths(repo: Path, base: str) -> tuple[str, tuple[str, ...]]:
     """Resolve once; --no-renames keeps both sides of a module rename in scope."""
     oid = _git(repo, "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}").decode().strip()
-    raw = _git(repo, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", oid, "--")
+    stats = _git(repo, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", oid, "--")
+    raw = b"\0".join(row.split(b"\t", 2)[2] for row in stats.split(b"\0") if row) + b"\0"
     raw += _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
     return oid, tuple(sorted({os.fsdecode(p) for p in raw.split(b"\0") if p}))
 

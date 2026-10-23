@@ -235,7 +235,7 @@ LEAVES: dict[str, tuple[str, str, frozenset[str]]] = {
         "_preserve_branch_for_official_reset", "_read_managed_repo_meta",
         "_read_update_intent", "_ref_points_at_ref", "_rescue_untracked_incomplete",
         "_run_git_resilient", "_update_source", "append_jsonl", "git_capture",
-        "checkout_and_reset", "current_drive_root", "import_test",
+        "checkout_and_reset", "current_drive_root", "current_repo_dir", "import_test",
         "preserve_local_ref_branch", "rescue_git_capture", "update_state",
         "sync_runtime_dependencies", "utc_now_iso",
     })),
