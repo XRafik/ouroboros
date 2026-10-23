@@ -174,7 +174,8 @@ def test_child_batches_keep_cursor_and_projection_atomic_and_retry_a_repaired_to
 
 
 @pytest.mark.parametrize("running", [False, True])
-def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch, running):
+@pytest.mark.parametrize("money_write", [False, True])
+def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch, running, money_write):
     counts = []
     for scale in (1, 30):
         root = env.root / f"root{scale:02}"
@@ -205,6 +206,9 @@ def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch,
             write_task_result(root, "running", "running", result="live progress")
             write_task_result(root, "missing0001", "running", result="progress after arrival")
         write_task_result(root, "unrelated", "completed", result="ordinary completion")
+        if money_write:
+            attempt(current, "system:unrelated", non_task=True)
+            debt = dirty(current)
         store.close_connections()
         with CostMeter(root) as meter:
             token = BOUNDARY.set("rest")
@@ -217,10 +221,16 @@ def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch,
         assert all(observed.get(f"{kind}:{category}", 0) == 0 for category in HISTORY for kind in ("open", "read_bytes"))
         counts.append({key: observed.get(key, 0) for key in ("vm_steps", "statements", "json_loads", "json_chars")})
         assert dirty(current) == debt
+        # A new price for an already absent owner still advances its own rest.
+        attempt(current, "missing0000", cost=.02)
+        duty.reconcile_abandoned_usage(root)
+        with store.open_store(root, write=False) as txn:
+            assert txn.get_row("duty_rest", "cost_projection:missing0000")["inputs"] == {
+                "usage_revision": dirty(current)["missing0000"]}
         write_task_result(root, "missing0000", "completed", result="late body")
         duty.reconcile_abandoned_usage(root)
         from ouroboros.task_results import load_task_result
-        assert load_task_result(root, "missing0000")["accounted_upper_bound_usd"] == .04
+        assert load_task_result(root, "missing0000")["accounted_upper_bound_usd"] == .06
         assert "missing0000" not in dirty(current)
         attempt(current, "new-owner")
         duty.reconcile_abandoned_usage(root)
@@ -247,3 +257,65 @@ def test_absence_racing_task_arrival_is_not_latched(env, monkeypatch):
     assert not dirty(env)
     with store.open_store(env.root, write=False) as txn:
         assert txn.get_row("duty_rest", "cost_projection:arriving") is None
+
+
+def test_money_only_pass_does_not_swallow_another_absent_owners_arrival(env, monkeypatch):
+    attempt(env, "waiting")
+    attempt(env, "priced")
+    duty.reconcile_abandoned_usage(env.root)
+    attempt(env, "priced", cost=.2)
+    present = duty._present_facts
+    selected = []
+
+    def arriving(root, ids):
+        ids = set(ids)
+        answer = present(root, ids)
+        if ids:
+            selected.append(ids)
+            write_task_result(root, "waiting", "completed")
+        return answer
+
+    with monkeypatch.context() as race:
+        race.setattr(duty, "_present_facts", arriving)
+        duty.reconcile_abandoned_usage(env.root)
+    assert selected == [{"priced"}], "only the owner of the newer money is selected"
+    assert "waiting" in dirty(env), "the racing arrival retains its projection debt"
+    duty.reconcile_abandoned_usage(env.root)
+    assert "waiting" not in dirty(env)
+    from ouroboros.task_results import load_task_result
+    assert load_task_result(env.root, "waiting")["accounted_upper_bound_usd"] == .4
+
+
+def test_ledger_epoch_change_reselects_absent_owners(env, monkeypatch):
+    attempt(env, "waiting")
+    duty.reconcile_abandoned_usage(env.root)
+    with usage_store.hold(env.root) as txn:
+        epoch, sequence = txn.marker()
+        txn.set_meta("publication_marker", [epoch + 1, sequence])
+    select, calls = usage_store.Txn.dirty_owners, []
+
+    def selected(txn, **kwargs):
+        calls.append(kwargs)
+        return select(txn, **kwargs)
+
+    monkeypatch.setattr(usage_store.Txn, "dirty_owners", selected)
+    duty.reconcile_abandoned_usage(env.root)
+    assert calls == [{}], "a new ledger epoch cannot reuse the previous sequence frontier"
+    duty.reconcile_abandoned_usage(env.root)
+    assert calls == [{}], "the new successful absence rests again"
+
+
+def test_old_usage_store_gains_the_dirty_revision_index_only_at_boot(env):
+    attempt(env, "old")
+    with usage_store.hold(env.root) as txn:
+        marker = txn.marker()
+        txn.conn.execute("DROP INDEX dirty_owners_revision")
+    attempt(env, "new")
+    with usage_store.read(env.root) as txn:
+        assert [owner for owner, _ in txn.dirty_owners(since=marker[1])] == ["new"]
+        assert txn.conn.execute("SELECT 1 FROM sqlite_master WHERE name='dirty_owners_revision'").fetchone() is None
+    assert usage_store.migrate_from_journal(env.root, initialize_journal=True)["dirty_owner_index"] == "created"
+    assert usage_store.migrate_from_journal(env.root, initialize_journal=True)["dirty_owner_index"] == "present"
+    with usage_store.read(env.root) as txn:
+        assert [owner for owner, _ in txn.dirty_owners(since=marker[1])] == ["new"]
+        assert {owner for owner, _ in txn.dirty_owners()} == {"old", "new"}

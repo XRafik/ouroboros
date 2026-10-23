@@ -312,6 +312,7 @@ def run_job(root, should_stop):
     return {"state": state, "items": 0}
 
 
+@store.acquisition_budget(0)
 def publish(root, event):
     """Keep the observation before the derived index; failure never changes execution."""
     if not root or not event.get("producer_id"):
@@ -320,8 +321,12 @@ def publish(root, event):
         before = _source_stamp(root)
         publication = None
         event = {**copy.deepcopy(event), "type": EVENT}
-        with store.open_store(root, write=False) as txn:
-            previous = txn.get_row(PRODUCERS, str(event["producer_id"])) or {}
+        previous = {}
+        try:
+            with store.open_store(root, write=False) as txn:
+                previous = txn.get_row(PRODUCERS, str(event["producer_id"])) or {}
+        except Exception:
+            pass  # Duplicate suppression cannot prevent the canonical append.
         if (event.get("actor") or {}).get("kind") == "api_call" and (previous.get("actor") or {}).get("usage_ref"):
             event["actor"].setdefault("usage_ref", copy.deepcopy(previous["actor"]["usage_ref"]))
         if {key: value for key, value in event.items() if key != "ts"} != {
@@ -329,8 +334,11 @@ def publish(root, event):
             event["ts"] = event.get("ts") or previous.get("ts") or utc_now_iso()
             from ouroboros import maintenance_jobs
             publication = identity_key(event)
-            with store.open_store(root, write=True) as txn:
-                maintenance_jobs.record_in(txn, JOB, state="pending", publication_owed=publication)
+            try:
+                with store.open_store(root, write=True) as txn:
+                    maintenance_jobs.record_in(txn, JOB, state="pending", publication_owed=publication)
+            except Exception:
+                log.debug("Measurement wake awaits the next publisher or explicit catch-up", exc_info=True)
             if not append_jsonl(pathlib.Path(root) / "logs/events.jsonl", event):
                 with store.open_store(root, write=True) as txn:
                     cursor = txn.meta(CURSOR) or {}

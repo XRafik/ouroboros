@@ -74,6 +74,7 @@ _TASK_CURSOR_SQL = "SELECT seq_first FROM attempts WHERE attempt_id=? AND task_i
 # One root's money rows of a recent window by range, never the root's whole life (the consciousness
 # allowance, ``consciousness_allowance``); a store an older body created gains it at the lifespan boot.
 ROOT_TIME_INDEX = "CREATE INDEX IF NOT EXISTS attempts_root_time ON attempts(root_task_id, ts_last_epoch)"
+DIRTY_REVISION_INDEX = "CREATE INDEX IF NOT EXISTS dirty_owners_revision ON dirty_owners(revision)"
 
 _SCHEMA = f"""
 CREATE TABLE attempts (
@@ -119,6 +120,7 @@ CREATE INDEX summaries_accounted ON summaries(scope, accounted_num);
 CREATE TABLE bindings (scope TEXT NOT NULL, key TEXT NOT NULL, binding TEXT NOT NULL,
   PRIMARY KEY (scope, key)) WITHOUT ROWID;
 CREATE TABLE dirty_owners (owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL) WITHOUT ROWID;
+{DIRTY_REVISION_INDEX};
 CREATE TABLE one_shots (attempt_id TEXT PRIMARY KEY, kind TEXT, task_id TEXT, root_task_id TEXT,
   subscription_route TEXT, source TEXT, category TEXT, identity TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
@@ -416,18 +418,20 @@ class Txn:
     def dirty_owner_ids(self) -> List[str]:
         return [owner for owner, _revision in self.dirty_owners()]
 
-    def dirty_owners(self) -> List[Tuple[str, int]]:
+    def dirty_owners(self, *, since: Optional[int] = None) -> List[Tuple[str, int]]:
         """The owners whose stored cost projection may be behind
         (``dirty_owners``) that own a non-review attempt or imported aggregate
         (rows under a review's own custody, ``_usage_rows.REVIEW_CUSTODY_KEYS``,
         never made an owner a candidate). Each owner's check is an indexed
-        lookup of its own rows."""
+        lookup of its own rows. ``since`` selects only newer writes in this epoch."""
+        changed = "d.revision > ? AND " if since is not None else ""
+        order = "revision, owner_id" if since is not None else "owner_id"
         return [(record["owner_id"], record["revision"]) for record in self.conn.execute(
-            "SELECT owner_id, revision FROM dirty_owners AS d WHERE EXISTS (SELECT 1 FROM attempts AS a "
+            "SELECT owner_id, revision FROM dirty_owners AS d WHERE " + changed + "EXISTS (SELECT 1 FROM attempts AS a "
             "WHERE (a.task_id = d.owner_id OR a.root_task_id = d.owner_id) "
             "AND COALESCE(a.kind, 'attempt') IN ('attempt', 'usage_baseline_group') "
             "AND COALESCE(a.review_skill, '') = '' "
-            "AND COALESCE(a.review_slot_id, '') = '') ORDER BY owner_id")]
+            "AND COALESCE(a.review_slot_id, '') = '') ORDER BY " + order, (() if since is None else (since,)))]
 
     def keys(self, scope: str) -> List[str]:
         """Every key of one summary scope (no bucket decoded)."""
@@ -851,7 +855,8 @@ def migrate_from_journal(root: pathlib.Path | str, *, initialize_journal: bool =
                 report = {"status": "already_completed", **_retire_journal(root, status)}
                 if initialize_journal and not stored.get("export"):  # an exporting store stays as it is handed off
                     report["journal_selected"] = _select_journal(root, path, tier)
-                    report["window_index"] = _ensure_window_index(root, path, tier)
+                    report["window_index"] = _ensure_read_index(root, path, tier, "attempts_root_time", ROOT_TIME_INDEX)
+                    report["dirty_owner_index"] = _ensure_read_index(root, path, tier, "dirty_owners_revision", DIRTY_REVISION_INDEX)
             else:
                 tier = TIER_ENFORCED if kernel_file_locks_enforced(root / LOCK_REL) else TIER_NAME
                 report = _import(root, path, tier)
@@ -865,23 +870,22 @@ def migrate_from_journal(root: pathlib.Path | str, *, initialize_journal: bool =
     return report
 
 
-def _ensure_window_index(root: pathlib.Path, path: pathlib.Path, tier: str) -> str:
-    """``ROOT_TIME_INDEX`` on a store an older body created: built once at the lifespan boot while
+def _ensure_read_index(root: pathlib.Path, path: pathlib.Path, tier: str, name: str, ddl: str) -> str:
+    """A read index on a store an older body created: built once at the lifespan boot while
     writers are quiescent, never by a reader; ``present`` costs one schema lookup. A failed build
-    leaves readers on ``attempts_root`` (the same answer, the root's whole life read) and is retried
-    at the next boot."""
+    leaves readers on existing indexes (same answer, broader scan) until the next boot."""
     try:
         with contextlib.ExitStack() as stack:
             if tier == TIER_NAME:
                 stack.enter_context(_named_lock(root, LOCK_REL.name, timeout_sec=USAGE_LOCK_TIMEOUT_SEC, stale_sec=90.0))
             conn = stack.enter_context(_core.connection(path, tier, wait_sec=USAGE_LOCK_TIMEOUT_SEC, opener=_connect))
-            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name='attempts_root_time'").fetchone():
+            if conn.execute("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?", (name,)).fetchone():
                 return "present"
             with _core.transaction(conn, write=True, commit_wait_sec=USAGE_LOCK_TIMEOUT_SEC):
-                conn.execute(ROOT_TIME_INDEX)
+                conn.execute(ddl)
         return "created"
     except (sqlite3.Error, _core.StoreError, UsageAccountingError) as exc:
-        log.warning("usage store window index deferred to the next boot: %s", exc)
+        log.warning("usage store index %s deferred to the next boot: %s", name, exc)
         return f"deferred: {type(exc).__name__}"
 
 

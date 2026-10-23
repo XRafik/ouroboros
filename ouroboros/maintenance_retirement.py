@@ -40,7 +40,7 @@ def artifact_changed(root, *, timestamp=None, immediate=False):
     """Call after publishing disposable bytes. A missed notification waits for startup/repair."""
     try:
         stamp = time.time() if timestamp is None else float(timestamp)
-        with store.open_store(root, write=True) as txn:
+        with store.acquisition_budget(0), store.open_store(root, write=True) as txn:
             schedule_in(txn, stamp + (0 if immediate else get_gc_retention_days() * 86400))
     except Exception:
         log.debug("Retirement publication awaits startup discovery", exc_info=True)
