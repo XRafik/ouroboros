@@ -30,6 +30,7 @@ from ouroboros.tool_access import (
     path_is_relative_to,
 )
 from ouroboros.utils import safe_relpath
+from supervisor.git_ops import host_git_env
 
 
 def _resolve_git_root(path: pathlib.Path) -> pathlib.Path | None:
@@ -108,6 +109,7 @@ def _protected_runtime_dirty_paths(repo_dir: pathlib.Path) -> list[str]:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=host_git_env(),
             )
             if res.returncode == 0:
                 dirty.update(rel for rel in res.stdout.splitlines() if is_protected_runtime_path(rel))
@@ -255,6 +257,7 @@ def _get_changed_files(repo_dir: pathlib.Path) -> list:
         res = subprocess.run(
             ["git", "status", "--porcelain"],
             cwd=str(repo_dir), capture_output=True, text=True, timeout=5,
+            env=host_git_env(),
         )
         if res.returncode == 0 and res.stdout.strip():
             return [line[3:].strip() for line in res.stdout.splitlines() if len(line) > 3 and line.strip()]
@@ -269,6 +272,7 @@ def _get_diff_stat(repo_dir: pathlib.Path) -> str:
         res = subprocess.run(
             ["git", "diff", "--stat"],
             cwd=str(repo_dir), capture_output=True, text=True, timeout=5,
+            env=host_git_env(),
         )
         if res.returncode == 0:
             return res.stdout.strip()

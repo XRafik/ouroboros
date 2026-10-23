@@ -1454,6 +1454,7 @@
 /**
  * @typedef {Object} UpdatePreflightResponse
  * @property {UpdateMergePlan} merge_plan
+ * @property {Object=} effects
  */
 
 /**
@@ -1478,6 +1479,8 @@
 /**
  * @typedef {Object} UpdateApplyErrorResponse
  * @property {string} error
+ * @property {'not_applied'|'rolled_back'=} outcome
+ * @property {Object=} index_lock
  * @property {string=} reason
  * @property {boolean=} abandoned
  * @property {Object=} status Preparation observations, not the success discriminator.

@@ -296,17 +296,33 @@ def _run_git_process_bounded(
             _active_subprocesses.discard(proc)
 
 
+def host_git_env(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Host observations never refresh the index; mandatory writer locks still apply.
+
+    GIT_OPTIONAL_LOCKS=0 is Git's --no-optional-locks. Porcelain diff also needs
+    diff.autoRefreshIndex=false (the invocation config equivalent of -c). Append
+    it to inherited config rather than replacing the caller's Git settings.
+    """
+    result = dict(os.environ if env is None else env)
+    slot = int(result.get("GIT_CONFIG_COUNT", "0"))
+    result.update(LC_ALL="C", LANG="C", GIT_OPTIONAL_LOCKS="0",
+                  GIT_CONFIG_COUNT=str(slot + 1))
+    result[f"GIT_CONFIG_KEY_{slot}"] = "diff.autoRefreshIndex"
+    result[f"GIT_CONFIG_VALUE_{slot}"] = "false"
+    return result
+
+
 def git_capture(
-    cmd: List[str], *, timeout: Optional[float] = None, repair_index: bool = True,
+    cmd: List[str], *, timeout: Optional[float] = None, repair_index: bool = False,
 ) -> Tuple[int, str, str]:
-    # A caller interpreting one physical command's effects can opt out of repair/retry;
-    # the final stderr alone cannot describe an earlier attempt or its index rebuild.
+    # Repair is a writer's explicit opt-in, never a side effect of observation.
+    # The final stderr alone cannot describe an earlier attempt or its index rebuild.
     # Same reason as utils.run_cmd: this stderr is PARSED (`_maybe_repair_git_index`
     # matches English git diagnostics), so the operator's locale must not decide
     # whether a repairable index error is recognised.
     # ``timeout`` is None for existing non-rescue call sites: a bound here is a
     # behavior change, so it stays opt-in rather than silently retiming them.
-    env = {**os.environ, "LC_ALL": "C", "LANG": "C"}
+    env = host_git_env()
     repo = current_repo_dir()
     for _attempt in range(2):
         if timeout is None:

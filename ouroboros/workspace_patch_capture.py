@@ -547,12 +547,14 @@ def _git_bytes(
     allow_rc: Iterable[int] = (0,),
     errors: Optional[List[Dict[str, Any]]] = None,
 ) -> bytes:
+    from supervisor.git_ops import host_git_env
     try:
         result = subprocess.run(
             list(cmd),
             cwd=str(cwd),
             capture_output=True,
             timeout=30,
+            env=host_git_env(),
         )
     except subprocess.TimeoutExpired:
         if errors is not None:
@@ -583,6 +585,7 @@ def _append_git_output(
     errors: List[Dict[str, Any]],
     diagnostics: List[Dict[str, Any]],
 ) -> int:
+    from supervisor.git_ops import host_git_env
     written_box = {"value": 0}
     read_errors: List[str] = []
     try:
@@ -592,6 +595,7 @@ def _append_git_output(
                 cwd=str(cwd),
                 stdout=subprocess.PIPE,
                 stderr=stderr_fh,
+                env=host_git_env(),
             )
             assert proc.stdout is not None
 

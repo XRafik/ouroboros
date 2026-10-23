@@ -117,6 +117,24 @@ class IndexLockRefusal(subprocess.CalledProcessError):
 _LOCK_REFUSAL = re.compile(r"fatal: Unable to create '(.+)': File exists\.")
 
 
+def effective_index_path() -> pathlib.Path:
+    """Ask Git, including linked worktrees and an inherited GIT_INDEX_FILE."""
+    rc, path, error = _go().git_capture(["git", "rev-parse", "--path-format=absolute", "--git-path", "index"])
+    if rc != 0 or not path:
+        raise RuntimeError(error or "Git could not locate its index")
+    return pathlib.Path(path)
+
+
+def observe_index_lock() -> dict:
+    """An observation only: existence never establishes ownership or removal authority."""
+    path = pathlib.Path(str(effective_index_path()) + ".lock")
+    try:
+        stat = path.lstat()
+    except FileNotFoundError:
+        return {"path": str(path), "exists": False}
+    return {"path": str(path), "exists": True, "inode": stat.st_ino, "size": stat.st_size}
+
+
 def _index_lock_refused(cmd, result) -> bool:
     """This attempt died acquiring this checkout's index lock (C-locale Git, first stderr line)."""
     if result.returncode != 128 or [str(part) for part in cmd[:2]] not in (["git", "reset"], ["git", "checkout"]):
@@ -124,8 +142,8 @@ def _index_lock_refused(cmd, result) -> bool:
     stderr = result.stderr.decode("utf-8", "replace") if isinstance(result.stderr, bytes) else str(result.stderr or "")
     match = _LOCK_REFUSAL.fullmatch((stderr.splitlines() or [""])[0].strip())
     try:
-        return bool(match) and pathlib.Path(match.group(1)).resolve() == (_go()._git_dir() / "index.lock").resolve()
-    except OSError:
+        return bool(match) and pathlib.Path(match.group(1)).resolve() == pathlib.Path(str(effective_index_path()) + ".lock").resolve()
+    except (OSError, RuntimeError):
         return False
 
 
