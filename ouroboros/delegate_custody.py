@@ -939,6 +939,7 @@ def record_start_requested(drive_root: Any, **payload: Any) -> bool:
     """
     body = payload.get("request")
     if isinstance(body, dict) and body:
+        from ouroboros.delegate_pending import request_shape
         from ouroboros.observability import write_blob
 
         try:
@@ -947,7 +948,7 @@ def record_start_requested(drive_root: Any, **payload: Any) -> bool:
             log.warning("delegate custody request body could not be stored", exc_info=True)
             return False
         payload = {key: value for key, value in payload.items() if key != "request"}
-        payload.update(request_ref=ref, prompt_chars=len(str(body.get("prompt") or "")))
+        payload.update(request_ref=ref, request_shape=request_shape(body), prompt_chars=len(str(body.get("prompt") or "")))
     from ouroboros.owner_pause import admit_delegated_start
 
     return admit_delegated_start(drive_root, payload)

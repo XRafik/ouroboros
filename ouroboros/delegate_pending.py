@@ -7,6 +7,13 @@ import pathlib
 from typing import Any, Dict, List, Optional
 
 
+def request_shape(body):
+    """Bounded no-write evidence, never an envelope that could authorize replay."""
+    body = body if isinstance(body, dict) else {}
+    return {"access": str(body.get("access") or ""), "mode": str(body.get("mode") or ""),
+            "execution": bool(body.get("execution"))}
+
+
 def pending_invocations(
     drive_root: Any, rows: Optional[List[Dict[str, Any]]] = None, *, materialize: bool = True,
 ) -> List[Dict[str, Any]]:
@@ -37,6 +44,8 @@ def pending_invocations(
                 "operation_id": str(row.get("operation_id") or ""),
                 "request": row.get("request") if isinstance(row.get("request"), dict) else None,
                 "request_ref": row.get("request_ref"),
+                **({"request_shape": copy.deepcopy(row["request_shape"])} if "request_shape" in row else
+                   {"request_shape": request_shape(row["request"])} if isinstance(row.get("request"), dict) else {}),
                 "route": str(row.get("route") or ""),
                 "project_id": str(row.get("project_id") or ""),
                 "project_owned": bool(row.get("project_owned")),
@@ -114,7 +123,7 @@ JOB = "pending_invocations"
 
 
 def backfill_due(root, row, facts, child):
-    return row.get("state") != "done"
+    return row.get("state") != "done" or not row.get("request_shapes")
 
 
 def backfill(root, should_stop):
@@ -128,9 +137,14 @@ def backfill(root, should_stop):
     for key, facts in rows.items():
         if should_stop():
             return {"state": "pending", "items": done}
-        if not key.startswith("invocation:") or "pending" in facts:
+        if not key.startswith("invocation:") or ("pending" in facts and
+                all("request_shape" in record for record in facts["pending"])):
             continue
-        projected = pending_invocations(root, [facts["request"]], materialize=False)
+        source = facts["request"]
+        shape = source.get("request_shape")
+        if shape is None:
+            shape = request_shape(request_body(root, source))
+        projected = pending_invocations(root, [{**source, "request_shape": shape}], materialize=False)
         with store.open_store(root, write=True) as txn:
             if txn.get_row("custody_open", key) == facts:
                 txn.put_row("custody_open", key, {**facts, "pending": projected})
@@ -138,7 +152,7 @@ def backfill(root, should_stop):
     with store.open_store(root, write=True) as txn:
         if txn.meta("job:" + JOB) != request:
             return {"state": "pending", "items": done}  # an import/repair added open rows meanwhile
-        maintenance_jobs.record_in(txn, JOB, state="done", items=done)
+        maintenance_jobs.record_in(txn, JOB, state="done", items=done, request_shapes=True)
     return {"state": "done", "items": done}
 
 
