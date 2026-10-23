@@ -114,10 +114,10 @@ _CAPTURE_STDERR_WITHHELD = b"[stderr exceeded 64 KiB; diagnostics withheld]"
 def _merge_refused_before_effect(cmd: List[str], res: subprocess.CompletedProcess, stderr: str) -> bool:
     """Whether the complete stderr of the merge ``merge_receipts`` sends is gh's own pre-merge refusal.
 
-    Only ``pr merge N --METHOD --match-head-commit SHA [--body TEXT] [--repo R]``, exit 1 with empty
+    Only ``pr merge N --METHOD --match-head-commit SHA [--body-file -] [--repo R]``, exit 1 with empty
     stdout, the whole refusal for N and nothing else; a status, prefix or suffix proves nothing."""
     args = cmd[1:]
-    if args[6:7] == ["--body"] and len(args) >= 8:
+    if args[6:8] == ["--body-file", "-"]:
         args = args[:6] + args[8:]
     if (res.returncode != 1 or res.stdout.strip() or args[:2] != ["pr", "merge"] or len(args) not in (6, 8)
             or args[3] not in ("--merge", "--squash", "--rebase") or args[4] != "--match-head-commit"

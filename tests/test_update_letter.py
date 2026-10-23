@@ -115,7 +115,8 @@ def test_material_recovers_rows_from_commit_diffs_and_lists_range_commits(histor
     assert set(material) == {"base_sha", "target_sha", "commits", "bodies_omitted",
                              "omitted_commit_chunks", "releases", "omitted_rows",
                              "omitted_row_commits", "rows_summarized", "versions",
-                             "local_commits", "omitted_local_chunks"}
+                             "local_commits", "omitted_local_chunks", "first_parent_commits"}
+    assert material["first_parent_commits"] == material["commits"]  # this history is linear
     assert material["local_commits"] == [] and material["omitted_local_chunks"] == 0
 
 

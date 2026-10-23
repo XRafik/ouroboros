@@ -60,19 +60,42 @@ def _get_json(url: str) -> dict:
         return json.load(response)
 
 
-def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> dict:
-    """Newest run attempt per exact incoming SHA, including red intermediate merges.
+def _missing_runs(commits: list[dict], runs: dict) -> list[str]:
+    """First-parent order is newest first; completed checks cover skipped pushes.
 
-    Query the workflow's pages once, stopping once all named commits have a run or
-    the workflow history ends. A physical 10-page response budget stays disclosed;
-    no run at the target never implies that earlier incoming merges passed.
+    Match post_merge_check.choose_base: cancelled/skipped runs are not coverage.
+    Keep direct observations, including earlier reds, beside inferred coverage.
+    """
+    for run in runs.values():
+        run.pop("covered_shas", None)
+    covering, missing = None, []
+    for commit in commits:
+        sha = commit["sha"]
+        run = runs.get(sha)
+        if run and run.get("status") == "completed" and run.get("conclusion") in ("success", "failure"):
+            covering = run
+        elif covering is not None:
+            covering.setdefault("covered_shas", []).append(sha)
+        elif run is None:
+            missing.append(sha)
+    return sorted(missing)
+
+
+def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> dict:
+    """Read runs for first-parent integrations, newest first, including squash.
+
+    Stop when every integration has an observation or later completed coverage,
+    or history ends. A physical 10-page response budget stays disclosed.
     Public GitHub needs no credential. Offline/rate-limit failures remain unknown.
     """
+    if not commits:
+        return {"status": "observed", "runs": [], "missing_shas": []}
     get_json = get_json or _get_json
     parsed = urllib.parse.urlparse(repo_url)
     parts = parsed.path.removesuffix(".git").strip("/").split("/")
     if parsed.hostname != "github.com" or len(parts) != 2:
-        return {"status": "unavailable", "reason": "The update source has no supported GitHub check reader.", "runs": []}
+        return {"status": "unavailable", "reason": "The update source has no supported GitHub check reader.",
+                "runs": [], "missing_shas": sorted(c["sha"] for c in commits)}
     wanted = {c["sha"] for c in commits}
     runs = {}
     complete = False
@@ -87,18 +110,20 @@ def post_merge_checks(commits: list[dict], repo_url: str, *, get_json=None) -> d
                     runs[sha] = {"sha": sha, "status": row.get("status"), "conclusion": row.get("conclusion"),
                                  "url": row.get("html_url"), "run_id": row.get("id"),
                                  "attempt": row.get("run_attempt")}
-            if len(rows) < 100 or wanted.issubset(runs):
+            missing = _missing_runs(commits, runs)
+            if len(rows) < 100 or not missing:
                 complete = True
                 break
     except Exception as exc:
-        return {"status": "unavailable", "reason": type(exc).__name__, "runs": list(runs.values())}
+        return {"status": "unavailable", "reason": type(exc).__name__, "runs": list(runs.values()),
+                "missing_shas": _missing_runs(commits, runs)}
     return {"status": "observed" if complete else "partial", "runs": list(runs.values()),
-            "missing_shas": sorted(wanted - runs.keys()),
+            "missing_shas": missing,
             "reason": "No matching run is not a passing check." if complete else "GitHub response page budget reached."}
 
 
 def range_qualification(material: dict, repo_url: str) -> dict:
-    commits = material.get("commits") or []
+    commits = material.get("first_parent_commits", material.get("commits")) or []
     return {"base_sha": material["base_sha"], "target_sha": material["target_sha"],
             "commits": [{"sha": c["sha"], "subject": c["subject"],
                          "receipt": c.get("qualification", commit_qualification(c.get("body") or "")),
@@ -107,24 +132,33 @@ def range_qualification(material: dict, repo_url: str) -> dict:
             "github": post_merge_checks(commits, repo_url)}
 
 
-def preflight_description(plan: dict, *, drive_root=None) -> dict:
-    """Called by the preflight executor, after it resolves its immutable pins.
+def refresh_qualification(authored: dict, repo_url: str, *, previous: dict | None = None) -> tuple[dict, bool]:
+    """Refresh facts without making an outage erase observations or buy prose.
 
-    A failed new letter retains the older source as history; the confirmation
-    receives no prose from a different range. This helper never changes a plan.
+    The boolean names new check evidence relative to the letter's authoring input.
+    Availability is shown separately, with the latest retained observations.
     """
+    if not previous or any(previous.get(k) != authored.get(k) for k in ("base_sha", "target_sha")):
+        previous = authored
+    github = post_merge_checks(authored["commits"], repo_url)
+    if github.get("status") in ("unavailable", "partial"):
+        runs = {r["sha"]: dict(r) for r in previous.get("github", {}).get("runs", [])}
+        runs.update({r["sha"]: dict(r) for r in github.get("runs", [])})
+        github = {**github, "missing_shas": _missing_runs(authored["commits"], runs), "runs": list(runs.values())}
+    old = authored.get("github") or {}
+    changed = ({r["sha"]: r for r in github.get("runs", [])} != {r["sha"]: r for r in old.get("runs", [])}
+               or github.get("missing_shas", []) != old.get("missing_shas", []))
+    return {**authored, "github": github}, changed
+
+
+def preflight_description(plan: dict, *, drive_root=None) -> dict:
+    """Read the saved description for the exact pins; never fetch, write or author."""
     from ouroboros import update_letter as letter
-    from ouroboros.server_process import server_source_baseline
-    from supervisor.git_ops_updates import managed_update_remote_url, _public_repo_url
 
     base, target = str(plan.get("base_sha") or ""), str(plan.get("target_sha") or "")
     if not base or not target:
         return {"letter": None, "qualification": None}
-    status = {**plan, "current_sha": base, "preflight_base_sha": base,
-              "running_sha": server_source_baseline(), "checked_target_sha": target,
-              "latest_sha": target, "check_ok": True, "available": base != target,
-              "official_repo_url": _public_repo_url(managed_update_remote_url())}
-    record = letter.refresh_after_check(status, drive_root=drive_root)
+    record = letter.read_record(drive_root)
     view = letter.project_letter(record, head_sha=base, latest_sha=target)
     if view and not view["description_current"]:
         view = {**view, "text": ""}

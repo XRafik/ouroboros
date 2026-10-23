@@ -88,6 +88,7 @@ export function preflightEvidenceText(preflight) {
     lines.push(`GitHub checks: ${github.status || 'unknown'}${github.reason ? `; ${github.reason}` : ''}.`);
     for (const run of github.runs || []) {
         lines.push(`${String(run.sha).slice(0, 8)} post-merge: ${run.conclusion || run.status || 'unknown'} ${run.url || ''}`);
+        if (run.covered_shas?.length) lines.push(`This run also covers: ${run.covered_shas.map((sha) => sha.slice(0, 8)).join(', ')}.`);
     }
     if (github.missing_shas?.length) lines.push(`No matching run observed: ${github.missing_shas.map((sha) => sha.slice(0, 8)).join(', ')}.`);
     return lines.join('\n');
