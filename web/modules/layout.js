@@ -42,6 +42,24 @@ export function pinchMagnified(w = win()) {
     return Boolean(vv && layoutWidth && Number(vv.width) < layoutWidth - 1);
 }
 
+/** A window too short for the sidebar's zones pins its head and its foot over the one scroller (style.css). Their
+ * measured heights are the column's scroll padding there, so a row reached with Tab or brought into view is never
+ * left under either bar. Returns the disposer. */
+export function measurePinnedBars(sidebar, { Observer = globalThis.ResizeObserver } = {}) {
+    const head = sidebar?.querySelector('.sidebar-head');
+    const foot = sidebar?.querySelector('.sidebar-foot-meta');
+    if (!head || !foot || typeof Observer !== 'function') return () => {};
+    const write = () => {
+        sidebar.style.setProperty('--sidebar-head-h', `${head.getBoundingClientRect().height}px`);
+        sidebar.style.setProperty('--sidebar-foot-h', `${foot.getBoundingClientRect().height}px`);
+    };
+    const observer = new Observer(write);
+    observer.observe(head);
+    observer.observe(foot);
+    write();
+    return () => observer.disconnect();
+}
+
 /** Hear the switch move; returns the disposer. The handler gets the new layout name. */
 export function onLayoutChange(handler, { w = win() } = {}) {
     const listener = (event) => handler(event?.detail?.layout || currentLayout({ w }));

@@ -94,3 +94,32 @@ test('a pinch is read against the layout width, so a smaller Interface size is n
     assert.equal(pinchMagnified(at({ inner: 700, client: 685, visual: 685 })), false, 'a classic scrollbar is no pinch');
     assert.equal(pinchMagnified({ innerWidth: 390 }), false, 'no visual viewport, no pinch');
 });
+
+test('measurePinnedBars writes the pinned head and foot heights as the column\'s scroll padding values', async () => {
+    const { measurePinnedBars } = await import('../modules/layout.js');
+    const props = new Map();
+    const box = (height) => ({ getBoundingClientRect: () => ({ height }) });
+    const head = box(104), foot = box(60.5);
+    const sidebar = { style: { setProperty: (name, value) => props.set(name, value) },
+        querySelector: (sel) => ({ '.sidebar-head': head, '.sidebar-foot-meta': foot })[sel] ?? null };
+    const observed = [];
+    let fire = null;
+    let disconnected = false;
+    class Observer {
+        constructor(callback) { fire = callback; }
+        observe(el) { observed.push(el); }
+        disconnect() { disconnected = true; }
+    }
+    const dispose = measurePinnedBars(sidebar, { Observer });
+    assert.deepEqual(observed, [head, foot]);
+    assert.equal(props.get('--sidebar-head-h'), '104px');
+    assert.equal(props.get('--sidebar-foot-h'), '60.5px');
+    foot.getBoundingClientRect = () => ({ height: 88 });  // an update capsule wrapped onto a second line
+    fire();
+    assert.equal(props.get('--sidebar-foot-h'), '88px');
+    dispose();
+    assert.equal(disconnected, true);
+    // A page without the bars, or without ResizeObserver, measures nothing and still returns a disposer.
+    assert.equal(typeof measurePinnedBars({ querySelector: () => null }, { Observer }), 'function');
+    assert.equal(typeof measurePinnedBars(sidebar, { Observer: undefined }), 'function');
+});

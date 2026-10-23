@@ -36,7 +36,7 @@ import { initStorage } from './modules/storage.js';
 import { SHELL_ICONS } from './modules/page_icons.js';
 import { renderNavRows, renderProjectsHeader } from './modules/pages.js';
 import { renderPageHeader } from './modules/page_header.js';
-import { isStackLayout, onLayoutChange, pinchMagnified } from './modules/layout.js';
+import { isStackLayout, measurePinnedBars, onLayoutChange, pinchMagnified } from './modules/layout.js';
 import { createLayerStack } from './modules/layers.js';
 import { afterMotion, reducedMotion } from './modules/motion.js';
 import { createShellMotion } from './modules/shell_motion.js';
@@ -100,6 +100,7 @@ const shellMotion = createShellMotion({ content: document.getElementById('conten
 // follows the Projects, before the version. Nothing below looks a row up before this.
 primarySidebar?.querySelector('.sidebar-head')?.insertAdjacentHTML('beforeend', renderNavRows('head'));
 primarySidebar?.querySelector('.sidebar-foot-meta')?.insertAdjacentHTML('beforebegin', renderNavRows('foot'));
+measurePinnedBars(primarySidebar);  // a short window's scroll padding under its pinned head and foot
 const navProjectsHeader = primarySidebar?.querySelector('.nav-projects-header');
 if (navProjectsHeader) navProjectsHeader.innerHTML = renderProjectsHeader();
 const navProjectsFacts = navProjectsHeader?.querySelector('.nav-projects-facts');

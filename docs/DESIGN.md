@@ -2553,7 +2553,8 @@ other row hides whatever it is doing, the open one included, and the header keep
 its mark and unread count for them. The choice is remembered on the device; a row
 that hides while it or its menu holds focus closes its menu and hands focus to the
 header. No label is set in capitals. A short window first compacts rows (fine pointer only), then lets the
-whole column scroll with Main pinned; a tool never becomes an unlabelled icon. One
+whole column scroll with Main pinned at the top and the version and the update on the bottom edge (owner 23.10);
+a tool never becomes an unlabelled icon. One
 place is chosen at a time, and pressing a place opens it, never closes it.
 
 **The drawer.** In the stack layout the room is a card the drawer pushes aside.
