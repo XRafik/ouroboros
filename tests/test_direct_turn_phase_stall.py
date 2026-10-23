@@ -349,3 +349,76 @@ def test_an_ordinary_turn_reaches_its_model_and_answer_once_and_journals_nothing
     bus = _journal_only(out, actor)
     assert len([item for item in bus if item.get("type") == "main_llm_call_state"]) == 1
 
+
+def test_a_turn_ending_in_its_stalled_phase_stood_until_its_end_and_a_cut_stack_says_so(monkeypatch):
+    from ouroboros import server_liveness
+
+    rows: list = []
+    monkeypatch.setattr("supervisor.state.append_jsonl", lambda path, row, *a, **k: rows.append(dict(row)) or True)
+    registry = get_direct_activity_registry()
+    watch = server_liveness._TurnPhaseWatch(15)
+    turn = registry.begin_execution(1, client_message_id="m-1")  # on this test's thread, deeper than the bound
+    at = turn.marks[-1][1]
+    watch.tick(at + 20, {})  # the watch's clock, a whole interval past the phase's stamp
+    registry.end_execution(turn)
+    watch.tick(at + 400, {})  # its next look, long after the turn ended
+    onset, end = rows
+    assert onset["stack_truncated"] is True and "loop_stack_truncated" not in onset
+    assert len(onset["stack"]) == server_liveness._STALL_STACK_FRAMES
+    assert (end["then"], end["stood_sec"]) == ("ended", round(turn.ended_at - at, 1)) and end["stood_sec"] < 20
+    # A whole stack carries no flag.
+    began, release, shallow = threading.Event(), threading.Event(), []
+
+    def stands() -> None:
+        shallow.append(registry.begin_execution(2))
+        began.set()
+        release.wait(10)
+
+    thread = threading.Thread(target=stands, daemon=True)
+    thread.start()
+    try:
+        assert began.wait(10)
+        watch.tick(shallow[0].marks[-1][1] + 20, {})
+    finally:
+        release.set()
+        thread.join(timeout=10)
+    assert rows[-1]["type"] == "direct_turn_stall" and "stack_truncated" not in rows[-1]
+    registry.end_execution(shallow[0])
+
+
+def test_each_watchdog_generation_closes_the_episodes_it_opened(monkeypatch, tmp_path):
+    """The supervisor loop's next generation starts its own watchdog while the turn's thread runs on."""
+    out = _lane(monkeypatch, tmp_path)
+    blocked, release = threading.Event(), threading.Event()
+
+    def stalls(actor, task):
+        blocked.set()
+        assert release.wait(10)
+        return _answers_at_once(actor, task)
+
+    actor, thread = _turn(monkeypatch, stalls)
+    clock, stop = _AheadClock(ahead=20.0), None
+    try:
+        thread.start()
+        assert blocked.wait(10)
+        stop = _start_watchdog(monkeypatch, clock)
+        assert _wait_until(lambda: _stall_rows(out))
+        _stop_watchdog(stop)
+        assert [(row["type"], row.get("then")) for row in _stall_rows(out)] == [
+            ("direct_turn_stall", None), ("direct_turn_stall_end", "unwatched")]
+        stop = _start_watchdog(monkeypatch, clock)
+        assert _wait_until(lambda: len(_stall_rows(out)) == 3)
+        clock.ahead = 0.0
+        release.set()
+        thread.join(timeout=10)
+        assert _wait_until(lambda: len(_stall_rows(out)) == 4)
+    finally:
+        release.set()
+        if stop is not None:
+            _stop_watchdog(stop)
+    rows = _stall_rows(out)
+    assert [(row["type"], row["phase"], row.get("then")) for row in rows] == [
+        ("direct_turn_stall", "started", None), ("direct_turn_stall_end", "started", "unwatched"),
+        ("direct_turn_stall", "started", None), ("direct_turn_stall_end", "started", "context_building")]
+    assert len({row["execution_id"] for row in rows}) == 1 and rows[2]["stood_sec"] >= rows[1]["stood_sec"]
+    _journal_only(out, actor)

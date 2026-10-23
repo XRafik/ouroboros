@@ -44,7 +44,8 @@ class TurnExecution:
     only appended to, so a reader's copy never pairs one fact with another fact's instant.
     ``owner_turn``: the owner awaits its answer (its entry's ``reply_expected``); only such a
     turn reports its first dispatch to the after-update facts, a wake or resume never does.
-    ``call``: its latest Main call (id, start instant, whether its route observed it)."""
+    ``call``: its latest Main call (id, start instant, whether its route observed it);
+    ``ended_at``: the instant it left the registry."""
 
     chat_id: int
     client_message_id: str = ""
@@ -54,6 +55,7 @@ class TurnExecution:
     thread: Tuple[int, str] = field(default_factory=_calling_thread)
     marks: List[Tuple[str, float]] = field(default_factory=lambda: [("accepted", time.monotonic())])
     call: Optional[Tuple[str, float, bool]] = None
+    ended_at: Optional[float] = None
 
     @property
     def phase(self) -> str:
@@ -217,9 +219,13 @@ class DirectActivityRegistry:
         return execution
 
     def end_execution(self, execution: Optional[TurnExecution]) -> None:
-        if execution is not None:
-            with self._lock:
-                self._executions.pop(execution.execution_id, None)
+        with self._lock:
+            self._drop(execution)
+
+    def _drop(self, execution: Optional[TurnExecution]) -> None:
+        """Under the lock: the execution ends now, the instant a stall episode it stood in closes at."""
+        if execution is not None and self._executions.pop(execution.execution_id, None) is not None:
+            execution.ended_at = time.monotonic()
 
     def executions(self) -> List[TurnExecution]:
         """Every running execution, registered or not yet: what the liveness watchdog reads."""
@@ -268,8 +274,8 @@ class DirectActivityRegistry:
         )
         with self._lock:
             replaced = self._activities.get(aid)
-            if replaced is not None and replaced.execution is not None:
-                self._executions.pop(replaced.execution.execution_id, None)
+            if replaced is not None:
+                self._drop(replaced.execution)
             self._activities[aid] = entry
             self._executions[execution.execution_id] = execution
         log.debug("Registered direct activity: %s (chat_id=%s, kind=%s)", aid, chat_id, kind)
@@ -279,8 +285,8 @@ class DirectActivityRegistry:
         aid = str(activity_id or "").strip()
         with self._lock:
             entry = self._activities.pop(aid, None)
-            if entry is not None and entry.execution is not None:
-                self._executions.pop(entry.execution.execution_id, None)
+            if entry is not None:
+                self._drop(entry.execution)
             self._lock.notify_all()
         if entry:
             log.debug("Unregistered direct activity: %s (chat_id=%s)", aid, entry.chat_id)
@@ -357,7 +363,8 @@ class DirectActivityRegistry:
         """Clear registry — primarily for tests and process resets."""
         with self._lock:
             self._activities.clear()
-            self._executions.clear()
+            for execution in list(self._executions.values()):
+                self._drop(execution)
             self._lock.notify_all()
 
 

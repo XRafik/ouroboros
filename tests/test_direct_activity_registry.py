@@ -167,9 +167,10 @@ def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry(monkeypatch
     stamps = [at for _, at in execution.marks]
     assert stamps == sorted(stamps)
     registry.unregister("act-4")
-    assert registry.executions() == []
+    assert registry.executions() == [] and execution.ended_at >= stamps[-1]
+    ended = execution.ended_at
     registry.end_execution(execution)  # the thread's own end after its entry's is a no-op
-    assert registry.executions() == []
+    assert registry.executions() == [] and execution.ended_at == ended
 
 
 def test_a_call_its_route_never_observes_is_dispatched_at_its_start_once_it_finished(monkeypatch):
