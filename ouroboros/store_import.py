@@ -325,6 +325,9 @@ def _upgrade_review_collection(txn: Txn) -> None:
         txn.conn.execute(index)
     if "drive_retention_at" not in columns:
         txn.conn.execute("ALTER TABLE tasks ADD COLUMN drive_retention_at TEXT")
+    if "terminal_seq" not in columns:  # schema 8: rows written terminal before it carry no count (nothing to look at again)
+        txn.conn.execute("ALTER TABLE tasks ADD COLUMN terminal_seq INTEGER")
+    txn.conn.execute(store.TERMINAL_SEQ_INDEX)
     if int(txn.meta("schema_version") or 1) < store.SCHEMA_VERSION:
         txn.set_meta("schema_version", store.SCHEMA_VERSION)
 

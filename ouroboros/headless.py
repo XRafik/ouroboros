@@ -208,15 +208,17 @@ def _drive_retention_rows(parent: pathlib.Path, names: List[str], stop: Any, *,
 
 
 def drive_candidates(base: pathlib.Path, parent: pathlib.Path, cutoff: float, stop: Any = None,
-                     *, after: str = "", record: bool = True) -> Iterable[Tuple[str, str, Optional[float], bool, Dict[str, Any]]]:
+                     *, after: str = "", record: bool = True,
+                     names: Optional[List[str]] = None) -> Iterable[Tuple[str, str, Optional[float], bool, Dict[str, Any]]]:
     """The selection half the prune and the free-space preview share: every drive folder under
     BASE in name order (wrapping after AFTER), each with the cheap canonical facts of its task row
     as ``(task_id, status, drive_retention_at, inside_wait, fact)``. ``inside_wait`` says the
     row is terminal but its retention instant is after CUTOFF; a missing row yields ``""`` as
     status and None as the instant (the strict reader decides later). A hint never authorizes
     removal: the prune re-reads the strict row before any settlement. ``record=False`` (the
-    preview) classifies a legacy row in memory only; the prune fills the projection."""
-    names = _drive_names(base)
+    preview) classifies a legacy row in memory only; the prune fills the projection. ``names``
+    (the drives whose own rows changed) replaces the listing: only those are selected."""
+    names = _drive_names(base) if names is None else sorted(names)
     names = [name for name in names if name > after] + [name for name in names if name <= after]
     for task_id, fact in _drive_retention_rows(parent, names, stop, record=record):
         status, retention_at, inside = "", None, False
@@ -243,6 +245,31 @@ def _earliest(known: Optional[float], instant: float) -> float:
     return float(instant) if known is None else min(float(known), float(instant))
 
 
+def _only_the_counter_moved(recorded: Any, basis: Dict[str, Any]) -> bool:
+    """The layout's recorded basis differs from the current one in the terminal-write counter alone:
+    rows were written terminal somewhere, nothing else about the layout changed."""
+    return (isinstance(recorded, dict) and isinstance(recorded.get("terminal"), int)
+            and recorded["terminal"] != basis.get("terminal")
+            and {key: value for key, value in recorded.items() if key != "terminal"}
+            == {key: value for key, value in basis.items() if key != "terminal"})
+
+
+def _changed_drives(base: pathlib.Path, parent: pathlib.Path, since: int) -> List[str]:
+    """The drives of BASE whose own task rows were written terminal since the counter stood at SINCE: one
+    indexed read of those rows (``task_store.terminal_writes_since``) and one stat per row, never a listing."""
+    from ouroboros.task_store import terminal_writes_since
+
+    changed = []
+    for task_id in terminal_writes_since(parent, since):
+        try:
+            validate_task_id(task_id)
+        except ValueError:
+            continue
+        if (base / task_id).is_dir():
+            changed.append(task_id)
+    return changed
+
+
 def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, not_terminal: str,
                   retention_days: Optional[int], now: Optional[float], live: Any, guard: Any, stop: Any,
                   budget: Optional[int], after: str, extra_checks: Any, rested: Any = None,
@@ -255,10 +282,12 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
     (``task_custody.rested_verdict``), updated in place, or a callable that loads them: a pass that walks reads
     them, one at rest never does. ``rest`` is the layout's durable rest, updated in place: the inputs
     (``task_custody.layout_basis``) and the earliest retention instant of a drive it left young; while both
-    hold, the pass lists nothing (``rested`` in the report). A whole pass that attempted nothing records it;
-    any other pass clears it. ``only`` restricts the pass to those task ids (the free action's previewed folders;
-    every other drive is untouched, no rest is kept); ``progress`` is called with the report after each
-    settlement attempt."""
+    hold, the pass lists nothing (``rested`` in the report). When the terminal-write counter alone moved
+    (rows were written terminal somewhere), the pass looks only at the drives whose own rows those were
+    (``_changed_drives``): a completion elsewhere leaves the rest standing under the moved counter, still
+    without a listing. A whole pass that attempted nothing records the rest; any other pass clears it.
+    ``only`` restricts the pass to those task ids (the free action's previewed folders; every other drive is
+    untouched, no rest is kept); ``progress`` is called with the report after each settlement attempt."""
     from ouroboros.retention import age_cutoff
     from ouroboros.task_custody import forget_departed, layout_basis, record_rest, rested_verdict, settle_child_drive
 
@@ -270,14 +299,23 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
         return report
     chosen = None if only is None else {str(task_id) for task_id in only}
     basis = layout_basis(parent, base, days) if rest is not None and chosen is None else None
-    if basis is not None and rest.get("basis") == basis and not (
-            rest.get("youngest") is not None and float(rest["youngest"]) <= cutoff):
+    young_due = basis is not None and rest.get("youngest") is not None and float(rest["youngest"]) <= cutoff
+    if basis is not None and rest.get("basis") == basis and not young_due:
         report["rested"] = True
         return report  # nothing listed, decoded, copied or hashed: what the last whole pass saw still stands
+    names = None
+    if basis is not None and not young_due and _only_the_counter_moved(rest.get("basis"), basis):
+        names = _changed_drives(base, parent, rest["basis"]["terminal"])
+        if not names:
+            rest["basis"] = basis  # the rows written were none of this layout's: its rest stands under the moved counter
+            report["rested"] = True
+            return report
     rested = rested() if callable(rested) else rested
-    forget_departed(rested, base.name, _drive_names(base))
-    attempts, youngest = 0, None
-    for task_id, status, retention_at, inside_wait, fact in drive_candidates(base, parent, cutoff, stop, after=after):
+    if names is None:
+        forget_departed(rested, base.name, _drive_names(base))
+    attempts, youngest = 0, (None if names is None else rest.get("youngest"))
+    for task_id, status, retention_at, inside_wait, fact in drive_candidates(base, parent, cutoff, stop, after=after,
+                                                                               names=names):
         if chosen is not None and task_id not in chosen:
             continue
         task_dir = base / task_id
