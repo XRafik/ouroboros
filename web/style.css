@@ -140,10 +140,13 @@ html[data-layout="stack"] .shell-icon-control {
    edge there too (owner 23.10): the tools' box steps aside (its rows become the column's), so the foot sticks to
    the column itself and the rows pass under it as they pass under the head. Its offset and negative margin reach
    through the column's bottom padding, which it takes as its own, so its text sits where a tall window puts it.
-   The two bars' measured heights (layout.js measurePinnedBars) are the column's scroll padding, so a row reached
-   with Tab is never left under either. */
+   The two bars' measured heights (layout.js measurePinnedBars) are the scroll margin of the rows that pass under
+   them, so a row reached with Tab is never left under either bar, while a bar's own control (Main, the update)
+   leaves the column where it is (a scroll padding on the column would count the bars as covered and move it). */
 @media (max-height: 540px), (pointer: coarse) and (max-height: 600px) {
-    #primary-sidebar { scroll-padding-block: var(--sidebar-head-h, 0px) var(--sidebar-foot-h, 0px); }
+    #primary-sidebar :is(.nav-projects *, .sidebar-foot > [data-nav-page]) {
+        scroll-margin-block: var(--sidebar-head-h, 0px) var(--sidebar-foot-h, 0px);
+    }
     #primary-sidebar .nav-projects { flex: 0 0 auto; min-height: 0; }
     #primary-sidebar .nav-projects-list { flex: 0 0 auto; overflow-y: visible; }
     #primary-sidebar .sidebar-foot { display: contents; }

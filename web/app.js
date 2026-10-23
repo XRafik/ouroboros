@@ -100,7 +100,7 @@ const shellMotion = createShellMotion({ content: document.getElementById('conten
 // follows the Projects, before the version. Nothing below looks a row up before this.
 primarySidebar?.querySelector('.sidebar-head')?.insertAdjacentHTML('beforeend', renderNavRows('head'));
 primarySidebar?.querySelector('.sidebar-foot-meta')?.insertAdjacentHTML('beforebegin', renderNavRows('foot'));
-measurePinnedBars(primarySidebar);  // a short window's scroll padding under its pinned head and foot
+measurePinnedBars(primarySidebar);  // a short window's row scroll margin under its pinned head and foot
 const navProjectsHeader = primarySidebar?.querySelector('.nav-projects-header');
 if (navProjectsHeader) navProjectsHeader.innerHTML = renderProjectsHeader();
 const navProjectsFacts = navProjectsHeader?.querySelector('.nav-projects-facts');

@@ -111,7 +111,7 @@ def walk(page, key, limit=120):
 
 def test_a_row_reached_with_tab_is_never_left_under_a_pinned_bar(chromium_ui, tmp_path):
     """Tab walks the column down to its foot and back up to Main: the browser brings each row into view, and the two
-    bars' heights are the column's scroll padding, so no focused row stays under the pinned foot or the pinned head.
+    bars' heights are the rows' scroll margin, so no focused row stays under the pinned foot or the pinned head.
     (WebKit on macOS does not Tab to buttons unless the system's keyboard navigation is on, so Chromium walks it.)"""
     page = seed_page(chromium_ui, 1100, 500, touch=False)
     facts = {'engine': 'chromium'}
@@ -127,13 +127,15 @@ def test_a_row_reached_with_tab_is_never_left_under_a_pinned_bar(chromium_ui, tm
         page.close()
     down, up = facts['down'], facts['up']
     assert facts['short'] is True and len(down) > 60 and len(up) > 60, facts
-    assert down[-1]['scrollTop'] > 0 and up[-1]['scrollTop'] == 0, ('the walk scrolled the column', facts)
+    assert down[-1]['scrollTop'] > 0, ('the walk scrolled the column', facts)
+    # Back at the head, Main leaves the column where the row before it did: a bar's own control moves nothing.
+    assert up[-1]['name'] == 'Main Chat' and up[-1]['scrollTop'] == up[-2]['scrollTop'] < down[-1]['scrollTop'], facts
     hidden = [(way, stop['name']) for way, stops in (('down', down), ('up', up)) for stop in stops
               if stop['underFoot'] or stop['underHead']]
     assert not hidden, ('a focused row under a pinned bar', hidden, facts)
 
 
-# The two pinned bars: the heights the column's scroll padding holds against their real border boxes.
+# The two pinned bars: the heights the rows' scroll margin holds against their real border boxes.
 BARS = """() => {
     const side = document.getElementById('primary-sidebar');
     const css = getComputedStyle(side);
@@ -154,10 +156,10 @@ LATE = {
 @pytest.mark.parametrize(('width', 'height', 'touch', 'late', 'bar', 'grows'),
                          [(1100, 500, False, 'title-band', 'head', 52), (390, 570, True, 'safe-area', 'foot', 34)],
                          ids=['desk-title-band', 'drawer-safe-area'])
-def test_the_scroll_padding_follows_a_band_or_a_safe_area_that_arrives_later(shell_ui, tmp_path, width, height,
-                                                                             touch, late, bar, grows):
+def test_the_bars_measured_heights_follow_a_band_or_a_safe_area_that_arrives_later(shell_ui, tmp_path, width, height,
+                                                                                   touch, late, bar, grows):
     """The bars' measured heights stay their real heights when only their padding changes after the first paint, so
-    the scroll padding still keeps a focused row clear of both."""
+    the rows' scroll margin still keeps a focused row clear of both."""
     page = seed_page(shell_ui, width, height, touch=touch)
     facts = {'engine': shell_ui['engine'], 'late': late}
     try:
@@ -178,3 +180,57 @@ def test_the_scroll_padding_follows_a_band_or_a_safe_area_that_arrives_later(she
     assert abs(after[bar] - before[bar] - grows) <= 1, ('the late padding reached the bar', facts)
     for state in (before, after):
         assert abs(state['headPad'] - state['head']) <= 0.5 and abs(state['footPad'] - state['foot']) <= 0.5, facts
+
+
+# Focus without a keyboard walk, so WebKit (which Tabs only to fields by default) measures it too: a bar's own control
+# focused while the column sits mid-scroll, and every row brought into view by focus() from the top of the scroll.
+FOCUS_MOVES = """async () => {
+    const side = document.getElementById('primary-sidebar');
+    const frames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const head = side.querySelector('.sidebar-head'), meta = side.querySelector('.sidebar-foot-meta');
+    const version = document.getElementById('nav-version');
+    version.tabIndex = -1;  // the foot's own text stands in for its update capsule, hidden in this fixture
+    const bars = {};
+    for (const [name, el] of [['main', side.querySelector('.sidebar-head [data-nav-page="chat"]')], ['foot', version]]) {
+        document.activeElement?.blur?.();
+        side.scrollTop = Math.round((side.scrollHeight - side.clientHeight) / 2);
+        await frames();
+        const before = side.scrollTop;
+        el.focus();
+        await frames();
+        bars[name] = {before, after: side.scrollTop};
+    }
+    const hidden = [];
+    const rows = [...side.querySelectorAll('#nav-projects-list [data-project-id], .sidebar-foot > [data-nav-page]')];
+    for (const row of rows) {
+        side.scrollTop = 0;
+        await frames();
+        row.focus();
+        await frames();
+        const r = row.getBoundingClientRect(), h = head.getBoundingClientRect(), m = meta.getBoundingClientRect();
+        if (r.bottom > m.top + 0.5 || r.top < h.bottom - 0.5) hidden.push(row.textContent.trim().slice(0, 40));
+    }
+    return {bars, rows: rows.length, hidden};
+}"""
+
+
+@pytest.mark.parametrize(('width', 'height', 'touch'), [(1100, 500, False), (390, 570, True)],
+                         ids=['desk', 'phone-drawer'])
+def test_a_pinned_bars_own_control_leaves_the_column_where_it_is(shell_ui, tmp_path, width, height, touch):
+    """The rows carry the bars' heights as their scroll margin, not the column as its scroll padding: a row brought
+    into view clears both bars, and focusing Main or the foot does not count them as covered and scroll the column."""
+    page = seed_page(shell_ui, width, height, touch=touch)
+    facts = {'engine': shell_ui['engine'], 'size': [width, height]}
+    try:
+        boot(page, shell_ui)
+        if width < 720:
+            open_drawer(page)
+        facts['short'] = page.evaluate(SHORT)
+        facts.update(page.evaluate(FOCUS_MOVES))
+    finally:
+        evidence(tmp_path, f'sidebar-short-bar-focus-{width}x{height}-{shell_ui["engine"]}', facts)
+        page.close()
+    assert facts['short'] is True and facts['rows'] > 30, facts
+    for name, move in facts['bars'].items():
+        assert move['before'] > 0 and abs(move['after'] - move['before']) <= 1, ('the column stayed put', name, facts)
+    assert facts['hidden'] == [], ('a row brought into view under a pinned bar', facts)

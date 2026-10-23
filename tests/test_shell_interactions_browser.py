@@ -581,7 +581,7 @@ SIDEBAR_FACTS = """() => {
             gapToTools: Math.round(files.top - zone.bottom), filesTop: Math.round(files.top),
             sidebarBottom: Math.round(side.getBoundingClientRect().bottom),
             // The foot: how far the version row's bottom sits above the column's content edge (0 = on the edge), and
-            // whether the column itself scrolls (the short-window fallback, where the foot is the flow's last row).
+            // whether the column itself scrolls (the short-window fallback, where the foot is pinned over it).
             footGap: Math.round(side.getBoundingClientRect().bottom - parseFloat(getComputedStyle(side).paddingBottom)
                 - side.querySelector('.sidebar-foot-meta').getBoundingClientRect().bottom),
             footBelowTools: side.querySelector('.sidebar-foot-meta').getBoundingClientRect().top

@@ -43,7 +43,7 @@ export function pinchMagnified(w = win()) {
 }
 
 /** A window too short for the sidebar's zones pins its head and its foot over the one scroller (style.css). Their
- * measured heights are the column's scroll padding there, so a row reached with Tab or brought into view is never
+ * measured heights are the scroll margin of the rows there, so a row reached with Tab or brought into view is never
  * left under either bar. Their border boxes are watched: the macOS title band and the safe area are their padding
  * and can arrive after the first paint (a Telegram inset, a page zoom), which a content box never reports. Returns
  * the disposer. */
