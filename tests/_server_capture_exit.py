@@ -42,8 +42,10 @@ def invoke(entrypoint, args):
 
 
 def record(gates, name, *, announce=True, **facts):
+    from ouroboros.utils import atomic_write_json
+
     row = {"pid": os.getpid(), "monotonic": time.monotonic(), **facts}
-    (gates / (name + ".json")).write_text(json.dumps(row), encoding="utf-8")
+    atomic_write_json(gates / (name + ".json"), row)
     if announce:
         print(name, json.dumps(row), flush=True)
 
