@@ -71,6 +71,13 @@ def test_gh_pre_merge_refusals_are_pre_effect(tmp_path, monkeypatch, method, rep
     assert result.text.count(" | ") <= 2 and "&& git" not in result.text
 
 
+@pytest.mark.parametrize("body_file,failure", [("-", "pre_effect"), ("body.txt", "exit")])
+def test_stdin_body_retains_exact_pre_effect_refusal(tmp_path, monkeypatch, body_file, failure):
+    args = ["pr", "merge", "7", "--merge", "--match-head-commit", HEAD, "--body-file", body_file]
+    result = _classify(tmp_path, monkeypatch, refusal(DIRTY) + AUTO, args=args, repo="octo/demo")
+    assert result.failure == failure
+
+
 @pytest.mark.parametrize("stderr,kw", [
     (refusal(DIRTY) + AUTO + ADMIN, {}),
     (refusal(BLOCKED) + AUTO, {}),
@@ -125,7 +132,7 @@ def chain(tmp_path, monkeypatch):
     registry, queue, workers = _registry(tmp_path, monkeypatch)
     fake = FakeGh(tmp_path)
     fake.pr.update(mergeStateStatus="DIRTY")
-    state = SimpleNamespace(registry=registry, queue=queue, workers=workers, fake=fake, merges=[], answers=[],
+    state = SimpleNamespace(registry=registry, queue=queue, workers=workers, fake=fake, merges=[], merge_inputs=[], answers=[],
                             root=tmp_path)
     real_run = subprocess.run
 
@@ -136,6 +143,7 @@ def chain(tmp_path, monkeypatch):
         assert "--repo" not in args and kw["cwd"] == str(registry._ctx.workspace_root)
         if args[:2] == ["pr", "merge"]:
             state.merges.append(args)
+            state.merge_inputs.append(kw.get("input"))
             fake.calls.append(list(args))
             answer = state.answers.pop(0)
             if answer == "timeout":
@@ -236,13 +244,13 @@ def test_proven_conflict_refusal_frees_custody_and_a_repaired_head_merges_once(c
     second = _merge(chain, REPAIRED, method)
     assert second.meta["operation_outcome"] == "completed", second.text
     assert len(chain.merges) == 2
-    for call, head, retained in zip(chain.merges, (HEAD, REPAIRED), _receipts(chain)):
+    for call, body, head, retained in zip(chain.merges, chain.merge_inputs, (HEAD, REPAIRED), _receipts(chain)):
         expected_args = ["pr", "merge", "7", f"--{method}", "--match-head-commit", head]
         if method == "rebase":
             assert call == expected_args  # rebase has no merge commit to carry a receipt
+            assert body is None
             continue
-        assert call[:7] == [*expected_args, "--body"] and len(call) == 8
-        body = call[7]
+        assert call == [*expected_args, "--body-file", "-"]
         prose, summary = body.split("\n\nOuroboros qualification receipt", 1)
         assert prose == owner_intro + owner_footer
         qualification = commit_qualification(body)

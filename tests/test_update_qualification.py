@@ -114,7 +114,8 @@ def test_merge_commit_carries_checks_and_missing_evidence_without_blocking(world
                            review_verdict="AUTHOR ACCEPTED")
     assert "merge: merged" in out
     call = next(c for c in world.gh.calls if c[:2] == ["pr", "merge"])
-    body = call[call.index("--body") + 1]
+    assert call[6:] == ["--body-file", "-"]
+    body = world.gh.merge_inputs[0]
     receipt = qualification.commit_qualification(body)
     assert receipt == _receipts(world)[0]["qualification"]
     assert receipt["checks"][0] == {**checks[0], "source": "author_declared"}
@@ -128,7 +129,9 @@ def test_merge_commit_carries_checks_and_missing_evidence_without_blocking(world
 def test_rebase_discloses_that_it_creates_no_merge_commit(world):  # noqa: F811
     github._pr_merge(world.ctx, number=7, expected_head_sha=HEAD, method="rebase")
     assert _receipts(world)[0]["commit_receipt"] == "no_merge_commit_for_rebase"
-    assert "--body" not in next(c for c in world.gh.calls if c[:2] == ["pr", "merge"])
+    assert next(c for c in world.gh.calls if c[:2] == ["pr", "merge"]) == [
+        "pr", "merge", "7", "--rebase", "--match-head-commit", HEAD]
+    assert world.gh.merge_inputs == [None]
 
 
 def test_check_shape_refusal_then_valid_missing_checks_still_merge(world):  # noqa: F811

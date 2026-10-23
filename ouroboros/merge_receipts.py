@@ -698,10 +698,12 @@ def run_pr_merge(ctx: Any, gh: Gh, gh_api: Gh, *, drive_root: Any, task_id: str,
         return {**_finish(ctx, gh, gh_api, drive_root, task_id, recovered), "readback_only": True,
                 "prior_status": str((prior.get("outcome") or {}).get("status") or "")}
     args = ["pr", "merge", str(number), f"--{method}", "--match-head-commit", expected]
+    body = None
     if method != "rebase":
-        args += ["--body", _BODY_BLOCK_RE.sub("", str(pr.get("body") or "")).rstrip()
-                 + "\n\n" + commit_summary(receipt["qualification"])]
-    res = gh(args, timeout=120)
+        args += ["--body-file", "-"]
+        body = (_BODY_BLOCK_RE.sub("", str(pr.get("body") or "")).rstrip()
+                + "\n\n" + commit_summary(receipt["qualification"]))
+    res = gh(args, timeout=120, input_data=body)
     receipt.update(state="effect_attempted", effect={
         "ok": bool(getattr(res, "ok", False)), "exit_code": getattr(res, "exit_code", None),
         "http_status": getattr(res, "http_status", None), "failure": str(getattr(res, "failure", "") or ""),
