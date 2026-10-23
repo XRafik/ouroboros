@@ -216,12 +216,6 @@ def test_b2_publication_to_dialogue_is_flat(measured):
     assert_publication_flat(measured, "B2_dialogue")
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "A custody publication at boot walks the event chain: the startup custody sweep publishes a custody event "
-    "per pending start request it recovers (delegate_custody_current.publish -> flush_outbox -> "
-    "delegate_custody.chain_length), and chain_length stats every archive events segment "
-    "(utils._closed_segments: stat:archive 7 -> 65 at k=1 -> k=30 for the same three events). The chain's length "
-    "after this store's own last row is a stored fact (CHAIN_BOUNDARY), not a walk. Removed by lane D2a."))
 def test_b2_publication_to_supervisor_ready_is_flat(measured):
     assert_publication_flat(measured, "B2_ready")
 
@@ -239,12 +233,6 @@ def _assert_state_questions(measured, tag):
         assert measured[k]["responses"][tag]["decisions"] == expected
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "The cold /api/state reads the consciousness allowance window for its status view "
-    "(consciousness.status_snapshot -> consciousness_allowance.allowance_window -> usage_store.attempts): every "
-    "money row of every consciousness root in the last 24 h is decoded (statements 142 -> 258, vm_steps 1600 -> "
-    "12000 at k=1 -> k=30) instead of an addressed daily-spend fact; the same read is boundary P:allowance. "
-    "Removed by lane D2b."))
 def test_b3_state_cold_is_flat(measured):
     _assert_state_questions(measured, "B3")
     assert_flat(measured, "B3")
@@ -362,56 +350,27 @@ def _host_duty_names() -> tuple:
 
 DUTY_NAMES = (*_host_duty_names(), "delegated-body")  # the dispatcher's inventory plus the lifespan's body tick
 
-# Where today's code breaks the law: the measured cause (k=1 -> k=30, the readers that grow) and the
-# change that removes it (lane D2a: the usage duty, the metrics projection, pending invocations and the
-# ended plan asks leave the server's passes; lane D2b: intake, send and the allowance read addressed).
-REST_LAW_GAPS = {
-    "abandoned_usage_reconciliation": (
-        "R2: the usage duty re-selects every dirty owner whose task row is gone on every pass "
-        "(terminal_cost_reconciliation._refresh_costs: usage_store.dirty_owners, then task_facts over all of "
-        "them) instead of resting on an explicit successful-absence observation; the pass writes nothing and "
-        "its vm_steps go 900 -> 6500 at k=1 -> k=30. Removed by lane D2a."),
-    "reconcile-maintenance": (
-        "The reconcile pass redoes history-sized work at rest: late_review_marks._collect_ended_plan_asks "
-        "re-collects every ended task's pending plan seat and rewrites its body each pass "
-        "(plan_record._update_plan_record; writes 10 -> 244 at k=1 -> k=30), the age-only retirers read every "
-        "settled task's body (headless._prune_*: load_task_result) and the zombie reconcile opens every child "
-        "drive's store (connect:headless 0 -> 16, read_bytes:headless 0 -> 6400); statements 541 -> 7871, "
-        "vm_steps 8600 -> 162200, the packing job it wakes included. Removed by lane D2a (ended plan-ask "
-        "collection and the retirers become child jobs)."),
-    "maintenance-child": (
-        "The dispatcher's look at the job facts grows with history: maintenance.due reads every job row and "
-        "the drive-settlement job row carries a per-task map (maintenance_jobs.jobs: json_chars +20665 at "
-        "k=30), and dialogue_import.import_status counts pending segments (vm_steps 800 -> 2100). Removed by "
-        "lane D2a (the look reads addressed facts)."),
-}
-BOUNDARY_GAPS = {
-    "P:metrics_run": (
-        "M7 (#2196): subagent_metrics.catch_up folds the whole event suffix inside a write transaction when the "
-        "cursor is absent (swarm_rollup.fold_event_suffix: open:archive 4 -> 62, read_bytes:archive 44 KB -> "
-        "1.34 MB, json_loads 347 -> 9047 at k=1 -> k=30) on a delegated run's measurement publication. Removed "
-        "by lane D2a."),
-    "P:metrics_review": (
-        "M7 (#2196): the same fold on a review publication over a stale cursor (open:archive 3 -> 61, "
-        "read_bytes:archive 22 KB -> 1.32 MB). Removed by lane D2a."),
+# Where today's code still breaks the law: the measured cause (k=1 -> k=30, the readers that grow) and
+# the change that removes it. A duty or boundary named here is driven and measured all the same; the
+# marker turns the known breach into a strict xfail that flips the moment the cause is gone.
+REST_LAW_GAPS: Dict[str, str] = {}
+BOUNDARIES = ("P:metrics_run", "P:metrics_review", "P:intake", "P:send", "P:allowance")
+BOUNDARY_GAPS: Dict[str, str] = {
     "P:intake": (
-        "Owner-message intake reads task_facts over every task and the bodies of the offered roots "
-        "(server_routing_context._recent_root_results via _decision_turn_metadata) on the loop thread before "
-        "the turn starts: vm_steps 5300 -> 18700, json_chars +91 KB at k=1 -> k=30. Removed by lane D2b "
-        "(addressed recent-root facts)."),
-    "P:send": (
-        "The loop's send_message retains the answer through artifacts.store_actor_source_bytes -> "
-        "evidence_packs.handle_info, whose first touch of the pack index validates the whole cache "
-        "(evidence_packs._index_valid: vm_steps 1400 -> 5900 at k=1 -> k=30). Removed by lane D2b."),
-    "P:allowance": (
-        "The consciousness allowance read decodes every money row of every consciousness root in the window "
-        "(consciousness_allowance._window_rows -> usage_store.attempts: statements 15 -> 131, vm_steps 300 -> "
-        "10700 at k=1 -> k=30) instead of an addressed daily-spend fact. Removed by lane D2b."),
+        "Owner-message intake decodes the WHOLE body of every offered newest root (server_routing_context."
+        "_recent_root_results: load_task_result per id of newest_root_ids, :257) on the loop thread before the "
+        "turn starts. The window is addressed now (lane D2b: 70 decodes and 218 statements at both sizes, "
+        "vm_steps 4500 -> 4700 inside the allowance), but the offered roots' bodies are what they are: at k=30 "
+        "the newest roots carry the 20-200 KB settled bodies, json_chars +91 KB at k=1 -> k=30. The decision "
+        "needs each root's facts (status, terminal line), not its body; the row's typed columns hold them."),
 }
 # The counter a duty's companion makes appear (work > rest at every size); the body's walk and copy are
-# the two execution-root counters the 22.10 control fails on at rest.
+# the two execution-root counters the 22.10 control fails on at rest. A copy opens its source through
+# either door: ``io.open`` (``shutil.copy2``, the 22.10 body) or ``os.open`` (the exclusive byte copy of
+# ``review_checking._retain_files``); the counters of one tuple are summed.
+COPY = ("open:execution", "os_open:execution")
 COMPANION_COUNTERS = {
-    "delegated-body": ("scandir:execution", "open:execution", "writes"),
+    "delegated-body": ("scandir:execution", COPY, "writes"),
     "abandoned_usage_reconciliation": ("writes",),
     "custody-maintenance": ("writes",),
     "reconcile-maintenance": ("writes",),
@@ -453,9 +412,11 @@ def _growing(little: Dict[str, Any], big: Dict[str, Any]) -> List[tuple]:
                    if amount > little.get("callers", {}).get(source, 0)), key=lambda item: -item[1])[:8]
 
 
-def _companion_counter(measured: Dict[Any, Any], name: str, k: int, phase: str, counter: str) -> int:
+def _companion_counter(measured: Dict[Any, Any], name: str, k: int, phase: str, counter: Any) -> int:
     if counter == "child_spawn":  # the child's spawn is recorded under the boundary that requested the look
         return measured[k].get("child_spawns", []).count(f"D:{name}:{phase}")
+    if isinstance(counter, tuple):  # one kind of work reached through several doors
+        return sum(_companion_counter(measured, name, k, phase, door) for door in counter)
     return _duty_pass(measured, name, k, phase)["counts"].get(counter, 0)
 
 
@@ -486,7 +447,7 @@ def test_b7_every_duty_has_a_companion_or_a_named_reason():
     assert not set(COMPANION_COUNTERS) & set(COMPANIONS_NOT_BUILT)
 
 
-@pytest.mark.parametrize("tag", [pytest.param(tag, marks=_gap(BOUNDARY_GAPS, tag)) for tag in BOUNDARY_GAPS])
+@pytest.mark.parametrize("tag", [pytest.param(tag, marks=_gap(BOUNDARY_GAPS, tag)) for tag in BOUNDARIES])
 def test_b8_producer_and_loop_boundaries_are_flat_on_the_first_pass(measured, tag):
     assert_flat(measured, tag)
 
@@ -582,11 +543,12 @@ def test_child_header_allowance_rejects_history_work(tmp_path, monkeypatch, extr
         store.close_connections()
 
 
-@pytest.mark.parametrize("walks", [False, True])
+@pytest.mark.parametrize("walks", [None, "copy2", "exclusive"])
 def test_the_rest_law_catches_a_walk_or_copy_under_an_execution_root(tmp_path, walks):
     """A pass that reads its own row touches no checkout; one that re-walks a declared evidence tree
-    and copies a file shows the walk as ``scandir``/``stat`` and the copy as the source's ``open`` under
-    ``execution`` (``shutil.copy2`` moves the bytes in the kernel: no ``read_bytes`` to count)."""
+    and copies a file shows the walk as ``scandir``/``stat`` and the copy as the source's open under
+    ``execution``, through whichever door: ``shutil.copy2`` opens it with ``io.open`` and moves the bytes
+    in the kernel (no ``read_bytes`` to count), the exclusive byte copy opens it with ``os.open``."""
     import shutil
 
     exec_root, data = tmp_path / "exec", tmp_path / "data"
@@ -602,14 +564,20 @@ def test_the_rest_law_catches_a_walk_or_copy_under_an_execution_root(tmp_path, w
         if walks:
             for _current, _dirs, _files in os.walk(exec_root / "run"):
                 pass
+        if walks == "copy2":
             shutil.copy2(tree / "object", tmp_path / "copy")
+        elif walks == "exclusive":
+            with os.fdopen(os.open(tree / "object", os.O_RDONLY), "rb") as src, (tmp_path / "copy").open("xb") as dst:
+                shutil.copyfileobj(src, dst, 1 << 20)
 
     with CostMeter(data, execution_root=exec_root) as meter:
         tagged("rest", second_pass)
     counts = meter.snapshot("rest")["counts"]
-    assert bool(rest_breaches(counts)) is walks, counts
+    assert bool(rest_breaches(counts)) is bool(walks), counts
     if walks:
-        assert counts["scandir:execution"] >= 1 and counts["open:execution"] == 1, counts
+        door = "open:execution" if walks == "copy2" else "os_open:execution"
+        assert counts["scandir:execution"] >= 1 and counts[door] == 1, counts
+        assert sum(counts.get(key, 0) for key in COPY) == 1, counts
 
 
 @pytest.mark.parametrize("by_boundary", [True, False])

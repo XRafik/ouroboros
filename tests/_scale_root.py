@@ -35,8 +35,10 @@ with no custody yet (``COMPANION_RUN``: the driver's positive companion starts i
 of ``k``: ``CLOSED_RUNS_PER_K`` closed runs that once held such evidence, ``ABSENT_OWNERS_PER_K``
 usage owners whose task row is gone (``result_absent``), ``PACKED_PER_K`` settled tasks whose
 evidence the real packer packed (sidecars, pack index), ``PLAN_ASKS_PER_K`` ended tasks with a
-plan ask still pending a seat, ``CONSCIOUSNESS_PER_K`` consciousness roots with money in the last
-24 h; and the subagent metrics cursor is ABSENT while the event chain holds every unit's suffix.
+plan ask still pending a seat, one more day of consciousness money (``CONSCIOUSNESS_PER_K`` own
+wakes and the step of a started root still at work today, through the retired usage journal the
+store imports once) while the allowance's own last-24-hours window stays CURRENT and constant;
+and the subagent metrics cursor is ABSENT while the event chain holds every unit's suffix.
 
 Run in its own interpreter with ``OUROBOROS_DATA_DIR`` set to the root (the writers that use
 the process data root then write there): ``python -m tests._scale_root ROOT K OUT.json``.
@@ -70,7 +72,8 @@ CLOSED_RUNS_PER_K = 2
 ABSENT_OWNERS_PER_K = 5
 PACKED_PER_K = 2
 PLAN_ASKS_PER_K = 2
-CONSCIOUSNESS_PER_K = 2
+CONSCIOUSNESS_PER_K = 2  # own wakes per day of history
+LONG_ROOT = "cur-long-root"  # a started root at work today whose steps reach back k days
 BODY_SIZES = (20_000, 40_000, 80_000, 200_000)
 MAIN = 1
 FOREIGN_CHATS = (MAIN, 424242, 515151)  # Main and two transport mirrors: never a project room
@@ -496,10 +499,10 @@ def _delegated(root: pathlib.Path, k: int) -> Dict[str, Any]:
 
 
 def _usage_owners(root: pathlib.Path, k: int) -> Dict[str, int]:
-    """Per unit: owners whose task row is gone (``result_absent``) and consciousness roots with money."""
+    """Per unit: owners whose task row is gone (``result_absent``), and the settled rows of the day's wakes."""
     from tests._store_shared import delete_result
 
-    absent = wakes = 0
+    absent = 0
     for unit in range(k):
         for index in range(ABSENT_OWNERS_PER_K):
             task_id = f"hist-absent-{unit}-{index}"
@@ -508,11 +511,42 @@ def _usage_owners(root: pathlib.Path, k: int) -> Dict[str, int]:
             delete_result(root, task_id)
             absent += 1
         for index in range(CONSCIOUSNESS_PER_K):
-            task_id = f"hist-wake-{unit}-{index}"
-            _settled_task(root, task_id)
-            _money(root, task_id, category="consciousness", cost=0.01)
-            wakes += 1
-    return {"absent_owners": absent, "consciousness_roots": wakes}
+            _settled_task(root, f"hist-wake-{unit}-{index}")
+    return {"absent_owners": absent}
+
+
+def _journal_rows(attempt_id: str, ts: float, root_task_id: str, task_id: str, category: str, cost: float = 0.01) -> List[dict]:
+    """One settled attempt in the retired journal format the store's one-time import reads."""
+    base = {"attempt_id": attempt_id, "kind": "attempt", "model": "test", "provider": "openai", "category": category,
+            "source": "test", "task_id": task_id, "root_task_id": root_task_id, "parent_task_id": "",
+            "ts": datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).isoformat()}
+    return [{**base, "state": "reserved", "reservation_upper_bound_usd": "1"}, {**base, "state": "dispatched"},
+            {**base, "state": "settled", "cost_usd": str(cost), "cost_final": True, "pricing_known": True}]
+
+
+def _consciousness_journal(root: pathlib.Path, k: int) -> int:
+    """Consciousness money through the retired journal the usage store imports once, when it is first
+    opened (before any money is settled on this root). CURRENT and constant: the last 24 hours — two own
+    wakes, one started root, the long-lived root's row of today. Per unit of ``k``, one day further back
+    (outside the allowance's window): ``CONSCIOUSNESS_PER_K`` own wakes and the long-lived root's step of
+    that day. The allowance read sums the window; the older days are history it must not visit."""
+    from tests._usage_store_testing import write_journal
+
+    now, day, rows, roots = time.time(), 86_400.0, [], 0
+    for wake in range(2):
+        rows += _journal_rows(f"cur-wake-{wake}", now - 3600 * (wake + 1), f"cur-wake-{wake}", f"cur-wake-{wake}", "consciousness")
+    rows += _journal_rows("cur-started", now - 7200, "cur-started", "cur-started", "consciousness_task")
+    rows += _journal_rows("cur-long-today", now - 1800, LONG_ROOT, LONG_ROOT, "consciousness_task")
+    for unit in range(k):
+        at = now - (unit + 1) * day - 3 * 3600
+        for index in range(CONSCIOUSNESS_PER_K):
+            wake = f"hist-wake-{unit}-{index}"
+            rows += _journal_rows(wake, at - 60 * index, wake, wake, "consciousness")
+            roots += 1
+        rows += _journal_rows(f"hist-long-{unit}-0", at - 10, LONG_ROOT, f"hist-long-step-{unit}", "consciousness_task")
+        rows += _journal_rows(f"hist-long-{unit}-1", at - 20, LONG_ROOT, f"hist-long-step-{unit}", "task")
+    write_journal(root, rows)
+    return roots
 
 
 def _packed(root: pathlib.Path, k: int) -> Dict[str, Any]:
@@ -587,6 +621,7 @@ def build(root: Any, k: int) -> Dict[str, Any]:
                                         encoding="utf-8")
     facts: Dict[str, Any] = {"k": k}
     steps: Dict[str, float] = {}
+    facts["consciousness_roots"] = _consciousness_journal(root, k)  # before the first money write opens the store
 
     def step(name: str, call):
         begun = time.monotonic()
