@@ -64,7 +64,7 @@ OUROBOROS_RUN_UI_SMOKE=1 OUROBOROS_EXPECT_BROWSER_ENGINES=chromium,webkit \
 
 ### Flaky and accepted tests
 
-`scripts/ci_retry.py` retries a failed test once and continues unrun tests: retry PASS is listed as FLAKY; failed again or unrun is red. ACCEPTED needs `tests/accepted_failures.json` and an open issue labelled `not-a-product-bug`. Skill/provider runs are never retried. Post-merge also runs the whole cost contract independently of affected selection (`tests/test_post_merge_workflow.py`); measure changed scale shapes against its eight-minute budget.
+`scripts/ci_retry.py` retries a failed test once and continues unrun tests: retry PASS is listed as FLAKY; failed again or unrun is red. ACCEPTED needs `tests/accepted_failures.json` and an open issue labelled `not-a-product-bug`. Skill/provider runs are never retried. Post-merge runs the whole cost contract on its own (`tests/test_post_merge_workflow.py`); new scale shapes must fit its eight minutes.
 
 ### The tiered commit and CI gates
 
