@@ -381,10 +381,6 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
 # history-sized work instead. Where today's code still does, the breach is named here with its measured
 # numbers and its remover (the Opus review, fix cycle 1); the marker flips the moment the cause is gone.
 UNRELATED_JOB_GAPS: Dict[str, str] = {
-    "ended_plan_asks": ("after one unrelated completion the job reloads every pending plan record "
-                        "(late_review_marks._collect_ended_plan_asks -> plan_record.load_plan_record; its key "
-                        "plan_collection_job.py:22-28 is the terminal-write counter): stat 171 -> 4,347, json_loads 34 -> 498, "
-                        "json_chars 174,546 -> 5,221,656 at k=1 -> k=30. Removed by lane D2a (per-candidate signatures)."),
     "evidence_packing": ("after one unrelated completion the packer's pass takes a fresh census of every task's loose "
                          "evidence (evidence_packer.run_pass; _packing_due re-arms on the terminal-write counter): stat 63 -> 237, "
                          "stat:root 30 -> 88 at k=1 -> k=30, and under the child's pass task_results/ is listed whole "
@@ -392,20 +388,13 @@ UNRELATED_JOB_GAPS: Dict[str, str] = {
                          "removes it; the packer's owner — root to assign."),
 }
 UNRELATED_DUTY_GAPS: Dict[str, str] = {
-    "abandoned_usage_reconciliation": (
-        "after one unrelated completion the usage pass re-keys on the global store revision and re-reads every absent "
-        "owner (terminal_cost_reconciliation._refresh_costs: obligations.__init__ over the owner set, usage_store.dirty_owners, "
-        "task_facts): statements 49 -> 194, json_loads 12 -> 157, json_chars 764 -> 21,575, vm_steps 1,200 -> 10,100 at "
-        "k=1 -> k=30. Removed by lane D2a (a task-arrival fact plus the money marker; absent ids in one query)."),
     "reconcile-maintenance": (
         "the drive settlement is flat after the completion (stat:headless 3 -> 3, no verdict decoded: fix cycle 1); the growth "
-        "is the child's jobs the pass's end wakes: ended_plan_asks decodes every pending plan record (json_chars 206,784 -> "
-        "5,246,998) and evidence_packing's census lists task_results/ (dir_entries:task_results 7 -> 65): statements 678 -> 2,998, "
-        "vm_steps 9,000 -> 76,000 at k=1 -> k=30. Removed with UNRELATED_JOB_GAPS (lane D2a; the packer's owner)."),
+        "is the child's evidence_packing census the pass's end wakes (dir_entries:task_results 7 -> 65). Removed with "
+        "UNRELATED_JOB_GAPS['evidence_packing']."),
     "maintenance-child": (
-        "the same two jobs after one unrelated completion (ended_plan_asks, evidence_packing): statements 579 -> 2,899, "
-        "json_chars 180,475 -> 5,220,679, vm_steps 7,700 -> 69,900, dir_entries:task_results 7 -> 65 at k=1 -> k=30. "
-        "Removed with UNRELATED_JOB_GAPS (lane D2a; the packer's owner)."),
+        "the evidence_packing census after one unrelated completion (dir_entries:task_results 7 -> 65). Removed with "
+        "UNRELATED_JOB_GAPS['evidence_packing']."),
 }
 
 
@@ -443,12 +432,7 @@ DUTY_NAMES = (*_host_duty_names(), "delegated-body")  # the dispatcher's invento
 # marker turns the known breach into a strict xfail that flips the moment the cause is gone.
 REST_LAW_GAPS: Dict[str, str] = {}
 BOUNDARIES = ("P:metrics_run", "P:metrics_review", "P:intake", "P:send", "P:allowance")
-BOUNDARY_GAPS: Dict[str, str] = {
-    "P:send": ("placing the answer's evidence lists the pack directory once and examines every sidecar name in it "
-               "(evidence_packs._sidecar_names <- _task_handles <- _placements <- _locate: one listdir of "
-               "observability/packs/, dir_entries:packs 8 -> 124 at k=1 -> k=30; the call count alone was flat). The "
-               "pack index names a task's own sidecars. Removed by lane D2b (fix cycle 1)."),
-}
+BOUNDARY_GAPS: Dict[str, str] = {}
 # The counter a duty's companion makes appear (work > rest at every size); the body's walk and copy are
 # the two execution-root counters the 22.10 control fails on at rest. A copy opens its source through
 # either door: ``io.open`` (``shutil.copy2``, the 22.10 body) or ``os.open`` (the exclusive byte copy of
