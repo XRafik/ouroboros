@@ -342,7 +342,7 @@ def test_after_its_first_pass_the_census_is_the_rows_written_terminal_since_and_
     row = maintenance_jobs.job(root, "evidence_packing")
     assert listed and sorted(set(stamped)) == [f"settled-{n}" for n in range(4)]
     assert row["census"] == row["terminal"] == packer.terminal_revision(root) and row["pending"] == []
-    assert packer.census_since(row, packer.terminal_revision(root)) == row["terminal"]
+    assert packer.census_since(row, packer.terminal_revision(root), packer.store_body(root)) == row["terminal"]
     assert maintenance.run_job(root, "evidence_packing")["state"] == "done"  # the look an unlink owes
     assert "evidence_packing" not in maintenance.due(root)
 
@@ -395,11 +395,12 @@ def test_a_position_another_body_moved_or_a_counter_that_went_back_owes_a_whole_
     maintenance.run_job(root, "evidence_packing")
     maintenance.run_job(root, "evidence_packing")
     row = maintenance_jobs.job(root, "evidence_packing")
-    counter = packer.terminal_revision(root)
-    assert packer.census_since(row, counter) == counter
-    assert packer.census_since({**row, "terminal": counter + 3, "census": counter + 3}, counter) is None  # went back
-    assert packer.census_since({**row, "pending": 1}, counter) is None  # an older body's count of unfinished work
-    assert packer.census_since({**row, "terminal": counter + 1}, counter + 1) is None  # moved alone
+    counter, body = packer.terminal_revision(root), packer.store_body(root)
+    assert packer.census_since(row, counter, body) == counter
+    assert packer.census_since({**row, "terminal": counter + 3, "census": counter + 3}, counter, body) is None  # went back
+    assert packer.census_since({**row, "pending": 1}, counter, body) is None  # an older body's count of unfinished work
+    assert packer.census_since({**row, "terminal": counter + 1}, counter + 1, body) is None  # moved alone
+    assert packer.census_since(row, counter, {"sha": "another", "at": "2026-10-23T00:00:00+00:00"}) is None  # another HEAD booted
     assert packer.owed_ids({**row, "pending": 2}) == () and packer.owed_ids({**row, "pending": ["x"]}) == ("x",)
 
     refs, _handle = _task(root, "under-an-older-body", blobs=1)
@@ -415,6 +416,64 @@ def test_a_position_another_body_moved_or_a_counter_that_went_back_owes_a_whole_
     assert packs.published_generations(root, "under-an-older-body") and not pathlib.Path(refs[0]["path"]).exists()
     row = maintenance_jobs.job(root, "evidence_packing")
     assert row["census"] == row["terminal"] and row["pending"] == []
+
+
+def test_a_terminal_write_under_another_body_that_ran_no_pass_owes_one_whole_census(root, monkeypatch):
+    """Both directions, through the real boot door. A Restore to an older body closes a task and returns
+    before that body's packer ran: its writer moves the counter without stamping ``terminal_seq`` and leaves
+    this body's row as it was, so by its own facts the row still reads addressed and the counter-keyed census
+    would skip the task for good. The position is recorded under the store's body fact
+    (``meta.last_store_body``, rewritten by a boot only when the HEAD differs): the first pass back lists the
+    folders whole once and packs the task; this body's own reboots and the completions after it stay
+    addressed (no listing, the task's stamp alone)."""
+    from ouroboros import maintenance_jobs, store_import
+
+    listed, stamped = [], []
+    _observed(monkeypatch, listed, stamped)
+    this_body, older_body = "c8dcd17f8-this-body", "9b1a974c0-older-body"
+    store_import.ensure_current_store(root, with_children=False, body_sha=this_body)  # this body's boot
+    _task(root, "first", blobs=1)
+    maintenance.run_job(root, "evidence_packing")
+    maintenance.run_job(root, "evidence_packing")  # the look an unlink owes
+    row, body = maintenance_jobs.job(root, "evidence_packing"), packer.store_body(root)
+    assert body["sha"] == this_body and row["body"] == body
+    assert packer.census_since(row, row["terminal"], body) == row["terminal"]
+    assert "evidence_packing" not in maintenance.due(root)
+
+    store_import.ensure_current_store(root, with_children=False, body_sha=this_body)  # the same body boots again
+    assert packer.store_body(root) == body, "the fact moved without a HEAD change"
+    listed.clear(), stamped.clear()
+    refs, _handle = _task(root, "later", blobs=1)
+    assert maintenance.run_job(root, "evidence_packing")["state"] == "done"
+    assert (listed, set(stamped)) == ([], {"later"}), "a reboot of the same body cost a whole census"
+    assert packs.published_generations(root, "later") and not pathlib.Path(refs[0]["path"]).exists()
+    maintenance.run_job(root, "evidence_packing")
+    assert "evidence_packing" not in maintenance.due(root)
+
+    store_import.ensure_current_store(root, with_children=False, body_sha=older_body)  # Restore: the older body boots
+    refs, _handle = _task(root, "under-the-older-body", blobs=1)
+    with store.open_store(root, write=True) as txn:  # its writer: the counter moved, the row carries no stamp
+        txn.conn.execute("UPDATE tasks SET terminal_seq=NULL WHERE task_id='under-the-older-body'")
+    store_import.ensure_current_store(root, with_children=False, body_sha=this_body)  # the update back; no pass of the older body
+    row, counter = maintenance_jobs.job(root, "evidence_packing"), packer.terminal_revision(root)
+    assert row["census"] == row["terminal"] < counter and row["pending"] == []  # by its own facts the row reads addressed
+    assert packer.census_since(row, counter, row["body"]) == row["census"]
+    assert packer.census_since(row, counter, packer.store_body(root)) is None  # not under the store's body fact
+    listed.clear(), stamped.clear()
+    assert "evidence_packing" in maintenance.due(root)
+    assert maintenance.run_job(root, "evidence_packing")["state"] == "done"
+    assert listed and "under-the-older-body" in stamped, "the older body's terminal task was never censused"
+    assert packs.published_generations(root, "under-the-older-body") and not pathlib.Path(refs[0]["path"]).exists()
+    row = maintenance_jobs.job(root, "evidence_packing")
+    assert row["body"] == packer.store_body(root) and row["census"] == row["terminal"] == counter
+    maintenance.run_job(root, "evidence_packing")
+    assert "evidence_packing" not in maintenance.due(root)
+
+    listed.clear(), stamped.clear()
+    refs, _handle = _task(root, "after", blobs=1)  # one whole census, not one per pass: addressed again
+    assert maintenance.run_job(root, "evidence_packing")["state"] == "done"
+    assert (listed, set(stamped)) == ([], {"after"}), "the census stayed whole after the fact was recorded"
+    assert packs.published_generations(root, "after") and not pathlib.Path(refs[0]["path"]).exists()
 
 
 def test_the_keep_set_covers_live_sharers_whose_rows_did_not_move(root, monkeypatch):
