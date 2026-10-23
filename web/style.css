@@ -13,8 +13,8 @@ dialog { margin: auto; }
 }
 
 /* A page laid out wider than its screen (Interface size below 100 %, theme.js) keeps its type scale: a phone's
-   text inflation would enlarge long text against the owner's size. */
-html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+   text inflation would enlarge long text against the owner's size. At 100 % the phone's own text settings stand. */
+:root[data-interface-smaller] { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
@@ -1180,14 +1180,17 @@ html[data-layout="docked"] .app-page-header[data-lead] {
     min-height: 50px;
     padding-block: 0;
 }
-/* In the macOS window the row is the window's band, so its tabs sit level with the traffic lights at every Interface
-   size: a larger size shrinks the band in CSS px, and the strip's top inset shrinks with it (at 100 % it is the 10px
-   above, once the band is shorter than a control the row grows below the band). */
+/* In the macOS window the row is the window's band, so its tabs and actions sit level with the traffic lights at every
+   Interface size: a larger size shrinks the band in CSS px, and the strip's insets shrink with it, the bottom one
+   keeping the tabs' 16px of shadow room (at 100 % they are the 10px and 26px above; once the band is shorter than a
+   control the row grows below the band). */
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-header[data-lead] {
+    --lead-inset: min(10px, max(0px, calc((var(--window-chrome-top) - var(--chrome-control-h)) / 2)));
     min-height: var(--window-chrome-top);
 }
 :root[data-window-chrome="integrated"][data-layout="docked"] .app-page-lead .app-tab-strip {
-    padding-top: min(10px, max(0px, calc((var(--window-chrome-top) - var(--chrome-control-h)) / 2)));
+    padding-top: var(--lead-inset);
+    padding-bottom: calc(16px + var(--lead-inset));
 }
 html[data-layout="docked"] .app-page-header[data-lead] > .app-page-leading { display: none; }
 html[data-layout="docked"] .app-page-header[data-lead] > .app-page-toolbar :is(.btn, button) {

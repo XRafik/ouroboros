@@ -160,6 +160,7 @@ test('the note names this surface\'s way and keys', () => {
     assert.match(sizeNote({ route: 'app' })[0], /\{zoomIn\}, \{zoomOut\} and \{reset\}/, 'the "and" is the template\'s, so it is translated');
     assert.deepEqual(sizeNote({ route: 'screen', min: 75, max: 120 })[1], { min: 75, max: 120 });
     assert.match(sizeNote({ route: 'none', reason: 'telegram' })[0], /Telegram/);
+    assert.doesNotMatch(sizeNote({ route: 'browser', touch: true })[0], /zoomIn|Ctrl|⌘/, 'a phone has no zoom keys to name');
 });
 
 function fakeBlock() {
@@ -216,12 +217,17 @@ const until = async (ok, ms = 2000) => {
 };
 
 function bootViewport({ width = 390, stored = null, honoured = true, coarse = true, relativeScale = false,
-    storage: shared = null, agent = 'phone-test' } = {}) {
+    storage: shared = null, agent = 'phone-test', slowFrames = 0 } = {}) {
+    let reports = relativeScale ? 'pinch' : 'page';  // what the visual viewport's scale is: a pinch's, or the page's
+    let pinch = 1;
     let content = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
     let layoutWidth = width;
     let writes = 0;
     let lagging = false;  // a rotation still under way: the host lays out a new meta only when it settles
     const contents = [];
+    const attrs = new Set();
+    let frames = 0;
+    let layoutAt = 0;  // a slow first layout: the frame by which the host has laid the meta out
     const storage = shared || new Map(stored ? [['ouroboros.interface-size', String(stored)]] : []);
     const meta = {
         getAttribute: () => content,
@@ -229,22 +235,29 @@ function bootViewport({ width = 390, stored = null, honoured = true, coarse = tr
             writes += 1;
             content = value;
             contents.push(value);
-            if (!lagging) layOut();
+            if (slowFrames && !layoutAt) layoutAt = frames + slowFrames;
+            else if (!lagging) layOut();
         },
     };
     // The screen shows the whole layout width at the page's scale (Chromium, WebKit); an engine that reported only a
     // pinch's own scale would make the layout width read as the screen's.
-    const visualViewport = { get width() { return layoutWidth; }, get scale() { return relativeScale ? 1 : width / layoutWidth; } };
+    const visualViewport = {
+        get width() { return pinch === 1 ? layoutWidth : Math.round(layoutWidth / pinch); },  // whole px, as iOS reports
+        get scale() { return (reports === 'pinch' ? 1 : width / layoutWidth) * pinch; },
+    };
     const props = {};
     const listeners = new Map();
     const doc = {
         querySelector: (selector) => (selector === 'meta[name="viewport"]' ? meta : null),
         querySelectorAll: () => [],
-        documentElement: { get clientWidth() { return layoutWidth; }, style: { setProperty: (k, v) => { props[k] = v; } }, dataset: {} },
+        documentElement: { get clientWidth() { return layoutWidth; }, style: { setProperty: (k, v) => { props[k] = v; } }, dataset: {},
+            toggleAttribute: (name, on) => { if (on) attrs.add(name); else attrs.delete(name); } },
         addEventListener() {}, removeEventListener() {},
     };
+    const turns = [];
     const win = {
-        matchMedia: (query) => ({ matches: query.includes('coarse') ? coarse : false, addEventListener: () => {} }),
+        matchMedia: (query) => ({ matches: query.includes('coarse') ? coarse : false,
+            addEventListener: (type, fn) => { if (query.includes('orientation')) turns.push(fn); } }),
         addEventListener: (type, fn) => listeners.set(type, fn), removeEventListener() {},
         get innerWidth() { return layoutWidth; },
         visualViewport,
@@ -253,7 +266,12 @@ function bootViewport({ width = 390, stored = null, honoured = true, coarse = tr
     const context = {
         window: win, document: doc,
         localStorage: { getItem: (k) => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
-        requestAnimationFrame: (fn) => setTimeout(fn, 0), CustomEvent: class {}, console, navigator: { userAgent: agent },
+        requestAnimationFrame: (fn) => setTimeout(() => {
+            frames += 1;
+            if (layoutAt && frames >= layoutAt) { layoutAt = -1; layOut(); }
+            fn();
+        }, 0),
+        CustomEvent: class {}, console, navigator: { userAgent: agent },
     };
     vm.runInNewContext(fs.readFileSync(new URL('../theme.js', import.meta.url), 'utf8'), context);
     const resize = (next) => {  // the screen's width changes and the window says so
@@ -266,8 +284,15 @@ function bootViewport({ width = 390, stored = null, honoured = true, coarse = tr
         layoutWidth = honoured && asked ? Number(asked[1]) : width;
     }
     const lag = (on) => { lagging = on; if (!on) { layOut(); listeners.get('resize')?.(); } };
-    return { scale: win.ouroViewportScale, content: () => content, props, storage, resize, lag, contents,
-        writes: () => writes };
+    const rotate = (next) => {  // a turn: the screen's width changes and the orientation query says so
+        width = next;
+        if (!/width=\d+/.test(content)) layoutWidth = next;
+        for (const fn of turns) fn();
+    };
+    const magnify = (factor) => { pinch = factor; listeners.get('resize')?.(); };  // a toolbar resize while pinched
+    const report = (kind) => { reports = kind; };
+    return { scale: win.ouroViewportScale, content: () => content, props, storage, resize, lag, rotate, contents, attrs,
+        magnify, report, writes: () => writes };
 }
 
 test('a phone lays the page out at another width and keeps the size the host honours', async () => {
@@ -335,6 +360,52 @@ test('a rotation keeps the size: a layout still moving is no refusal, and the pa
     assert.match(phone.content(), /^width=703, initial-scale=1.200569,/);
     assert.ok(phone.contents.slice(before).every((value) => !value.startsWith('width=device-width')), 'no flash to 100 %');
     assert.equal(phone.storage.get('ouroboros.interface-size'), '120');
+});
+
+test('a slow first layout is no refusal: the page looks once more before it gives the size up', async () => {
+    const phone = bootViewport({ width: 390, slowFrames: 3 });  // laid out on the third frame, one past the first look
+    assert.equal(await phone.scale.set(120), 'active');
+    assert.equal(phone.scale.percent, 120);
+    assert.equal(phone.storage.get('ouroboros.interface-size-refused'), undefined, 'nothing is remembered as a refusal');
+});
+
+test('a turn right after the slider is let go keeps the new choice', async () => {
+    const phone = bootViewport({ width: 390 });
+    const setting = phone.scale.set(120);
+    phone.rotate(844);  // before the 120 % write has settled
+    await setting;
+    await until(() => /^width=703,/.test(phone.content()) && phone.scale.percent === 120);
+    assert.equal(phone.storage.get('ouroboros.interface-size'), '120', 'the choice, not the size the turn found');
+    assert.match(phone.content(), /^width=703, initial-scale=1.200569,/);
+});
+
+test('only a page laid out wider than its screen turns text inflation off', async () => {
+    const phone = bootViewport({ width: 390 });
+    await phone.scale.set(80);
+    assert.ok(phone.attrs.has('data-interface-smaller'));
+    await phone.scale.set(100);
+    assert.ok(!phone.attrs.has('data-interface-smaller'), 'at 100 % the phone\'s own text settings stand');
+});
+
+test('a reading that turns out to be the layout\'s stops the watch instead of chasing it', async () => {
+    const phone = bootViewport({ width: 390 });
+    await phone.scale.set(120);  // read as the page's scale at the first size, so it is watched
+    phone.report('pinch');  // then the engine shows it reports a pinch's scale only
+    const writes = phone.writes();
+    for (let i = 0; i < 5; i += 1) phone.resize(390);
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(phone.writes(), writes, 'no write and no loop');
+    assert.equal(phone.scale.percent, 120);
+});
+
+test('a resize deep in a pinch leaves the size alone', async () => {
+    const phone = bootViewport({ width: 390 });
+    await phone.scale.set(80);  // 488 px laid out
+    const writes = phone.writes();
+    phone.magnify(488 / 80.5);  // iOS reports 81 px visible: read as a screen, 392.4 px, more than the 2 px it allows
+    await new Promise((done) => setTimeout(done, 30));
+    assert.equal(phone.writes(), writes);
+    assert.equal(phone.scale.percent, 80);
 });
 
 test('a stored size is applied before the first layout; a host that ignores the meta keeps 100 %', async () => {

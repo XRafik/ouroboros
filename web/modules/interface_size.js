@@ -69,7 +69,7 @@ export function createInterfaceSize({ win = globalThis.window, doc = globalThis.
         const topLevel = (() => { try { return win.top === win; } catch { return false; } })();
         if (shell && nativeChecked) return { route: 'none', reason: nativeKnown ? 'engine' : 'app', percent: 100 };
         if (isTelegramHost({ win, doc }) && topLevel) return { route: 'none', reason: 'telegram', percent: 100 };
-        return { route: 'browser', percent: 100 };
+        return { route: 'browser', percent: 100, touch: Boolean(win?.matchMedia?.('(pointer: coarse)')?.matches) };
     }
 
     async function readNative() {
@@ -182,6 +182,10 @@ export function sizeNote(current, { mac = false } = {}) {
     }
     if (current.reason === 'telegram') {
         return ['Telegram does not let a page change its size here. Your system’s display size setting makes everything '
+            + 'larger or smaller.', {}];
+    }
+    if (current.touch) {
+        return ['This browser keeps the page at its own size here. Your system’s display size setting makes everything '
             + 'larger or smaller.', {}];
     }
     return ['This browser sets the size of the page: {zoomIn}, {zoomOut} and {reset}.', keys];

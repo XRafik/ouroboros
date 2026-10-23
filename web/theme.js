@@ -308,8 +308,10 @@
         const scale = value === 100 ? 1 : Number((base / asked(value)).toFixed(6));
         meta.setAttribute('content', value === 100 ? original
             : `width=${asked(value)}, initial-scale=${scale}, viewport-fit=cover`);
-        // The touch field guard keeps a field's text at 16 device px whatever the size (style.css).
+        // The touch field guard keeps a field's text at 16 device px whatever the size, and a page laid out wider than
+        // its screen keeps its type scale (style.css).
         document.documentElement.style.setProperty('--interface-scale', String(scale));
+        document.documentElement.toggleAttribute?.('data-interface-smaller', value < 100);
     };
 
     /* Apply `value` %, keeping it only if the host laid the page out at the width asked for. */
@@ -320,9 +322,13 @@
         settling += 1;
         write(next);
         await frames();
+        let laidOut = next === 100 || Math.abs(width() - asked(next)) <= 2;
+        if (!laidOut && !honoured && mine === generation) {
+            await frames();  // a first miss may be a slow first layout or a turn under way: look once more
+            laidOut = Math.abs(width() - asked(next)) <= 2;
+        }
         settling -= 1;
         if (mine !== generation) return state;
-        const laidOut = next === 100 || Math.abs(width() - asked(next)) <= 2;
         if (!laidOut && !honoured) {
             write(100);
             percent = 100;
@@ -371,7 +377,11 @@
         if (state === 'unavailable' || !watching) return;
         if (state === 'pending' || settling) { recheck = true; return; }
         recheck = false;
+        // A pinch never changes the screen's width, and deep in one the reading is too coarse to trust.
+        if (Number(window.visualViewport?.width) < width() - 1) return;
         const now = shownWidth();
+        // A reading equal to the layout width at another size is the layout's, not the screen's: stop watching here.
+        if (percent !== 100 && Math.abs(now - width()) <= 2) { watching = false; return; }
         if (now && Math.abs(now - base) > 2) remeasure();
     };
 
@@ -394,7 +404,7 @@
             if (state === 'unavailable') return state;
             chosen = clamp(value);  // before the write: a new screen width read meanwhile reapplies this choice
             const next = await apply(chosen);
-            if (next === 'active') { chosen = percent; store(percent); }
+            if (next === 'active') store(chosen);  // the choice, even when a newer write took the screen first
             return next;
         },
         subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
