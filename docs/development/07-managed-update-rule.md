@@ -11,7 +11,7 @@ Managed updates rewrite the live tree under owner authority. Persist target, wri
 - The resolver stages the merge, binaries included; review needs exact staged mode/blob/size and parent ids. Missing metadata blocks.
 - Managed merge commits need a green full suite on the exact candidate (“The tiered commit and CI gates”). Non-commit resolver terminals roll back and best-effort preserve the failed-update branch; recovery requires fresh rescue. Boot holds Paused commits (`postcommit_resume`); Stop rolls back.
 - Fresh rescue precedes destructive rollback and boot re-materialization; capture failure is fail-open, durably disclosed with a transaction pointer (ARCHITECTURE §2).
-- `git_ops.host_git_env` disables optional locks/diff refresh; reads never repair. Writers retain mandatory locks/repair. Refusals retain stderr; no tree effect means not-applied, never restored.
+- `git_observation.host_git_env` prevents optional locks/index refresh; reads never repair. Writers keep mandatory locks/repair. Refusals keep stderr; no tree effect means not-applied.
 - Manual Restore fences writers, pins HEAD, never pushes, interrupts without restart handoffs. Promotion binds one development SHA for QA and push. After-update facts reach panel and mind; the host never messages the owner (`tests/test_update_generation_facts.py`).
 - Apply shows the engine transition, active work (unreadable is unknown), installed versus bundled Python/SQLite, forward-only engine data; `engine_pin_policy` also drives restart.
 - `git_bootstrap.json` needs identical clean checkout/dependency fingerprints; checkout/rollback invalidates it, successful smoke recreates it (ARCHITECTURE §2). Test zero-reset/zero-smoke repeats and change/transaction invalidation.

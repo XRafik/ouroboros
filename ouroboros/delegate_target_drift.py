@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 
 
 def _target_drift_evidence(entry: Any) -> Dict[str, Any]:
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     evidence: Dict[str, Any] = {"checked": False, "paths": [], "error": ""}
     target = pathlib.Path(str(entry.target_root or "")).resolve(strict=False)
     baseline = str(entry.baseline_sha or "").strip()

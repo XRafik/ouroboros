@@ -368,7 +368,7 @@ def record_converted_builtin(drive_root: pathlib.Path, skill: Any, legacy: Any, 
 
 def _seed_identity(repo_dir: pathlib.Path) -> Optional[Dict[str, Any]]:
     """The committed bundled tree, read without its payloads; a dirty or unknown tree stays uncached."""
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
     if not (repo_dir / ".git").exists():
         return None
     try:

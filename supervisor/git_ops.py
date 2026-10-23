@@ -17,6 +17,7 @@ from supervisor.state import (
     append_jsonl, atomic_write_text, load_state, save_state, update_state,  # noqa: F401
 )
 from ouroboros import config as _config
+from ouroboros.git_observation import host_git_env
 from ouroboros.utils import utc_now_iso  # noqa: F401
 
 log = logging.getLogger(__name__)
@@ -294,22 +295,6 @@ def _run_git_process_bounded(
     finally:
         with _subprocess_lock:
             _active_subprocesses.discard(proc)
-
-
-def host_git_env(env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """Host observations never refresh the index; mandatory writer locks still apply.
-
-    GIT_OPTIONAL_LOCKS=0 is Git's --no-optional-locks. Porcelain diff also needs
-    diff.autoRefreshIndex=false (the invocation config equivalent of -c). Append
-    it to inherited config rather than replacing the caller's Git settings.
-    """
-    result = dict(os.environ if env is None else env)
-    slot = int(result.get("GIT_CONFIG_COUNT", "0"))
-    result.update(LC_ALL="C", LANG="C", GIT_OPTIONAL_LOCKS="0",
-                  GIT_CONFIG_COUNT=str(slot + 1))
-    result[f"GIT_CONFIG_KEY_{slot}"] = "diff.autoRefreshIndex"
-    result[f"GIT_CONFIG_VALUE_{slot}"] = "false"
-    return result
 
 
 def git_capture(

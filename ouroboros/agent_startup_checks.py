@@ -351,7 +351,7 @@ def check_uncommitted_changes(env: Any) -> Tuple[dict, int]:
     A read only: it takes no optional index lock and removes none, since a lock's
     age says nothing about whether its writer is still running.
     """
-    from supervisor.git_ops import host_git_env
+    from ouroboros.git_observation import host_git_env
 
     try:
         result = subprocess.run(
