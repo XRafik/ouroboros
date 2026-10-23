@@ -22,7 +22,7 @@ import json
 import threading
 from collections import deque
 from types import SimpleNamespace
-from typing import Any, Callable, Dict
+from typing import Any, Callable, Dict, Tuple
 
 import pytest
 
@@ -35,13 +35,15 @@ K_LARGE = 30
 TAG = "answer_path"
 
 
-def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any],
-          boundary: Callable[[Any, Any], Callable[[], Any]]) -> Dict[int, Dict[str, Any]]:
+def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any], boundary: Callable[[Any, Any], Callable[[], Any]],
+          *, unlisted: Tuple[str, ...] = ()) -> Dict[int, Dict[str, Any]]:
     """Build each root, let ``boundary(root, facts)`` warm up and return the counted call; compare.
 
     Cached store connections are closed after the build, so every connection the boundary uses
     is opened under the meter and its SQL is counted (a connection opened before the meter is
-    installed carries no trace callback)."""
+    installed carries no trace callback). The meter counts a directory listing once, whatever it
+    returns, so a location in ``unlisted`` must not be listed at all: the names the call examines
+    there are its counted stats and opens, compared like every other count."""
     from ouroboros import store
 
     counted, answers = {}, {}
@@ -57,6 +59,10 @@ def _flat(tmp_path, monkeypatch, build: Callable[[Any, int], Any],
             assert not meter.join_spawned(TAG), "a thread the boundary started is still running"
         counted[k] = meter.snapshot(TAG)
         assert counted[k]["counts"].get("statements"), "the counted call ran no SQL the meter could see"
+        listed = {key: amount for key, amount in counted[k]["counts"].items()
+                  if key.split(":")[0] in ("listdir", "scandir") and key.partition(":")[2] in unlisted}
+        assert not listed, f"k={k}: the counted call listed {listed}: " + "; ".join(
+            source for source in counted[k]["callers"] if source.split(" <- ")[0] in listed)
     breaches = contract_breaches(counted[K_SMALL]["counts"], counted[K_LARGE]["counts"], K_LARGE)
     growing = sorted(((source, amount - counted[K_SMALL]["callers"].get(source, 0))
                       for source, amount in counted[K_LARGE]["callers"].items()
@@ -115,14 +121,16 @@ def _owed_answer(root, task_id):
 
 @pytest.mark.parametrize("index", ["validated", "stale", "contended", "damaged"])
 def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, monkeypatch, index):
-    """The delivering task names its own handle, so the capture reads that task's own sidecars.
+    """The delivering task names its own handle, so the capture reads that task's own sidecars,
+    found by their names: the packs directory is never listed (one listing returns every pack's
+    names), and the names the capture probes are counted and compared at both sizes.
 
-    ``validated``: the pack index was checked by this process (the quiet case even before the
-    fix); ``stale``: the packer wrote the index since (re-validation is a whole-index
-    ``quick_check``); ``contended``: the packer holds the index lock past the send's
-    acquisition slice (the 22.10 stalls: every sidecar opened and parsed); ``damaged``: the
-    cache must be rebuilt from every sidecar. The answer still reaches the chat and keeps its
-    retained receipt on both sizes."""
+    ``validated``: a whole-pack reader of this process checked the index the packer left (the
+    quiet case even before the fix: the index answers); ``stale``: the packer wrote the index
+    since (re-validation is a whole-index ``quick_check``); ``contended``: the packer holds the
+    index lock past the send's acquisition slice (the 22.10 stalls: every sidecar opened and
+    parsed); ``damaged``: the cache must be rebuilt from every sidecar. The answer still reaches
+    the chat and keeps its retained receipt on both sizes."""
     from ouroboros import evidence_packs, store
     from supervisor import events_chat_delivery
 
@@ -131,7 +139,10 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
         assert events_chat_delivery._handle_send_message(_owed_answer(root, "warm-up"), ctx)
         event = _owed_answer(root, "turn")
         holder = None
-        if index == "stale":
+        if index == "validated":
+            with evidence_packs.open_index(root):
+                pass  # a whole-pack reader of this process checked the bytes the packer left
+        elif index == "stale":
             evidence_packs._VALIDATED.clear()
         elif index == "damaged":
             (evidence_packs.packs_dir(root) / evidence_packs.INDEX_NAME).write_bytes(b"not a database")
@@ -161,24 +172,37 @@ def test_send_message_receipt_capture_is_flat_across_evidence_packs(tmp_path, mo
                     receipt["source_ref"]["path"].startswith("source_handles/context_checkpoints/"))
         return send
 
-    answers = _flat(tmp_path, monkeypatch, _packed_history, boundary)
+    answers = _flat(tmp_path, monkeypatch, _packed_history, boundary, unlisted=("packs",))
     assert answers[K_SMALL] == answers[K_LARGE] == (True, True, True)
 
 
 
 # ---- owner-message intake: the routing manifests over k-scaled task history ----------------------
 
-HISTORY_ROOTS_PER_K, HISTORY_CHILDREN_PER_K, ELSEWHERE_ROOTS_PER_K = 10, 4, 6
+HISTORY_ROOTS_PER_K, HISTORY_CHILDREN_PER_K, ELSEWHERE_ROOTS_PER_K, WAVE_CHILDREN_PER_K = 10, 4, 6, 10
 
 
 def _stored(txn, template, task_id, ts, **fields):
     txn.store_task({**template, "task_id": task_id, "ts": ts, "updated_at": ts, **fields}, pending_drive=False)
 
 
+def _wave(txn, template, unit, project=""):
+    """``WAVE_CHILDREN_PER_K`` finished subagent children newer than every current row and as many
+    dated between the current roots (``2026-09-01T00:MM:00``/``:30``): the newest-first walk meets
+    them all before its last root."""
+    for index in range(WAVE_CHILDREN_PER_K):
+        between = unit * WAVE_CHILDREN_PER_K + index
+        for name, ts in ((f"hist-{unit}-wave-{index}", f"2026-09-{3 + unit // 24:02d}T{unit % 24:02d}:{index:02d}:00+00:00"),
+                         (f"hist-{unit}-between-{index}", f"2026-09-01T00:{between % 17:02d}:{10 + between // 17:02d}+00:00")):
+            _stored(txn, template, name, ts, project_id=project, parent_task_id=f"hist-{unit}-0",
+                    root_task_id=f"hist-{unit}-0", delegation_role="subagent")
+
+
 def _task_history(root, k):
     """The same current results at every size: ``cap + 1`` newest roots and two newer children in
     Main and in the project room (one root past the cap in each). Unrelated history grows with k:
-    older Main roots and children and another project's roots, each with a 4 KB result body."""
+    older Main roots and children, another project's roots, and a finished swarm wave of an older
+    Main root (``_wave``), each with a 4 KB result body."""
     from ouroboros import store
     from ouroboros.projects_registry import create_project
     from ouroboros.runtime_limits import get_routing_manifest_result_rows
@@ -211,14 +235,16 @@ def _task_history(root, k):
             for index in range(ELSEWHERE_ROOTS_PER_K):
                 _stored(txn, template, f"hist-{unit}-elsewhere-{index}", f"{day}T03:{index:02d}:00+00:00",
                         project_id="elsewhere")
+            _wave(txn, template, unit)
     return {"room_chat_id": int(room["chat_id"])}
 
 
 @pytest.mark.parametrize("room", ["main", "project"])
 def test_owner_message_intake_reads_the_newest_roots_not_every_task(tmp_path, monkeypatch, room):
-    """The supervisor loop routes an owner message: the Main manifest walks the store's newest
-    rows until its window is full, a project room sorts only its own rows; bodies are decoded for
-    the offered rows alone. Both sizes offer the same newest roots, children never among them."""
+    """The supervisor loop routes an owner message: the Main manifest walks the store's root-only
+    index until its window is full (no child of the swarm wave is visited), a project room walks
+    its own; bodies are decoded for the offered rows alone. Both sizes offer the same newest
+    roots, children never among them."""
     from ouroboros import server_owner_routing
 
     def boundary(root, facts):
@@ -251,11 +277,74 @@ def test_owner_message_intake_reads_the_newest_roots_not_every_task(tmp_path, mo
         metadata = directed[-1]
         manifest = metadata["main_routing_manifest" if room == "main" else "project_routing_manifest"]
         manifests[k] = [row["task_id"] for row in manifest["final_results"]]
-    # Main offers every lane's roots (the room's current roots are a minute newer); a room its own.
+    # Main offers every lane's roots (the room's current roots are half a minute newer); a room its own.
     newest = sorted(((f"2026-09-01T00:{index:02d}:{30 if scope == 'room' else 0:02d}", f"cur-{scope}-{index:02d}")
                      for scope in (("main", "room") if room == "main" else ("room",)) for index in range(17)),
                     reverse=True)
     assert manifests[K_SMALL] == manifests[K_LARGE] == [task_id for _ts, task_id in newest[:16]]
+
+
+@pytest.mark.parametrize("scope", ["main", "project"])
+def test_the_newest_roots_are_walked_without_visiting_a_child(tmp_path, monkeypatch, scope):
+    """The window walks a root-only index, so ``limit`` bounds the entries read: the scope's own swarm
+    waves (children newer than every root, children dated between its roots) are never visited, in
+    Main and in a project room. Both sizes return the same newest roots."""
+    from ouroboros import store
+    from ouroboros.task_results import write_task_result
+    from ouroboros.task_store import newest_root_ids, read_document
+
+    project = "room" if scope == "project" else ""
+
+    def build(root, k):
+        write_task_result(root, "template", "completed", chat_id=1, result="r" * 4000, ts="2023-01-01T00:00:00+00:00")
+        template = read_document(root, "template")
+        with store.open_store(root, write=True) as txn:
+            for index in range(17):
+                _stored(txn, template, f"cur-{index:02d}", f"2026-09-01T00:{index:02d}:00+00:00", project_id=project)
+        for unit in range(k):
+            with store.open_store(root, write=True) as txn:
+                _stored(txn, template, f"hist-{unit}-0", f"2024-01-{1 + unit % 28:02d}T00:00:00+00:00", project_id=project)
+                _wave(txn, template, unit, project)
+        return {}
+
+    def boundary(root, _facts):
+        newest_root_ids(root, 17, project_id=project)
+        return lambda: newest_root_ids(root, 17, project_id=project)
+
+    answers = _flat(tmp_path, monkeypatch, build, boundary)
+    assert answers[K_SMALL] == answers[K_LARGE] == [f"cur-{index:02d}" for index in reversed(range(17))]
+
+
+def test_a_store_an_older_body_published_gains_the_root_windows_at_boot(tmp_path, monkeypatch):
+    """Schema 8's root-only indexes are DDL of the boot's schema step, committed with the version and
+    built once; before that step the window cannot be read (``StoreError``: the manifest says the
+    store is unreadable), never answered by walking every row. Afterwards both windows read through
+    their indexes and a room's counts stay exact."""
+    from ouroboros import store
+    from ouroboros.store_import import ensure_current_store
+    from ouroboros.task_results import write_task_result
+    from ouroboros.task_store import newest_root_ids, project_result_counts
+
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(tmp_path))
+    with monkeypatch.context() as patch:
+        patch.setattr(store, "_SCHEMA", store._SCHEMA.replace("".join(store.ROOT_WINDOWS), ""))
+        patch.setattr(store, "SCHEMA_VERSION", 7)
+        for index in range(3):
+            write_task_result(tmp_path, f"root{index}", "completed", project_id="room", ts=f"2026-09-01T00:0{index}:00Z")
+        write_task_result(tmp_path, "child", "completed", project_id="room", parent_task_id="root0",
+                          root_task_id="root0", delegation_role="subagent", ts="2026-09-02T00:00:00Z")
+    store.close_connections(store.store_path(tmp_path))
+    names = "SELECT name FROM sqlite_master WHERE name IN ('tasks_root_ts', 'tasks_project_root_ts')"
+    with store.open_store(tmp_path, write=False) as txn:
+        assert txn.meta("schema_version") == 7 and not txn.conn.execute(names).fetchall()
+    with pytest.raises(store.StoreError, match="no such index"):
+        newest_root_ids(tmp_path, 2)
+    ensure_current_store(tmp_path)  # the boot's schema step
+    with store.open_store(tmp_path, write=False) as txn:
+        assert txn.meta("schema_version") == store.SCHEMA_VERSION == 8
+        assert sorted(row[0] for row in txn.conn.execute(names)) == ["tasks_project_root_ts", "tasks_root_ts"]
+    assert newest_root_ids(tmp_path, 2) == newest_root_ids(tmp_path, 2, project_id="room") == ["root2", "root1"]
+    assert project_result_counts(tmp_path, "room") == (3, 1)
 
 
 def _spy_sidecars(monkeypatch):
@@ -294,6 +383,28 @@ def test_a_task_handle_is_answered_by_its_own_sidecars_only(tmp_path, monkeypatc
     (packs.packs_dir(tmp_path) / packs.INDEX_NAME).unlink()  # no cache that could still vouch for it
     with pytest.raises(packs.SidecarCorrupt, match="evidence_corrupt"):
         packs.handle_bytes(tmp_path, "a", handles["a"]["path"])
+
+
+def test_a_torn_generation_does_not_hide_the_next_one(tmp_path, monkeypatch):
+    """A task's sidecars are probed by name, generation after generation: a pack published without
+    its sidecar (a crash between the two) still occupies its generation, the packer moves past it,
+    and so does the probe; the first generation holding neither name ends the task."""
+    from ouroboros import evidence_packer, evidence_packs as packs
+    from ouroboros.artifacts import store_actor_source_bytes, task_artifact_dir_path
+    from tests.test_evidence_packs import _task
+
+    monkeypatch.setenv("OUROBOROS_DATA_DIR", str(tmp_path))
+    _refs, first = _task(tmp_path, "torn", blobs=1)
+    assert evidence_packer.run_pass(tmp_path)["faults"] == 0
+    (packs.packs_dir(tmp_path) / packs.pack_name("torn", 2)).write_bytes(b"a pack whose sidecar never landed")
+    later = store_actor_source_bytes(tmp_path, "torn", category="context_checkpoints", source_id="focus_source_later",
+                                     data=b"# later focus\n", extension="md")
+    assert evidence_packer.run_pass(tmp_path)["packed"] == 1
+    assert not (task_artifact_dir_path(tmp_path, "torn") / later["path"]).exists()  # only its pack holds it now
+    assert packs._task_sidecar_names(tmp_path, "torn") == {"torn.members.json", "torn.3.members.json"}
+    packs._VALIDATED.clear()  # nothing validated the cache in this process: the sidecars answer
+    assert packs.handle_bytes(tmp_path, "torn", later["path"]) == b"# later focus\n"
+    assert packs.packed_handle_names(tmp_path, "torn") == sorted(ref["path"].rsplit("/", 1)[-1] for ref in (first, later))
 
 
 @pytest.mark.parametrize("index", ["valid", "absent"])

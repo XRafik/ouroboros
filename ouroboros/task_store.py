@@ -248,17 +248,19 @@ def newest_ids(root: Any, limit: Optional[int] = None, *, where: str = "", param
                 txn.conn.execute(f"SELECT task_id FROM tasks {clause}{_NEWEST_ORDER}{bound}", tuple(params))]
 
 
-ROOT_RESULT_WHERE = "parent_task_id IS NULL AND (delegation_role IS NULL OR delegation_role != 'subagent')"
+ROOT_RESULT_WHERE = store.ROOT_RESULT_WHERE
 
 
 def newest_root_ids(root: Any, limit: Optional[int] = None, *, project_id: str = "") -> List[str]:
-    """Root task ids (``ROOT_RESULT_WHERE``) newest first, read through the index that keeps the
-    read addressed: one project sorts only its own rows (``tasks_project``); the whole store walks
-    ``tasks_ts`` newest first and stops at ``limit``. Unpinned, the planner reads every root
-    through ``tasks_parent`` and sorts them all."""
+    """Root task ids (``ROOT_RESULT_WHERE``) newest first, walked in the root-only index of that
+    order (``store.ROOT_WINDOWS``: one project's ``tasks_project_root_ts``, the whole
+    store's ``tasks_root_ts``), so ``limit`` bounds the entries read: no child is visited, however
+    many are newer than the roots or between them. Unpinned, the planner reads every root through
+    ``tasks_parent`` and sorts them all."""
     if not project_id and limit is None:
         raise ValueError("the whole store's newest roots need a limit")
-    index, scope, params = ("tasks_project", "project_id=? AND ", (project_id,)) if project_id else ("tasks_ts", "", ())
+    index, scope, params = (("tasks_project_root_ts", "project_id=? AND ", (project_id,)) if project_id
+                            else ("tasks_root_ts", "", ()))
     bound = "" if limit is None else f" LIMIT {int(limit)}"
     with open_store(root, write=False) as txn:
         return [record["task_id"] for record in txn.conn.execute(
@@ -266,12 +268,14 @@ def newest_root_ids(root: Any, limit: Optional[int] = None, *, project_id: str =
 
 
 def project_result_counts(root: Any, project_id: str) -> Tuple[int, int]:
-    """``(roots, children)`` among one project's results, counted over its own index without a body."""
+    """``(roots, children)`` among one project's results, counted without a body: its roots over
+    its root index, all its rows over ``tasks_project`` alone (a child's table row is never read)."""
     with open_store(root, write=False) as txn:
-        record = txn.conn.execute(
-            f"SELECT COUNT(*) AS results, COALESCE(SUM({ROOT_RESULT_WHERE}), 0) AS roots "
-            "FROM tasks INDEXED BY tasks_project WHERE project_id=?", (project_id,)).fetchone()
-    return int(record["roots"]), int(record["results"]) - int(record["roots"])
+        roots = txn.conn.execute(f"SELECT COUNT(*) FROM tasks INDEXED BY tasks_project_root_ts WHERE project_id=? "
+                                 f"AND {ROOT_RESULT_WHERE}", (project_id,)).fetchone()[0]
+        results = txn.conn.execute("SELECT COUNT(*) FROM tasks INDEXED BY tasks_project WHERE project_id=?",
+                                   (project_id,)).fetchone()[0]
+    return int(roots), int(results) - int(roots)
 
 
 def documents_by_ids(root: Any, task_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:

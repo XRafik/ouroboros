@@ -34,7 +34,7 @@ LOCK_NAME = "current.lock"  # the name-tier lock around every access
 IMPORT_LOCK_NAME = "current_import.lock"
 GENERATION = 8  # the lifecycle generation that owns the store
 GENERATION_KEY = "current_store_generation"  # in state/migrations.json
-SCHEMA_VERSION = 7  # 2: owner questions; 3: acceptance; 4: plans; 5: retention; 6: hot facts; 7: task cards
+SCHEMA_VERSION = 8  # 2: owner questions; 3: acceptance; 4: plans; 5: retention; 6: hot facts; 7: task cards; 8: root windows
 STORE_WAIT_SEC = 10.0
 JOURNAL_SIZE_LIMIT = 64 << 20  # retain at most 64 MiB of an idle rollback journal (PERSISTENCE.md: what it bounds)
 TIER_ENFORCED, TIER_NAME = "enforced", "name"
@@ -61,6 +61,9 @@ REVIEW_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_review_collection O
                            "WHERE review_collection_pending IS NULL OR review_collection_pending=1;")
 PLAN_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_plan_collection ON tasks(plan_collection_pending, task_id) "
                          "WHERE plan_collection_pending IS NULL OR plan_collection_pending=1;")
+ROOT_RESULT_WHERE = "parent_task_id IS NULL AND (delegation_role IS NULL OR delegation_role != 'subagent')"
+ROOT_WINDOWS = tuple(f"CREATE INDEX IF NOT EXISTS {name} ON tasks({key}) WHERE {ROOT_RESULT_WHERE};\n" for name, key in
+                     (("tasks_root_ts", "ts, task_id"), ("tasks_project_root_ts", "project_id, ts, task_id")))
 _SCHEMA = """
 CREATE TABLE tasks (
   task_id TEXT PRIMARY KEY, status TEXT, parent_task_id TEXT, root_task_id TEXT, delegation_role TEXT,
@@ -89,7 +92,7 @@ CREATE INDEX custody_invocation ON custody_runs(invocation_id) WHERE invocation_
 CREATE TABLE custody_outbox (event_id TEXT PRIMARY KEY, run_id TEXT, task_id TEXT, event TEXT NOT NULL, created_at TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """ + REVIEW_COLLECTION_INDEX + PLAN_COLLECTION_INDEX + "".join(f"CREATE INDEX tasks_{column} ON tasks({column}) WHERE {column}=1;\n"
-              for column in FLAG_COLUMNS.values()) + store_task_cards.SCHEMA + store_hot_facts.SCHEMA
+    for column in FLAG_COLUMNS.values()) + "".join(ROOT_WINDOWS) + store_task_cards.SCHEMA + store_hot_facts.SCHEMA
 
 
 class StoreError(RuntimeError):
