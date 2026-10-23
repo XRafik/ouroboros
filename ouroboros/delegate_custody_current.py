@@ -380,9 +380,8 @@ def publish(root, event: Dict[str, Any], *, propagate_contention: bool = False) 
     owed = ""
     from ouroboros.delegate_custody import START_REQUESTED
     from ouroboros.delegate_pending import pending_invocations
-    # Capture the one request before the transaction. Future inventories read only
-    # this projection; STARTED/refusal removes it together with the open identity.
-    pending = pending_invocations(root, [event]) if event.get("type") == START_REQUESTED else None
+    # Keep the canonical reference, never a replay-authorizing copy of its body.
+    pending = pending_invocations(root, [event], materialize=False) if event.get("type") == START_REQUESTED else None
     try:
         while True:
             with store.open_store(root, write=True) as txn:
