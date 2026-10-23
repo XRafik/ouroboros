@@ -41,7 +41,7 @@ def private_directory(path, anchor):
             raise OSError(f"evidence parent is not a private directory: {directory}")
 
 
-def saved_named_evidence(root, entry):
+def saved_named_evidence(root, entry, *, observe=True):
     home = custody.delegated_capture_dir(root, entry.task_id, custody.capture_key(entry))
     name = str(entry.named_evidence.get("directory") or "evidence")
     # Only the writer's local directory name is accepted, never a stored absolute parent.
@@ -52,14 +52,16 @@ def saved_named_evidence(root, entry):
         saved = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         saved = {}
-    if not saved and entry.named_evidence and entry.named_evidence.get("status") != "unreadable":
+    if not isinstance(saved, dict):
+        saved = {}
+    if observe and not saved and entry.named_evidence and entry.named_evidence.get("status") != "unreadable":
         # A consumer discovered a lost receipt, a new physical fact. It requests no
         # recapture itself; the body's ordinary due rule sees the changed custody.
         outcome = {**entry.named_evidence, "status": "unreadable"}
         custody.emit(root, custody.NAMED_EVIDENCE_RETAINED,
                      {"run_id": entry.run_id, "task_id": entry.task_id, "outcome": outcome})
         entry.named_evidence = outcome
-    return path, saved if isinstance(saved, dict) else {}
+    return path, saved
 
 
 def prune_abandoned_generations(home):
@@ -69,10 +71,17 @@ def prune_abandoned_generations(home):
     cleanup needs no chmod. A busy handle leaves staging for the next addressed capture.
     """
     for path in pathlib.Path(home).glob(".evidence-*.pending"):
-        if linked(path):
-            path.unlink()
-        else:
-            shutil.rmtree(path, ignore_errors=True)
+        try:
+            if linked(path):
+                # A junction is a directory reparse point: unlink refuses it on Windows.
+                if stat.S_ISDIR(path.lstat().st_mode):
+                    path.rmdir()
+                else:
+                    path.unlink()
+            else:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            pass  # A contended orphan never blocks publication of a fresh generation.
 
 
 def _publish(root, entry, name, summary):
@@ -101,7 +110,7 @@ def _selection(entry, area, whole):
     return {path.relative_to(prefix).as_posix() for path in paths if path.is_relative_to(prefix)}
 
 
-def retain_named(root, entry, *, whole=False, recapture=False, reread=False):
+def retain_named(root, entry, *, whole=False, recapture=False, reread=False, publish=True):
     """Observe inputs on an addressed request; reuse partial as well as complete receipts.
 
     No BodyRuntime tick calls the witness walker. A new terminal observation, explicit
@@ -111,7 +120,7 @@ def retain_named(root, entry, *, whole=False, recapture=False, reread=False):
 
     root = pathlib.Path(root).resolve()
     home = custody.delegated_capture_dir(root, entry.task_id, custody.capture_key(entry))
-    previous, known = saved_named_evidence(root, entry)
+    previous, known = saved_named_evidence(root, entry, observe=publish)
     area = pathlib.Path(str(entry.execution_root or ""))
     if reread or not entry.execution_root or not area.is_dir():
         return known or {"status": "copy_missing", "files": [], "gaps": []}
@@ -127,7 +136,8 @@ def retain_named(root, entry, *, whole=False, recapture=False, reread=False):
     except Exception as exc:
         error = exc
     if not recapture and error is None and known.get("inputs") == source:
-        _publish(root, entry, previous.parent.name, known)
+        if publish:
+            _publish(root, entry, previous.parent.name, known)
         return known
     private_directory(home, root)
     prune_abandoned_generations(home)
@@ -153,14 +163,15 @@ def retain_named(root, entry, *, whole=False, recapture=False, reread=False):
     try:
         atomic_write_json(staging / "summary.json", summary)
         staging.rename(final)  # only a never-published, unique destination
-        _publish(root, entry, name, summary)
+        if publish:
+            _publish(root, entry, name, summary)
         return summary
     finally:
         if staging.exists():
             shutil.rmtree(staging, ignore_errors=True)
 
 
-def run_named_evidence(root, entry, *, recapture=False):
+def run_named_evidence(root, entry, *, recapture=False, publish=True):
     from ouroboros.delegate_directory import is_directory_run
     from ouroboros.delegate_registration_policy import candidate_apply_possible
 
@@ -168,4 +179,4 @@ def run_named_evidence(root, entry, *, recapture=False):
             or entry.authority_source == "skill_payload"):
         return {}
     return retain_named(root, entry, whole=candidate_apply_possible(entry), recapture=recapture,
-                        reread=bool(entry.patch_disposed or entry.superseded_by))
+                        reread=bool(entry.patch_disposed or entry.superseded_by), publish=publish)

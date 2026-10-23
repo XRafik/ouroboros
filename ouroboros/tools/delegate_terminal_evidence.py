@@ -552,7 +552,7 @@ def _delivered_terminal_payload(ctx: ToolContext, run_id: str, detail: Dict[str,
 def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
     """Join the body collection; deliver retained output independently of other duties."""
     from ouroboros import delegate_custody as custody
-    from ouroboros.delegate_collection import collect_terminal, observe_run, retained_payload, capture_projection
+    from ouroboros.delegate_collection import collect_terminal, observe_run, retained_payload, capture_projection, body_runtime
     from ouroboros.delegate_custody_current import run
 
     root = custody.custody_root(ctx)
@@ -586,7 +586,7 @@ def collect_and_deliver_terminal(ctx, rid, detail, authority, entry, gateway):
     if retained_payload(root, fresh) is None:
         collection = collect_terminal(root, rid, gateway=gateway,
                                       staging_task_id=str(getattr(ctx, "task_id", "") or ""),
-                                      output_authority=authority)
+                                      output_authority=authority, background=body_runtime(root) is not None)
     else:
         collection = {"status": "pending" if not fresh.settled else "retained",
                       "reason": "available_output"}

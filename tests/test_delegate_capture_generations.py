@@ -1,7 +1,7 @@
 """An unchanged partial receipt is debt, not permission for another filesystem pass.
 
 Drive the real tick, keep its driver alive but parked, and join every submitted future.
-Count source scandirs and copies, including worker work; a per-tick source lexists or
+Count source stats, scandirs and copies, including worker work; a per-tick source lexists or
 witness walk would violate this law even if the saved summary were never decoded.
 """
 from __future__ import annotations
@@ -13,6 +13,8 @@ import shutil
 import stat
 
 import pytest
+
+from tests._delegate_capture_child import capture_child  # noqa: F401
 
 from ouroboros import delegate_collection as body, delegate_custody as c, delegate_custody_current as current
 from ouroboros import delegate_named_evidence as named, review_checking as checking
@@ -44,8 +46,8 @@ def test_clock_advanced_partial_is_quiet_but_changed_terminal_and_explicit_captu
     runtime, clock, tick = driven_runtime
     entry, area = _captured(tmp_path, monkeypatch, partial=True)
     assert current.collection_pending(entry) and not collection_due(entry, generation=runtime.runtime_id)
-    copies, walks, submissions = [], [], []
-    copy, scan, submit = shutil.copyfileobj, os.scandir, runtime.collectors.submit
+    copies, walks, probes, submissions = [], [], [], []
+    copy, scan, submit = shutil.copyfileobj, os.scandir, runtime.observers.submit
     def counted_copy(*args, **kwargs):
         copies.append(True)
         return copy(*args, **kwargs)
@@ -56,27 +58,35 @@ def test_clock_advanced_partial_is_quiet_but_changed_terminal_and_explicit_captu
     def submitted(*args, **kwargs):
         submissions.append(args)
         return submit(*args, **kwargs)
+    def counted_probe(operation):
+        def probe(path, *args, **kwargs):
+            if str(path).startswith(str(area)):
+                probes.append(str(path))
+            return operation(path, *args, **kwargs)
+        return probe
     monkeypatch.setattr(shutil, "copyfileobj", counted_copy)
     monkeypatch.setattr(os, "scandir", counted_scan)
-    monkeypatch.setattr(runtime.collectors, "submit", submitted)
+    monkeypatch.setattr(os, "stat", counted_probe(os.stat))
+    monkeypatch.setattr(os, "lstat", counted_probe(os.lstat))
+    monkeypatch.setattr(runtime.observers, "submit", submitted)
     for moment in (100, 10000):
         clock[0] = moment
         tick()
-    assert not submissions and not walks and not copies
+    assert not submissions and not walks and not copies and not probes
     first = body.saved_named_evidence(tmp_path, entry)[0]
     first_bytes = first.read_bytes()
     assert body.observe_run(tmp_path, entry, terminal(entry.run_id, "changed source", seq=8))
     tick()
-    assert len(submissions) == 1 and walks and copies
+    assert len(submissions) == 2 and walks and copies
     assert first.read_bytes() == first_bytes
-    walks.clear(); copies.clear(); submissions.clear()
+    walks.clear(); copies.clear(); probes.clear(); submissions.clear()
     runtime.request(entry.run_id)
     tick()
-    assert len(submissions) == 1 and walks and copies
-    walks.clear(); copies.clear(); submissions.clear()
+    assert len(submissions) == 2 and walks and copies
+    walks.clear(); copies.clear(); probes.clear(); submissions.clear()
     clock[0] += 10000
     tick()
-    assert not submissions and not walks and not copies
+    assert not submissions and not walks and not copies and not probes
 
 
 @pytest.mark.parametrize("destination", ["readonly", "hardlink", "symlink", "parent_symlink"])
@@ -103,6 +113,7 @@ def test_changed_evidence_never_writes_through_old_destinations(tmp_path, monkey
         old_file.parent.symlink_to(outside, target_is_directory=True)
     before = victim.stat()
     source = area / checking.EVIDENCE_DIRNAME / "result.bin"
+    source.chmod(0o644)  # Windows also denies unlinking a read-only source fixture.
     source.unlink()
     source.write_bytes(b"new content")
     with monkeypatch.context() as patch:
@@ -137,15 +148,19 @@ def test_partial_investigation_reuses_its_receipt_and_changed_input_finishes(tmp
     assert json.loads((pathlib.Path(first["evidence_dir"]) / "summary.json").read_text(encoding="utf-8")) == first
 
 
-@pytest.mark.parametrize("damage", ["missing", "unreadable"])
+@pytest.mark.parametrize("damage", ["missing", "unreadable", "wrong_type"])
 def test_a_missing_or_unreadable_receipt_is_a_new_fact(tmp_path, monkeypatch, damage, driven_runtime):  # noqa: F811
     runtime, clock, tick = driven_runtime
     entry, area = _captured(tmp_path, monkeypatch)
+    runtime.request(entry.run_id)
+    tick()  # Exercise loss after a child result has already been accepted, too.
+    entry = current.run(tmp_path, entry.run_id)
+    assert entry.capture_job["state"] == "consumed"
     receipt, _ = body.saved_named_evidence(tmp_path, entry)
     if damage == "missing":
         receipt.unlink()
     else:
-        receipt.write_text("{broken", encoding="utf-8")
+        receipt.write_text("[1]" if damage == "wrong_type" else "{broken", encoding="utf-8")
     assert not body.saved_named_evidence(tmp_path, entry)[1]
     assert collection_due(current.run(tmp_path, entry.run_id), generation=runtime.runtime_id)
     tick()
@@ -188,11 +203,15 @@ def test_transient_capture_retries_once_in_the_next_generation(tmp_path, monkeyp
     assert not collection_due(fresh, generation="three") and area.is_dir()
 
 
-def test_unpublished_staging_has_a_remover_but_published_receipts_survive(tmp_path, monkeypatch):
+@pytest.mark.parametrize("staging", ["directory", "linked_receipt"])
+def test_unpublished_staging_has_a_remover_but_published_receipts_survive(tmp_path, monkeypatch, staging):
     entry, _ = _captured(tmp_path, monkeypatch)
     receipt, _ = body.saved_named_evidence(tmp_path, entry)
     abandoned = receipt.parent.parent / ".evidence-interrupted.pending"
-    abandoned.mkdir()
-    (abandoned / "bytes").write_bytes(b"incomplete")
+    if staging == "directory":
+        abandoned.mkdir()
+        (abandoned / "bytes").write_bytes(b"incomplete")
+    else:
+        abandoned.symlink_to(receipt.parent, target_is_directory=True)
     named.run_named_evidence(tmp_path, entry, recapture=True)
     assert not abandoned.exists() and receipt.is_file()

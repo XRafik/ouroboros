@@ -9,6 +9,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests._delegate_capture_child import capture_child  # noqa: F401
+
 from ouroboros import delegate_collection as body, delegate_custody as custody, delegate_custody_current as current
 from ouroboros.tools.delegate_terminal_evidence import collect_and_deliver_terminal
 from ouroboros.tools.registry import ToolContext
@@ -234,7 +236,7 @@ def test_owned_unrecorded_start_delivers_exact_terminal_instead_of_renewing_fore
 
 
 @pytest.fixture
-def driven_runtime(tmp_path, monkeypatch):
+def driven_runtime(tmp_path, monkeypatch, capture_child):  # noqa: F811
     """Keep the real driver parked while exercising its real tick and physical jobs on a controlled clock."""
     release, entered = threading.Event(), threading.Event()
     tick = body.BodyRuntime.tick
@@ -255,6 +257,10 @@ def driven_runtime(tmp_path, monkeypatch):
             jobs = list(runtime.collections.values()) + list(runtime.reads.values())
         for job in jobs:
             job.result(timeout=5)
+        if capture_child.drain(tmp_path):
+            tick(runtime)  # server publishes the child's result under its fresh owner check
+            for future in list(runtime.collections.values()):
+                future.result(timeout=5)
     try:
         yield runtime, clock, step
     finally:

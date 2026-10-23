@@ -251,7 +251,11 @@ def _setup_job(name, data, monkeypatch):
     from ouroboros import store_import
     from ouroboros.task_results import write_task_result
 
-    if name == "legacy_reconcile":
+    if name == "delegate_capture":
+        from tests.test_delegate_capture_child import _queued
+
+        assert _queued(data.parent, monkeypatch)[0] == data
+    elif name == "legacy_reconcile":
         monkeypatch.setattr(store_import, "run_legacy_reconcile", lambda root, **kw: maintenance_jobs.record(
             root, "legacy_reconcile", state="done", done=1), raising=False)
         maintenance_jobs.record(data, "legacy_reconcile", state="pending")

@@ -34,7 +34,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from ouroboros import maintenance_jobs, store
+from ouroboros import delegate_capture_job, maintenance_jobs, store
 from ouroboros.startup_historical_audit import _REPORT_BYTES, finish_maintenance_job, spawn_maintenance_job
 
 log = logging.getLogger(__name__)
@@ -290,6 +290,8 @@ def _hot_facts_run(root: pathlib.Path, should_stop: Callable[[], bool]) -> Dict[
 # order. ``child`` is False for the server's look: a job may then decline to be a reason to spawn
 # (it still runs whenever the child runs for another reason).
 JOBS: Dict[str, tuple] = {
+    # Captures already addressed by the server must not queue behind a history import.
+    "delegate_capture": (delegate_capture_job.due, delegate_capture_job.run),
     # Before the archive import: the drives it reconciles can leave dialogue work, which the import
     # then finishes in the same pass (the next pass rests; tests/test_cost_contract.py B6).
     "legacy_reconcile": (_legacy_due, _legacy_run),

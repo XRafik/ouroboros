@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import pathlib
 import subprocess
 from contextlib import ExitStack
@@ -274,17 +273,18 @@ def _dispose_delegated(drive: Any, entry: Any, snapshot_key: str, reason: str,
     return True, note
 
 
-def retain_run_evidence(drive: Any, entry: Any, block: Dict[str, Any], gateway: Any = None, *, recapture=False) -> Dict[str, Any]:
+def retain_run_evidence(drive: Any, entry: Any, block: Dict[str, Any], gateway: Any = None, *, recapture=False, named=None) -> Dict[str, Any]:
     """Retention disposes investigations; candidates await owner apply/reject after named evidence."""
     from ouroboros.delegate_registration_policy import candidate_apply_possible
 
     if not candidate_apply_possible(entry):
-        return retain_investigation_evidence(drive, entry, block, gateway, recapture=recapture)
-    named = run_named_evidence(drive, entry, recapture=recapture) if block.get("status") in _READY_CAPTURE_STATUSES else {}
+        return retain_investigation_evidence(drive, entry, block, gateway, recapture=recapture, named=named)
+    if named is None:
+        named = run_named_evidence(drive, entry, recapture=recapture) if block.get("status") in _READY_CAPTURE_STATUSES else {}
     return {**block, "named_evidence": named} if named else block
 
 
-def retain_investigation_evidence(drive: Any, entry: Any, block: Dict[str, Any], gateway: Any = None, *, recapture=False) -> Dict[str, Any]:
+def retain_investigation_evidence(drive: Any, entry: Any, block: Dict[str, Any], gateway: Any = None, *, recapture=False, named=None) -> Dict[str, Any]:
     """A ready investigation's capture IS its disposition (#1609), never applied.
     Patch/file outputs stay in the capture directory; Git named evidence is retained first.
     Gaps keep the copy undisposed. The one dispose writer records evidence_retained before
@@ -302,7 +302,8 @@ def retain_investigation_evidence(drive: Any, entry: Any, block: Dict[str, Any],
         return block
     retained_note = INVESTIGATION_NOTE
     directory = str(block.get("capture_kind") or "") == "engine_directory"
-    named = {} if directory else _retain_named_evidence(drive, entry, reread=bool(entry.patch_disposed), recapture=recapture)
+    if named is None:
+        named = {} if directory else _retain_named_evidence(drive, entry, reread=bool(entry.patch_disposed), recapture=recapture)
     shown = {**block, **({"named_evidence": named} if named else {})}
     if entry.patch_disposed:
         return {**shown, "disposition": custody.EVIDENCE_RETAINED, "note": retained_note}

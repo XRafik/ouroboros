@@ -77,6 +77,7 @@ TERMINAL_ACKNOWLEDGED = "delegate_run_terminal_acknowledged"
 PATCH_CAPTURED = "delegate_run_patch_captured"
 NAMED_EVIDENCE_RETAINED = "delegate_run_named_evidence_retained"
 COLLECTION_ATTEMPTED = "delegate_run_collection_attempted"
+CAPTURE_JOB_CHANGED = "delegate_run_capture_job_changed"
 PATCH_DISPOSED = "delegate_run_patch_disposed"
 # Not a row: the replayed disposition of a run whose snapshot a successor's STARTED
 # row took over (``_supersede``); its work rides the successor's cumulative capture.
@@ -157,6 +158,7 @@ class RunCustody:
     terminal_source: Dict[str, Any] = field(default_factory=dict)
     named_evidence: Dict[str, Any] = field(default_factory=dict)
     collection_attempt: Dict[str, Any] = field(default_factory=dict)
+    capture_job: Dict[str, Any] = field(default_factory=dict)
     observation_seq: int = -1
     interaction_source: Dict[str, Any] = field(default_factory=dict)
     pending_interaction_ids: List[str] = field(default_factory=list)
@@ -490,7 +492,7 @@ def _merge_started_into(entry: RunCustody, previous: RunCustody) -> None:
     if previous.containment_fault:
         entry.containment_fault = dict(previous.containment_fault)
     for attr in ("terminal_source", "observation_seq", "interaction_source", "pending_interaction_ids",
-                 "output_terminal_sha", "named_evidence", "collection_attempt"):
+                 "output_terminal_sha", "named_evidence", "collection_attempt", "capture_job"):
         setattr(entry, attr, copy.deepcopy(getattr(previous, attr)))
     entry.output_reader_receipts = previous.output_reader_receipts
     entry.daemon_store_id = previous.daemon_store_id or entry.daemon_store_id
@@ -647,6 +649,9 @@ def _apply(state: Dict[str, RunCustody], row: Dict[str, Any]) -> None:
         if isinstance(row.get("outcome"), dict):
             setattr(custody, "named_evidence" if kind == NAMED_EVIDENCE_RETAINED else "collection_attempt",
                     copy.deepcopy(row["outcome"]))
+    elif (kind == CAPTURE_JOB_CHANGED and isinstance(row.get("outcome"), dict)
+          and row.get("expected_id") == custody.capture_job.get("id", "")):
+        custody.capture_job = copy.deepcopy(row["outcome"])
     elif kind == PATCH_APPLY_STARTED:
         custody.patch_apply_pending = True
         custody.patch_apply_key = str(row.get("apply_idempotency_key") or "")

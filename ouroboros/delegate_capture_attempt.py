@@ -32,6 +32,7 @@ def inputs(entry):
         "terminal_sha": entry.terminal_source.get("sha256"), "policy": POLICY,
         "named_source": copy.deepcopy(entry.named_evidence.get("inputs") or {}),
         "named_status": entry.named_evidence.get("status"),
+        "capture_job": {key: entry.capture_job.get(key) for key in ("id", "state")},
         "output_sha": entry.output_sha, "output_complete": entry.output_complete,
         "output_terminal_sha": entry.output_terminal_sha, "patch_captured": entry.patch_captured,
         "patch_disposed": entry.patch_disposed, "ledger_recorded": entry.ledger_recorded, "settled": entry.settled}
