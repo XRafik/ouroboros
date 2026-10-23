@@ -153,6 +153,7 @@ D20 = "Presence"
 "ouroboros/claudexor_exit_facts.py" = "D07"
 "ouroboros/claudexor_runtime.py" = "D07"
 "ouroboros/claudexor_runtime_retention.py" = "D07"
+"ouroboros/engine_pin_policy.py" = "D07"  # one engine pin rule shared by update preflight and restart
 "ouroboros/claudexor_startup_failure.py" = "D07"
 "ouroboros/cli.py" = "D18"
 "ouroboros/client_surface.py" = "D11"
@@ -183,6 +184,7 @@ D20 = "Presence"
 "ouroboros/chronicle_store.py" = "D15"
 "ouroboros/chronicle_import.py" = "D15"
 "ouroboros/late_review_marks.py" = "D15"  # late reviewer feedback kept in view as a host mark in its owning room
+"ouroboros/plan_collection_job.py" = "D15"
 "ouroboros/consolidator.py" = "D15"
 "ouroboros/knowledge.py" = "D15"
 "ouroboros/memory_publication.py" = "D15"
@@ -802,6 +804,9 @@ D20 = "Presence"
 "ouroboros/ui_translation.py" = "D12"
 "ouroboros/update_channels.py" = "D12"
 "ouroboros/update_letter.py" = "D12"
+"ouroboros/update_qualification.py" = "D12"
+"ouroboros/update_generation_facts.py" = "D12"
+"ouroboros/update_impact.py" = "D12"
 "ouroboros/usage_accounting.py" = "D16"
 "ouroboros/usage_origin.py" = "D16"
 "ouroboros/usage_admission.py" = "D16"
@@ -830,6 +835,7 @@ D20 = "Presence"
 "ouroboros/server_boot.py" = "D11"
 "ouroboros/server_maintenance.py" = "D11"
 "ouroboros/maintenance.py" = "D11"
+"ouroboros/maintenance_retirement.py" = "D11"
 "ouroboros/terminal_cost_reconciliation.py" = "D11"
 "ouroboros/server_owner_routing.py" = "D11"
 "ouroboros/server_process.py" = "D11"
@@ -1245,6 +1251,7 @@ lazy_only = [
   "D15->D08",
   "D15->D09",
   "D15->D10",
+  "D15->D11",
   "D15->D13",
   "D15->D20",
   "D16->D01",
@@ -1258,6 +1265,7 @@ lazy_only = [
   "D17->D02",
   "D17->D07",
   "D17->D09",
+  "D17->D10",
   "D17->D13",
   "D17->D20",
   "D18->D01",

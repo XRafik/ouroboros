@@ -18,8 +18,12 @@ def _queued(tmp_path, monkeypatch):
     requests = []
     monkeypatch.setattr(maintenance.child, "request", lambda: requests.append(True))
     result = body.collect_terminal(root, entry.run_id, detail=terminal(entry.run_id), background=True)
-    assert result["workspace_capture"]["status"] == "pending" and requests == [True]
-    return root, current.run(root, entry.run_id), area
+    queued = current.run(root, entry.run_id)
+    # The capture is owed durably and the child is woken; a first money publication may wake the
+    # same child in the same call (cold metrics), so the wake itself is not exclusive.
+    assert result["workspace_capture"]["status"] == "pending" and queued.capture_job.get("state") == "pending"
+    assert requests
+    return root, queued, area
 
 
 def _child(root, *, fail_named=False):
