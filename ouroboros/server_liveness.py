@@ -407,10 +407,11 @@ class _TurnPhaseWatch:
 
     Each watchdog interval reads every running ``TurnExecution`` (its thread and the start
     facts it passed, each with the monotonic instant it was stamped). One whose phase has
-    stood a whole interval before its first model request gets one ``direct_turn_stall``
+    stood a whole interval before its Main call started gets one ``direct_turn_stall``
     row with that thread's stack, one folded stack sample per interval while the phase
     stands, and one ``direct_turn_stall_end`` once it advances (``then``: the next phase,
-    ``stood_sec`` up to that phase's own stamp) or the turn ends in it (``then: "ended"``).
+    ``stood_sec`` up to that phase's own stamp), the turn ends in it (``then: "ended"``, up
+    to its end) or this watchdog stops (``then: "unwatched"``; a next one opens its own).
     Heartbeat age decides nothing: a turn blocked before its heartbeat starts and one
     blocked under a live heartbeat are watched alike, and the onset row only reports the
     heartbeat's age (null before it started). Journal only, as invariant 20 binds the
@@ -421,7 +422,7 @@ class _TurnPhaseWatch:
         self._open: dict = {}  # execution_id -> the open episode
 
     def tick(self, now: float, heartbeats: dict) -> None:
-        from supervisor.active_activity import get_direct_activity_registry
+        from supervisor.active_activity import CALL_PHASES, get_direct_activity_registry
 
         executions = {row.execution_id: row for row in get_direct_activity_registry().executions()}
         for execution_id in [key for key in self._open if key not in executions]:
@@ -433,7 +434,7 @@ class _TurnPhaseWatch:
             if episode is not None and episode["index"] != index:
                 self._close(execution_id, now)
                 episode = None
-            if phase == "dispatched" or now - at < self._interval:
+            if phase in CALL_PHASES or now - at < self._interval:
                 continue
             ident = execution.thread[0]
             if episode is not None:
@@ -445,17 +446,27 @@ class _TurnPhaseWatch:
             self._journal({"type": "direct_turn_stall", **self._ids(execution), "thread": execution.thread[1],
                            "phase": phase, "stood_sec": round(now - at, 1),
                            "heartbeat_sec": round(now - beat, 1) if isinstance(beat, (int, float)) else None,
-                           **flags, **({"stack": stack} if stack else {})})
+                           **({"stack_truncated": True} if flags else {}), **({"stack": stack} if stack else {})})
             episode = self._open[execution_id] = {"execution": execution, "index": index,
                                                   "samples": {}, "last_stack": []}
             _fold_sample(episode, stack)
+
+    def close(self, now: float) -> None:
+        """This watchdog stops: every episode it opened ends with its own row."""
+        for execution_id in list(self._open):
+            self._close(execution_id, now)
 
     def _close(self, execution_id: str, now: float) -> None:
         episode = self._open.pop(execution_id)
         execution, index = episode["execution"], episode["index"]
         marks = list(execution.marks)
         phase, at = marks[index]
-        then, until = marks[index + 1] if index + 1 < len(marks) else ("ended", now)
+        if index + 1 < len(marks):
+            then, until = marks[index + 1]
+        elif execution.ended_at is not None:
+            then, until = "ended", execution.ended_at
+        else:
+            then, until = "unwatched", now
         self._journal({"type": "direct_turn_stall_end", **self._ids(execution), "phase": phase, "then": then,
                        "stood_sec": round(until - at, 1), "samples": sum(episode["samples"].values()),
                        "top_frames": _top_frames(episode["samples"]), "last_stack": episode["last_stack"]})
@@ -658,6 +669,7 @@ def _start_supervisor_liveness_watchdog(
                 turn_phases.tick(now, dict(turns))
             except Exception:
                 log.debug("direct-turn phase watch failed", exc_info=True)
+        turn_phases.close(time.monotonic())
 
     threading.Thread(target=_watch, name="supervisor-liveness-watchdog", daemon=True).start()
 

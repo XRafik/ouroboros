@@ -2638,7 +2638,7 @@ no bar (Widgets keeps the plain band). A Project shows its name. In the stack
 layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
 ⋯, with the page's tabs, or Files' location and its actions, under it
 (`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
-drops whole, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
+drops whole after its start step, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
 content column is too narrow, including while the sidebar is resized; the toolbar wraps in its
 own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's

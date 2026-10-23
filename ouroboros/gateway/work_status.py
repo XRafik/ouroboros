@@ -64,6 +64,7 @@ REASON_TEXT = {
     "turn_context_built": "Context ready",
 }
 _TURN_STEPS = ("admitted", "started", "context_building", "context_built")
+_CALL_STEPS = ("requested", "dispatched")  # its Main call started (supervisor.active_activity.CALL_PHASES)
 
 
 def reason(code: str, *, count: Optional[int] = None, ids: Iterable[str] = (), since: Any = None,
@@ -114,10 +115,10 @@ def _current_waits(row: Mapping[str, Any]) -> List[tuple]:
 
 def _call(row: Mapping[str, Any]) -> str:
     """The exact-call word a working member is in (the cards' modelActivityPresentation); a direct turn
-    whose own dispatch fact precedes its census phase's move is already sending."""
+    whose own call start precedes its census phase's move says the word that move gives, never more."""
     phase = row.get("phase")
     if phase == "preparing":
-        return "sending" if row.get("turn_phase") == "dispatched" else "preparing"
+        return "working" if row.get("turn_phase") in _CALL_STEPS else "preparing"
     activity = row.get("model_activity") if isinstance(row.get("model_activity"), dict) else {}
     operation = activity.get("phase")
     if operation in {"dispatching", "awaiting_response"}:
