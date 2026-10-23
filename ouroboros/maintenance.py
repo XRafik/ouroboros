@@ -221,30 +221,36 @@ def _packing_due(root: pathlib.Path, row: Dict[str, Any], facts: Dict[str, Any],
 
 def _packing_run(root: pathlib.Path, should_stop: Callable[[], bool]) -> Dict[str, Any]:
     """Discovery (archive first, then the first changed task stamp) and, when it finds work, one
-    packing pass with its own fresh census. The inputs are read before the pass and recorded after
-    it, so a task closing during the pass makes the next look differ. A pass that unlinked records
-    ``quiet: False``; one that left candidates deferred, busy or faulted records their count as
-    ``pending`` with the store revision it has seen: the one its own record leaves when nothing
-    else wrote during the pass, else the one the pass began at, since a write during the pass (the
-    contender's receipt, committed after the deferral and before this record) is one the pass has
-    not seen, and recording the later revision would swallow it (``_packing_due`` re-arms on the
-    next write; a quiet install then retries once and rests until the store moves again). A raised
-    discovery or pass records nothing: the job stays due for the next look."""
+    packing pass, both over the census the job row addresses: the rows written terminal since the
+    position the last pass recorded (``census``, the counter it read before its pass) and the
+    candidates it left (``pending``); every loose folder only without a readable position
+    (``evidence_packer.census_since``: the first run, an older body's pass, a counter that went
+    back). The inputs are read before the pass and recorded after it, so a task closing during the
+    pass makes the next look differ. A pass that unlinked records ``quiet: False``; one that left
+    candidates deferred, busy or faulted records their ids as ``pending`` with the store revision
+    it has seen: the one its own record leaves when nothing else wrote during the pass, else the
+    one the pass began at, since a write during the pass (the contender's receipt, committed after
+    the deferral and before this record) is one the pass has not seen, and recording the later
+    revision would swallow it (``_packing_due`` re-arms on the next write; a quiet install then
+    retries once and rests until the store moves again). A raised discovery or pass records
+    nothing: the job stays due for the next look."""
     from ouroboros import evidence_packer, evidence_packs as packs
 
+    row = maintenance_jobs.job(root, "evidence_packing") or {}
     inputs = _packing_inputs(root)
     began = _revision(root)  # the census reads the store after this point
-    report: Dict[str, Any] = {"status": "completed", **dict.fromkeys(evidence_packer.COUNTERS, 0)}
-    if evidence_packer.packing_pending(root, should_stop):
-        report = evidence_packer.run_pass(root)
+    since, owed = evidence_packer.census_since(row, inputs["terminal"]), evidence_packer.owed_ids(row)
+    report: Dict[str, Any] = {"status": "completed", **dict.fromkeys(evidence_packer.COUNTERS, 0), "unfinished": []}
+    if evidence_packer.packing_pending(root, should_stop, since=since, owed=owed):
+        report = evidence_packer.run_pass(root, since=since, owed=owed)
         packs.record_storage_pack(root, phase=report["status"], **{key: report[key] for key in evidence_packer.COUNTERS})
     if should_stop():
         return {"state": "pending", "items": report["examined"]}
-    pending = report["deferred"] + report["busy"] + report["faults"]
     with store.open_store(root, write=True) as txn:  # one write: the row and the revision it has seen
         seen = txn.revision() + 1 if txn.revision() == began else began
         maintenance_jobs.record_in(txn, "evidence_packing", state="done", terminal=inputs["terminal"],
-                                   quiet=not report["unlinked"], pending=pending, revision=seen,
+                                   census=inputs["terminal"], quiet=not report["unlinked"],
+                                   pending=list(report["unfinished"]), revision=seen,
                                    packed=report["packed"], examined=report["examined"])
     return {"state": "done", "items": report["examined"]}
 
