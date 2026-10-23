@@ -64,11 +64,13 @@ def _git(repo: Path, *args: str) -> bytes:
 
 def changed_paths(repo: Path, base: str) -> tuple[str, tuple[str, ...]]:
     """Resolve once; --no-renames keeps both sides of a module rename in scope."""
+    from ouroboros.git_observation import numstat_paths
+
     oid = _git(repo, "rev-parse", "--verify", "--end-of-options", f"{base}^{{commit}}").decode().strip()
-    stats = _git(repo, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", oid, "--")
-    raw = b"\0".join(row.split(b"\t", 2)[2] for row in stats.split(b"\0") if row) + b"\0"
-    raw += _git(repo, "ls-files", "--others", "--exclude-standard", "-z")
-    return oid, tuple(sorted({os.fsdecode(p) for p in raw.split(b"\0") if p}))
+    cmd = ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--numstat", "-z", oid, "--"]
+    paths = numstat_paths(_git(repo, *cmd[1:]), cmd, lambda args: _git(repo, *args[1:]))
+    paths.extend(os.fsdecode(p) for p in _git(repo, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0") if p)
+    return oid, tuple(sorted(set(paths)))
 
 
 def is_test_module(path: str) -> bool:
