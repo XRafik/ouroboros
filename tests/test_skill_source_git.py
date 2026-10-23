@@ -241,7 +241,7 @@ def newline_source(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("existing", [False, True])
-def test_source_checkout_preserves_release_bytes_with_host_autocrlf(newline_source, tmp_path, existing):
+def test_source_checkout_preserves_release_bytes_with_host_autocrlf(newline_source, tmp_path, monkeypatch, existing):
     from ouroboros.skill_loader import compute_content_hash
 
     source, git, config = newline_source
@@ -256,9 +256,19 @@ def test_source_checkout_preserves_release_bytes_with_host_autocrlf(newline_sour
         assert (target / name).read_bytes() == (source / name).read_bytes()
     assert compute_content_hash(target) == compute_content_hash(source)
     assert config.read_bytes() == before
-    # An ordinary refresh at exactly the same revision stays correct.
-    assert transport.fetch_tree(target, str(source), commit) == commit
-    assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
+    # A consumer may still be reading when a same-commit source refresh runs.
+    # Only legacy materialization may remove tracked files, not every refresh.
+    real_git = transport._git
+
+    def refresh_without_removal(args, **kwargs):
+        assert args[0] != "rm", "prepared source refresh must not remove published files"
+        return real_git(args, **kwargs)
+
+    monkeypatch.setattr(transport, "_git", refresh_without_removal)
+    with (target / "SKILL.md").open("rb") as manifest:
+        assert transport.fetch_tree(target, str(source), commit) == commit
+        assert manifest.read() == (source / "SKILL.md").read_bytes()
+        assert (target / "SKILL.md").read_bytes() == (source / "SKILL.md").read_bytes()
 
 
 def test_cached_pointer_repairs_crlf_without_network(newline_source, tmp_path, monkeypatch):

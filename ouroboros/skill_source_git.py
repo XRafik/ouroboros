@@ -140,12 +140,16 @@ def _checkout_source(target: pathlib.Path, revision: str) -> None:
     Repository-authored attributes still apply; release hashes remain authoritative.
     Callers hold the source lock (or own a fresh private probe directory).
     """
-    _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "pending"], cwd=target)
-    _git(["config", "--local", "core.autocrlf", "false"], cwd=target)
-    _git(["config", "--local", "core.eol", "lf"], cwd=target)
-    _git(["rm", "-r", "--force", "--ignore-unmatch", "--", "."], cwd=target)
+    policy = _git(["config", "--local", "--default", "", "--get",
+                   "ouroboros.sourceCheckoutPolicy"], cwd=target).strip()
+    if policy != "1":
+        _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "pending"], cwd=target)
+        _git(["config", "--local", "core.autocrlf", "false"], cwd=target)
+        _git(["config", "--local", "core.eol", "lf"], cwd=target)
+        _git(["rm", "-r", "--force", "--ignore-unmatch", "--", "."], cwd=target)
     _git(["checkout", "--quiet", "--force", "--detach", revision], cwd=target)
-    _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "1"], cwd=target)
+    if policy != "1":
+        _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "1"], cwd=target)
 
 
 def fetch_tree(target: pathlib.Path, url: str, selector: str, *, depth: int = 1) -> str:
