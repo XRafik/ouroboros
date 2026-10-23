@@ -30,7 +30,9 @@ is a pass this file never measured: tests/test_duty_inventory.py) and the delega
 each driven in the booted driver process (tests/_cost_driver.py ``D:<duty>:<pass>``): a second
 pass over unchanged inputs writes nothing, opens nothing of the history or the evidence packs and
 walks or copies nothing under the delegated execution roots, with every thread, pool work item
-and wake the pass dispatched joined into its count; its counts are equal at k=1 and k=30; and a
+and wake the pass dispatched joined into its count; its counts are equal at k=1 and k=30; the pass
+after each ordinary activity of a live install (``tests._cost_driver.ACTIVITIES``: a task completes,
+a task records one LLM attempt, a new child drive appears) costs the same at both sizes; and a
 positive companion per duty (an addressed input change) shows the work still happens. ``B8`` holds
 the producer and loop boundaries (``P:*``) flat on their FIRST pass. The scale root carries the
 shapes of the 22.10 class in counted numbers (tests/_scale_root.py).
@@ -46,10 +48,11 @@ import os
 import pathlib
 import sqlite3
 import sys
-from typing import Any, Callable, Dict, Iterable, List
+from typing import Any, Callable, Dict, Hashable, Iterable, List, Tuple
 
 import pytest
 
+from tests._cost_driver import ACTIVITIES
 from tests._cost_meter import EXECUTION, HISTORY, VM_STEP, CostMeter, tagged
 
 pytestmark = pytest.mark.scale
@@ -84,7 +87,7 @@ def vm_allowance(large: int, small: int = K_SMALL) -> int:
     return 128 * math.ceil(math.log2(large / small)) + COUNT_JITTER * VM_STEP
 
 
-def _gap(table: Dict[str, str], name: str) -> tuple:
+def _gap(table: Dict[Any, str], name: Hashable) -> tuple:
     """A known breach named in a gap table is driven and measured all the same: a strict xfail that flips
     (XPASS) the moment its cause is gone, so the marker is removed instead of forgotten."""
     return (pytest.mark.xfail(strict=True, reason=table[name]),) if name in table else ()
@@ -330,25 +333,26 @@ def _rests_at_every_size(measured: Dict[Any, Any], run: Callable[[pathlib.Path],
     assert not contract_breaches(rested[K_SMALL], rested[large], large), (what, rested)
 
 
-def run_after_unrelated(run: Callable[[pathlib.Path], Any], root: pathlib.Path, what: str) -> Dict[str, int]:
-    """The counters of a job's run after it rested and one ordinary task nobody here owns completed."""
+def run_after_activity(run: Callable[[pathlib.Path], Any], root: pathlib.Path, what: str, phase: str,
+                       k: int) -> Dict[str, int]:
+    """The counters of a job's run after it rested and one ordinary activity nobody here owns happened
+    (``ACTIVITIES[phase]``, the driver's own shapes, as the install it maintains)."""
     from tests._store_shared import as_install
-
-    from ouroboros.task_results import write_task_result
 
     run(root)
     run(root)
     with as_install(root):
-        write_task_result(root, f"cur-unrelated-job-{what}", "completed", chat_id=1, result="an ordinary finished turn")
+        ACTIVITIES[phase](root, f"job-{what}", k)
     with CostMeter(root) as meter:
-        tagged("unrelated", lambda: run(root))
-    return meter.snapshot("unrelated")["counts"]
+        tagged(phase, lambda: run(root))
+    return meter.snapshot(phase)["counts"]
 
 
-def _same_cost_after_unrelated(measured: Dict[Any, Any], run: Callable[[pathlib.Path], Any], what: str) -> None:
+def _same_cost_after_activity(measured: Dict[Any, Any], run: Callable[[pathlib.Path], Any], what: str,
+                              phase: str) -> None:
     large = measured["large"]
-    after = {k: run_after_unrelated(run, pathlib.Path(measured[k]["root"]), what) for k in (K_SMALL, large)}
-    assert not contract_breaches(after[K_SMALL], after[large], large), (what, after)
+    after = {k: run_after_activity(run, pathlib.Path(measured[k]["root"]), what, phase, k) for k in (K_SMALL, large)}
+    assert not contract_breaches(after[K_SMALL], after[large], large), (phase, what, after)
 
 
 @pytest.mark.parametrize("name", JOB_NAMES)
@@ -363,26 +367,41 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
     _rests_at_every_size(measured, lambda root: maintenance.run(root, should_stop=lambda: False), "maintenance.run")
 
 
-# The install is never idle: between two passes an ordinary, unrelated task completes. A job or duty may do
-# the addressed work that completion owes it, and its cost is the same at k=1 and k=30; one whose rest keys
-# on an install-wide counter (the store revision, the terminal-write counter, a directory's time) redoes
-# history-sized work instead. A breach still in the code is named here with its measured numbers and its
-# remover; the marker flips the moment the cause is gone.
-UNRELATED_JOB_GAPS: Dict[str, str] = {}
-UNRELATED_DUTY_GAPS: Dict[str, str] = {}
+# The install is never idle: between two passes one ordinary activity nobody here owns happens
+# (``tests._cost_driver.ACTIVITIES``): a task completes (``unrelated``), a task records one LLM attempt
+# (``money``), a new child drive appears (``drive``). A job or duty may do the addressed work the activity
+# owes it, and its cost is the same at k=1 and k=30; one whose rest keys on an install-wide fact (the store
+# revision, the terminal-write counter, the usage ledger's marker, a layout directory's time) redoes
+# history-sized work instead. A breach still in the code is named here by (activity, name) with its
+# measured numbers and its remover; the marker flips the moment the cause is gone.
+ACTIVITY_JOB_GAPS: Dict[Tuple[str, str], str] = {}
+ACTIVITY_DUTY_GAPS: Dict[Tuple[str, str], str] = {
+    ("money", "abandoned_usage_reconciliation"): (
+        "The usage pass rests on the key [arrivals, money_marker] (terminal_cost_reconciliation._refresh_costs, "
+        "`absence_inputs`), and every recorded LLM attempt moves the marker, so one unrelated attempt makes the "
+        "next pass re-select every absent owner: k=1 -> k=30 json_loads 10 -> 155, json_chars 758 -> 21,567, "
+        "vm_steps 2,100 -> 10,400 (obligations.DutyRest over the owner set, usage_store.dirty_owners, "
+        "task_store.task_facts; at k=100: 505, 72,136, 32,500). Remover: on a money-only change select only "
+        "the owners the new money concerns (rows newer than the recorded marker) - lane D2a (Opus round 2, "
+        "MINOR 6); the root removes this entry when that fix merges."),
+}
 
 
-@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_JOB_GAPS, name)) for name in JOB_NAMES])
-def test_b6_each_job_costs_the_same_after_an_unrelated_completion(measured, name):
-    _same_cost_after_unrelated(measured, job_runner(name), name)
+def _activity_params(table: Dict[Tuple[str, str], str], names: Iterable[str]) -> list:
+    return [pytest.param(phase, name, marks=_gap(table, (phase, name))) for phase in ACTIVITIES for name in names]
 
 
-@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_JOB_GAPS, name)) for name in ("maintenance.run",)])
-def test_b6_the_maintenance_pass_costs_the_same_after_an_unrelated_completion(measured, name):
+@pytest.mark.parametrize("phase,name", _activity_params(ACTIVITY_JOB_GAPS, JOB_NAMES))
+def test_b6_each_job_costs_the_same_after_unrelated_activity(measured, phase, name):
+    _same_cost_after_activity(measured, job_runner(name), name, phase)
+
+
+@pytest.mark.parametrize("phase,name", _activity_params(ACTIVITY_JOB_GAPS, ("maintenance.run",)))
+def test_b6_the_maintenance_pass_costs_the_same_after_unrelated_activity(measured, phase, name):
     maintenance = _maintenance()
     if maintenance is None or not callable(getattr(maintenance, "run", None)):
         pytest.skip("the maintenance child's pass does not exist on this tree yet")
-    _same_cost_after_unrelated(measured, lambda root: maintenance.run(root, should_stop=lambda: False), name)
+    _same_cost_after_activity(measured, lambda root: maintenance.run(root, should_stop=lambda: False), name, phase)
 
 
 # ---- B7: the rest law of every recurring pass; B8: the producer and loop boundaries --------------------
@@ -472,14 +491,15 @@ def test_b7_each_duty_rests_on_its_second_pass(measured, name):
     assert not breaches, (name, breaches, _growing(rested[K_SMALL], rested[large]))
 
 
-@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_DUTY_GAPS, name)) for name in DUTY_NAMES])
-def test_b7_each_duty_costs_the_same_after_an_unrelated_completion(measured, name):
-    """One ordinary task nobody here owns completed between the rest pass and this one: the duty may do the
-    addressed work that completion owes it, and its counts are the same at k=1 and k=30."""
+@pytest.mark.parametrize("phase,name", _activity_params(ACTIVITY_DUTY_GAPS, DUTY_NAMES))
+def test_b7_each_duty_costs_the_same_after_unrelated_activity(measured, phase, name):
+    """One ordinary activity nobody here owns happened between the previous pass and this one (a task
+    completed, a task recorded one LLM attempt, a new child drive appeared): the duty may do the addressed
+    work the activity owes it, and its counts are the same at k=1 and k=30."""
     large = measured["large"]
-    after = {k: _duty_pass(measured, name, k, "unrelated") for k in (K_SMALL, large)}
+    after = {k: _duty_pass(measured, name, k, phase) for k in (K_SMALL, large)}
     breaches = contract_breaches(after[K_SMALL]["counts"], after[large]["counts"], large)
-    assert not breaches, (name, breaches, _growing(after[K_SMALL], after[large]))
+    assert not breaches, (phase, name, breaches, _growing(after[K_SMALL], after[large]))
 
 
 @pytest.mark.parametrize("name", sorted(COMPANION_COUNTERS))

@@ -460,9 +460,10 @@ def spend_limit_usd(k: int) -> float:
     return GLOBAL_LIMIT_USD * max(1.0, k / LIMIT_REFERENCE_K)
 
 
-def _money(root: pathlib.Path, task_id: str, *, category: str = "", cost: float = 0.4,
-           limit: float = GLOBAL_LIMIT_USD) -> None:
-    """One settled attempt of ``task_id`` through the real ledger: the task becomes a dirty usage owner."""
+def money(root: pathlib.Path, task_id: str, *, category: str = "", cost: float = 0.4,
+          limit: float = GLOBAL_LIMIT_USD) -> None:
+    """One settled attempt of ``task_id`` through the real ledger: the task becomes a dirty usage owner
+    and the ledger's publication marker moves (also the driver's ``money`` activity, tests/_cost_driver.py)."""
     from ouroboros import usage_accounting as usage
 
     reservation = usage.reserve_attempt(usage.AttemptRequest(
@@ -519,7 +520,7 @@ def _usage_owners(root: pathlib.Path, k: int) -> Dict[str, int]:
         for index in range(ABSENT_OWNERS_PER_K):
             task_id = f"hist-absent-{unit}-{index}"
             _settled_task(root, task_id)
-            _money(root, task_id, limit=spend_limit_usd(k))
+            money(root, task_id, limit=spend_limit_usd(k))
             delete_result(root, task_id)
             absent += 1
         for index in range(CONSCIOUSNESS_PER_K):
