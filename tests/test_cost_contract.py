@@ -375,16 +375,7 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
 # history-sized work instead. A breach still in the code is named here by (activity, name) with its
 # measured numbers and its remover; the marker flips the moment the cause is gone.
 ACTIVITY_JOB_GAPS: Dict[Tuple[str, str], str] = {}
-ACTIVITY_DUTY_GAPS: Dict[Tuple[str, str], str] = {
-    ("money", "abandoned_usage_reconciliation"): (
-        "The usage pass rests on the key [arrivals, money_marker] (terminal_cost_reconciliation._refresh_costs, "
-        "`absence_inputs`), and every recorded LLM attempt moves the marker, so one unrelated attempt makes the "
-        "next pass re-select every absent owner: k=1 -> k=30 json_loads 10 -> 155, json_chars 758 -> 21,567, "
-        "vm_steps 2,100 -> 10,400 (obligations.DutyRest over the owner set, usage_store.dirty_owners, "
-        "task_store.task_facts; at k=100: 505, 72,136, 32,500). Remover: on a money-only change select only "
-        "the owners the new money concerns (rows newer than the recorded marker) - lane D2a (Opus round 2, "
-        "MINOR 6); the root removes this entry when that fix merges."),
-}
+ACTIVITY_DUTY_GAPS: Dict[Tuple[str, str], str] = {}
 
 
 def _activity_params(table: Dict[Tuple[str, str], str], names: Iterable[str]) -> list:
