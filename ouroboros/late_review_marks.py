@@ -229,7 +229,7 @@ def replay_owed_late_reviews(drive_root: Any, *, stop: Any = None) -> Dict[str, 
     return report
 
 
-def _collect_ended_plan_asks(drive_root: Any, stop: Any) -> int:
+def _collect_ended_plan_asks(drive_root: Any, stop: Any, *, candidates=None) -> int:
     """The crash window of a plan reply: a seat of an ended task whose producer completed while nobody was
     listening settles at $0 through the organ's own collector (``plan_ask.collect_pending``), whose settlement
     keeps the reply in its room. The ask's pending seat is the duty, so nothing else is written for it; a seat
@@ -240,7 +240,7 @@ def _collect_ended_plan_asks(drive_root: Any, stop: Any) -> int:
 
     root, settled = pathlib.Path(drive_root), 0
     try:
-        for task_id in plan_collection_candidates(root, stop=stop):
+        for task_id in plan_collection_candidates(root, stop=stop) if candidates is None else candidates:
             if stop is not None and stop():
                 break
             try:

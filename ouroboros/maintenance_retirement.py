@@ -1,26 +1,21 @@
 """History-sized filesystem retirement, owned by the maintenance child.
 
-A pass observes fixed directory stamps and current recovery facts. Time alone never
-re-arms it; changed inputs, explicit repair (pending), or a new server generation do.
-A source edited below an unchanged parent may wait for one of those facts. Retention
-remains a minimum age, never an authorization to delete a live or unknown owner.
+Prunes report their earliest retained item's age eligibility. Producers schedule
+new artifacts; startup and explicit repair discover legacy ones. Directory times
+and unrelated completions never wake a sweep. Age grants no deletion authority.
 """
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import pathlib
 import uuid
 
-from ouroboros import maintenance_jobs, obligations, store
+from ouroboros import maintenance_jobs, store
+from ouroboros.retention import get_gc_retention_days, time
 
 log = logging.getLogger(__name__)
 JOB = "runtime_retirement"
 STARTUP = "startup_recovery"
-DIRECTORIES = ("task_trees", "services", "state/delegate_recovery",
-               "state/delegate_recovery_transactions", "state/delegate_supervision", "state/skills",
-               "state/code_intel", "state/extension_reconcile/failed", "uploads/screenshots", "uploads/views")
 
 
 def record_startup(root, *, gaps):
@@ -30,26 +25,50 @@ def record_startup(root, *, gaps):
 
 
 def _inputs(root):
-    from ouroboros.retention import get_gc_retention_days
-
-    stamps = []
-    for name in DIRECTORIES:
-        try:
-            info = (pathlib.Path(root) / name).lstat()
-            stamps.append([info.st_ino, info.st_mtime_ns, info.st_size])
-        except FileNotFoundError:
-            stamps.append(None)
     with store.open_store(root, write=False) as txn:
-        # Active recovery obligations only: never task bodies or completed history.
-        recovery = {name: obligations.members_in(txn, name)
-                    for name in ("nonterminal", "pending_drives", "unknowns")}
-        token = hashlib.sha256(json.dumps(recovery, sort_keys=True).encode()).hexdigest()
-        return {"directories": stamps, "recovery": token, "startup": txn.meta(STARTUP),
-                "terminal": txn.meta(store.TERMINAL_WRITES), "retention": get_gc_retention_days()}
+        return {"startup": txn.meta(STARTUP), "retention": get_gc_retention_days()}
+
+
+def schedule_in(txn, eligible_at):
+    """A producer's own artifact, never a polling interval or an install-wide counter."""
+    row = txn.meta(maintenance_jobs.PREFIX + JOB) or {}
+    due = min(row.get("next_due") or eligible_at, eligible_at)
+    maintenance_jobs.record_in(txn, JOB, next_due=due, arrival=uuid.uuid4().hex)
+
+
+def artifact_changed(root, *, timestamp=None, immediate=False):
+    """Call after publishing disposable bytes. A missed notification waits for startup/repair."""
+    try:
+        stamp = time.time() if timestamp is None else float(timestamp)
+        with store.open_store(root, write=True) as txn:
+            schedule_in(txn, stamp + (0 if immediate else get_gc_retention_days() * 86400))
+    except Exception:
+        log.debug("Retirement publication awaits startup discovery", exc_info=True)
+
+
+def task_written(txn, task_id, columns):
+    """A task can wake retirement only if it owns physical retirement inputs."""
+    from ouroboros.task_status import SETTLED_STATUSES
+    if txn.root is None or columns.get("status") not in SETTLED_STATUSES:
+        return
+    names = (f"task_trees/{task_id}", f"services/{task_id}",
+             f"state/delegate_recovery/{task_id}.json", f"state/delegate_supervision/{task_id}.json")
+    deadlines = []
+    for name in names:
+        try:
+            stamp = (txn.root / name).stat().st_mtime
+        except OSError:
+            continue
+        if name.startswith("task_trees/") and columns.get("drive_retention_at"):
+            stamp = float(columns["drive_retention_at"])
+        deadlines.append(stamp + get_gc_retention_days() * 86400)
+    if deadlines:
+        schedule_in(txn, min(deadlines))
 
 
 def due(root, row, facts, child):
-    return row.get("state") == "pending" or row.get("inputs") != _inputs(root)
+    return (row.get("state") == "pending" or row.get("inputs") != _inputs(root)
+            or row.get("next_due") is not None and time.time() > row["next_due"])
 
 
 def run(root, should_stop):
@@ -63,6 +82,7 @@ def run(root, should_stop):
     from ouroboros.utils import append_jsonl, utc_now_iso
 
     inputs, reports, errors = _inputs(root), {}, []
+    before = maintenance_jobs.job(root, JOB) or {}
     steps = [("delegate_state", sweep_settled_delegate_state),
              ("skill_state", sweep_uninstalled_skill_state), ("code_intel", prune_stale_code_intel_roots),
              ("failed_reconcile", prune_failed_reconcile_markers), ("agent_media", prune_agent_media_uploads)]
@@ -87,8 +107,13 @@ def run(root, should_stop):
             errors.append(name)
             log.warning("%s retirement failed; sources stay owed", name, exc_info=True)
     state = "pending" if should_stop() else "failed" if errors else "done"
-    # Keep the initial observation: a racing new artifact or recovery fact remains due.
-    maintenance_jobs.record(root, JOB, state=state, inputs=inputs, errors=errors)
+    deadlines = [report["next_due"] for report in reports.values() if report.get("next_due") is not None]
+    with store.open_store(root, write=True) as txn:
+        current = txn.meta(maintenance_jobs.PREFIX + JOB) or {}
+        if current.get("arrival") != before.get("arrival") and current.get("next_due") is not None:
+            deadlines.append(current["next_due"])
+        maintenance_jobs.record_in(txn, JOB, state=state, inputs=inputs, errors=errors,
+                                   next_due=min(deadlines) if deadlines else None)
     if errors or any(report.get(key) for report in reports.values()
                      for key in ("removed", "swept", "restored", "deleted_dirs", "deleted_files")):
         append_jsonl(pathlib.Path(root) / "logs/events.jsonl",
@@ -119,7 +144,7 @@ def prune_agent_media_uploads(
     """
     import stat as stat_module
 
-    from ouroboros.retention import age_cutoff, get_gc_retention_days
+    from ouroboros.retention import age_cutoff, get_gc_retention_days, keep_until
 
     if retention_days is None:
         retention_days = get_gc_retention_days()
@@ -141,6 +166,7 @@ def prune_agent_media_uploads(
                     report["skipped"] += 1  # symlink, directory or special file
                     continue
                 if info.st_mtime >= cutoff:
+                    keep_until(report, info.st_mtime, retention_days)
                     report["kept"] += 1
                     continue
                 path.unlink()

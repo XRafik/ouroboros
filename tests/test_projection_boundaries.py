@@ -193,11 +193,18 @@ def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch,
         with store.open_store(root, write=False) as txn:
             rests = txn.set_rows("duty_rest")
         assert len(rests) == 10 * scale and all(row["signature"] is None for row in rests.values())
+        if running:
+            write_task_result(root, "missing0001", "running")
+            duty.reconcile_abandoned_usage(root)
+            with store.open_store(root, write=False) as txn:
+                assert txn.get_row("duty_rest", "cost_projection:missing0001") is None
         monkeypatch.setattr("ouroboros.utils.utc_now_iso", lambda: "2099-01-01T00:00:00+00:00")
         with store.open_store(root, write=True) as txn:
             txn.set_meta("unrelated_job", {"state": "done"})
         if running:
             write_task_result(root, "running", "running", result="live progress")
+            write_task_result(root, "missing0001", "running", result="progress after arrival")
+        write_task_result(root, "unrelated", "completed", result="ordinary completion")
         store.close_connections()
         with CostMeter(root) as meter:
             token = BOUNDARY.set("rest")

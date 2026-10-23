@@ -403,7 +403,7 @@ def prune_task_trees(
     """Prune ephemeral task-tree ledgers once the root is terminal or absent and
     older than GC retention; durable project memory is outside this plane."""
 
-    from ouroboros.retention import age_cutoff
+    from ouroboros.retention import age_cutoff, keep_until
 
     parent = pathlib.Path(parent_drive_root)
     base = parent / "task_trees"
@@ -428,6 +428,7 @@ def prune_task_trees(
                 report["skipped"].append({"root_task_id": root_id, "reason": "root_not_terminal", "status": status})
                 continue
             if _timestamp_from_result(result, dir_mtime) > cutoff:
+                keep_until(report, _timestamp_from_result(result, dir_mtime), days)
                 report["skipped"].append({"root_task_id": root_id, "reason": "younger_than_retention"})
                 continue
             shutil.rmtree(tree_dir)

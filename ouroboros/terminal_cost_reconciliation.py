@@ -265,7 +265,7 @@ def _present_facts(root, task_ids) -> tuple:
 
 def _refresh_costs(root: pathlib.Path, reads) -> None:
     from ouroboros import store, usage_store
-    from ouroboros.obligations import DutyRest
+    from ouroboros.obligations import COST_ARRIVALS, DutyRest
     from ouroboros.task_results import validate_task_id
     from ouroboros.task_status import SETTLED_STATUSES
     from ouroboros.post_task_checkpoint import post_task_synthesis_is_open
@@ -286,12 +286,12 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
                 yield leaf, reads.load(leaf)
 
     with store.open_store(root, write=False) as txn:
-        terminal_writes = int(txn.meta(store.TERMINAL_WRITES) or 0)
+        arrivals = int(txn.meta(COST_ARRIVALS) or 0)
     with usage_store.read(root) as txn:
         money_marker = txn.marker()
         with _UNRESOLVED_LOCK:
             state = _subject_state(root, COST_PROJECTIONS)
-            resting = state.get("absence_inputs") == [terminal_writes, money_marker]
+            resting = state.get("absence_inputs") == [arrivals, money_marker]
         owners = state["present_owners"] if resting else txn.dirty_owners()
     if resting and not owners:
         # Retry a failed diagnostic publication, not the proven-absent owners.
@@ -305,7 +305,7 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         except ValueError:
             pass  # System accounting scopes own no task result.
     # Successful absence keeps debt and rests on task arrival or a money write.
-    # Terminal writes and money changes invalidate the selection. Other pending
+    # Only a waiting owner's arrival or money changes invalidate the selection. Other pending
     # owners keep being examined without materializing the absent owners or rests.
     _ids, facts = _present_facts(root, ids.values())
     settled = set() if facts is None else {tid for tid, row in facts.items() if row["status"] in SETTLED_STATUSES}

@@ -56,7 +56,7 @@ FLAG_COLUMNS = {"synthesis": "owes_synthesis", "terminal_projection": "owes_term
 # present key as ``{}`` (its place and presence); ``load`` puts the rows back there, so a document
 # round-trips byte for byte. A key the body never had appears while it has rows.
 ROW_BACKED_FIELDS: Tuple[str, ...] = ("launch_handoffs", "model_waits", "retired_model_consumers")
-TERMINAL_WRITES = "terminal_writes"  # meta: how many times a terminal row was written (``Txn._note_terminal_write``)
+TERMINAL_WRITES = "terminal_writes"  # meta: terminal row writes (``obligations.task_written``)
 REVIEW_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_review_collection ON tasks(review_collection_pending, task_id) "
                            "WHERE review_collection_pending IS NULL OR review_collection_pending=1;")
 PLAN_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_plan_collection ON tasks(plan_collection_pending, task_id) "
@@ -1418,21 +1418,14 @@ class Txn:
                           (task_id, *columns.values()))
         self.sync_handoffs(task_id, document)
         store_task_cards.merge(self, task_id, document)  # the same monotonic rule: a stale document regresses no card
-        self._note_terminal_write(columns["status"])
+        from ouroboros.obligations import task_written
+        task_written(self, task_id, columns)
 
     def touch(self, task_id: str) -> None:
         """A row-only write still moves the task's signature (the memos re-read)."""
         self.conn.execute("UPDATE tasks SET write_seq = write_seq + 1 WHERE task_id=?", (task_id,))
-        self._note_terminal_write(self.row(task_id, "status"))
-
-    def _note_terminal_write(self, status: Any) -> None:
-        """Count the writes of terminal rows in ``meta.terminal_writes``: the one O(1) fact the
-        packer's dispatcher compares each look (a task closing or a closed task written again moves
-        it; a live task's writes never do), kept here, where every terminal row is written."""
-        from ouroboros.task_status import SETTLED_STATUSES
-
-        if str(status or "") in SETTLED_STATUSES:
-            self.set_meta(TERMINAL_WRITES, int(self.meta(TERMINAL_WRITES) or 0) + 1)
+        from ouroboros.obligations import task_written
+        task_written(self, task_id)
 
     def row(self, task_id: str, *columns: str) -> Any:
         """One task's typed columns (one value for one column, a tuple for several; ``None`` when absent)."""
