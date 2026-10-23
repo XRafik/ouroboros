@@ -7,8 +7,8 @@ history of the first (settled tasks with 20-200 KB bodies, child drives with the
 frozen legacy result files, archive segments of other rooms newer than the requested room's
 rows, closed custody records). Each boundary is driven through its real public entry point in a
 fresh interpreter (tests/_cost_driver.py) and its work is counted (tests/_cost_meter.py):
-connections, statements, SQLite VM steps, file-system calls and bytes read by location, JSON
-decodes, child processes and threads. The contract is EQUALITY of those counters between the two
+connections, statements, SQLite VM steps, file-system calls, the directory entries they deliver
+and bytes read by location, JSON decodes, child processes and threads. The contract is EQUALITY of those counters between the two
 roots; the one allowance is ``VM_ALLOWANCE`` SQLite VM steps for a deeper B-tree (logarithmic in
 the history, never a share of it). A full scan hidden inside one SELECT grows the VM steps and
 fails; reading the requested rooms' own rows is the same work at every size and passes.
@@ -61,7 +61,8 @@ LOCATIONS = ("root", *HISTORY, EXECUTION)
 # Counted per location; lock files (``lock``) are left out: how often a lock is probed and retried
 # follows the contention between this process's threads at that instant, not the history.
 WORK = ("connect", "statements", "begins", "commits", "writes", "json_loads", "json_chars", "popen", "thread_start",
-        *(f"{kind}:{where}" for kind in ("connect", "stat", "scandir", "listdir", "open", "os_open", "read_bytes")
+        *(f"{kind}:{where}" for kind in ("connect", "stat", "scandir", "listdir", "dir_entries", "open", "os_open",
+                                          "read_bytes")
           for where in (*LOCATIONS, "outside")))
 
 
@@ -81,6 +82,12 @@ def vm_allowance(large: int, small: int = K_SMALL) -> int:
     """SQLite VM steps a deeper index may add (logarithmic in the history, never a share of it), plus the
     progress-handler granularity of the statements ``COUNT_JITTER`` lets differ."""
     return 128 * math.ceil(math.log2(large / small)) + COUNT_JITTER * VM_STEP
+
+
+def _gap(table: Dict[str, str], name: str) -> tuple:
+    """A known breach named in a gap table is driven and measured all the same: a strict xfail that flips
+    (XPASS) the moment its cause is gone, so the marker is removed instead of forgotten."""
+    return (pytest.mark.xfail(strict=True, reason=table[name]),) if name in table else ()
 
 
 # ---- measurement -------------------------------------------------------------------------------
@@ -151,14 +158,15 @@ def child_header_breaches(entry: Dict[str, Any], children: int, root_depth: int)
 
     Each fixture child has one current store. WAL needs its header twice (mode and tier);
     Windows buffers each 100-byte read. Root resolution and confined directory handles
-    also grow with the number/depth of children, never with their stored history.
+    also grow with the number/depth of children, never with their stored history; the one
+    listing of the layout delivers one entry per child (``dir_entries``: 4 and 91 observed).
     """
     counts = entry["counts"]
-    metadata = {"stat", "scandir", "listdir", "open", "os_open", "read_bytes"}
+    metadata = {"stat", "scandir", "listdir", "dir_entries", "open", "os_open", "read_bytes"}
     breaches = {key: value for key, value in counts.items() if value and (
         key.split(":")[0] not in metadata or key.endswith((":archive", ":task_results")))}
     limits = {"stat": (children + 1) * (2 * root_depth + 32),
-              "scandir": 2 * (children + 1), "listdir": 2 * (children + 1),
+              "scandir": 2 * (children + 1), "listdir": 2 * (children + 1), "dir_entries": 2 * (children + 1),
               "open": 6 * children, "os_open": 16 * (children + 1),
               "read_bytes:headless": 2 * io.DEFAULT_BUFFER_SIZE * children}
     breaches.update({key: (counts[key], limit) for key, limit in limits.items() if counts.get(key, 0) > limit})
@@ -212,10 +220,22 @@ def test_b1_no_child_process_before_health(measured):
         assert measured[k]["popen_before_health"] == 0, (k, measured[k]["B1"]["names"])
 
 
+# The boot's dialogue cutover decides whether to plan the chains again by listing archive/ once and examining
+# every entry (each stream's segment count and newest name against the recorded tails): the one scandir is the
+# same call at every size, the entries it delivers are the history's.
+B2_ARCHIVE_LISTING = ("dialogue_import._replan_owed -> _archive_tails (since e39bae271) lists archive/ whole on every boot: "
+                      "dir_entries:archive 10 -> 213 at k=1 -> k=30 under B2_dialogue and B2_ready, one scandir at both "
+                      "sizes. An addressed check reads the archive directory's own stamp (st_mtime_ns, as "
+                      "delegate_custody_current._archive_stamp) and lists the tails only after it moved. Named for the "
+                      "root to assign (fix cycle 1).")
+
+
+@pytest.mark.xfail(strict=True, reason=B2_ARCHIVE_LISTING)
 def test_b2_publication_to_dialogue_is_flat(measured):
     assert_publication_flat(measured, "B2_dialogue")
 
 
+@pytest.mark.xfail(strict=True, reason=B2_ARCHIVE_LISTING)
 def test_b2_publication_to_supervisor_ready_is_flat(measured):
     assert_publication_flat(measured, "B2_ready")
 
@@ -322,6 +342,27 @@ def _rests_at_every_size(measured: Dict[Any, Any], run: Callable[[pathlib.Path],
     assert not contract_breaches(rested[K_SMALL], rested[large], large), (what, rested)
 
 
+def run_after_unrelated(run: Callable[[pathlib.Path], Any], root: pathlib.Path, what: str) -> Dict[str, int]:
+    """The counters of a job's run after it rested and one ordinary task nobody here owns completed."""
+    from tests._store_shared import as_install
+
+    from ouroboros.task_results import write_task_result
+
+    run(root)
+    run(root)
+    with as_install(root):
+        write_task_result(root, f"cur-unrelated-job-{what}", "completed", chat_id=1, result="an ordinary finished turn")
+    with CostMeter(root) as meter:
+        tagged("unrelated", lambda: run(root))
+    return meter.snapshot("unrelated")["counts"]
+
+
+def _same_cost_after_unrelated(measured: Dict[Any, Any], run: Callable[[pathlib.Path], Any], what: str) -> None:
+    large = measured["large"]
+    after = {k: run_after_unrelated(run, pathlib.Path(measured[k]["root"]), what) for k in (K_SMALL, large)}
+    assert not contract_breaches(after[K_SMALL], after[large], large), (what, after)
+
+
 @pytest.mark.parametrize("name", JOB_NAMES)
 def test_b6_each_job_rests_on_its_second_run(measured, name):
     _rests_at_every_size(measured, job_runner(name), name)
@@ -332,6 +373,53 @@ def test_b6_the_maintenance_pass_rests_on_its_second_run(measured):
     if maintenance is None or not callable(getattr(maintenance, "run", None)):
         pytest.skip("the maintenance child's pass does not exist on this tree yet")
     _rests_at_every_size(measured, lambda root: maintenance.run(root, should_stop=lambda: False), "maintenance.run")
+
+
+# The install is never idle: between two passes an ordinary, unrelated task completes. A job or duty may do
+# the addressed work that completion owes it, and its cost is the same at k=1 and k=30; one whose rest keys
+# on an install-wide counter (the store revision, the terminal-write counter, a directory's time) redoes
+# history-sized work instead. Where today's code still does, the breach is named here with its measured
+# numbers and its remover (the Opus review, fix cycle 1); the marker flips the moment the cause is gone.
+UNRELATED_JOB_GAPS: Dict[str, str] = {
+    "ended_plan_asks": ("after one unrelated completion the job reloads every pending plan record "
+                        "(late_review_marks._collect_ended_plan_asks -> plan_record.load_plan_record; its key "
+                        "plan_collection_job.py:22-28 is the terminal-write counter): stat 171 -> 4,347, json_loads 34 -> 498, "
+                        "json_chars 174,546 -> 5,221,656 at k=1 -> k=30. Removed by lane D2a (per-candidate signatures)."),
+    "evidence_packing": ("after one unrelated completion the packer's pass takes a fresh census of every task's loose "
+                         "evidence (evidence_packer.run_pass; _packing_due re-arms on the terminal-write counter): stat 63 -> 237, "
+                         "stat:root 30 -> 88 at k=1 -> k=30, and under the child's pass task_results/ is listed whole "
+                         "(dir_entries:task_results 7 -> 65). A census of the tasks whose rows moved (tasks.terminal_seq) "
+                         "removes it; the packer's owner — root to assign."),
+}
+UNRELATED_DUTY_GAPS: Dict[str, str] = {
+    "abandoned_usage_reconciliation": (
+        "after one unrelated completion the usage pass re-keys on the global store revision and re-reads every absent "
+        "owner (terminal_cost_reconciliation._refresh_costs: obligations.__init__ over the owner set, usage_store.dirty_owners, "
+        "task_facts): statements 49 -> 194, json_loads 12 -> 157, json_chars 764 -> 21,575, vm_steps 1,200 -> 10,100 at "
+        "k=1 -> k=30. Removed by lane D2a (a task-arrival fact plus the money marker; absent ids in one query)."),
+    "reconcile-maintenance": (
+        "the drive settlement is flat after the completion (stat:headless 3 -> 3, no verdict decoded: fix cycle 1); the growth "
+        "is the child's jobs the pass's end wakes: ended_plan_asks decodes every pending plan record (json_chars 206,784 -> "
+        "5,246,998) and evidence_packing's census lists task_results/ (dir_entries:task_results 7 -> 65): statements 678 -> 2,998, "
+        "vm_steps 9,000 -> 76,000 at k=1 -> k=30. Removed with UNRELATED_JOB_GAPS (lane D2a; the packer's owner)."),
+    "maintenance-child": (
+        "the same two jobs after one unrelated completion (ended_plan_asks, evidence_packing): statements 579 -> 2,899, "
+        "json_chars 180,475 -> 5,220,679, vm_steps 7,700 -> 69,900, dir_entries:task_results 7 -> 65 at k=1 -> k=30. "
+        "Removed with UNRELATED_JOB_GAPS (lane D2a; the packer's owner)."),
+}
+
+
+@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_JOB_GAPS, name)) for name in JOB_NAMES])
+def test_b6_each_job_costs_the_same_after_an_unrelated_completion(measured, name):
+    _same_cost_after_unrelated(measured, job_runner(name), name)
+
+
+@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_JOB_GAPS, name)) for name in ("maintenance.run",)])
+def test_b6_the_maintenance_pass_costs_the_same_after_an_unrelated_completion(measured, name):
+    maintenance = _maintenance()
+    if maintenance is None or not callable(getattr(maintenance, "run", None)):
+        pytest.skip("the maintenance child's pass does not exist on this tree yet")
+    _same_cost_after_unrelated(measured, lambda root: maintenance.run(root, should_stop=lambda: False), name)
 
 
 # ---- B7: the rest law of every recurring pass; B8: the producer and loop boundaries --------------------
@@ -355,7 +443,12 @@ DUTY_NAMES = (*_host_duty_names(), "delegated-body")  # the dispatcher's invento
 # marker turns the known breach into a strict xfail that flips the moment the cause is gone.
 REST_LAW_GAPS: Dict[str, str] = {}
 BOUNDARIES = ("P:metrics_run", "P:metrics_review", "P:intake", "P:send", "P:allowance")
-BOUNDARY_GAPS: Dict[str, str] = {}
+BOUNDARY_GAPS: Dict[str, str] = {
+    "P:send": ("placing the answer's evidence lists the pack directory once and examines every sidecar name in it "
+               "(evidence_packs._sidecar_names <- _task_handles <- _placements <- _locate: one listdir of "
+               "observability/packs/, dir_entries:packs 8 -> 124 at k=1 -> k=30; the call count alone was flat). The "
+               "pack index names a task's own sidecars. Removed by lane D2b (fix cycle 1)."),
+}
 # The counter a duty's companion makes appear (work > rest at every size); the body's walk and copy are
 # the two execution-root counters the 22.10 control fails on at rest. A copy opens its source through
 # either door: ``io.open`` (``shutil.copy2``, the 22.10 body) or ``os.open`` (the exclusive byte copy of
@@ -379,10 +472,6 @@ COMPANIONS_NOT_BUILT = {
     "owner_pause_settlement": "a requested owner pause stops members through the daemon (absent here)",
     "schedule-admission": "a due schedule admits a task into the queue the held supervisor never serves",
 }
-
-
-def _gap(table: Dict[str, str], name: str) -> tuple:
-    return (pytest.mark.xfail(strict=True, reason=table[name]),) if name in table else ()
 
 
 def _duty_pass(measured: Dict[Any, Any], name: str, k: int, phase: str) -> Dict[str, Any]:
@@ -423,6 +512,16 @@ def test_b7_each_duty_rests_on_its_second_pass(measured, name):
         assert not breaches, (name, k, breaches, _writes(snapshot), sorted(snapshot.get("paths", {}).items())[:8])
     breaches = contract_breaches(rested[K_SMALL]["counts"], rested[large]["counts"], large)
     assert not breaches, (name, breaches, _growing(rested[K_SMALL], rested[large]))
+
+
+@pytest.mark.parametrize("name", [pytest.param(name, marks=_gap(UNRELATED_DUTY_GAPS, name)) for name in DUTY_NAMES])
+def test_b7_each_duty_costs_the_same_after_an_unrelated_completion(measured, name):
+    """One ordinary task nobody here owns completed between the rest pass and this one: the duty may do the
+    addressed work that completion owes it, and its counts are the same at k=1 and k=30."""
+    large = measured["large"]
+    after = {k: _duty_pass(measured, name, k, "unrelated") for k in (K_SMALL, large)}
+    breaches = contract_breaches(after[K_SMALL]["counts"], after[large]["counts"], large)
+    assert not breaches, (name, breaches, _growing(after[K_SMALL], after[large]))
 
 
 @pytest.mark.parametrize("name", sorted(COMPANION_COUNTERS))
@@ -499,6 +598,84 @@ def test_the_contract_catches_a_history_walk(tmp_path, walks_history):
             tagged("read", read)
         counted[k] = meter.snapshot("read")["counts"]
     assert bool(contract_breaches(counted[K_SMALL], counted[30], 30)) is walks_history, counted
+
+
+def _listing(door: str) -> Callable[[pathlib.Path], int]:
+    """One reader per door, each ONE call over the directory; ``probe`` examines one entry of it."""
+    def scandir(directory):
+        with os.scandir(directory) as entries:
+            return sum(1 for _entry in entries)
+
+    def listdir(directory):
+        return len(os.listdir(directory))
+
+    def iterdir(directory):
+        return sum(1 for _entry in pathlib.Path(directory).iterdir())
+
+    def walk(directory):
+        return sum(len(files) for _root, _dirs, files in os.walk(directory))
+
+    def probe(directory):  # whether the directory is empty: the same one entry at every size
+        with os.scandir(directory) as entries:
+            return int(next(entries, None) is not None)
+    return {"scandir": scandir, "listdir": listdir, "iterdir": iterdir, "walk": walk, "probe": probe}[door]
+
+
+@pytest.mark.parametrize("door", ["scandir", "listdir", "iterdir", "walk", "probe"])
+def test_the_contract_catches_a_history_sized_listing_made_in_one_call(tmp_path, door):
+    """A listing costs the entries it delivers, not the calls it took: ONE ``scandir`` or ``listdir``
+    over a history directory (``os.walk`` and ``Path.iterdir`` included) is the same one call at every
+    size and grows with the history all the same; looking whether the directory is empty examines one
+    entry and stays flat."""
+    counted = {}
+    for k in (K_SMALL, 30):
+        archive = tmp_path / f"k{k:03d}" / "archive"
+        archive.mkdir(parents=True)
+        for index in range(k):
+            (archive / f"chat_{index:04d}.jsonl").write_text("{}\n", encoding="utf-8")
+        with CostMeter(tmp_path / f"k{k:03d}") as meter:
+            tagged("read", lambda archive=archive: _listing(door)(archive))
+        counted[k] = meter.snapshot("read")["counts"]
+    calls = [{key: counts.get(key, 0) for key in ("scandir", "listdir")} for counts in counted.values()]
+    assert calls[0] == calls[1] and sum(calls[0].values()) == 1, calls  # the call count alone sees nothing
+    breaches = contract_breaches(counted[K_SMALL], counted[30], 30)
+    assert (set(breaches) == {"dir_entries:archive"}) is (door != "probe"), (door, breaches, counted)
+    expected = (1, 30) if door != "probe" else (1, 1)
+    assert (counted[K_SMALL]["dir_entries:archive"], counted[30]["dir_entries:archive"]) == expected
+
+
+@pytest.mark.parametrize("look_ends", ["inside_the_pass", "during_the_drain"])
+def test_the_driver_measures_the_child_a_pass_spawned_whenever_its_look_ends(tmp_path, monkeypatch, look_ends):
+    """A pass whose look spawned the child owns the child's jobs: the driver runs them under the pass's
+    tag whether the look's thread ended inside the pass (its spawn recorded before the drain began) or
+    ends while the drain joins it. A spawn baseline read after the pass takes the early spawn for an
+    old one and measures no child jobs, with no error to show for it."""
+    import threading
+    import time
+    from types import SimpleNamespace
+
+    from ouroboros import maintenance
+    from tests._cost_driver import _measured_pass
+    from tests._cost_meter import tag_of
+
+    runs: List[str] = []
+    monkeypatch.setattr(maintenance, "run", lambda _root, **_kwargs: runs.append(tag_of()))
+    monkeypatch.setattr(maintenance, "child", SimpleNamespace(owed=lambda: False))
+    dispatcher = SimpleNamespace(_DELIVERY_WAKE=threading.Event(), _tick_maintenance_child=lambda: None)
+    result: Dict[str, Any] = {"errors": [], "child_spawns": ["D:earlier:first"], "_started": time.monotonic()}
+
+    def spawn():
+        result["child_spawns"].append(tag_of())
+
+    def look():
+        if look_ends == "inside_the_pass":
+            spawn()
+        else:
+            threading.Thread(target=lambda: (time.sleep(0.2), spawn()), name="maintenance-child").start()
+
+    with CostMeter(tmp_path) as meter:
+        _measured_pass(meter, "D:duty:first", look, dispatcher, tmp_path, threading.Event(), result)
+    assert result["errors"] == [] and runs == ["D:duty:first"], (look_ends, runs, result["child_spawns"])
 
 
 @pytest.mark.parametrize("extra", ["none", "sql", "body", "legacy_scan", "missing_headers"])

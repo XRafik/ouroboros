@@ -437,16 +437,31 @@ def _one_pass(sm: Any, duty: Any, root: pathlib.Path, stop: threading.Event) -> 
         run(stop, latch)
 
 
+def _measured_pass(meter: CostMeter, tag: str, one: Callable[[], None], sm: Any, root: pathlib.Path,
+                   stop: threading.Event, result: Dict[str, Any]) -> Dict[str, Any]:
+    """One pass under ``tag``, everything it dispatched (``_drain``), then its count. The spawn
+    baseline is read BEFORE the pass: a look whose thread ends inside the pass has its spawn
+    recorded before the drain begins, and a baseline read then would take it for an old one and
+    leave the child's jobs unmeasured."""
+    spawned = len(result.get("child_spawns", ()))
+    try:
+        tagged(tag, one)
+    except Exception as exc:
+        result["errors"].append(f"{tag}: {type(exc).__name__}: {exc}")
+    _drain(meter, tag, sm, root, stop, result, spawned)
+    _mark(result, tag)
+    return _summary(meter, tag)
+
+
 def _drain(meter: CostMeter, tag: str, sm: Any, root: pathlib.Path, stop: threading.Event,
-           result: Dict[str, Any]) -> None:
+           result: Dict[str, Any], spawned: int) -> None:
     """Everything the pass dispatched or woke, before its count is read: its threads (the child's
     look, the daemon latch retry, a reaper), the child look it requested (run here under its tag),
-    the child's jobs a look it caused spawned (run here under its tag, as B6's job runner does: a
-    child process the meter cannot see would hide the work a pass dispatched) and the early
-    delivery replay it woke."""
+    the child's jobs a look it caused spawned — every spawn recorded since ``spawned``, the count
+    before the pass — (run here under its tag, as B6's job runner does: a child process the meter
+    cannot see would hide the work a pass dispatched) and the early delivery replay it woke."""
     from ouroboros import maintenance
 
-    spawned = len(result.get("child_spawns", ()))
     for _round in range(3):
         alive = meter.join_spawned(tag, timeout=180.0)
         if alive:
@@ -561,6 +576,7 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
     from ouroboros.delegate_collection import body_runtime
     from ouroboros.headless import DRIVE_SETTLEMENTS_PER_PASS
     from ouroboros.maintenance import child
+    from ouroboros.task_results import write_task_result
 
     stop = threading.Event()
     companions = _companions(srv, root, facts)
@@ -571,13 +587,7 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
         return
 
     def one_pass(tag: str, one: Callable[[], None]) -> Dict[str, Any]:
-        try:
-            tagged(tag, one)
-        except Exception as exc:
-            result["errors"].append(f"{tag}: {type(exc).__name__}: {exc}")
-        _drain(meter, tag, sm, root, stop, result)
-        _mark(result, tag)
-        return _summary(meter, tag)
+        return _measured_pass(meter, tag, one, sm, root, stop, result)
 
     # A duty that works through a budgeted lap (drive settlement: DRIVE_SETTLEMENTS_PER_PASS attempts per
     # pass and layout) settles the root's drives over as many passes as its layouts need, then one more
@@ -588,8 +598,10 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
         """``first`` over the root as the boot left it; then, while the previous pass wrote (a duty
         whose first pass changed its own inputs, e.g. recorded a member's rest after writing its
         row, or a budgeted lap still settling), up to ``settle_passes`` ``settle`` passes; then
-        ``rest``, the pass over unchanged inputs the law holds to; then ``work`` after the
-        companion's input change."""
+        ``rest``, the pass over unchanged inputs the law holds to; then ``unrelated``, the pass
+        after one ordinary task nobody here owns completed (the install is never idle: a pass may
+        do the addressed work that completion owes it, never history-sized work); then ``work``
+        after the companion's input change."""
         entry: Dict[str, Any] = {"first": one_pass(f"D:{name}:first", one)}
         settled = entry["first"]
         for attempt in range(1, settle_passes + 1):
@@ -599,6 +611,9 @@ def _measure_duties(meter: CostMeter, srv: Any, result: Dict[str, Any], root: pa
             settled = entry[f"settle{attempt}"] = one_pass(f"D:{name}:settle{attempt}", one)
         before_rest()
         entry["rest"] = one_pass(f"D:{name}:rest", one)
+        write_task_result(root, f"cur-unrelated-{name}", "completed", chat_id=1, result="an ordinary finished turn")
+        before_rest()
+        entry["unrelated"] = one_pass(f"D:{name}:unrelated", one)
         companion = companions.get(name)
         if companion is None:
             entry["companion"] = None
