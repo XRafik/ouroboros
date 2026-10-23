@@ -452,19 +452,19 @@
    "works_complete": true,
    "works_gaps": []
   },
-  "direct_dispatched": {
+  "direct_requested": {
    "works": [
     {
-     "work_id": "dd",
+     "work_id": "dr",
      "room": 1,
      "name": "",
      "episode": {
-      "task_id": "dd",
+      "task_id": "dr",
       "live": true
      },
      "activity": "working",
      "transition": "none",
-     "call": "sending",
+     "call": "working",
      "because": [],
      "tails": [],
      "live": true,
@@ -474,13 +474,13 @@
      "refusal": {},
      "members": {
       "ids": [
-       "dd"
+       "dr"
       ],
       "states": {
-       "dd": {
+       "dr": {
         "activity": "working",
         "transition": "none",
-        "call": "sending",
+        "call": "working",
         "live": true,
         "release": "self",
         "confirmed": true,
@@ -498,36 +498,36 @@
      "controls": [
       {
        "action": "wrap_up",
-       "target": "dd"
+       "target": "dr"
       },
       {
        "action": "hurry",
-       "target": "dd"
+       "target": "dr"
       },
       {
        "action": "pause",
-       "target": "dd"
+       "target": "dr"
       },
       {
        "action": "stop",
-       "target": "dd",
+       "target": "dr",
        "scope": "cascade"
       }
      ],
-     "client_message_id": "cm-sent"
+     "client_message_id": "cm-call"
     }
    ],
    "rooms": {
     "1": {
      "activity": "working",
      "transition": "none",
-     "call": "sending",
+     "call": "working",
      "turn": [],
      "amber": false,
      "mark": "moving",
      "confirmed": true,
      "works": [
-      "dd"
+      "dr"
      ]
     }
    },

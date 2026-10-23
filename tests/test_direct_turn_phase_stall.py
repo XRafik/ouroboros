@@ -330,7 +330,7 @@ def test_an_ordinary_turn_reaches_its_model_and_answer_once_and_journals_nothing
     def answers(actor, task):
         _pass(actor, task, "context_building_started", "context_building_finished", "main_llm_call_state")
         census.extend(get_direct_activity_registry().snapshot())
-        # The model's own time: however long the dispatched phase stands, it is no start stall.
+        # The call's own time, before its dispatch is seen as well: however long it stands, it is no start stall.
         clock.ahead = 60.0
         seen = clock.ticks
         assert _wait_until(lambda: clock.ticks >= seen + 3)
@@ -345,6 +345,7 @@ def test_an_ordinary_turn_reaches_its_model_and_answer_once_and_journals_nothing
     finally:
         _stop_watchdog(stop)
     assert _stall_rows(out) == []
-    assert [row["turn_phase"] for row in census] == ["dispatched"]
+    assert [row["turn_phase"] for row in census] == ["requested"]
     bus = _journal_only(out, actor)
     assert len([item for item in bus if item.get("type") == "main_llm_call_state"]) == 1
+

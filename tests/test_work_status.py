@@ -35,14 +35,19 @@ def test_a_preparing_direct_turn_says_the_start_step_it_stands_at(turn_phase, te
     assert state["reasons"] == [{"code": f"turn_{turn_phase}", "text": text}]
 
 
-def test_a_start_step_speaks_only_while_preparing_and_dispatch_reads_sending():
-    sent = ws.classify_member(row("d", "preparing", kind="direct_chat", turn_phase="dispatched"))
-    assert (sent["call"], sent["reasons"]) == ("sending", [])
+def test_a_start_step_speaks_only_while_preparing_and_a_started_call_reads_the_census_move():
+    # Its own Main call started before its census phase moved: the word that move gives, never Sending ahead of it.
+    for step in ("requested", "dispatched"):
+        lagging = ws.classify_member(row("d", "preparing", kind="direct_chat", turn_phase=step))
+        assert (lagging["call"], lagging["reasons"]) == ("working", []), step
     # Without a start fact, or once its census phase moved on, a turn's word and reasons stay what they were.
     assert ws.classify_member(row("d", "preparing", kind="direct_chat"))["reasons"] == []
     moved = ws.classify_member(row("d", "working", kind="direct_chat", turn_phase="context_built"))
     assert (moved["call"], moved["reasons"]) == ("working", [])
     assert ws.classify_member(row("d", "working", kind="direct_chat", turn_phase="dispatched"))["call"] == "working"
+    # Sending is the census's own observation of the request going out.
+    sending = row("d", "working", kind="direct_chat", turn_phase="requested", model_activity={"phase": "dispatching"})
+    assert ws.classify_member(sending)["call"] == "sending"
 
 
 def test_writer_held_continue_waits_and_is_never_the_owners_turn():

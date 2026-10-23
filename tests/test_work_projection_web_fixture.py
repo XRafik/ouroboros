@@ -55,9 +55,9 @@ CASES = {
               turn_phase="context_building")],
         {}, {}, {},
     ),
-    # Its own dispatch fact arrived before its census phase moved: Sending, with no start step beside it.
-    "direct_dispatched": (
-        [_row("dd", "preparing", kind="direct_chat", chat_id=1, client_message_id="cm-sent", turn_phase="dispatched")],
+    # Its own Main call started before its census phase moved: the word that move gives (Working), no start step.
+    "direct_requested": (
+        [_row("dr", "preparing", kind="direct_chat", chat_id=1, client_message_id="cm-call", turn_phase="requested")],
         {}, {}, {},
     ),
     "paused_by_owner": (
@@ -176,7 +176,7 @@ def test_the_web_fixture_is_the_servers_projection():
 
 @pytest.mark.parametrize("name, activity", [
     ("held_continue", "working"), ("direct_question", "waiting"), ("direct_preparing", "working"),
-    ("direct_dispatched", "working"), ("paused_by_owner", "paused"),
+    ("direct_requested", "working"), ("paused_by_owner", "paused"),
     ("spending_limit", "paused"), ("queued_and_pausing", "working"), ("unknown", "unknown"),
     ("helper_after_parent", "working"), ("paused_review_finishing", "paused"), ("unconfirmed_run", "unknown"),
     ("paused_unattributed", "paused"), ("pausing_with_queued_helper", "working"), ("two_works_one_pausing", "working"),

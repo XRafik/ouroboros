@@ -407,7 +407,7 @@ class _TurnPhaseWatch:
 
     Each watchdog interval reads every running ``TurnExecution`` (its thread and the start
     facts it passed, each with the monotonic instant it was stamped). One whose phase has
-    stood a whole interval before its first model request gets one ``direct_turn_stall``
+    stood a whole interval before its Main call started gets one ``direct_turn_stall``
     row with that thread's stack, one folded stack sample per interval while the phase
     stands, and one ``direct_turn_stall_end`` once it advances (``then``: the next phase,
     ``stood_sec`` up to that phase's own stamp) or the turn ends in it (``then: "ended"``).
@@ -421,7 +421,7 @@ class _TurnPhaseWatch:
         self._open: dict = {}  # execution_id -> the open episode
 
     def tick(self, now: float, heartbeats: dict) -> None:
-        from supervisor.active_activity import get_direct_activity_registry
+        from supervisor.active_activity import CALL_PHASES, get_direct_activity_registry
 
         executions = {row.execution_id: row for row in get_direct_activity_registry().executions()}
         for execution_id in [key for key in self._open if key not in executions]:
@@ -433,7 +433,7 @@ class _TurnPhaseWatch:
             if episode is not None and episode["index"] != index:
                 self._close(execution_id, now)
                 episode = None
-            if phase == "dispatched" or now - at < self._interval:
+            if phase in CALL_PHASES or now - at < self._interval:
                 continue
             ident = execution.thread[0]
             if episode is not None:
