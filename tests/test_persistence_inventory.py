@@ -850,7 +850,9 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # and a candidate run's named-evidence ``.../delegated_runs/*/evidence/summary.json`` reread.
 # 416 -> 417 (this branch): retained bootstrap identity ``state/delegate_bootstrap/*.json`` and per-target
 # payload mutation locks ``state/delegate_payload_mutations/*.lock``; the retired global claim spelling is gone.
-EXPECTED_SCAN_PATHS = 417
+# 417 -> 418: the desktop window's Interface size ``state/desktop_page_zoom.json`` (``launcher_page_zoom.py``,
+# its section-2 row).
+EXPECTED_SCAN_PATHS = 418
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts

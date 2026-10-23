@@ -691,6 +691,26 @@ export function renderSettingsPage() {
                         </div>
                     </div>
 
+                    <div class="form-section" data-interface-size>
+                        <h3>Interface size</h3>
+                        <div class="settings-section-copy">
+                            Makes everything larger or smaller: text, buttons, cards and widgets.
+                            <br><strong>Per device, like the theme:</strong> each window and browser keeps its own size.
+                        </div>
+                        <div class="settings-effort-card">
+                            <!-- interface_size.js paints the range this surface allows and applies a size when the slider is let go. -->
+                            <div class="interface-size-range" data-interface-size-row hidden>
+                                <label for="interface-size">Size</label>
+                                <input type="range" id="interface-size" min="50" max="200" step="5" value="100" data-interface-size-input>
+                                <output for="interface-size" data-interface-size-value data-i18n-skip>100%</output>
+                                <div class="settings-toolbar">
+                                    <button type="button" class="btn btn-default btn-sm" data-interface-size-reset>Reset to 100%</button>
+                                </div>
+                            </div>
+                            <div class="settings-inline-note" data-interface-size-note role="status" aria-live="polite"></div>
+                        </div>
+                    </div>
+
                     <div class="form-section" data-notify-settings>
                         <h3>Notifications</h3>
                         <div class="settings-section-copy">
