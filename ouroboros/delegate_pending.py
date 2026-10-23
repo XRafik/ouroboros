@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 
 def pending_invocations(
-    drive_root: Any, rows: Optional[List[Dict[str, Any]]] = None,
+    drive_root: Any, rows: Optional[List[Dict[str, Any]]] = None, *, materialize: bool = True,
 ) -> List[Dict[str, Any]]:
     """Return request rows with no bound run and no definite refusal.
 
@@ -83,13 +83,58 @@ def pending_invocations(
         if state.get(invocation_id, "pending") != "pending":
             continue
         # Resolve only survivors, not every historical start on each sweep.
-        body = request_body(drive_root, record)
+        body = request_body(drive_root, record) if materialize else record.get("request")
         ref = record.pop("request_ref")
         # An unreadable stored body does not discharge the pending start.
         if body or ref is not None:
             record["request"] = body
+            if body is None and ref is not None:
+                record["request_ref"] = ref  # an addressed replay can retry an unavailable source
             pending.append(record)
     return pending
+
+
+def current_rows(root, rows):
+    """Typed open facts only. Legacy gaps keep their identity until the child backfills them."""
+    pending = []
+    for facts in rows:
+        if "pending" in facts:
+            pending.extend(copy.deepcopy(facts["pending"]))
+        else:
+            pending.extend(pending_invocations(root, [facts["request"]], materialize=False))
+    return pending
+
+
+JOB = "pending_invocations"
+
+
+def backfill_due(root, row, facts, child):
+    return row.get("state") != "done"
+
+
+def backfill(root, should_stop):
+    """One addressed pass over already-open requests, CAS against start/refusal races."""
+    from ouroboros import maintenance_jobs, store
+
+    with store.open_store(root, write=False) as txn:
+        request = txn.meta("job:" + JOB)
+        rows = txn.set_rows("custody_open")
+    done = 0
+    for key, facts in rows.items():
+        if should_stop():
+            return {"state": "pending", "items": done}
+        if not key.startswith("invocation:") or "pending" in facts:
+            continue
+        projected = pending_invocations(root, [facts["request"]])
+        with store.open_store(root, write=True) as txn:
+            if txn.get_row("custody_open", key) == facts:
+                txn.put_row("custody_open", key, {**facts, "pending": projected})
+        done += 1
+    with store.open_store(root, write=True) as txn:
+        if txn.meta("job:" + JOB) != request:
+            return {"state": "pending", "items": done}  # an import/repair added open rows meanwhile
+        maintenance_jobs.record_in(txn, JOB, state="done", items=done)
+    return {"state": "done", "items": done}
 
 
 def request_body(drive_root: Any, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:

@@ -90,6 +90,8 @@ def test_every_reconcile_pass_runs_the_media_prune(tmp_path, monkeypatch):
     monkeypatch.setattr(sm, "DATA_DIR", tmp_path)
 
     sm._run_reconcile_prunes()
+    from ouroboros.maintenance import run_job
+    run_job(tmp_path, "runtime_retirement")
 
     assert not old_shot.exists()
     assert owner_upload.read_bytes() == b"owner image"

@@ -239,8 +239,9 @@ class DutyRest:
         self.root, self.duty, self.inputs = Path(root), _check_name(duty), dict(inputs or {})
         prefix = self.duty + ":"
         self.candidates = {str(tid): dict(facts or {}) for tid, facts in (candidates or {}).items()}
-        self.signatures: dict[str, list] = {}
+        self.signatures: dict[str, list | None] = {}
         self.marks: dict[str, dict] = {}
+        self.readable = False
         try:
             with store.open_store(self.root, write=False) as txn:
                 if name:
@@ -250,6 +251,7 @@ class DutyRest:
                                                     "(SELECT value FROM json_each(?))", (json.dumps(sorted(self.candidates)),))}
                 self.marks = {record["id"][len(prefix):]: json.loads(record["facts"]) for record in txn.conn.execute(
                     "SELECT id, facts FROM obligations WHERE set_name=? AND id>=? AND id<?", (REST_SET, prefix, self.duty + ";"))}
+                self.readable = True
         except StoreError:
             if name:
                 raise  # the set's members are unknown: the duty cannot pass
@@ -263,40 +265,54 @@ class DutyRest:
     def _holds(self, tid: str, mark: dict, now_at: datetime.datetime | None, wake: set) -> bool:
         current = {**self.inputs, **self.candidates[tid]}
         due = _instant(mark.get("due_at")) if mark.get("due_at") else None
-        return (mark.get("signature") == self.signatures.get(tid) and not wake & set(mark.get("waits_on") or ())
+        return (self.readable and mark.get("signature") == self.signatures.get(tid) and not wake & set(mark.get("waits_on") or ())
                 and all(current.get(key) == value for key, value in (mark.get("inputs") or {}).items())
                 and (not mark.get("due_at") or (due is not None and now_at is not None and due > now_at)))
 
     def wait(self, task_id: str, *waits_on: str, due_at: str | None = None, inputs: Iterable[str] = (),
-             report: dict | None = None) -> None:
+             report: dict | None = None, absent: bool = False) -> None:
         """TASK_ID, examined this pass, cannot progress until what it WAITS_ON changes; ``inputs``
         names the pass's external stamps the outcome depends on (a member's own always count);
-        ``report`` is what the duty states about the member while it rests."""
+        ``report`` is what the duty states while it rests. ``absent`` requires a successful
+        read that found no row, never a failed/unavailable read."""
         tid = str(task_id)
-        if tid not in self.candidates or self.signatures.get(tid) is None or not waits_on:
+        if (not self.readable or tid not in self.candidates or not waits_on
+                or (self.signatures.get(tid) is None) != absent):
             return
         stamps = {**{key: self.inputs[key] for key in inputs if key in self.inputs}, **self.candidates[tid]}
-        self._outcomes[tid] = {"task_id": tid, "signature": self.signatures[tid], "waits_on": sorted(set(waits_on)),
+        self._outcomes[tid] = {"task_id": tid, "signature": self.signatures.get(tid), "waits_on": sorted(set(waits_on)),
                                **({"inputs": stamps} if stamps else {}), **({"due_at": str(due_at)} if due_at else {}),
                                **({"report": dict(report)} if report else {})}
 
-    def commit(self) -> None:
+    def commit(self, *, confirm: Iterable[str] = ()) -> int | None:
         """Write the pass's new outcomes and drop the rests of members that left, in one write
         transaction; an outcome whose task was written after its selection is not recorded (that
         write already puts the member back). Nothing new: nothing is written. A rest is never
-        authority, so a store that cannot take it leaves the members to the next pass."""
+        authority, so a store that cannot take it leaves the members to the next pass.
+        ``confirm`` revalidates selected signatures and returns the resulting store revision
+        for a process input latch; a racing write or unreadable store returns None."""
         import logging
 
         outcomes = {tid: facts for tid, facts in self._outcomes.items() if self.marks.get(tid) != facts}
         departed = [tid for tid in self.marks if tid not in self.candidates]
-        if not outcomes and not departed:
+        confirm = tuple(confirm)
+        if not outcomes and not departed and not confirm:
             return
         try:
-            with store.open_store(self.root, write=True) as txn:
+            with store.open_store(self.root, write=bool(outcomes or departed)) as txn:
+                changes, valid = txn.conn.total_changes, self.readable
+                for tid in confirm:
+                    signature = txn.row(tid, "write_seq", "updated_at")
+                    valid = valid and (list(signature) if signature is not None else None) == self.signatures.get(tid)
                 for tid in departed:
                     txn.delete_row(REST_SET, f"{self.duty}:{tid}")
                 for tid, facts in outcomes.items():
-                    if list(txn.row(tid, "write_seq", "updated_at") or ()) == facts["signature"]:
+                    signature = txn.row(tid, "write_seq", "updated_at")
+                    if (list(signature) if signature is not None else None) == facts["signature"]:
                         txn.put_row(REST_SET, f"{self.duty}:{tid}", facts)
+                    else:
+                        valid = False
+                # The shared store advances commit_seq once for a changed transaction.
+                return txn.revision() + int(txn.conn.total_changes != changes) if valid else None
         except StoreError:
             logging.getLogger(__name__).debug("Duty %s rests not recorded this pass", self.duty, exc_info=True)

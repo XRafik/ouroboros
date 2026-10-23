@@ -381,7 +381,7 @@ def test_task_snapshot_materializes_only_own_runs_and_pending_requests(tmp_path,
     audit = usage["delegate_terminal_reconciliation"]
     assert audit["audit_status"] == "ok" and not writes
     assert sorted(decoded) == ["own-closed", "own-open", "own-review"]
-    assert sorted(hydrated) == ["own-pending", "review-pending"]
+    assert hydrated == [], "typed pending identities need no historical request body"
     assert audit["open_run_ids"] == ["own-open"]
     assert audit["pending_invocation_ids"] == ["own-pending"]
     assert [row["run_id"] for row in audit["terminal_runs"]] == ["own-closed"]

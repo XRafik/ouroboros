@@ -264,7 +264,7 @@ def _present_facts(root, task_ids) -> tuple:
 
 
 def _refresh_costs(root: pathlib.Path, reads) -> None:
-    from ouroboros import usage_store
+    from ouroboros import store, usage_store
     from ouroboros.obligations import DutyRest
     from ouroboros.task_results import validate_task_id
     from ouroboros.task_status import SETTLED_STATUSES
@@ -285,23 +285,32 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
             if leaf != task_id and settled:
                 yield leaf, reads.load(leaf)
 
+    with store.open_store(root, write=False) as txn:
+        current_revision = txn.revision()
     with usage_store.read(root) as txn:
-        owners = txn.dirty_owners()
+        money_marker = txn.marker()
+        with _UNRESOLVED_LOCK:
+            state = _subject_state(root, COST_PROJECTIONS)
+            resting = state.get("absence_inputs") == [current_revision, money_marker]
+        owners = [] if resting else txn.dirty_owners()
+    if resting:
+        # Retry a failed diagnostic publication, not the proven-absent owners.
+        if state["fault"] is not None or state["published"] is None:
+            _publish_unresolved(root, {}, subject=COST_PROJECTIONS, keep=state["observed"])
+        return
     ids = {}
     for owner, _revision in owners:
         try:
             ids[owner] = validate_task_id(owner)
         except ValueError:
             pass  # System accounting scopes own no task result.
-    # Presence precedes the ownership read, for every owner in one statement: an
-    # absent row keeps this exact revision without the fence's authority read, and
-    # the next pass projects a row copied back after the last ledger write. A row
-    # not settled yet waits for its own settlement unread; a settled owner whose
-    # late phase is open rests (``obligations.DutyRest``) until its row or receipts change.
+    # Successful absence keeps debt and rests on task arrival or a money write.
+    # The process's input latch skips the whole unchanged selection; restart or
+    # explicit repair re-observes it. Unanswered reads establish no absence.
     _ids, facts = _present_facts(root, ids.values())
     settled = set() if facts is None else {tid for tid, row in facts.items() if row["status"] in SETTLED_STATUSES}
     rest = DutyRest(root, "cost_projection", {ids[owner]: {"usage_revision": revision}
-                                              for owner, revision in owners if ids.get(owner) in settled})
+                                              for owner, revision in owners if owner in ids})
     acknowledged, pending, failures, faults = [], set(), {}, {}
     for owner, revision in owners:
         task_id = ids.get(owner)
@@ -310,6 +319,7 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         pending.add(task_id)
         if facts is not None and task_id not in facts:
             failures[task_id] = "result_absent"
+            rest.wait(task_id, "result_absent", absent=True, report={"reason": "result_absent"})
             continue
         if facts is not None and task_id not in settled or task_id in rest.resting:
             continue
@@ -337,7 +347,14 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         with usage_store.hold(root) as txn:
             for owner, revision in acknowledged:
                 txn.ack_dirty_owner(owner, revision)
-    rest.commit()
+    for owner, _revision in acknowledged:
+        rest.candidates.pop(owner, None)
+    absent = {tid for tid, reason in failures.items() if reason == "result_absent"}
+    unchanged_absence = bool(pending) and pending == absent and rest.readable and all(
+        rest.signatures.get(tid) is None for tid in absent)
+    revision = rest.commit(confirm=absent if unchanged_absence else ())
+    with _UNRESOLVED_LOCK:
+        state["absence_inputs"] = [revision, money_marker] if unchanged_absence and revision is not None else None
     _publish_unresolved(root, failures, subject=COST_PROJECTIONS, faults=faults, keep=pending)
 
 

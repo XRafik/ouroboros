@@ -84,57 +84,180 @@ def fold(prior, event, previous=None):
     return result
 
 
-def catch_up(root):
-    """Replay only the suffix at a producer boundary; rollback a damaged suffix whole."""
+# Physical memory budget for one decoded suffix and its atomic projection. A single
+# larger event stays whole. The foreground never consumes a pre-existing backlog.
+BATCH_BYTES = 256 * 1024
+JOB = "subagent_metrics"
+
+
+def _projection(root, events):
+    """Capture addressed inputs, then fold with no store transaction held."""
+    addresses = set()
+    for event in events:
+        if event.get("type") == EVENT:
+            addresses.add((PRODUCERS, str(event["producer_id"])))
+            if event.get("row_id"):
+                addresses.add(_group(event))
+            if (event.get("actor") or {}).get("kind") == "api_call":
+                addresses.add((CALLS, event["producer_id"].removeprefix("call:")))
+    with store.open_store(root, write=False) as txn:
+        values = {address: txn.get_row(*address) for address in addresses}
+    updates, observed, tasks = {}, set(), set()
+
+    def put(address, value):
+        values[address] = updates[address] = value
+
+    for event in events:
+        if event.get("type") in {"llm_round", "llm_api_error"} and event.get("llm_call_id"):
+            put((CALLS, str(event["llm_call_id"])), {key: event[key] for key in
+                ("llm_call_id", "task_id", "ledger_attempt_ids", "physical_attempt_id") if key in event})
+            continue
+        if event.get("type") != EVENT:
+            continue
+        event = copy.deepcopy(event)
+        actor = event.get("actor") or {}
+        if actor.get("kind") == "api_call":
+            from ouroboros.subagent_metric_events import _call_evidence
+            call_id = event["producer_id"].removeprefix("call:")
+            call = values.get((CALLS, call_id)) or {}
+            if call.get("ledger_attempt_ids"):
+                actor["usage_ref"] = {"ledger_attempt_ids": call["ledger_attempt_ids"],
+                                      "observed_attempt_id": call.get("physical_attempt_id")}
+                event.update(_call_evidence(root, call_id, refs=call))
+        producer = str(event["producer_id"])
+        observed.add(producer)
+        previous = values.get((PRODUCERS, producer))
+        if previous == event or previous and previous.get("terminal") is True and event.get("terminal") is False:
+            continue
+        if previous and _group(previous) != _group(event):
+            raise ValueError("producer identity changed")
+        if event.get("row_id"):
+            address = _group(event)
+            put(address, fold(values.get(address), event, previous))
+        put((PRODUCERS, producer), event)
+        if event.get("task_id"):
+            tasks.add(event["task_id"])
+            put((set_name("swarm_actors", event["task_id"]), producer), event)
+    return updates, observed, tasks
+
+
+def _defer(root, upper):
+    from ouroboros import maintenance_jobs
+    from ouroboros.maintenance import child
+
+    with store.open_store(root, write=True) as txn:
+        cursor = txn.meta(CURSOR) or {}
+        coverage = {**cursor.get("coverage", {}), "state": "unknown", "stream": "pending",
+                    "history_before_window": "unknown"}
+        if cursor.get("coverage") != coverage:
+            txn.set_meta(CURSOR, {**cursor, "coverage": coverage})
+        job = txn.meta("job:" + JOB) or {}
+        if job.get("state") != "pending" or job.get("requested_through", -1) < upper:
+            maintenance_jobs.record_in(txn, JOB, state="pending", requested_through=upper)
+    child.request()
+
+
+def catch_up(root, *, foreground_from=None, should_stop=None):
+    """Fold a stable suffix outside writes, CAS each bounded projection with its cursor.
+
+    A producer supplies its pre-append horizon. Missing/stale coverage before that
+    publication belongs to the child; it never makes the answering process replay.
+    Explicit repair and the maintenance job omit that horizon and drain the suffix.
+    """
     from ouroboros.swarm_rollup import fold_event_suffix
     from ouroboros.jsonl_tail import JsonlChainSnapshot
 
-    root = pathlib.Path(root)
+    root, cursor = pathlib.Path(root), None
     try:
-        with store.open_store(root, write=True) as txn:
-            cursor = txn.meta(CURSOR) or {}
-            missing = set(cursor.get("missing_producers") or ())
-
-            def consume(event):
-                if event.get("type") in {"llm_round", "llm_api_error"} and event.get("llm_call_id"):
-                    txn.put_row(CALLS, str(event["llm_call_id"]), {key: event[key] for key in
-                        ("llm_call_id", "task_id", "ledger_attempt_ids", "physical_attempt_id") if key in event})
-                    return
-                if event.get("type") != EVENT:
-                    return
-                actor = event.get("actor") or {}
-                if actor.get("kind") == "api_call":
-                    call = txn.get_row(CALLS, event["producer_id"].removeprefix("call:")) or {}
-                    if call.get("ledger_attempt_ids"):
-                        actor["usage_ref"] = {"ledger_attempt_ids": call["ledger_attempt_ids"],
-                                              "observed_attempt_id": call.get("physical_attempt_id")}
-                producer = str(event["producer_id"])
-                missing.discard(producer)
-                previous = txn.get_row(PRODUCERS, producer)
-                if previous == event or previous and previous.get("terminal") is True and event.get("terminal") is False:
-                    return
-                if previous and _group(previous) != _group(event):
-                    raise ValueError("producer identity changed")
-                if event.get("row_id"):
-                    name, key = _group(event)
-                    txn.put_row(name, key, fold(txn.get_row(name, key), event, previous))
-                txn.put_row(PRODUCERS, producer, event)
-                if event.get("task_id"):
-                    txn.put_row(set_name("swarm_actors", event["task_id"]), producer, event)
-
-            through = fold_event_suffix(root, int(cursor.get("through", 0)), consume)
-            upper = JsonlChainSnapshot(root / "logs/events.jsonl").upper
-            txn.set_meta(CURSOR, {"through": through, "source_root": str(root.resolve()),
-                "missing_producers": sorted(missing),
+        source = JsonlChainSnapshot(root / "logs/events.jsonl")
+        while not (should_stop and should_stop()):
+            with store.open_store(root, write=False) as txn:
+                cursor = txn.meta(CURSOR) or {}
+            start = int(cursor.get("through", 0))
+            if foreground_from is not None and (start != foreground_from or source.upper - start > BATCH_BYTES):
+                _defer(root, source.upper)
+                return False
+            events = []
+            through = fold_event_suffix(root, start, events.append, source=source, max_bytes=BATCH_BYTES)
+            updates, observed, tasks = _projection(root, events)
+            missing = sorted(set(cursor.get("missing_producers") or ()) - observed)
+            next_cursor = {"through": through, "source_root": str(root.resolve()), "missing_producers": missing,
                 "coverage": {"state": "partial" if missing else "observed_window", "history_before_window": "unknown",
-                             "missing_publications": len(missing), "stream": "complete" if through == upper else "incomplete"}})
+                             "missing_publications": len(missing), "stream": "complete" if through == source.upper else "incomplete"}}
+            if next_cursor != cursor or updates:
+                with store.open_store(root, write=True) as txn:
+                    if (txn.meta(CURSOR) or {}) != cursor:
+                        # Another fold or a publication-gap observation won. Retry in
+                        # the child, never overwrite its projection or spin in a caller.
+                        break
+                    for address, value in updates.items():
+                        txn.put_row(*address, value)
+                    txn.set_meta(CURSOR, next_cursor)
+            from ouroboros.swarm_receipt import refresh_for_task
+            for task_id in tasks:
+                refresh_for_task(root, task_id)
+            if through == source.upper or through == start:
+                return through == source.upper
+            if foreground_from is not None:
+                break
+        _defer(root, source.upper)
+        return False
     except Exception:
-        # A retained projection remains useful, but cannot claim a complete stream.
         with store.open_store(root, write=True) as txn:
             old = txn.meta(CURSOR) or {}
-            txn.set_meta(CURSOR, {**old, "coverage": {"state": "unknown", "stream": "unavailable",
-                                                    "history_before_window": "unknown"}})
+            if cursor is None or old == cursor:
+                unknown = {**old, "coverage": {"state": "unknown", "stream": "unavailable",
+                                               "history_before_window": "unknown"}}
+                if unknown != old:
+                    txn.set_meta(CURSOR, unknown)
         raise
+
+
+def _source_stamp(root):
+    stamps = []
+    for name in ("logs/events.jsonl", "archive"):
+        try:
+            info = (pathlib.Path(root) / name).stat()
+            stamps.append([info.st_ino, info.st_size, info.st_mtime_ns])
+        except FileNotFoundError:
+            stamps.append(None)
+    return stamps
+
+
+def job_due(root, row, facts, child):
+    stamp = _source_stamp(root)
+    return row.get("state") in {"pending", "running"} or (
+        any(stamp) and row.get("source") != stamp)
+
+
+def run_job(root, should_stop):
+    from ouroboros import maintenance_jobs
+    from ouroboros.jsonl_tail import JsonlChainSnapshot
+
+    # The recorded job request is fenced too: a publisher racing the last fold
+    # keeps the job pending. A torn line rests until a publication requests it.
+    source = _source_stamp(root)
+    with store.open_store(root, write=False) as txn:
+        request = txn.meta("job:" + JOB)
+    try:
+        complete = catch_up(root, should_stop=should_stop)
+    except Exception as exc:
+        with store.open_store(root, write=True) as txn:
+            if txn.meta("job:" + JOB) == request:
+                maintenance_jobs.record_in(txn, JOB, state="failed", error=type(exc).__name__, source=source)
+        raise
+    upper = JsonlChainSnapshot(root / "logs/events.jsonl").upper
+    state = "pending"
+    with store.open_store(root, write=True) as txn:
+        cursor = txn.meta(CURSOR) or {}
+        if txn.meta("job:" + JOB) == request and not should_stop():
+            if complete and cursor.get("through") == upper:
+                state = "done"
+            elif (cursor.get("coverage") or {}).get("stream") == "incomplete":
+                state = "failed"  # a torn line waits for its writer, never for a timer
+            maintenance_jobs.record_in(txn, JOB, state=state, through=cursor.get("through"),
+                                       coverage=cursor.get("coverage"), source=source)
+    return {"state": state, "items": 0}
 
 
 def publish(root, event):
@@ -142,6 +265,8 @@ def publish(root, event):
     if not root or not event.get("producer_id"):
         return
     try:
+        from ouroboros.jsonl_tail import JsonlChainSnapshot
+        before = JsonlChainSnapshot(pathlib.Path(root) / "logs/events.jsonl").upper
         event = {**copy.deepcopy(event), "type": EVENT}
         with store.open_store(root, write=False) as txn:
             previous = txn.get_row(PRODUCERS, str(event["producer_id"])) or {}
@@ -157,7 +282,7 @@ def publish(root, event):
                     txn.set_meta(CURSOR, {**cursor, "missing_producers": missing,
                         "coverage": {**cursor.get("coverage", {}), "state": "partial", "missing_publications": len(missing)}})
                 raise OSError("measurement journal append failed")
-        catch_up(root)
+        catch_up(root, foreground_from=before)
         from ouroboros.swarm_receipt import refresh_for_task
         refresh_for_task(root, event.get("task_id"))
     except Exception:

@@ -1162,7 +1162,8 @@ def _adopt_holder(ctx: Any, task: Mapping[str, Any], row: dict, holder: dict, *,
         retry = {"retry_of": pending_id}
         if pending.get("work_order_source_request"):
             retry["work_order_source_request"] = pending["work_order_source_request"]
-        prompt = (pending.get("request") or {}).get("prompt")
+        from ouroboros.delegate_pending import request_body
+        prompt = (request_body(drive, pending) or {}).get("prompt")
         if not isinstance(prompt, str) or not prompt:
             return {**identity, "status": "refused", "reason": "pending_request_prompt_missing"}
         parsed = delegate_payload(exact_start(ctx, prompt, retry))

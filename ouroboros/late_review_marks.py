@@ -32,7 +32,7 @@ producer's own duty (``owe_after_end``: a change or commit wave its author left)
 producer turns into marks once the task's canonical terminal status is recorded. The off-loop
 maintenance pass replays those rows (``replay_owed_late_reviews``); a placed, unchanged or
 released mark discharges the row, so a replay can neither duplicate nor resurrect it. A plan
-reply needs no row of its own: its ask records which seats are still pending, so the same pass
+reply needs no row of its own: its ask records which seats are still pending, so the maintenance child job
 collects ended tasks' pending seats at $0 (``_collect_ended_plan_asks``).
 """
 from __future__ import annotations
@@ -205,9 +205,8 @@ def update_wait_cursors(drive_root: Any, duty_id: str, waiting: Mapping[str, Any
 
 def replay_owed_late_reviews(drive_root: Any, *, stop: Any = None) -> Dict[str, int]:
     """The maintenance pass over owed rows: each duty whose author ended is published or handed back to its
-    producer, and a row that names nothing it can owe is retired. Then the plan replies of ended tasks
-    whose producers completed while nobody was listening settle at $0 into their records and rooms; each
-    one counts as settled."""
+    producer; a row that names nothing it can owe is retired. Ended plan asks belong to the
+    separate maintenance child job, which uses their pending seats as debt."""
     from ouroboros import store  # D15->D17 is lazy-only
 
     report = {"settled": 0, "waiting": 0, "retired": 0, "failed": 0}
@@ -227,8 +226,6 @@ def replay_owed_late_reviews(drive_root: Any, *, stop: Any = None) -> Dict[str, 
             report["waiting"] += 1
         else:
             report[_settle_owed(drive_root, duty_id, row)] += 1
-    if stop is None or not stop():
-        report["settled"] += _collect_ended_plan_asks(drive_root, stop)
     return report
 
 
