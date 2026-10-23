@@ -73,6 +73,17 @@ def signature(root: Any, task_id: str, *, txn: Optional[Txn] = None) -> Optional
         return signature(root, task_id, txn=txn)
 
 
+def terminal_writes_since(root: Any, counter: int) -> List[str]:
+    """The task ids whose rows were written terminal after the terminal-write counter stood at COUNTER
+    (``obligations.task_written`` stamps each such row with the counter's new value, ``terminal_seq``),
+    in that order, through the ``tasks_terminal_seq`` index: what a pass keyed on the counter looks at
+    again, never the rows it did not move."""
+    with open_store(root, write=False) as txn:
+        return [record["task_id"] for record in txn.conn.execute(
+            "SELECT task_id FROM tasks INDEXED BY tasks_terminal_seq WHERE terminal_seq>? ORDER BY terminal_seq, task_id",
+            (int(counter),))]
+
+
 def delete_document(root: Any, task_id: str) -> bool:
     """Remove one task's row and body (a scheduling refusal undoing its own requested row)."""
     with open_store(root, write=True) as txn:

@@ -1,7 +1,7 @@
 """The reconciled duty inventory: one declaration the supervisor tick starts from.
 
 ``server_maintenance.HOST_DUTIES`` names every recurring pass the tick starts off-loop (its journal
-name, single-flight latch, cadence source and one-pass runner). The cost contract's rest law
+name, single-flight latch and one-pass runner). The cost contract's rest law
 (tests/test_cost_contract.py B7) reads the same table, so a pass that exists without a row is a
 pass nobody measures: that is how 22.10's re-offered captures stayed invisible to the instrument.
 Both directions are held here: a tick with every due condition true starts exactly the declared
@@ -38,7 +38,9 @@ def _started_by_one_tick(monkeypatch) -> List[str]:
     monkeypatch.setattr(queue, "RUNNING", {"cur-run": {"task": {"id": "cur-run"}}})  # an actor: cold custody is due
     monkeypatch.setattr(queue, "BUDGET_ROOT_FENCES", {"cur-paused": {}})  # a fence: owner-pause settlement is due
     monkeypatch.setattr(continuation_admission, "held_continuation_predecessors", lambda pending: ["cur-pred"])
-    monkeypatch.setattr(maintenance.child, "_owed", True)
+    # A child of this test's own: owed by construction (a process's first tick), never the process
+    # singleton an earlier test's server shutdown stopped (``server._emergency_process_cleanup``).
+    monkeypatch.setattr(maintenance, "child", maintenance.MaintenanceChild())
     sm._periodic_supervisor_maintenance([0.0], [0.0])
     return names
 
@@ -78,13 +80,11 @@ def test_the_terminal_duty_switch_runs_exactly_the_rows_that_name_it(monkeypatch
     assert sm._STEP_FAILURES == {"evidence-recheck": 1} and not latch.locked()
 
 
-def test_every_row_names_a_latch_a_cadence_source_and_a_runner():
+def test_every_row_names_a_latch_and_a_runner():
     seen = set()
     for duty in sm.HOST_DUTIES:
         assert duty.name and duty.name not in seen
         seen.add(duty.name)
         assert duty.latch is None or isinstance(duty.latch, type(threading.Lock())), duty
-        assert duty.cadence.strip() and not duty.cadence.strip().isdigit(), f"{duty.name}: a bare number is not a cadence source"
         assert callable(duty.run), duty
-    assert sm.host_duty("reconcile-maintenance").cadence == "RECONCILE_SWEEP_SEC"
     assert {duty.name for duty in sm.TWENTY_SECOND_DUTIES} < seen

@@ -440,10 +440,11 @@ def test_the_dispatchers_look_costs_the_same_whatever_the_server_and_the_ledger_
 
 def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data, monkeypatch):
     """After a whole pass finds nothing to settle, the next passes read the layout's basis and stop: the
-    drives are not listed, no verdict is compared, no body decoded, nothing written. A drive added, a
-    closed task written again, a changed retention setting, a new server generation and a young drive
-    reaching its retention instant each make the next pass walk again; a pass stopped by the generation
-    token records no rest."""
+    drives are not listed, no verdict is compared, no body decoded, nothing written. A task completing
+    elsewhere costs one indexed read of the rows written since and leaves the rest standing; a drive's
+    own closed task written again is looked at alone, without a listing. A drive added, a changed
+    retention setting, a new server generation and a young drive reaching its retention instant each
+    make the next pass walk again; a pass stopped by the generation token records no rest."""
     from ouroboros import headless, maintenance_retirement, server_maintenance as sm, task_custody
     from ouroboros.startup_migrations import prepare_startup_state
     from ouroboros.task_results import write_task_result
@@ -493,8 +494,17 @@ def test_a_layout_whose_inputs_stand_is_not_listed_and_each_input_wakes_it(data,
     write_task_result(data, "fresh", "completed", result="answer", child_drive_root=str(fresh), ts=old,
                       root_phase_checkpoint={"post_task_synthesis": "running"})
     walks_then_rests("a drive added")
-    write_task_result(data, "held", "completed", note="written again")  # a closed task written again
-    walks_then_rests("a closed task written again")
+    write_task_result(data, "elsewhere", "completed", result="an ordinary finished turn")  # no drive of this layout
+    listings.clear(), compared.clear(), decodes.clear()
+    counter = rest()["basis"]["terminal"]
+    sm._run_drive_custody_pass()
+    assert listings == [] and compared == [] and decodes == [], "a completion elsewhere walked the layout"
+    assert rest()["basis"]["terminal"] > counter, "the rest stands under the moved counter"
+    write_task_result(data, "held", "completed", note="written again")  # a closed task written again: its drive alone
+    listings.clear(), compared.clear()
+    sm._run_drive_custody_pass()
+    assert listings == [] and compared == ["held"], "a drive's own row written is looked at alone, without a listing"
+    walks_then_rests("the whole pass after a drive's own row changed")
     monkeypatch.setenv("OUROBOROS_GC_RETENTION_DAYS", "2")
     walks_then_rests("the retention setting changed")
     maintenance_retirement.record_startup(data, gaps=False)

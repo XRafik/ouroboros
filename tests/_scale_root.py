@@ -449,13 +449,25 @@ def _settled_task(root: pathlib.Path, task_id: str, **fields: Any) -> None:
     _discharged(root, task_id)
 
 
-def _money(root: pathlib.Path, task_id: str, *, category: str = "", cost: float = 0.4) -> None:
+GLOBAL_LIMIT_USD = 100.0  # the k=1 and k=30 roots reserve under this limit (measured so; unchanged)
+LIMIT_REFERENCE_K = 30
+
+
+def spend_limit_usd(k: int) -> float:
+    """The global limit the synthetic money is reserved under: the k=30 root's $100, or proportionally more
+    for a larger root (every unit settles ``ABSENT_OWNERS_PER_K`` attempts: the known spend grows with the
+    shape, and a fixed limit refused the k=100 root's reservations once it reached $100)."""
+    return GLOBAL_LIMIT_USD * max(1.0, k / LIMIT_REFERENCE_K)
+
+
+def _money(root: pathlib.Path, task_id: str, *, category: str = "", cost: float = 0.4,
+           limit: float = GLOBAL_LIMIT_USD) -> None:
     """One settled attempt of ``task_id`` through the real ledger: the task becomes a dirty usage owner."""
     from ouroboros import usage_accounting as usage
 
     reservation = usage.reserve_attempt(usage.AttemptRequest(
         model="test", provider="openai", drive_root=root, task_id=task_id, root_task_id=task_id,
-        reservation_usd=1.0, global_limit_usd=100.0, category=category))
+        reservation_usd=1.0, global_limit_usd=limit, category=category))
     usage.mark_dispatched(reservation)
     usage.settle_attempt(reservation, {"prompt_tokens": 7}, cost_usd=cost, cost_final=True)
 
@@ -507,7 +519,7 @@ def _usage_owners(root: pathlib.Path, k: int) -> Dict[str, int]:
         for index in range(ABSENT_OWNERS_PER_K):
             task_id = f"hist-absent-{unit}-{index}"
             _settled_task(root, task_id)
-            _money(root, task_id)
+            _money(root, task_id, limit=spend_limit_usd(k))
             delete_result(root, task_id)
             absent += 1
         for index in range(CONSCIOUSNESS_PER_K):

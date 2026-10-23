@@ -34,7 +34,7 @@ LOCK_NAME = "current.lock"  # the name-tier lock around every access
 IMPORT_LOCK_NAME = "current_import.lock"
 GENERATION = 8  # the lifecycle generation that owns the store
 GENERATION_KEY = "current_store_generation"  # in state/migrations.json
-SCHEMA_VERSION = 8  # 2: owner questions; 3: acceptance; 4: plans; 5: retention; 6: hot facts; 7: task cards; 8: root windows
+SCHEMA_VERSION = 8  # 2: owner questions; 3: acceptance; 4: plans; 5: retention; 6: hot facts; 7: task cards; 8: root windows, terminal_seq
 STORE_WAIT_SEC = 10.0
 JOURNAL_SIZE_LIMIT = 64 << 20  # retain at most 64 MiB of an idle rollback journal (PERSISTENCE.md: what it bounds)
 TIER_ENFORCED, TIER_NAME = "enforced", "name"
@@ -56,7 +56,8 @@ FLAG_COLUMNS = {"synthesis": "owes_synthesis", "terminal_projection": "owes_term
 # present key as ``{}`` (its place and presence); ``load`` puts the rows back there, so a document
 # round-trips byte for byte. A key the body never had appears while it has rows.
 ROW_BACKED_FIELDS: Tuple[str, ...] = ("launch_handoffs", "model_waits", "retired_model_consumers")
-TERMINAL_WRITES = "terminal_writes"  # meta: terminal row writes (``obligations.task_written``)
+TERMINAL_WRITES = "terminal_writes"  # meta: terminal row writes (``obligations.task_written``, which stamps ``terminal_seq``)
+TERMINAL_SEQ_INDEX = "CREATE INDEX IF NOT EXISTS tasks_terminal_seq ON tasks(terminal_seq) WHERE terminal_seq IS NOT NULL;"
 REVIEW_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_review_collection ON tasks(review_collection_pending, task_id) "
                            "WHERE review_collection_pending IS NULL OR review_collection_pending=1;")
 PLAN_COLLECTION_INDEX = ("CREATE INDEX IF NOT EXISTS tasks_plan_collection ON tasks(plan_collection_pending, task_id) "
@@ -74,7 +75,7 @@ CREATE TABLE tasks (
   has_pending_promotion INTEGER NOT NULL DEFAULT 0, has_pause_notices INTEGER NOT NULL DEFAULT 0,
   delegated_runs_unreconciled INTEGER NOT NULL DEFAULT 0, pending_drive INTEGER NOT NULL DEFAULT 0,
   has_owner_questions INTEGER,
-  review_collection_pending INTEGER, plan_collection_pending INTEGER, drive_retention_at TEXT);
+  review_collection_pending INTEGER, plan_collection_pending INTEGER, drive_retention_at TEXT, terminal_seq INTEGER);
 CREATE INDEX tasks_parent ON tasks(parent_task_id); CREATE INDEX tasks_root ON tasks(root_task_id);
 CREATE INDEX tasks_status ON tasks(status); CREATE INDEX tasks_project ON tasks(project_id);
 CREATE INDEX tasks_ts ON tasks(ts, task_id); CREATE INDEX tasks_updated ON tasks(updated_at, task_id);
@@ -91,7 +92,7 @@ CREATE INDEX custody_project ON custody_runs(project_id) WHERE project_id<>'';
 CREATE INDEX custody_invocation ON custody_runs(invocation_id) WHERE invocation_id<>'';
 CREATE TABLE custody_outbox (event_id TEXT PRIMARY KEY, run_id TEXT, task_id TEXT, event TEXT NOT NULL, created_at TEXT);
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-""" + REVIEW_COLLECTION_INDEX + PLAN_COLLECTION_INDEX + "".join(f"CREATE INDEX tasks_{column} ON tasks({column}) WHERE {column}=1;\n"
+""" + REVIEW_COLLECTION_INDEX + PLAN_COLLECTION_INDEX + TERMINAL_SEQ_INDEX + "".join(f"CREATE INDEX tasks_{column} ON tasks({column}) WHERE {column}=1;\n"
     for column in FLAG_COLUMNS.values()) + "".join(ROOT_WINDOWS) + store_task_cards.SCHEMA + store_hot_facts.SCHEMA
 
 

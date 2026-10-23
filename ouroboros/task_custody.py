@@ -1202,7 +1202,8 @@ def settlement_basis(parent: pathlib.Path, task_id: str, task_dir: pathlib.Path,
 def layout_basis(parent: pathlib.Path, base: pathlib.Path, days: int) -> Dict[str, Any]:
     """What can give a layout's lap work again, cheaply: the layout directory's identity (a drive
     added or removed moves its mtime), the store's terminal-write counter (a task closing, or a
-    closed task written again: the receipts a retained verdict waits on ride row writes), the
+    closed task written again: the receipts a retained verdict waits on ride row writes; when it alone
+    moved, the pass looks only at the rows written since, ``task_store.terminal_writes_since``), the
     server generation (one full lap per boot), the retention setting and the release that judged
     the last lap. A drive younger than retention is not here: its instant is kept beside the basis."""
     from ouroboros import __version__

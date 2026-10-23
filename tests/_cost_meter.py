@@ -15,6 +15,9 @@ What is counted, per tag:
 - ``stat`` / ``scandir`` / ``listdir`` (and per category): ``os.stat``, ``os.lstat``,
   ``os.scandir``, ``os.listdir`` and the ``pathlib`` accessor (Python 3.10 binds those at
   class creation, so they are wrapped separately), ``os.walk`` and ``glob`` included;
+  ``dir_entries`` (and per category): the entries a listing delivered to its reader (each one a
+  ``scandir`` iterator yields, the whole ``listdir`` list), so a history-sized directory listed in
+  ONE call still costs its size;
 - ``open`` (and per category): ``io.open``/``builtins.open``/``Path.open``; ``os_open`` for
   raw ``os.open``; ``read_bytes`` (and per category): bytes delivered by files opened for
   reading through those doors (``os.read``/``os.pread`` on a counted descriptor included; ``os.pread``
@@ -281,18 +284,54 @@ def _w_lstat(path, *args, **kwargs):
     return _ORIG["os.lstat"](path, *args, **kwargs)
 
 
+class _CountedScandir:
+    """The iterator ``os.scandir`` returned, counting every entry it yields (``dir_entries``): the
+    directory's size is paid by the reader that examines it, however few calls it made."""
+
+    __slots__ = ("_inner", "_path", "_category")
+
+    def __init__(self, inner, path, category):
+        self._inner, self._path, self._category = inner, path, category
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        entry = next(self._inner)
+        meter = _ACTIVE
+        if meter is not None:
+            meter.add("dir_entries", path=self._path, category=self._category)
+        return entry
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        self._inner.close()
+
+    def close(self):
+        self._inner.close()
+
+
 def _w_scandir(path=".", *args, **kwargs):
     meter = _ACTIVE
-    if meter is not None:
-        meter.add("scandir", path=path)
-    return _ORIG["os.scandir"](path, *args, **kwargs)
+    if meter is None:
+        return _ORIG["os.scandir"](path, *args, **kwargs)
+    category = meter.category(path)
+    meter.add("scandir", path=path, category=category)
+    return _CountedScandir(_ORIG["os.scandir"](path, *args, **kwargs), path, category)
 
 
 def _w_listdir(path=".", *args, **kwargs):
     meter = _ACTIVE
-    if meter is not None:
-        meter.add("listdir", path=path)
-    return _ORIG["os.listdir"](path, *args, **kwargs)
+    if meter is None:
+        return _ORIG["os.listdir"](path, *args, **kwargs)
+    category = meter.category(path)
+    meter.add("listdir", path=path, category=category)
+    names = _ORIG["os.listdir"](path, *args, **kwargs)
+    if names:
+        meter.add("dir_entries", len(names), path=path, category=category)
+    return names
 
 
 def _w_os_open(path, flags, *args, **kwargs):

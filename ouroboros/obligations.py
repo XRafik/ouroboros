@@ -35,15 +35,17 @@ _FACT_COLUMNS = ("task_id", "headless_child_drive_root", "child_drive_root", "dr
 
 
 def task_written(txn, task_id, columns=None):
-    """Publish duty inputs in the task writer's transaction. The packer's terminal-write
-    counter still moves on closing/closed writes, never on a live task's writes."""
+    """Publish duty inputs in the task writer's transaction. The terminal-write counter moves on
+    closing/closed writes, never on a live task's writes, and stamps the row's ``terminal_seq`` with
+    its new value, so a pass keyed on the counter reads only the rows written since (``task_store``)."""
     from ouroboros.task_status import SETTLED_STATUSES
     if columns is None:
         row = txn.conn.execute("SELECT status, write_seq, updated_at, plan_collection_pending, drive_retention_at "
                                "FROM tasks WHERE task_id=?", (task_id,)).fetchone()
         columns = dict(row) if row is not None else {}
     if columns.get("status") in SETTLED_STATUSES:
-        txn.set_meta(store.TERMINAL_WRITES, int(txn.meta(store.TERMINAL_WRITES) or 0) + 1)
+        txn.set_meta(store.TERMINAL_WRITES, count := int(txn.meta(store.TERMINAL_WRITES) or 0) + 1)
+        txn.conn.execute("UPDATE tasks SET terminal_seq=? WHERE task_id=?", (count, task_id))
     if columns and txn.conn.execute("SELECT 1 FROM obligations WHERE set_name=? AND id=? "
                         "AND json_type(facts, '$.signature')='null'",
                         (REST_SET, "cost_projection:" + task_id)).fetchone():
