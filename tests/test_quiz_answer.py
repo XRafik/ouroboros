@@ -163,18 +163,19 @@ def test_task_done_seam_reconciles_and_broadcasts(tmp_path, monkeypatch):
     quiz_state frame for each — replacing the per-domain events.py blocks."""
     import supervisor.queue_transitions as qt
 
-    record_asked(tmp_path, "t1", quiz_id="q1", question="?", options=["A", "B"])
+    record_asked(tmp_path, "t1", quiz_id="q1", question="?", options=["A", "B"], chat_id=73)
     frames = []
 
     class _Bridge:
-        def send_quiz_state(self, quiz_id, task_id, state, answered_index=None, chat_id=0, comment=None, question_delivery=None):
-            frames.append((quiz_id, task_id, state))
+        def send_quiz_state(self, quiz_id, task_id, state, answered_index=None, chat_id=0, comment=None,
+                            question_delivery=None, wait_for_answer=None):
+            frames.append((quiz_id, task_id, state, chat_id, wait_for_answer))
 
     import supervisor.message_bus as mb
 
     monkeypatch.setattr(mb, "get_bridge", lambda: _Bridge())
     qt.reconcile_terminal_task_projections(tmp_path, "t1")
-    assert frames == [("q1", "t1", "expired_terminal")]
+    assert frames == [("q1", "t1", "expired_terminal", 73, False)]
     assert quiz_states(tmp_path, "t1")["q1"]["state"] == STATE_EXPIRED_TERMINAL
 
 

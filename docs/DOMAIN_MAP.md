@@ -27,8 +27,8 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D17 | Projects, workspaces & task results | 49 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 32 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
-| D20 | Presence | 18 | 0 |
-| **total** | | **876** | **0** |
+| D20 | Presence | 19 | 0 |
+| **total** | | **877** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -65,7 +65,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 
 ## Hidden coupling (classified out of the strict graph)
 
-- lazy-only cross-domain pairs: **122**
+- lazy-only cross-domain pairs: **124**
   - D01->D10
   - D01->D11
   - D02->D05
@@ -112,6 +112,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D08->D10
   - D08->D11
   - D08->D13
+  - D08->D20
   - D09->D02
   - D09->D04
   - D09->D05
@@ -120,6 +121,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D09->D12
   - D09->D14
   - D09->D15
+  - D09->D20
   - D10->D01
   - D10->D07
   - D10->D09
@@ -1130,6 +1132,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/presence_continuation.py`
 - `ouroboros/presence_delivery.py`
 - `ouroboros/presence_observations.py`
+- `ouroboros/presence_owner_contact.py`
 - `ouroboros/presence_recovery.py`
 - `ouroboros/presence_runner.py`
 - `ouroboros/tools/presence.py`

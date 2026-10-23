@@ -667,6 +667,9 @@ def _make_thread_filter(
         quiz = entry.get("quiz")
         if not isinstance(quiz, dict):
             return 0
+        from ouroboros.presence_owner_contact import private_main_row
+        if private_main_row(entry):
+            return 0
         chat = rooms(entry.get("task_id")) or _stored_chat_id(entry.get("chat_id"), 1)
         return chat if chat in project_chat_ids else 0
 
@@ -803,6 +806,8 @@ def _collect_chat_rows(
                 rec["ingress_accepted"] = True
                 # Proven undispatched, entered, or this live process's and pending; an ended process's: nothing.
                 rec.update(delivery_facts(entry, entry_chat))
+            if isinstance(entry.get("presence_contact"), dict):
+                rec["presence_contact"] = dict(entry["presence_contact"])
             if role == "user" and entry.get("attachments"):  # the same views the live echo carried
                 rec["attachments"] = attachment_views(entry["attachments"], chat_path.parent.parent)
             if role == "user" and entry.get("text_placeholder") is True:  # host-written text, not the owner's
