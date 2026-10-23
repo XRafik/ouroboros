@@ -124,6 +124,15 @@ def _sidecar_names(root: Any) -> set[str]:
         return set()
 
 
+def _own_sidecar(name: str, task_id: str) -> bool:
+    """A name one of this task's generations may carry: the exact spelling, including task IDs
+    containing dots/digits (``a.2`` is ``a`` generation 2 or ``a.2`` generation 1; the sidecar's
+    own ``task_id`` decides). A sidecar is valid only under its own name, so no other name holds
+    this task's members."""
+    prefix = name.removesuffix(".members.json")
+    return prefix == task_id or (prefix.startswith(task_id + ".") and prefix[len(task_id) + 1:].isdigit())
+
+
 def list_sidecars(root: Any, *, errors: Optional[list] = None,
                   names: Optional[set[str]] = None) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
     """Read pack authority, or a rebuild's filename delta; cache builders may collect faults."""
@@ -233,14 +242,26 @@ def index_tier(root: pathlib.Path) -> str:
     return store.TIER_ENFORCED if kernel_file_locks_enforced(root / "state" / store.LOCK_NAME) else store.TIER_NAME
 
 
-def _index_valid(path: pathlib.Path, tier: str, *, wait_sec: float = INDEX_WAIT_SEC) -> bool:
+def _index_stamp(path: pathlib.Path) -> Optional[tuple]:
     identity = store.file_identity(path)
     if identity is None:
-        return False
+        return None
     try:
         info = os.stat(path)
-        stamp = (*identity, info.st_size, info.st_mtime_ns)
     except OSError:
+        return None
+    return (*identity, info.st_size, info.st_mtime_ns)
+
+
+def _index_validated(path: pathlib.Path) -> bool:
+    """This process already validated these exact index bytes; nothing is checked here."""
+    stamp = _index_stamp(path)
+    return stamp is not None and _VALIDATED.get(str(path)) == stamp
+
+
+def _index_valid(path: pathlib.Path, tier: str, *, wait_sec: float = INDEX_WAIT_SEC) -> bool:
+    stamp = _index_stamp(path)
+    if stamp is None:
         return False
     if _VALIDATED.get(str(path)) == stamp:
         return True
@@ -363,22 +384,18 @@ def index_upsert(root: Any, pack_path: pathlib.Path, sidecar: Dict[str, Any]) ->
 
 def _placements(root: pathlib.Path, *, sha256: str = "", kind: str = "", task_id: str = "", rel_path: str = "",
                 ) -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
-    """All indexed placements, or healthy sidecar rows when the cache is unavailable."""
+    """All indexed placements, or healthy sidecar rows when the cache is unavailable; a task's
+    checkpoint handle is addressed by its task (``_task_handles``)."""
     if not packs_dir(root).is_dir():
         return []  # a root without packs is left untouched (no cache, no lock file)
+    if rel_path:
+        return _task_handles(root, task_id, rel_path)
     try:
         with open_index(root) as conn:
-            if rel_path:
-                rows = conn.execute(
-                    "SELECT p.path AS pack, m.sha256, m.offset, m.size, m.kind FROM handles h "
-                    "JOIN members m ON m.sha256=h.sha256 AND m.task_id=h.task_id AND m.generation=h.generation "
-                    "JOIN packs p ON p.task_id=h.task_id AND p.generation=h.generation "
-                    "WHERE h.task_id=? AND h.rel_path=? AND m.kind=?", (task_id, rel_path, CHECKPOINT)).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT p.path AS pack, m.sha256, m.offset, m.size, m.kind FROM members m "
-                    "JOIN packs p ON p.task_id=m.task_id AND p.generation=m.generation "
-                    "WHERE m.sha256=? AND m.kind=? ORDER BY p.task_id, p.generation", (sha256, kind)).fetchall()
+            rows = conn.execute(
+                "SELECT p.path AS pack, m.sha256, m.offset, m.size, m.kind FROM members m "
+                "JOIN packs p ON p.task_id=m.task_id AND p.generation=m.generation "
+                "WHERE m.sha256=? AND m.kind=? ORDER BY p.task_id, p.generation", (sha256, kind)).fetchall()
             if not rows:
                 error_row = conn.execute("SELECT value FROM meta WHERE key='sidecar_errors'").fetchone()
                 if error_row and json.loads(error_row[0]):
@@ -389,12 +406,70 @@ def _placements(root: pathlib.Path, *, sha256: str = "", kind: str = "", task_id
     errors, found = [], []
     for sidecar_path, sidecar in list_sidecars(root, errors=errors):
         for member in sidecar["members"]:
-            if (rel_path and sidecar["task_id"] == task_id and member["kind"] == CHECKPOINT and member.get("path") == rel_path) or (
-                    not rel_path and member["sha256"] == sha256 and member["kind"] == kind):
+            if member["sha256"] == sha256 and member["kind"] == kind:
                 found.append((sidecar_path.with_name(pack_name(sidecar["task_id"], sidecar["generation"])), member))
     if errors and not found:
         raise errors[0]
     return found
+
+
+def _task_handles(root: pathlib.Path, task_id: str, rel_path: str = "") -> List[Tuple[pathlib.Path, Dict[str, Any]]]:
+    """This task's packed checkpoint handles (``rel_path``: that one), read as an addressed fact.
+
+    A handle is named by its task and the task's own sidecars are its authority, so no other
+    task's pack is read: the index answers while this process has validated its current bytes and
+    its lock is free now; otherwise, and for an absence it cannot prove (it recorded unreadable
+    sidecars), the task's own sidecars answer. Only when one of them is unreadable does a valid
+    index that still holds the placement keep it (checked, never rebuilt). The ordinary read
+    never waits for, re-validates or rebuilds the shared cache: those whole-index passes stay
+    with the readers that need every pack (``blob_bytes``) and with the packer."""
+    rows = _indexed_handles(root, task_id, rel_path, validated=True)
+    if rows is not None:
+        return rows
+    errors, found = [], []
+    names = {name for name in _sidecar_names(root) if _own_sidecar(name, task_id)}
+    for sidecar_path, sidecar in list_sidecars(root, errors=errors, names=names):
+        for member in sidecar["members"]:
+            if sidecar["task_id"] == task_id and member["kind"] == CHECKPOINT and member.get("path") and (
+                    not rel_path or member["path"] == rel_path):
+                found.append((sidecar_path.with_name(pack_name(task_id, sidecar["generation"])), member))
+    if errors and not found:
+        kept = _indexed_handles(root, task_id, rel_path, validated=False)
+        if kept:
+            return kept
+        raise errors[0]
+    return found
+
+
+_HANDLES_SQL = ("SELECT p.path AS pack, m.sha256, m.offset, m.size, m.kind, h.rel_path AS path FROM handles h "
+                "JOIN members m ON m.sha256=h.sha256 AND m.task_id=h.task_id AND m.generation=h.generation "
+                "JOIN packs p ON p.task_id=h.task_id AND p.generation=h.generation WHERE h.task_id=? AND m.kind=?")
+
+
+def _indexed_handles(root: pathlib.Path, task_id: str, rel_path: str, *,
+                     validated: bool) -> Optional[List[Tuple[pathlib.Path, Dict[str, Any]]]]:
+    """The index's rows for this task's handles, or ``None`` when it cannot answer. ``validated``
+    reads only bytes this process already validated and never waits for the lock; otherwise
+    ``open_index`` checks the existing index under the caller's budget, never rebuilding it."""
+    path = packs_dir(root) / INDEX_NAME
+    try:
+        with contextlib.ExitStack() as held:
+            if not validated:
+                conn = held.enter_context(open_index(root, rebuild=False))
+            else:
+                held.enter_context(store.name_lock(root, INDEX_LOCK_NAME, timeout_sec=0))
+                if not _index_validated(path):
+                    return None
+                conn = held.enter_context(contextlib.closing(store.connect(path, index_tier(root), wait_sec=0)))
+                held.enter_context(store.transaction(conn, write=False))
+            rows = conn.execute(_HANDLES_SQL + (" AND h.rel_path=?" if rel_path else ""),
+                                (task_id, CHECKPOINT, *((rel_path,) if rel_path else ()))).fetchall()
+            recorded = conn.execute("SELECT value FROM meta WHERE key='sidecar_errors'").fetchone()
+            if not rows and recorded and json.loads(recorded[0]):
+                return None  # an unreadable sidecar may be this task's: the index proves no absence
+    except (store.StoreError, sqlite3.Error, OSError, ValueError):
+        return None
+    return [(packs_dir(root) / row["pack"], dict(row)) for row in rows]
 
 
 def _locate(root: pathlib.Path, **identity: str) -> Optional[Tuple[pathlib.Path, Dict[str, Any]]]:
@@ -562,13 +637,9 @@ def _confined_handle(root: Any, task_id: str, rel_path: str, anchor: Any, *, inf
         try:
             names = sorted(name for name, _ in directory.entries(include_links=True)
                            if not name.startswith(".") and name.endswith(".members.json"))
-            def own(name):
-                # Exact generation spelling, including task IDs containing dots/digits.
-                prefix = name.removesuffix(".members.json")
-                return prefix == task_id or (prefix.startswith(task_id + ".")
-                                              and prefix[len(task_id) + 1:].isdigit())
             errors = []
-            for name in [*(name for name in names if own(name)), *(name for name in names if not own(name))]:
+            for name in [*(name for name in names if _own_sidecar(name, task_id)),
+                         *(name for name in names if not _own_sidecar(name, task_id))]:
                 try:
                     try:
                         handle, _ = directory.open(name)
@@ -647,14 +718,8 @@ def packed_handle_names(root: Any, task_id: str) -> List[str]:
     """Names of this task's packed checkpoint handles (for directory listings)."""
     if not packs_dir(root).is_dir():
         return []
-    try:
-        with open_index(root) as conn:
-            rows = conn.execute("SELECT rel_path FROM handles WHERE task_id=?", (str(task_id),)).fetchall()
-        return sorted(pathlib.PurePosixPath(row["rel_path"]).name for row in rows)
-    except (store.StoreError, sqlite3.Error, OSError):
-        return sorted(pathlib.PurePosixPath(member["path"]).name for _, sidecar in list_sidecars(root)
-                      if sidecar["task_id"] == str(task_id) for member in sidecar["members"]
-                      if member["kind"] == CHECKPOINT and member.get("path"))
+    return sorted({pathlib.PurePosixPath(member["path"]).name
+                   for _, member in _task_handles(pathlib.Path(root), str(task_id))})
 
 
 def _checkpoint_path(path: pathlib.Path) -> Optional[tuple]:
