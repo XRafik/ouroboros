@@ -1870,29 +1870,28 @@ before the observed cursor states unresolved coverage. Live, reconnect and repla
 use the same projection. Telegram reserves room for problems and incompleteness
 beside its disclosed speech preview and keeps the complete task reference.
 
-The block's chrome follows the work it stands on
-(`web/modules/chat.js::blockHasWork`, the presence facts minus open attention
-and a bare terminal outcome), never the lane that ran the turn (owner decision
-16.09: real work is a task card, a greeting is nothing). A block with work (a
-review group, a child card, an evidence or narration row, a tool error) is the
-task card, whether a managed root or a direct conversation turn produced it: a
-title (the coined name or the latest narration headline; a finished card with
-neither reads `Task activity`, a running one stays untitled because its chip
-already says Working), the status chip, Stop while the host attests it, and
-`Turn into project` in Main unless its origin is already bound (a direct turn's
-later rows then route to the Project room like a work that called
-`move_to_project`); its meta line and one action row ([Reply] first, then Turn
-into project, Resume, Stop…, one primary) form its foot. A nested child card is
-work inside its root's block, never a block of its own: it carries neither
-control, and its root's conversion converts the whole work. A block that exists
-only for open attention (a model wait, a pending or host-offered Stop) or only
-for a non-Done ending of a turn that did no work carries no title placeholder
-and no conversion; its chip says its state (Waiting…, Cancelling…, Failed), the
-wait controls stay, and its first row of work gives it the title. The compact
-meta line says who ran the work on what (a root: the
-observed solve model, else its agent model), duration, cost, exceptions and, while
-it runs, `updated` from its own narration. Tool calls, model provenance, origin
-and a finished card's update time are labelled rows of its details. Money
+`web/modules/chat.js::blockHasWork` governs chrome from work, excluding open
+attention and a bare outcome (owner 16.09: real work is a card, a greeting is
+nothing). Reviews, children, evidence, narration or tool errors give managed
+roots and direct turns the same card: a coined name or narration headline
+(`Task activity` when finished without either; untitled while Working), status,
+host-attested Stop, and `Turn into project` in Main unless already bound. Bound
+direct turns route later rows to their Project like `move_to_project`. The foot
+holds metadata and one action row: [Reply], Turn into project, Resume, Stop…,
+one primary. Nested children stay inside their root, carry neither root control,
+and convert with it. Attention-only blocks and non-Done endings without work
+have their status and wait controls, no title placeholder or conversion; the
+first work row adds the title.
+
+The compact meta line names executor/model (roots: observed solve model, else
+agent model), duration, cost, exceptions and running narration's `updated`.
+One positive task-local tool-call count joins that line and remains after Done
+(owner 22.10, A). Helpers are not aggregated. Rounds (usable solve responses)
+and known zero calls stay in Details; missing counts stay absent. For footer
+and Details counters, session nanny counts appear only in `Supervision`,
+separate from unreported executor counts. Portals keep one count.
+Neither rounds nor zero calls create work or a second footer row. Model
+provenance, origin and a finished card's update time stay in Details. Money
 there is ONE line whose wording carries its openness and never renders an
 unknown as a number: `$0.00` only where priced rows evidenced that zero,
 `up to $1.20` while the tracked subtotal is inexact, `Tracked: $1.20` when part
