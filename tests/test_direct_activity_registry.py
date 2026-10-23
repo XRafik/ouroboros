@@ -137,7 +137,7 @@ def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry(monkeypatch
         elsewhere = other.submit(registry.register, "act-other", 4).result()
     assert elsewhere.execution is not execution  # only the thread that began it adopts it
     registry.unregister("act-other")
-    entry = registry.register("act-4", 4)
+    entry = registry.register("act-4", 4, reply_expected=True)
     assert entry.execution is execution and execution.task_id == "act-4"
     assert registry.snapshot()[0]["turn_phase"] == "admitted"
     execution.observe("log_event", {"type": "context_building_started"})
@@ -146,6 +146,7 @@ def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry(monkeypatch
     assert registry.snapshot()[0]["turn_phase"] == "dispatched"
     assert [(d["task_id"], d["accepted_at"] <= d["dispatched_at"]) for d in dispatches] == [("act-4", True)]
     assert dispatches[0]["accepted_at"] == execution.marks[0][1]
+    assert dispatches[0]["attempt_id"] == execution.execution_id
     # A late or repeated fact never moves it back; other frames move nothing.
     assert execution.advance("context_built") is False
     execution.observe("log_event", {"type": "context_building_finished"})
@@ -190,3 +191,21 @@ def test_the_turn_queue_shows_its_own_frames_to_its_observer_only():
     inner: queue.Queue = queue.Queue()
     TurnEventQueue(inner, "t-own", 1, on_frame=broken).put({"type": "main_llm_call_state", "task_id": "t-own"})
     assert inner.get_nowait()["type"] == "main_llm_call_state"  # a failing observer never costs the frame
+
+
+def test_only_an_owner_turn_reports_its_first_dispatch(monkeypatch):
+    from ouroboros import update_generation_facts
+
+    dispatches = []
+    monkeypatch.setattr(update_generation_facts, "observe_direct_dispatch", lambda **kw: dispatches.append(kw))
+    registry = DirectActivityRegistry()
+    # A consciousness wake or an auto-resume after restart runs as a direct turn the owner did not send.
+    wake = registry.register("wake-1", 4).execution
+    wake.observe("main_llm_call_state", {"phase": "started"})
+    assert wake.phase == "dispatched" and dispatches == []
+    registry.unregister("wake-1")
+    owner = registry.register("owner-1", 4, reply_expected=True).execution
+    owner.observe("main_llm_call_state", {"phase": "started"})
+    owner.observe("main_llm_call_state", {"phase": "started"})
+    assert [(d["task_id"], d["attempt_id"]) for d in dispatches] == [("owner-1", owner.execution_id)]
+    registry.unregister("owner-1")

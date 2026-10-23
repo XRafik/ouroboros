@@ -36,11 +36,14 @@ class TurnExecution:
     """One execution of a direct turn: the thread running it, a process-local identity and
     ``marks``, each start fact it passed (``TURN_PHASES``) with the monotonic instant it was
     stamped. Facts only move forward, so there is at most one mark per phase; the list is
-    only appended to, so a reader's copy never pairs one fact with another fact's instant."""
+    only appended to, so a reader's copy never pairs one fact with another fact's instant.
+    ``owner_turn``: the owner awaits its answer (its entry's ``reply_expected``); only such a
+    turn reports its first dispatch to the after-update facts, a wake or resume never does."""
 
     chat_id: int
     client_message_id: str = ""
     task_id: str = ""
+    owner_turn: bool = False
     execution_id: str = field(default_factory=lambda: f"turn_{uuid.uuid4().hex[:12]}")
     thread: Tuple[int, str] = field(default_factory=_calling_thread)
     marks: List[Tuple[str, float]] = field(default_factory=lambda: [("accepted", time.monotonic())])
@@ -57,12 +60,12 @@ class TurnExecution:
         if TURN_PHASES.index(phase) <= TURN_PHASES.index(self.phase):
             return False
         self.marks.append((phase, time.monotonic()))
-        if phase == "dispatched":  # once per execution: facts only move forward
+        if phase == "dispatched" and self.owner_turn:  # once per execution: facts only move forward
             try:
                 from ouroboros.update_generation_facts import observe_direct_dispatch
 
-                observe_direct_dispatch(task_id=self.task_id, accepted_at=self.marks[0][1],
-                                        dispatched_at=self.marks[-1][1])
+                observe_direct_dispatch(task_id=self.task_id, attempt_id=self.execution_id,
+                                        accepted_at=self.marks[0][1], dispatched_at=self.marks[-1][1])
             except Exception:
                 log.debug("after-update dispatch observation failed", exc_info=True)
         return True
@@ -226,6 +229,7 @@ class DirectActivityRegistry:
                           if row.thread[0] == ident and not row.task_id), None)
         execution = begun or TurnExecution(int(chat_id or 0))
         execution.task_id = aid
+        execution.owner_turn = bool(reply_expected)
         execution.client_message_id = execution.client_message_id or str(client_message_id or "")
         execution.advance("admitted")
         entry = DirectActivityEntry(
