@@ -1531,6 +1531,7 @@
  * @property {boolean} description_current  successful shown text covers the exact running-source to checked-target range
  * @property {string} failed_at  ISO 8601 time of the failed attempt, independent of the shown text's written_at
  * @property {({base_sha: string, target_sha: string, update_channel: string, target_ref: string}|null)} latest_failed_key  the failed attempt's range, never the provenance of retained text
+ * @property {?Object=} qualification - Exact-range commit receipts and observed GitHub checks, including missing evidence.
  */
 
 export const MAX_LINK_ACTIONS = 12;

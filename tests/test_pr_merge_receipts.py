@@ -107,7 +107,9 @@ def test_a_reviewed_merge_records_intent_first_and_publishes_one_receipt(world):
     out = _merge(world, review_task_ids=["review-1"], reviewed_head_sha=HEAD, reviewed_base_sha=BASE,
                  review_verdict="PASS")
     assert world.gh.intent_seen_at_merge == ["intent_recorded"]  # written before the effect
-    assert ["pr", "merge", "7", "--squash", "--match-head-commit", HEAD] in world.gh.calls
+    call = next(c for c in world.gh.calls if c[:2] == ["pr", "merge"])
+    assert call[:6] == ["pr", "merge", "7", "--squash", "--match-head-commit", HEAD]
+    assert call[6] == "--body" and "Ouroboros-Qualification:" in call[7]
     assert not any("--auto" in c or "--admin" in c for c in world.gh.calls)
     (receipt,) = _receipts(world)
     assert receipt["outcome"] == {**receipt["outcome"], "status": "merged", "merge_sha": MERGE, "merge_tree": TREE,

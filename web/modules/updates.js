@@ -2,7 +2,7 @@ import { escapeHtmlAttr as escapeHtml } from './utils.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { showToast } from './toast.js';
 import { apiClient, apiFetch } from './api_client.js';
-import { UPDATE_STAGE_LABELS, attemptTime, dismissUpdateAttempt, dismissedUpdateAttempt, updateAttemptView, verifiedUpdatePlan } from './update_status.js';
+import { UPDATE_STAGE_LABELS, afterUpdateFactsText, attemptTime, bindPreflightDescription, dismissUpdateAttempt, dismissedUpdateAttempt, preflightEvidenceText, updateAttemptView, verifiedUpdatePlan } from './update_status.js';
 import { destroyChatMarkdown, enhanceChatMarkdown, mountChatMarkdown } from './chat_markdown.js';
 import { updateEffectsText } from './update_effects.js';
 
@@ -337,6 +337,8 @@ function noLetterView() {
 export function updateLetterView(data = {}, phase = '') {
     const letter = data?.letter && typeof data.letter === 'object' ? data.letter : null;
     if (!letter) return noLetterView();
+    if (data.preflight_range && (letter.key?.base_sha !== data.preflight_range.base_sha
+        || letter.key?.target_sha !== data.preflight_range.target_sha)) return noLetterView();
     if (LETTER_HIDDEN_PHASES.has(phase)) return noLetterView();
     if (LETTER_HIDDEN_VERDICTS.has(updateVerdict(data, phase).state)) return noLetterView();
 
@@ -483,6 +485,7 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
                     </div>
                 </section>
                 <div class="updates-meta" id="updates-meta"></div>
+                <section id="updates-generation-facts" hidden><h4>After-update observations</h4><p></p></section>
                 <div class="settings-action-row updates-action-row">
                     <span class="updates-action-note" id="updates-action-note"></span>
                     <button class="btn btn-primary" id="btn-update-primary" hidden></button>
@@ -710,6 +713,10 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
     }
 
     function render() {
+        const observed = afterUpdateFactsText(latestStatus?.after_update);
+        const facts = page.querySelector('#updates-generation-facts');
+        facts.hidden = !observed;
+        facts.querySelector('p').textContent = observed;
         const verdict = updateVerdict(latestStatus || {}, phase);
         dot.dataset.tone = verdict.tone;
         summary.textContent = verdict.headline;
@@ -811,7 +818,8 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
                         renderOfficialTags(data.official_tags || []);
                     }
                     if (statusRefreshNext) continue; // A newer notice owns the next read.
-                    latestStatus = data;
+                    latestStatus = options.preservePhase && phase === 'preflighting' && latestStatus?.preflight_range
+                        ? bindPreflightDescription(data, { merge_plan: latestStatus.preflight_range, letter: latestStatus.letter }) : data;
                     // Keep an outstanding apply/restart await. Server progress refines
                     // its label; a fresh page starts with no old local phase.
                     if (!options.preservePhase || !['updating', 'restarting', 'preflighting'].includes(phase)) {
@@ -946,11 +954,13 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
                 throw new Error(preflight?.merge_plan?.error || 'The update plan could not be verified. No files were changed.');
             }
             const { plan, strategy } = verified;
+            latestStatus = bindPreflightDescription(latestStatus, preflight);
+            render();
             const conflictCount = (plan.code_conflict_paths || []).length + (plan.doc_conflict_paths || []).length;
             const assisted = strategy === 'assisted';
             const proceed = await openConfirmDialog({
                 title: `Update ${String(plan.base_sha).slice(0, 8)} -> ${String(plan.target_sha).slice(0, 8)}`,
-                body: (assisted
+                body: preflightEvidenceText(preflight) + '\n\n' + (assisted
                     ? `${conflictCount} conflict(s) need resolution. Ouroboros will resolve the merge as a reviewed task (model spend applies); progress lands in chat, and the server restarts after the reviewed commit.`
                     : `Git applies this update directly (${plan.local_dirty_count || 0} uncommitted file(s) are stashed and restored). The server restarts when it lands.`)
                     + '\n\n' + updateEffectsText(preflight),
