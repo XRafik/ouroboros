@@ -31,6 +31,9 @@ test('confirmation names failed, absent and green evidence without converting de
     const green = preflightEvidenceText({ merge_plan: plan, letter, qualification });
     assert.match(green, /full_battery passed/);
     assert.doesNotMatch(green, /failed|failure|no qualification receipt|FAIL/);
+    assert.doesNotMatch(green, /also covers/);
+    qualification.github.runs[0].covered_shas = ['earlier-merge'];
+    assert.match(preflightEvidenceText({ merge_plan: plan, letter, qualification }), /This run also covers: earlier-/);
 });
 
 test('generation facts show scope, measured values and missing observations without a verdict', () => {

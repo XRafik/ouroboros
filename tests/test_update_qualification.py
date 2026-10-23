@@ -7,6 +7,104 @@ from ouroboros import update_letter as letter, update_qualification as qualifica
 from ouroboros.tools import github
 from tests.test_pr_merge_receipts import BASE, HEAD, _receipts, world  # noqa: F401
 from tests.test_update_letter import _capture_for, _commit, _git, _record, _status, history_repo  # noqa: F401
+from tests.test_update_letter_merge_range import merged_range  # noqa: F401
+
+
+def test_preflight_reads_exact_saved_range_without_writing_or_calling_a_model(tmp_path, monkeypatch):
+    running, head, target = "a" * 40, "c" * 40, "b" * 40
+    calls = []
+    monkeypatch.setattr(letter, "_default_git", lambda: lambda _: (1, "", ""))
+    monkeypatch.setattr(letter, "collect_range_material", lambda base, target: {
+        "base_sha": base, "target_sha": target, "commits": [{"sha": target, "subject": "change"}]})
+    monkeypatch.setattr(qualification, "post_merge_checks", lambda *a: {"status": "observed", "runs": []})
+
+    def write(status, material, **kwargs):
+        calls.append(material["base_sha"])
+        return _record(key=letter._key_from_status(status))
+
+    monkeypatch.setattr(letter, "write_letter", write)
+    check = _status(current_sha=head, running_sha=running)
+    plan = {"base_sha": head, "target_sha": target, "update_channel": "stable", "target_ref": "managed/main"}
+    for _ in range(2):
+        letter.refresh_after_check(check, drive_root=tmp_path)
+        saved = letter.record_path(tmp_path).read_bytes()
+        result = qualification.preflight_description(plan, drive_root=tmp_path)
+        assert not result["letter"] or not result["letter"]["text"]
+        assert result["qualification"] is None
+        assert letter.record_path(tmp_path).read_bytes() == saved
+    assert calls == [running]
+    result = qualification.preflight_description({**plan, "base_sha": running}, drive_root=tmp_path)
+    assert result["letter"]["text"] == "letter" and result["letter"]["description_current"]
+    assert result["qualification"]["base_sha"] == running
+    assert letter.record_path(tmp_path).read_bytes() == saved and calls == [running]
+
+
+@pytest.mark.parametrize("squash", [False, True])
+def test_qualification_checks_only_first_parent_integrations(merged_range, monkeypatch, squash):  # noqa: F811
+    repo, base, target, _local, feature, nested = merged_range
+    if squash:
+        _git(repo, "checkout", "-q", "-b", "squashed", base)
+        _git(repo, "merge", "--squash", target)
+        target = _commit(repo, "Squashed integration")
+    material = letter.collect_range_material(base, target, git=_capture_for(repo))
+    urls = []
+
+    def get(url):
+        urls.append(url)
+        return {"workflow_runs": [
+            {"head_sha": target, "status": "completed", "conclusion": "success"},
+            *[{"head_sha": "outside", "status": "completed", "conclusion": "failure"}] * 99]}
+
+    monkeypatch.setattr(qualification, "_get_json", get)
+    fact = qualification.range_qualification(material, "https://github.com/owner/repo")
+    assert [c["sha"] for c in fact["commits"]] == [target]
+    assert fact["github"]["status"] == "observed" and fact["github"]["missing_shas"] == []
+    assert len(urls) == 1
+    # The letter still receives branch-internal subjects and bodies.
+    assert {feature, nested}.issubset({c["sha"] for c in material["commits"]}) is (not squash)
+
+
+@pytest.mark.parametrize("status,conclusion,covers", [
+    ("completed", "success", True), ("completed", "failure", True),
+    ("in_progress", None, False), ("completed", "cancelled", False),
+])
+def test_later_finished_run_covers_earlier_merges_only(status, conclusion, covers):
+    commits = [{"sha": sha} for sha in ("newest", "checked", "earlier")]
+    fact = qualification.post_merge_checks(commits, "https://github.com/owner/repo", get_json=lambda _: {
+        "workflow_runs": [{"head_sha": "checked", "status": status, "conclusion": conclusion},
+                          {"head_sha": "outside", "status": "completed", "conclusion": "success"}]})
+    assert fact["missing_shas"] == (["newest"] if covers else ["earlier", "newest"])
+    assert fact["runs"][0].get("covered_shas", []) == (["earlier"] if covers else [])
+
+
+def test_github_availability_changes_preserve_authored_text(tmp_path, monkeypatch):
+    base, target = "a" * 40, "b" * 40
+    material = {"base_sha": base, "target_sha": target, "commits": [{"sha": target, "subject": "change"}]}
+    monkeypatch.setattr(letter, "collect_range_material", lambda *a: dict(material))
+    monkeypatch.setattr(letter, "_default_git", lambda: lambda _: (1, "", ""))
+    observed = {"status": "observed", "runs": [{"sha": target, "status": "completed", "conclusion": "success"}]}
+    monkeypatch.setattr(qualification, "post_merge_checks", lambda *a: dict(observed))
+    calls = []
+
+    def write(status, material, **kwargs):
+        calls.append(material["qualification"])
+        return _record(text=f"letter {len(calls)}")
+
+    monkeypatch.setattr(letter, "write_letter", write)
+    first = letter.refresh_after_check(_status(), drive_root=tmp_path)
+    runs = observed["runs"]
+    observed.update(status="unavailable", reason="HTTPError", runs=[])
+    offline = letter.refresh_after_check(_status(), drive_root=tmp_path)
+    assert len(calls) == 1 and offline["text"] == first["text"]
+    assert offline["qualification"]["github"]["status"] == "unavailable"
+    assert offline["qualification"]["github"]["runs"] == runs
+    observed.update(status="observed", reason="", runs=runs)
+    assert letter.refresh_after_check(_status(), drive_root=tmp_path)["text"] == first["text"]
+    assert len(calls) == 1
+    observed["runs"] = [{"sha": target, "status": "completed", "conclusion": "failure"}]
+    changed = letter.refresh_after_check(_status(), drive_root=tmp_path)
+    assert len(calls) == 2 and changed["text"] == "letter 2"
+    assert changed["qualification"]["github"]["runs"][0]["conclusion"] == "failure"
 
 
 @pytest.mark.parametrize("state", ["passed", "failed", "not_run"])
@@ -66,9 +164,7 @@ def test_github_checks_include_red_intermediate_sha_but_exclude_other_ranges():
     assert unavailable["status"] == "unavailable" and not unavailable["runs"]
 
 
-def test_preflight_uses_exact_real_git_range_and_names_unqualified_items(history_repo, tmp_path, monkeypatch):  # noqa: F811
-    from ouroboros import server_process
-    monkeypatch.setattr(server_process, "server_source_baseline", lambda: "running-source")
+def test_check_writes_exact_real_git_range_and_preflight_reads_unqualified_items(history_repo, tmp_path, monkeypatch):  # noqa: F811
     repo, base, old = history_repo["repo"], history_repo["base"], history_repo["c4"]
     checks = [{"name": "full_battery", "status": "failed", "detail": "Author accepted two FAILs"},
               {"name": "cost_contract", "status": "not_run"}]
@@ -85,13 +181,14 @@ def test_preflight_uses_exact_real_git_range_and_names_unqualified_items(history
         prompts.append(letter._request_text(status, material, "1"))
         return _record(key=letter._key_from_status(status), text="Incoming qualification has accepted FAILs.")
     monkeypatch.setattr(letter, "write_letter", write)
+    letter.refresh_after_check(_status(current_sha=old, running_sha=base, latest_sha=target), drive_root=drive)
     result = qualification.preflight_description({"base_sha": base, "target_sha": target,
                                                   "update_channel": "stable", "target_ref": "managed/main"}, drive_root=drive)
     assert result["letter"]["key"]["target_sha"] == target and result["letter"]["description_current"]
     assert result["qualification"]["target_sha"] == target
     assert {c["sha"] for c in result["qualification"]["commits"]} == set(_git(repo, "rev-list", f"{base}..{target}").splitlines())
     assert all(word in prompts[0] for word in (target, "Author accepted two FAILs", '"conclusion": "failure"', "not_run"))
-    assert '"sha": "running-source"' in prompts[0] and f'"base_sha": "{base}"' in prompts[0]
+    assert f'"sha": "{base}"' in prompts[0] and f'"base_sha": "{base}"' in prompts[0]
     # Green evidence stays green; host code does not invent a failure from prose.
     green = qualification.merge_qualification({"record": {"verdict": {"aggregate": "PASS"}}},
         [{"name": name, "status": "passed"} for name in qualification.CHECKS])
@@ -119,13 +216,14 @@ def test_new_post_merge_red_refreshes_same_range_and_offline_never_becomes_green
     assert len(calls) == 2 and calls[-1]["github"]["runs"][0]["conclusion"] == "failure"
     observed.update(status="unavailable", runs=[])
     letter.refresh_after_check(_status(), drive_root=tmp_path)
-    assert len(calls) == 3 and calls[-1]["github"]["status"] == "unavailable"
-    assert json.loads(letter.record_path(tmp_path).read_text(encoding="utf-8"))["text"] == "letter 3"
+    record = json.loads(letter.record_path(tmp_path).read_text(encoding="utf-8"))
+    assert len(calls) == 2 and record["qualification"]["github"]["status"] == "unavailable"
+    assert record["text"] == "letter 2"
 
 
-def test_failed_preflight_letter_does_not_show_prior_range(tmp_path, monkeypatch):
+def test_preflight_letter_does_not_show_prior_range(tmp_path):
     old = _record()
-    monkeypatch.setattr(letter, "refresh_after_check", lambda *a, **k: old)
+    letter.atomic_write_json(letter.record_path(tmp_path), old)
     result = qualification.preflight_description({"base_sha": "a" * 40, "target_sha": "c" * 40}, drive_root=tmp_path)
     assert result["letter"]["text"] == "" and result["letter"]["description_current"] is False
     result = qualification.preflight_description({"base_sha": "a" * 40, "target_sha": "b" * 40}, drive_root=tmp_path)
@@ -147,6 +245,7 @@ def test_failed_same_range_rewrite_keeps_new_red_facts_but_marks_old_prose_stale
         return {**green, "commits": [{"sha": target, "subject": "change", "body": ""}]}
     monkeypatch.setattr(letter, "collect_range_material", collect)
     monkeypatch.setattr(letter, "write_letter", lambda *a, **k: _record(state="failed", text="", error_kind="budget_exhausted"))
+    letter.refresh_after_check(_status(), drive_root=tmp_path)
     failed = qualification.preflight_description({"base_sha": base, "target_sha": target,
         "update_channel": "stable", "target_ref": "managed/main"}, drive_root=tmp_path)
     assert failed["letter"]["description_current"] is False and failed["letter"]["text"] == ""
@@ -154,6 +253,7 @@ def test_failed_same_range_rewrite_keeps_new_red_facts_but_marks_old_prose_stale
     # A later successful author consumes the new evidence and becomes current.
     failure = ""
     monkeypatch.setattr(letter, "write_letter", lambda *a, **k: _record(text="This merge has a red check"))
+    letter.refresh_after_check(_status(), drive_root=tmp_path)
     fixed = qualification.preflight_description({"base_sha": base, "target_sha": target,
         "update_channel": "stable", "target_ref": "managed/main"}, drive_root=tmp_path)
     assert fixed["letter"]["description_current"] and fixed["letter"]["text"] == "This merge has a red check"

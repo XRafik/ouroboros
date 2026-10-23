@@ -180,6 +180,12 @@ def collect_range_material(
     # the bodies of only the newest ``max_bodies`` — git never hands this process the bodies
     # of a whole long history just so most of them can be dropped again.
     commits, material["omitted_commit_chunks"] = _commit_subjects(capture, spec)
+    # Match the post-merge workflow's integration line, including squash commits.
+    rc, out, err = capture(["git", "rev-list", "--first-parent", spec])
+    if rc != 0:
+        raise MaterialUnavailable(f"git rev-list --first-parent {spec} failed (rc={rc}): {str(err)[:200]}")
+    by_sha = {c["sha"]: c for c in commits}
+    material["first_parent_commits"] = [by_sha[sha] for sha in out.split() if sha in by_sha]
     material["local_commits"], material["omitted_local_chunks"] = _commit_subjects(
         capture, f"{target_sha}..{base_sha}")
     bodies: Dict[str, str] = {}
@@ -650,7 +656,7 @@ def runtime_status(status: Dict[str, Any]) -> Dict[str, Any]:
 
 def _key_from_status(status: Dict[str, Any]) -> Dict[str, str]:
     return {
-        "base_sha": str(status.get("preflight_base_sha", status.get("running_sha", status.get("current_sha"))) or ""),
+        "base_sha": str(status.get("running_sha", status.get("current_sha")) or ""),
         "target_sha": str(status.get("checked_target_sha") or status.get("latest_sha") or ""),
         "update_channel": str(status.get("update_channel") or ""),
         "target_ref": str(status.get("target_ref") or ""),
@@ -705,14 +711,15 @@ def refresh_after_check(
             if no_update:
                 return checked(current)
             shown, text, _last_good = shown_letter(current) if current else ({}, "", None)
-            from ouroboros.update_qualification import post_merge_checks, range_qualification
+            from ouroboros.update_qualification import range_qualification, refresh_qualification
 
             qualification = None
             if shown.get("state") == "ready" and text and shown.get("key") == key and shown.get("qualification"):
-                qualification = {**shown["qualification"], "github": post_merge_checks(
-                    shown["qualification"]["commits"], str(status.get("official_repo_url") or ""))}
-                if qualification == shown["qualification"]:
-                    return checked(current)
+                qualification, changed = refresh_qualification(
+                    shown["qualification"], str(status.get("official_repo_url") or ""),
+                    previous=current.get("qualification"))
+                if not changed:
+                    return checked({**current, "qualification": qualification})
             try:
                 material = collect_range_material(key["base_sha"], key["target_sha"])
             except MaterialUnavailable as exc:
