@@ -387,15 +387,28 @@ test('only a page laid out wider than its screen turns text inflation off', asyn
     assert.ok(!phone.attrs.has('data-interface-smaller'), 'at 100 % the phone\'s own text settings stand');
 });
 
-test('a reading that turns out to be the layout\'s stops the watch instead of chasing it', async () => {
+test('a reading that turns out to be the layout\'s is measured once, then no longer watched', async () => {
     const phone = bootViewport({ width: 390 });
     await phone.scale.set(120);  // read as the page's scale at the first size, so it is watched
     phone.report('pinch');  // then the engine shows it reports a pinch's scale only
+    phone.resize(390);  // the reading equals the layout: measured at 100 %, the screen had not moved
+    await until(() => phone.scale.percent === 120 && /^width=325,/.test(phone.content()));
+    await new Promise((done) => setTimeout(done, 30));
     const writes = phone.writes();
     for (let i = 0; i < 5; i += 1) phone.resize(390);
     await new Promise((done) => setTimeout(done, 30));
-    assert.equal(phone.writes(), writes, 'no write and no loop');
-    assert.equal(phone.scale.percent, 120);
+    assert.equal(phone.writes(), writes, 'no further writes and no loop');
+    assert.match(phone.content(), /^width=325,/);
+});
+
+test('a resize to a screen as wide as the layout is still a new screen', async () => {
+    const tablet = bootViewport({ width: 1024 });
+    await tablet.scale.set(125);  // laid out at 819 px
+    for (const [screen, layout] of [[820, 656], [768, 614], [900, 720]]) {
+        tablet.resize(screen);  // 820 reads as the layout's 819: measured, and it is a new screen
+        await until(() => new RegExp(`^width=${layout},`).test(tablet.content()) && tablet.scale.percent === 125);
+        assert.match(tablet.content(), new RegExp(`^width=${layout},`), `${screen} px at 125 %`);
+    }
 });
 
 test('a resize deep in a pinch leaves the size alone', async () => {

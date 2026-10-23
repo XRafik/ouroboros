@@ -349,10 +349,11 @@
     };
 
     /* A rotation or a new window width changes the width at 100 %: read it, or measure it at 100 %, then reapply. */
-    const remeasure = async () => {
+    const remeasure = async (measure = false) => {
         if (state === 'unavailable') return;
         const mine = ++generation;
-        const shown = watching ? shownWidth() : 0;
+        const before = base;
+        const shown = watching && !measure ? shownWidth() : 0;
         if (shown > 0) {
             base = Math.round(shown);
         } else {
@@ -362,6 +363,8 @@
             settling -= 1;
             if (mine !== generation) return;
             base = width();
+            // An ambiguous reading the measure shows was no new screen came from an engine reporting the layout.
+            if (measure && Math.abs(base - before) <= 2) watching = false;
         }
         if (chosen !== 100 || percent !== 100) {
             await apply(chosen);
@@ -380,8 +383,9 @@
         // A pinch never changes the screen's width, and deep in one the reading is too coarse to trust.
         if (Number(window.visualViewport?.width) < width() - 1) return;
         const now = shownWidth();
-        // A reading equal to the layout width at another size is the layout's, not the screen's: stop watching here.
-        if (percent !== 100 && Math.abs(now - width()) <= 2) { watching = false; return; }
+        // A reading equal to the layout width at another size is a screen that now matches it or an engine that
+        // reports the layout: measure at 100 % to tell them apart.
+        if (percent !== 100 && Math.abs(now - width()) <= 2) { remeasure(true); return; }
         if (now && Math.abs(now - base) > 2) remeasure();
     };
 
