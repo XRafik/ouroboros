@@ -252,7 +252,7 @@ def test_continuable_owned_project_never_pays_the_full_chain_read(tmp_path, monk
     sweep(tmp_path, gateway, set())
     sweep(tmp_path, gateway, set())
     assert gateway.removed == [] and calls == []
-    assert custody.replay(tmp_path)['run'].output_source, 'terminal collection still runs'
+    assert custody.replay(tmp_path)['run'].output_source, 'the body retained the terminal output'
     result(tmp_path, 'owner')  # Closing the Continue offer makes retirement eligible.
     sweep(tmp_path, gateway, set())
     assert gateway.removed == ['project'] and calls
