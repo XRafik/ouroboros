@@ -22,7 +22,7 @@ def _queued(tmp_path, monkeypatch):
     return root, current.run(root, entry.run_id), area
 
 
-def _child(root):
+def _child(root, *, fail_named=False):
     code = '''
 import json, os, pathlib, sys
 from ouroboros import delegate_custody as c, delegate_collection as body, maintenance
@@ -31,10 +31,15 @@ def forbidden(*a, **kw):
 c.record_patch_captured = forbidden
 c.record_patch_disposed = forbidden
 body.record_terminal_money = forbidden
+if sys.argv[2] == "fail":
+    from ouroboros import review_checking
+    def locked(*a, **kw):
+        raise PermissionError("a native capture handle is busy")
+    review_checking.retain_named_evidence = locked
 result = maintenance.run_job(pathlib.Path(sys.argv[1]), "delegate_capture")
 print(json.dumps({"pid": os.getpid(), "result": result}))
 '''
-    result = subprocess.run([sys.executable, "-c", code, str(root)],
+    result = subprocess.run([sys.executable, "-c", code, str(root), "fail" if fail_named else ""],
                             capture_output=True, text=True, timeout=60, check=True)
     return json.loads(result.stdout)
 
@@ -54,6 +59,23 @@ def test_real_child_prepares_bytes_and_server_settles_and_publishes(tmp_path, mo
     assert final.patch_captured and not final.patch_disposed and not current.collection_pending(final)
     assert _child(root)["result"] is None
     assert current.run(root, entry.run_id).collection_attempt == final.collection_attempt
+
+
+def test_transient_waits_for_another_child_generation_without_spawning_it(tmp_path, monkeypatch):
+    root, entry, area = _queued(tmp_path, monkeypatch)
+    _child(root, fail_named=True)
+    body.collect_terminal(root, entry.run_id, background=True)
+    failed = current.run(root, entry.run_id)
+    assert failed.named_evidence["status"] == "capture_failed" and failed.settled
+    assert failed.capture_job["retry"] == "transient" and current.collection_pending(failed)
+    assert not job.due(root, {}, {}, False), "a transient alone cannot spawn another child"
+    assert _child(root)["result"] == {"state": "done", "items": 1}
+    prepared = current.run(root, entry.run_id)
+    assert prepared.capture_job["id"] != failed.capture_job["id"]
+    body.collect_terminal(root, entry.run_id, background=True)
+    final = current.run(root, entry.run_id)
+    assert final.named_evidence["status"] == "retained" and not current.collection_pending(final)
+    assert _child(root)["result"] is None and area.is_dir()
 
 
 def test_continuation_between_child_return_and_server_acceptance_keeps_its_snapshot(tmp_path, monkeypatch):

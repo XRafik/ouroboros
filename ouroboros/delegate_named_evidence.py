@@ -45,11 +45,10 @@ def saved_named_evidence(root, entry, *, observe=True):
     home = custody.delegated_capture_dir(root, entry.task_id, custody.capture_key(entry))
     name = str(entry.named_evidence.get("directory") or "evidence")
     # Only the writer's local directory name is accepted, never a stored absolute parent.
-    if pathlib.Path(name).name != name or not name.startswith("evidence"):
-        return home / "evidence" / "summary.json", {}
-    path = home / name / "summary.json"
+    valid_name = pathlib.Path(name).name == name and name.startswith("evidence")
+    path = home / (name if valid_name else "evidence") / "summary.json"
     try:
-        saved = json.loads(path.read_text(encoding="utf-8"))
+        saved = json.loads(path.read_text(encoding="utf-8")) if valid_name else {}
     except (OSError, ValueError):
         saved = {}
     if not isinstance(saved, dict):

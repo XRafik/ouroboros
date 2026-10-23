@@ -13,7 +13,7 @@ import pathlib
 import uuid
 
 from ouroboros import delegate_custody as custody, delegate_custody_current as current
-from ouroboros.delegate_capture_attempt import POLICY
+from ouroboros.delegate_capture_attempt import GENERATION, POLICY
 
 NAME = "delegate_capture"
 READY = {"ready", "ready_with_changes", "ready_no_changes"}
@@ -92,12 +92,20 @@ def accept_result(root, entry, result):
     return True
 
 
-def _pending(root):
-    return current.runs(root, "state=? AND json_extract(facts, '$.capture_job.state')=?", (current.HELD, "pending"))
+def _pending(root, *, child=False):
+    pending = "json_extract(facts, '$.capture_job.state')='pending'"
+    params = [current.HELD]
+    if child:
+        pending += (" OR (json_extract(facts, '$.capture_job.state')='consumed'"
+                    " AND json_extract(facts, '$.capture_job.retry')='transient'"
+                    " AND COALESCE(json_extract(facts, '$.capture_job.child_generation'), '')<>?)")
+        params.append(GENERATION)
+    return current.runs(root, f"state=? AND ({pending})", tuple(params))
 
 
 def due(root, row, facts, child):
-    return bool(_pending(root))
+    # A transient does not spawn a child; another real child generation may retry it.
+    return bool(_pending(root, child=child))
 
 
 def _capture(root, entry, should_stop):
@@ -113,9 +121,19 @@ def _capture(root, entry, should_stop):
         return False
     try:
         entry = current.run(root, entry.run_id)
-        if entry is None or entry.capture_job.get("state") != "pending" or should_stop():
+        if entry is None or should_stop():
             return False
         request = entry.capture_job
+        if (request.get("state") == "consumed" and request.get("retry") == "transient"
+                and request.get("child_generation") != GENERATION
+                and request.get("binding") == identity(entry) and not disposition_refusal(root, entry)):
+            request = {"id": uuid.uuid4().hex, "binding": identity(entry), "state": "pending",
+                       "generation": request.get("generation"), "recapture": True}
+            if not _record(root, entry, request):
+                raise OSError("capture retry publication failed")
+            entry.capture_job = request
+        if request.get("state") != "pending":
+            return False
         if request.get("binding") != identity(entry) or disposition_refusal(root, entry):
             result = {"status": "superseded", "note": "The capture binding changed before collection."}
         else:
@@ -131,7 +149,8 @@ def _capture(root, entry, should_stop):
                 result = {"status": "failed", "note": f"{type(exc).__name__}: {exc}",
                           "retry": "transient" if isinstance(exc, OSError) else "changed_input"}
         source = _retain(root, entry, result, "capture-" + request["id"])
-        return _record(root, entry, {**request, "state": "ready", "source": source})
+        return _record(root, entry, {**request, "state": "ready", "source": source,
+                                    "child_generation": GENERATION})
     finally:
         release_exclusive_file_lock(path, fd)
 
@@ -140,7 +159,7 @@ def run(root, should_stop):
     from ouroboros import maintenance_jobs
 
     done = 0
-    for entry in _pending(root).values():
+    for entry in _pending(root, child=True).values():
         if should_stop():
             break
         done += int(_capture(root, entry, should_stop))

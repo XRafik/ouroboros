@@ -94,6 +94,7 @@ def test_changed_evidence_never_writes_through_old_destinations(tmp_path, monkey
     entry, area = _captured(tmp_path, monkeypatch)
     old_path, old = body.saved_named_evidence(tmp_path, entry)
     old_file = old_path.parent / "files" / checking.EVIDENCE_DIRNAME / "result.bin"
+    assert next(row for row in old["files"] if row["path"].endswith("result.bin"))["mode"] == 0o444
     old_bytes = old_path.read_bytes()
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -148,7 +149,7 @@ def test_partial_investigation_reuses_its_receipt_and_changed_input_finishes(tmp
     assert json.loads((pathlib.Path(first["evidence_dir"]) / "summary.json").read_text(encoding="utf-8")) == first
 
 
-@pytest.mark.parametrize("damage", ["missing", "unreadable", "wrong_type"])
+@pytest.mark.parametrize("damage", ["missing", "unreadable", "wrong_type", "bad_address"])
 def test_a_missing_or_unreadable_receipt_is_a_new_fact(tmp_path, monkeypatch, damage, driven_runtime):  # noqa: F811
     runtime, clock, tick = driven_runtime
     entry, area = _captured(tmp_path, monkeypatch)
@@ -159,6 +160,10 @@ def test_a_missing_or_unreadable_receipt_is_a_new_fact(tmp_path, monkeypatch, da
     receipt, _ = body.saved_named_evidence(tmp_path, entry)
     if damage == "missing":
         receipt.unlink()
+    elif damage == "bad_address":
+        entry.named_evidence["directory"] = "../outside"
+        c.emit(tmp_path, c.NAMED_EVIDENCE_RETAINED,
+               {"run_id": entry.run_id, "task_id": entry.task_id, "outcome": entry.named_evidence})
     else:
         receipt.write_text("[1]" if damage == "wrong_type" else "{broken", encoding="utf-8")
     assert not body.saved_named_evidence(tmp_path, entry)[1]
