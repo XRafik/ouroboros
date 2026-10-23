@@ -34,7 +34,7 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from ouroboros import maintenance_jobs, store
+from ouroboros import delegate_pending, maintenance_jobs, maintenance_retirement, plan_collection_job, store, subagent_metrics
 from ouroboros.startup_historical_audit import _REPORT_BYTES, finish_maintenance_job, spawn_maintenance_job
 
 log = logging.getLogger(__name__)
@@ -290,11 +290,15 @@ def _hot_facts_run(root: pathlib.Path, should_stop: Callable[[], bool]) -> Dict[
 # order. ``child`` is False for the server's look: a job may then decline to be a reason to spawn
 # (it still runs whenever the child runs for another reason).
 JOBS: Dict[str, tuple] = {
+    "subagent_metrics": (subagent_metrics.job_due, subagent_metrics.run_job),
+    "pending_invocations": (delegate_pending.backfill_due, delegate_pending.backfill),
     # Before the archive import: the drives it reconciles can leave dialogue work, which the import
     # then finishes in the same pass (the next pass rests; tests/test_cost_contract.py B6).
     "legacy_reconcile": (_legacy_due, _legacy_run),
     "dialogue_import": (_dialogue_due, _dialogue_run),  # the owner's history: newest segments first
     "hot_facts": (_hot_facts_due, _hot_facts_run),
+    "ended_plan_asks": (plan_collection_job.due, plan_collection_job.run),
+    "runtime_retirement": (maintenance_retirement.due, maintenance_retirement.run),
     "child_ref_promotion": (_promotion_due, _promotion_run),
     "custody_trash": (_trash_due, _trash_run),
     "temp_sweep": (_temp_due, _temp_run),

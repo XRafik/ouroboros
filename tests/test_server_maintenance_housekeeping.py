@@ -44,6 +44,8 @@ def _reconcile_pass(monkeypatch):
     monkeypatch.setattr("ouroboros.review_operation.retire_dead_review_pointers_softly", lambda *a, **k: None)
     monkeypatch.setattr("ouroboros.late_review_marks.replay_owed_late_reviews", lambda *a, **k: None)
     sm._run_periodic_reconcile_sweep([0.0], latch=SimpleNamespace(release=lambda: None))
+    from ouroboros.maintenance import run_job
+    run_job(sm.DATA_DIR, "runtime_retirement")
 
 
 def test_the_age_only_retirers_run_again_on_a_later_pass_and_trees_wait_out_a_recovery_gap(root, monkeypatch):
@@ -95,9 +97,10 @@ def test_a_generation_closed_between_two_reconcile_prunes_starts_no_further_one(
     monkeypatch.setattr(delegate_state_sweep, "sweep_settled_delegate_state", first)
     monkeypatch.setattr(skill_uninstall_state, "sweep_uninstalled_skill_state", lambda _root: calls.append("skills") or {})
     monkeypatch.setattr(code_intelligence, "prune_stale_code_intel_roots", lambda _root: calls.append("caches") or {})
-    sm._run_reconcile_prunes(closed)
+    from ouroboros.maintenance import run_job
+    run_job(root, "runtime_retirement", should_stop=closed.is_set)
     assert calls == ["delegate"], "the generation closed: no further retirer starts"
-    sm._run_reconcile_prunes(threading.Event())
+    run_job(root, "runtime_retirement")
     assert calls == ["delegate", "delegate", "skills", "caches"], "an open generation runs every step"
 
 

@@ -195,6 +195,8 @@ def test_planner_statistics_once_per_store_and_again_after_tenfold_growth(data):
 def test_legacy_reconcile_runs_only_when_scheduled_and_tolerates_a_body_without_it(data, monkeypatch):
     from ouroboros import store_import
 
+    for name in ("pending_invocations", "ended_plan_asks", "runtime_retirement"):
+        maintenance.run_job(data, name)
     calls = []
     monkeypatch.setattr(store_import, "run_legacy_reconcile",
                         lambda root, **kw: calls.append(kw) or maintenance_jobs.record(root, "legacy_reconcile",
@@ -251,7 +253,12 @@ def _setup_job(name, data, monkeypatch):
     from ouroboros import store_import
     from ouroboros.task_results import write_task_result
 
-    if name == "legacy_reconcile":
+    if name == "subagent_metrics":
+        from ouroboros.subagent_metrics import EVENT
+        from ouroboros.utils import append_jsonl
+        from tests.test_subagent_metrics import event
+        append_jsonl(data / "logs/events.jsonl", event(type=EVENT))
+    elif name == "legacy_reconcile":
         monkeypatch.setattr(store_import, "run_legacy_reconcile", lambda root, **kw: maintenance_jobs.record(
             root, "legacy_reconcile", state="done", done=1), raising=False)
         maintenance_jobs.record(data, "legacy_reconcile", state="pending")
@@ -373,7 +380,8 @@ def test_the_real_child_process_runs_the_due_jobs_and_reports(data):
     from ouroboros import dialogue_import
 
     dialogue_import.cutover(data)  # as the boot does before the dialogue opens: the archive is planned
-    assert maintenance.due(data) == ["dialogue_import", "custody_trash"]
+    assert maintenance.due(data) == ["subagent_metrics", "pending_invocations", "dialogue_import",
+                                     "ended_plan_asks", "runtime_retirement", "custody_trash"]
     unit = maintenance.MaintenanceChild()
     assert unit.tick(data, REPO)
     unit._thread.join(240)

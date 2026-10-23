@@ -784,71 +784,21 @@ def _prune_engine_runtimes() -> None:
         log.debug("Engine runtime prune failed", exc_info=True)
 
 
-def prune_agent_media_uploads(
-    drive_root: pathlib.Path,
-    retention_days: "int | None" = None,
-    *,
-    now: "float | None" = None,
-) -> dict:
-    """Age-prune AGENT-generated media under uploads/ (CPL4-C21, owner 6A).
-
-    Only ``uploads/screenshots/`` (browser tool) and ``uploads/views/``
-    (view_image durable copies) follow GC retention — owner attachments live
-    in the uploads/ ROOT and are owner-explicit-delete only, untouched here.
-    Readers already skip missing files (the eviction placeholder only formats
-    a re-view hint), so a pruned screenshot degrades to a stale hint, never
-    an error. Fail-soft per file.
-
-    CONTAINED (audit #15-13): the sweep deletes only REGULAR FILES that live
-    inside the real family directory. ``is_file()``/``stat()`` follow symlinks,
-    so a symlinked ``uploads/screenshots`` — or a single symlink inside it —
-    made an age sweep of the drive unlink old files anywhere on the host. Both
-    shapes are now skipped by ``lstat`` and counted, never followed.
-    """
-    import stat as stat_module
-
-    from ouroboros.retention import age_cutoff, get_gc_retention_days
-
-    if retention_days is None:
-        retention_days = get_gc_retention_days()
-    cutoff = age_cutoff(retention_days, now)
-    report: dict = {"removed": 0, "kept": 0, "skipped": 0, "errors": 0}
-    for family in ("screenshots", "views"):
-        family_dir = pathlib.Path(drive_root) / "uploads" / family
-        try:
-            if family_dir.is_symlink():
-                report["skipped"] += 1  # the whole family points out of the drive
-                continue
-            entries = sorted(family_dir.iterdir())
-        except OSError:
-            continue
-        for path in entries:
-            try:
-                info = path.lstat()
-                if not stat_module.S_ISREG(info.st_mode):
-                    report["skipped"] += 1  # symlink, directory or special file
-                    continue
-                if info.st_mtime >= cutoff:
-                    report["kept"] += 1
-                    continue
-                path.unlink()
-                report["removed"] += 1
-            except OSError:
-                report["errors"] += 1
-    return report
+from ouroboros.maintenance_retirement import prune_agent_media_uploads as prune_agent_media_uploads
 
 
-# Memory only: startup recovery left a gap (unresolved rows, unknown ownership), so task trees and
-# service logs, which recovery may still need, wait for the next server generation.
+# The server mirror of the durable startup_recovery gate; the child reads only the stored fact.
 _STARTUP_RECOVERY_GAPS = [False]
 
 
 def _startup_prune_sweeps(*, preserve_task_sources=False, recovery_report=None):
     """Boot's housekeeping: note whether recovery left a gap, reap the fallback scripts (only before
-    intake, when none can be live) and observe the memory journals' sizes once per generation. The
-    retirers themselves run on their cadences (``_run_reconcile_prunes``, the custody pass)."""
+    intake, when none can be live) and observe the memory journals' sizes once per generation. History-sized
+    retirers run in the maintenance child; queue-owned copies stay on the custody pass."""
     _STARTUP_RECOVERY_GAPS[0] = bool(preserve_task_sources and (
         recovery_report is None or recovery_report.get("errors") or "*" in recovery_report.get("unresolved", [])))
+    from ouroboros.maintenance_retirement import record_startup
+    record_startup(DATA_DIR, gaps=_STARTUP_RECOVERY_GAPS[0])
     if not preserve_task_sources:  # the atomic-temp walk is the maintenance child's temp_sweep job
         from ouroboros.temp_sweep import sweep_stale_temp_files
         sweep_stale_temp_files(DATA_DIR, atomic_temps=False)
@@ -864,64 +814,10 @@ def _startup_prune_sweeps(*, preserve_task_sources=False, recovery_report=None):
 
 
 def _run_reconcile_prunes(stop_event: Any = None):
-    """The age-only retirers of small planes, on every reconcile pass, so a server that stays up
-    for weeks retires them too. Task trees and service logs wait while startup recovery left a gap
-    and for a pass whose recovery links cannot be read (``startup_tree_exclusions``); every step
-    fails soft and the next pass tries again; a closed generation starts no further step."""
-    if not _STARTUP_RECOVERY_GAPS[0]:
-        try:
-            from ouroboros.headless import prune_task_trees
-            from ouroboros.startup_task_files import startup_tree_exclusions
-            from ouroboros.tools.services import prune_service_logs
-
-            exclusions = startup_tree_exclusions(DATA_DIR)
-            if exclusions is not None:
-                prune_task_trees(DATA_DIR, exclude_root_ids=exclusions)
-                _prune_event("runtime_artifact_prune", ("deleted_dirs", "deleted_files", "errors"),
-                             services=prune_service_logs(DATA_DIR))
-        except Exception:
-            log.debug("Task tree and service log prune failed", exc_info=True)
-    if _stop_requested(stop_event):
-        return
-    try:
-        from ouroboros.delegate_state_sweep import sweep_settled_delegate_state
-
-        _prune_event("delegate_state_sweep", ("removed", "errors", "skipped"),
-                     report=sweep_settled_delegate_state(DATA_DIR))
-    except Exception:
-        log.debug("Delegate state sweep failed", exc_info=True)
-    if _stop_requested(stop_event):
-        return
-    try:
-        # CPL4-C11 (owner batch 3A): clear owner state of tombstoned-uninstalled
-        # skills; grants survive as owner authority, reinstalls self-heal.
-        from ouroboros.skill_uninstall_state import sweep_uninstalled_skill_state
-
-        _prune_event("skill_uninstall_state_sweep", ("swept", "restored", "errors"),
-                     report=sweep_uninstalled_skill_state(DATA_DIR))
-    except Exception:
-        log.debug("Uninstalled-skill state sweep failed", exc_info=True)
-    if _stop_requested(stop_event):
-        return
-    try:
-        # CPL4-C14/C15: pure-cache and dead-marker age prunes (GC retention).
-        from ouroboros.code_intelligence import prune_stale_code_intel_roots
-        from ouroboros.extension_reconcile_queue import prune_failed_reconcile_markers
-
-        _prune_event("stale_cache_prune", ("removed", "errors"),
-                     code_intel=prune_stale_code_intel_roots(DATA_DIR),
-                     extension_reconcile_failed=prune_failed_reconcile_markers(DATA_DIR))
-    except Exception:
-        log.debug("Stale cache prune failed", exc_info=True)
-    if _stop_requested(stop_event):
-        return
-    try:
-        # CPL4-C21 (owner 6A): agent screenshots/views follow GC retention;
-        # owner attachments in the uploads/ root are never touched.
-        _prune_event("agent_media_prune", ("removed", "skipped", "errors"),
-                     report=prune_agent_media_uploads(DATA_DIR))
-    except Exception:
-        log.debug("Agent media prune failed", exc_info=True)
+    """Request a cheap child dispatch check; history-sized retirement lives there."""
+    if not _stop_requested(stop_event):
+        from ouroboros.maintenance import child
+        child.request()
 
 
 # Memory only: the views pass of the review checkout prune runs once per process, until done.

@@ -190,11 +190,11 @@ def _pending_rows(txn) -> List[Dict[str, Any]]:
 
 
 def pending(root):
-    from ouroboros.delegate_pending import pending_invocations
+    from ouroboros.delegate_pending import current_rows
 
     with store.open_store(root, write=False) as txn:
-        rows = _pending_rows(txn)
-    return pending_invocations(root, rows=rows)
+        rows = txn.set_rows("custody_open")
+    return current_rows(root, [facts for key, facts in rows.items() if key.startswith("invocation:")])
 
 
 def task_snapshot(root, task_id: str):
@@ -202,9 +202,9 @@ def task_snapshot(root, task_id: str):
 
     Runs use the task index. The request predicate scans only custody_open:
     closed requests leave that set, so cost follows open requests, not history.
-    Only this task's matching request bodies are materialized.
+    Only this task's typed pending facts are decoded; no request source is opened.
     """
-    from ouroboros.delegate_pending import pending_invocations
+    from ouroboros.delegate_pending import current_rows
 
     mine = str(task_id or "")
     with store.open_store(root, write=False) as txn:
@@ -213,8 +213,7 @@ def task_snapshot(root, task_id: str):
             "SELECT facts FROM obligations WHERE set_name='custody_open' "
             "AND CAST(json_extract(facts, '$.request.task_id') AS TEXT)=? ORDER BY rowid", (mine,))]
     runs_by_id = {rid: json_loads(text) for rid, text in raw.items()}
-    requests = [json_loads(text)["request"] for text in requests]
-    return {"runs": _decode_all(runs_by_id), "pending": pending_invocations(root, rows=requests)}
+    return {"runs": _decode_all(runs_by_id), "pending": current_rows(root, [json_loads(text) for text in requests])}
 
 
 def payload_snapshot(root):
@@ -222,13 +221,13 @@ def payload_snapshot(root):
     settled and disposed, and every pending invocation (a holder whose REQUESTED becomes
     STARTED between two reads would be in neither). Target, owner and terminality checks
     belong to the caller, after this transaction closes."""
-    from ouroboros.delegate_pending import pending_invocations
+    from ouroboros.delegate_pending import current_rows
 
     with store.open_store(root, write=False) as txn:
         raw = txn.custody_raw_rows(*_selected(txn, "payload_held=1", _MAY_HOLD_PAYLOAD))
-        requests = _pending_rows(txn)
+        requests = [facts for key, facts in txn.set_rows("custody_open").items() if key.startswith("invocation:")]
     held = {rid: json_loads(text) for rid, text in raw.items()}
-    return {"runs": _decode_all(held), "pending": pending_invocations(root, rows=requests)}
+    return {"runs": _decode_all(held), "pending": current_rows(root, requests)}
 
 
 def invocation(root, invocation_id: str, request_facts: Callable) -> Optional[Dict[str, Any]]:
@@ -253,18 +252,19 @@ def snapshot(root, closed: bool = True):
     with store.open_store(root, write=False) as txn:
         debts = txn.set_rows("delegated_runs") if closed else {}
         held = txn.custody_rows("state=?", (HELD,))
-        invocations = _pending_rows(txn)
-    from ouroboros.delegate_pending import pending_invocations
+        invocations = [facts for key, facts in txn.set_rows("custody_open").items() if key.startswith("invocation:")]
+    from ouroboros.delegate_pending import current_rows
 
     state = {}
     for facts in debts.values():
         state.update({rid: _decode(raw) for rid, raw in facts.get("closed_runs", {}).items()})
     state.update(_decode_all(held))
-    return {"state": state, "pending": pending_invocations(root, rows=invocations), "current": True}
+    return {"state": state, "pending": current_rows(root, invocations), "current": True}
 
 
 
-def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Dict[str, Dict[str, Any]]) -> str:
+def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Dict[str, Dict[str, Any]],
+            pending=None) -> str:
     """Apply ONE event to the rows it touches (``state`` holds the decoded runs the caller
     loaded; a PROJECT_RETIRED needs its project's siblings, a STARTED its invocation row).
     Returns the owner whose closing receipt a late retained output re-owed ("" otherwise)."""
@@ -285,7 +285,7 @@ def _reduce(txn, event: Dict[str, Any], state: Dict[str, Any], marks_by_task: Di
         key = f"invocation:{iid}"
         if (txn.get_row("custody_open", key) is None and txn.get_row("custody_refused", iid) is None
                 and not inv.bound_runs(txn, iid)):  # a replayed request of an answered invocation re-opens nothing
-            txn.put_row("custody_open", key, {"request": event})
+            txn.put_row("custody_open", key, {"request": event, **({"pending": pending} if pending is not None else {})})
     before = {run_id: deepcopy(vars(entry)) for run_id, entry in state.items()}
     c._apply(state, event)
     if kind == c.STARTED and rid in state:
@@ -376,13 +376,18 @@ def publish(root, event: Dict[str, Any], *, propagate_contention: bool = False) 
     from ouroboros import delegate_invocation as inv
 
     owed = ""
+    from ouroboros.delegate_custody import START_REQUESTED
+    from ouroboros.delegate_pending import pending_invocations
+    # Capture the one request before the transaction. Future inventories read only
+    # this projection; STARTED/refusal removes it together with the open identity.
+    pending = pending_invocations(root, [event]) if event.get("type") == START_REQUESTED else None
     try:
         while True:
             with store.open_store(root, write=True) as txn:
                 if int(txn.meta("schema_version") or 1) >= store.SCHEMA_VERSION:
                     if not event.get("event_id") or txn.get_row(inv.EVENTS, str(event["event_id"])) is None:
                         event = {**event, "custody_ordinal": int(txn.meta(inv.ORDINAL) or 0) + 1}
-                        owed = _reduce(txn, event, _loaded(txn, event), {})
+                        owed = _reduce(txn, event, _loaded(txn, event), {}, pending)
                         txn.outbox_put(event)
                     break
             # Prepare an old child before reducing anything, like store.update_task.
@@ -554,6 +559,8 @@ def write_fold(txn, folded: Dict[str, Any], *, replace: bool) -> None:
     for key, facts in merged.items():
         if held.get(key) != facts:
             txn.put_row("custody_open", key, facts)
+    if any(key.startswith("invocation:") and "pending" not in facts for key, facts in merged.items()):
+        txn.set_meta("job:pending_invocations", {"state": "pending", "requested_revision": txn.revision() + 1})
 
 
 def rebuild(root, *, replace=False) -> int:
