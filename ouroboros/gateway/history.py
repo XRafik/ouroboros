@@ -488,6 +488,9 @@ def _annotate_terminal_task_truth(
                     if isinstance(result.get(key), dict):
                         terminal_truth[key] = dict(result[key])
                 retention = retention_summary(result)
+                rounds = ((result.get("loop_outcome") or {}).get("usage") or {}).get("total_rounds")
+                if type(rounds) is int and rounds >= 0:
+                    terminal_truth["rounds"] = rounds
                 if retention:
                     terminal_truth["history_retention"] = retention
                 if result.get("reason_code"):
