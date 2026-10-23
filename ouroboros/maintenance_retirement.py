@@ -57,10 +57,10 @@ def task_written(txn, task_id, columns):
     for name in names:
         try:
             stamp = (txn.root / name).stat().st_mtime
-        except OSError:
+            if name.startswith("task_trees/") and columns.get("drive_retention_at"):
+                stamp = float(columns["drive_retention_at"])
+        except (OSError, TypeError, ValueError):
             continue
-        if name.startswith("task_trees/") and columns.get("drive_retention_at"):
-            stamp = float(columns["drive_retention_at"])
         deadlines.append(stamp + get_gc_retention_days() * 86400)
     if deadlines:
         schedule_in(txn, min(deadlines))

@@ -7,6 +7,7 @@ import pytest
 from ouroboros import maintenance, maintenance_jobs, maintenance_retirement, plan_record, store
 from ouroboros.task_results import write_task_result
 from tests._cost_meter import BOUNDARY, CostMeter, HISTORY
+from tests.test_plan_record import _participant, _record
 
 
 def measured_rest(root, job):
@@ -67,14 +68,35 @@ def test_child_requires_recorded_startup_success_and_keeps_unknown_recovery_link
     assert not tree.exists()
 
 
+def test_malformed_retention_date_does_not_abort_a_task_write_or_schedule_retirement(tmp_path):
+    from ouroboros import task_store
+
+    write_task_result(tmp_path, "ended", "completed")
+    (tmp_path / "task_trees/ended").mkdir(parents=True)
+    assert maintenance_jobs.job(tmp_path, "runtime_retirement") is None
+    for sequence, timestamp in enumerate(("not-a-timestamp", "12345.5"), start=2):
+        with store.open_store(tmp_path, write=True) as txn:
+            txn.conn.execute("UPDATE tasks SET drive_retention_at=? WHERE task_id='ended'", (timestamp,))
+        handoff = {"state": "closed", "revision": sequence}
+        assert task_store.patch_handoff(tmp_path, "ended", "model_waits", "wait", lambda _: handoff) == handoff
+        with store.open_store(tmp_path, write=False) as txn:
+            assert txn.row("ended", "write_seq") == sequence
+            assert txn.handoff("ended", "wait") == handoff, "the task writer committed through the retirement seam"
+        job = maintenance_jobs.job(tmp_path, "runtime_retirement")
+        if sequence == 2:
+            assert job is None, "malformed retention data supplies no deadline"
+        else:
+            assert job["next_due"] == 12345.5 + maintenance_retirement.get_gc_retention_days() * 86400
+            assert job["arrival"]
+
+
 def test_ended_plan_job_rests_flat_and_wakes_on_terminal_or_producer_facts(tmp_path, monkeypatch):
     from ouroboros.observability import persist_call
     costs = []
     for scale in (1, 30):
         root = tmp_path / f"root{scale:02}"
         for index in range(5 * scale):
-            record = {**plan_record.empty_record(), "asks": [{"ask_id": "a1", "revision": 0, "ts": "t",
-                "participants": [{"seat_id": "s1", "status": "pending", "dispatched": True}]}]}
+            record = _record([_participant("s1")])
             write_task_result(root, f"ended{index:04}", "completed", plan_record=record)
         assert maintenance.run_job(root, "ended_plan_asks")["state"] == "done"
         write_task_result(root, "unrelated", "completed")
@@ -139,8 +161,8 @@ def test_new_retained_images_schedule_their_own_age_after_an_empty_pass(tmp_path
 
 def test_racing_plan_publication_survives_the_examined_signature(tmp_path, monkeypatch):
     from ouroboros import plan_collection_job
-    write_task_result(tmp_path, "plan", "completed", plan_record={"asks": [{"participants": [{"status": "pending"}]}]})
-    maintenance.run_job(tmp_path, "ended_plan_asks")
+    write_task_result(tmp_path, "plan", "completed", plan_record=_record([_participant("s1")]))
+    assert maintenance.run_job(tmp_path, "ended_plan_asks") == {"state": "done", "items": 0}
     plan_collection_job.producer_published(tmp_path, ["plan", "first", "digest"])
     load = plan_record.load_plan_record
     def arrive(root, task_id):
@@ -148,8 +170,10 @@ def test_racing_plan_publication_survives_the_examined_signature(tmp_path, monke
         return load(root, task_id)
     with monkeypatch.context() as race:
         race.setattr(plan_record, "load_plan_record", arrive)
-        maintenance.run_job(tmp_path, "ended_plan_asks")
-    assert maintenance.run_job(tmp_path, "ended_plan_asks") is not None
+        assert maintenance.run_job(tmp_path, "ended_plan_asks") == {"state": "done", "items": 0}
+    with store.open_store(tmp_path, write=False) as txn:
+        assert txn.get_row(plan_collection_job.CHANGED, "plan") == {"producer": ["plan", "second", "digest"]}
+    assert maintenance.run_job(tmp_path, "ended_plan_asks") == {"state": "done", "items": 0}
     measured_rest(tmp_path, "ended_plan_asks")
 
 

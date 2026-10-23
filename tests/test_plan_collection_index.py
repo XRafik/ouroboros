@@ -298,6 +298,60 @@ def test_lazy_selection_failure_preserves_real_settlement_and_remaining_pending_
     assert late._plan_marks(root) == [mark] and council.transport.calls.count("m/a") == 1
 
 
+@pytest.mark.parametrize("discovery", ["initial", "changed", "legacy"])
+@pytest.mark.parametrize("read", ["plan", "terminal", "collection"])
+def test_failed_plan_examination_keeps_its_wake_until_a_later_child_pass(council, monkeypatch, discovery, read):
+    from ouroboros import maintenance, maintenance_jobs, plan_collection_job, task_results
+    from ouroboros.tools import plan_ask
+    from tests.test_child_duty_rest import measured_rest
+
+    root = council.h.drive
+    if discovery == "changed":
+        assert maintenance.run_job(root, "ended_plan_asks")["state"] == "done"
+        measured_rest(root, "ended_plan_asks")
+    with monkeypatch.context() as lossy:
+        lost = late._lose_settlement_callbacks(lossy)
+        council.transport.release()
+        late._until(lambda: len(lost) == 3)
+    late._end(council.h)
+    with store.open_store(root, write=True) as txn:
+        if discovery == "legacy":
+            txn.delete_row(plan_collection_job.CHANGED, late.PLAN_TASK)  # an older writer queued no token
+        wake = txn.get_row(plan_collection_job.CHANGED, late.PLAN_TASK)
+    assert bool(wake) is (discovery != "legacy")
+    faults = []
+
+    def busy(*args, **kwargs):
+        faults.append(True)
+        raise store.StoreBusy("one child pass cannot read the retained plan")
+
+    monkeypatch.setattr(plan_ask, "dispatch_ask", lambda *a, **kw: pytest.fail("collection never buys another ask"))
+    owner, attribute = {"plan": (plan_record, "read_document"),
+                        "terminal": (task_results, "load_task_result"),
+                        "collection": (plan_ask, "collect_pending")}[read]
+    with monkeypatch.context() as fault:
+        fault.setattr(owner, attribute, busy)
+        assert maintenance.run_job(root, "ended_plan_asks") == {"state": "pending", "items": 0}
+    assert faults == [True]
+    assert _flags(root, late.PLAN_TASK)[1] == 1
+    assert all(late._participant(council.h, seat)["status"] == "pending" for seat in ("s1", "s2", "s3"))
+    assert late._plan_marks(root) == []
+    with store.open_store(root, write=False) as txn:
+        assert txn.get_row(plan_collection_job.CHANGED, late.PLAN_TASK) == wake
+    assert maintenance_jobs.job(root, "ended_plan_asks")["state"] == "pending"
+
+    # The next child pass retries the debt without a timer, new producer or explicit repair.
+    assert maintenance.run_job(root, "ended_plan_asks") == {"state": "done", "items": 3}
+    assert _flags(root, late.PLAN_TASK)[1] == 0
+    assert all(late._participant(council.h, seat)["status"] == "answered" for seat in ("s1", "s2", "s3"))
+    marks = late._plan_marks(root)
+    assert {mark["review"]["subject"]["seat_id"] for mark in marks} == {"s1", "s2", "s3"}
+    with store.open_store(root, write=False) as txn:
+        assert txn.get_row(plan_collection_job.CHANGED, late.PLAN_TASK) is None
+    measured_rest(root, "ended_plan_asks")
+    assert late._plan_marks(root) == marks and sorted(council.transport.calls) == ["m/a", "m/b", "m/c"]
+
+
 def test_storeless_roundtrip_and_reimport_preserve_plan_and_derive_selector(tmp_path):
     original = document("task", plan_record=_record([_pending()]), result="exact historical text")
     source, restored = tmp_path / "source", tmp_path / "restored"
