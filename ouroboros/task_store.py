@@ -251,6 +251,29 @@ def newest_ids(root: Any, limit: Optional[int] = None, *, where: str = "", param
 ROOT_RESULT_WHERE = "parent_task_id IS NULL AND (delegation_role IS NULL OR delegation_role != 'subagent')"
 
 
+def newest_root_ids(root: Any, limit: Optional[int] = None, *, project_id: str = "") -> List[str]:
+    """Root task ids (``ROOT_RESULT_WHERE``) newest first, read through the index that keeps the
+    read addressed: one project sorts only its own rows (``tasks_project``); the whole store walks
+    ``tasks_ts`` newest first and stops at ``limit``. Unpinned, the planner reads every root
+    through ``tasks_parent`` and sorts them all."""
+    if not project_id and limit is None:
+        raise ValueError("the whole store's newest roots need a limit")
+    index, scope, params = ("tasks_project", "project_id=? AND ", (project_id,)) if project_id else ("tasks_ts", "", ())
+    bound = "" if limit is None else f" LIMIT {int(limit)}"
+    with open_store(root, write=False) as txn:
+        return [record["task_id"] for record in txn.conn.execute(
+            f"SELECT task_id FROM tasks INDEXED BY {index} WHERE {scope}{ROOT_RESULT_WHERE} {_NEWEST_ORDER}{bound}", params)]
+
+
+def project_result_counts(root: Any, project_id: str) -> Tuple[int, int]:
+    """``(roots, children)`` among one project's results, counted over its own index without a body."""
+    with open_store(root, write=False) as txn:
+        record = txn.conn.execute(
+            f"SELECT COUNT(*) AS results, COALESCE(SUM({ROOT_RESULT_WHERE}), 0) AS roots "
+            "FROM tasks INDEXED BY tasks_project WHERE project_id=?", (project_id,)).fetchone()
+    return int(record["roots"]), int(record["results"]) - int(record["roots"])
+
+
 def documents_by_ids(root: Any, task_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
     ids = [str(task_id) for task_id in task_ids]
     if not ids:

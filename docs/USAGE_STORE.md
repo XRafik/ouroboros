@@ -44,7 +44,7 @@ owner succeeds; no failure authorizes unsafe WAL continuation.
 
 | table | holds |
 |---|---|
-| `attempts` | one row per attempt id, UPDATEd on every transition; `revision` counts its transitions (the old `expected_seq` role). Typed columns for ids, state, attribution, timestamps (`ts_reserved`, `ts_dispatched`, `ts_final`, `ts_last`), money as canonical decimal text, tokens (NULL = not reported), caps, review/route attribution, local-answer owner; `weight` (1, or the folded attempt count of an imported aggregate); every other field verbatim in `extra`, so a row decodes to exactly what was written. Indexes: root, group, task, the open set (partial: reserved/dispatched/unresolved and abandoned settlements), `(category, ts_last)`, review wave, route. |
+| `attempts` | one row per attempt id, UPDATEd on every transition; `revision` counts its transitions (the old `expected_seq` role). Typed columns for ids, state, attribution, timestamps (`ts_reserved`, `ts_dispatched`, `ts_final`, `ts_last`), money as canonical decimal text, tokens (NULL = not reported), caps, review/route attribution, local-answer owner; `weight` (1, or the folded attempt count of an imported aggregate); every other field verbatim in `extra`, so a row decodes to exactly what was written. Indexes: root, `(root, ts_last)`, group, task, the open set (partial: reserved/dispatched/unresolved and abandoned settlements), `(category, ts_last)`, review wave, route. |
 | `summaries` | `(scope, key)` → the full bucket the readers render: the cash 5-tuple as decimal text, state counts, unknown/priced/open/non-final counters, sessions and windows, processing summary, token sums with presence counts, physical calls, cache TTLs and the cap multiset; `accounted_num` (REAL) orders the costliest tasks and is never read as an amount. |
 | `bindings` | the earliest root/group cap binding (`BindingIndex` semantics: carried, `legacy_live`, `legacy_default`, explicit unlimited `None`). |
 | `dirty_owners` | task and root ids whose stored cost projection may be behind, with the revision that dirtied them. |
@@ -117,8 +117,10 @@ network-bound runs inside it.
 Money and displays read the same rows. A display read (`allow_stale`) waits
 only the short display wait, then reports the fact unavailable — never zero.
 `read_usage_records` (every row) serves the explicit audit and the export; a
-test pins its call sites. The consciousness allowance selects its roots and
-window rows through the `(category, ts_last)` and root indexes. Terminal
+test pins its call sites. The consciousness allowance selects its roots through
+the `(category, ts_last)` index and each root's window rows through `(root,
+ts_last)`, so a tick reads a root still at work for its last day, never its whole
+life. Terminal
 maintenance takes recovery candidates from the open-set index and projection
 candidates from `Txn.dirty_owners()`. After an addressed projection succeeds or
 is equal, `ack_dirty_owner(owner_id, revision)` removes only that revision; a
@@ -211,8 +213,10 @@ cannot be read is `UsageLedgerCorrupt` for every caller and is never replaced.
 The server runs `migrate_from_journal(root, initialize_journal=True)` at lifespan
 start on every door (a providerless install included), before any request,
 worker or supervisor, which is also where an existing store gets this runtime's
-journal (§1); the supervisor's liveness phase `startup:usage_store` then finds
-it completed and keeps the journal as it is.
+journal (§1) and, once, the `(root, ts_last)` index an older body's store lacks
+(a failed build leaves readers on the root index and retries at the next boot);
+the supervisor's liveness phase `startup:usage_store` then finds it completed and
+keeps the journal as it is.
 A display read (`allow_stale=True`) never imports: while a journal or a
 pre-ledger event chain awaits that job it reports the store unavailable, and with
 neither it creates the empty store. A non-display reader that finds no store (a tool or a test without a
