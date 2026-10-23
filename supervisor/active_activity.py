@@ -57,6 +57,14 @@ class TurnExecution:
         if TURN_PHASES.index(phase) <= TURN_PHASES.index(self.phase):
             return False
         self.marks.append((phase, time.monotonic()))
+        if phase == "dispatched":  # once per execution: facts only move forward
+            try:
+                from ouroboros.update_generation_facts import observe_direct_dispatch
+
+                observe_direct_dispatch(task_id=self.task_id, accepted_at=self.marks[0][1],
+                                        dispatched_at=self.marks[-1][1])
+            except Exception:
+                log.debug("after-update dispatch observation failed", exc_info=True)
         return True
 
     def observe(self, kind: str, data: Dict[str, Any]) -> None:

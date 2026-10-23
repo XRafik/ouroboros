@@ -124,7 +124,11 @@ def test_registry_concurrent_operations():
     assert registry.executions() == []
 
 
-def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry():
+def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry(monkeypatch):
+    from ouroboros import update_generation_facts
+
+    dispatches = []  # the after-update facts get the first model dispatch of each turn, once
+    monkeypatch.setattr(update_generation_facts, "observe_direct_dispatch", lambda **kw: dispatches.append(kw))
     registry = DirectActivityRegistry()
     execution = registry.begin_execution(4, client_message_id="m-4")
     assert execution.phase == "accepted" and registry.executions() == [execution]
@@ -137,14 +141,18 @@ def test_a_turn_execution_moves_forward_only_and_ends_with_its_entry():
     assert entry.execution is execution and execution.task_id == "act-4"
     assert registry.snapshot()[0]["turn_phase"] == "admitted"
     execution.observe("log_event", {"type": "context_building_started"})
+    assert dispatches == [], "no dispatch fact before the turn's own model call"
     execution.observe("main_llm_call_state", {"phase": "started"})
     assert registry.snapshot()[0]["turn_phase"] == "dispatched"
+    assert [(d["task_id"], d["accepted_at"] <= d["dispatched_at"]) for d in dispatches] == [("act-4", True)]
+    assert dispatches[0]["accepted_at"] == execution.marks[0][1]
     # A late or repeated fact never moves it back; other frames move nothing.
     assert execution.advance("context_built") is False
     execution.observe("log_event", {"type": "context_building_finished"})
     execution.observe("main_llm_call_state", {"phase": "finished"})
     execution.observe("log_event", {"type": "task_started"})
     assert [phase for phase, _ in execution.marks] == ["accepted", "admitted", "context_building", "dispatched"]
+    assert len(dispatches) == 1, "a repeated dispatch frame reports nothing again"
     stamps = [at for _, at in execution.marks]
     assert stamps == sorted(stamps)
     registry.unregister("act-4")
