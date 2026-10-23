@@ -256,10 +256,7 @@ def _dialogue_due(root: pathlib.Path, row: Dict[str, Any], facts: Dict[str, Any]
 
     if row.get("state") == "failed":
         return child
-    if not dialogue_store.present(root):
-        return False
-    return any(int(view.get("pending") or 0) for view in dialogue_import.import_status(root).values()
-               if isinstance(view, dict))
+    return dialogue_store.present(root) and dialogue_import.import_owed(root)
 
 
 def _dialogue_run(root: pathlib.Path, should_stop: Callable[[], bool]) -> Dict[str, Any]:
@@ -314,7 +311,7 @@ JOB_NAMES = tuple(JOBS)
 def due(root: Any) -> List[str]:
     """The jobs whose facts say work may wait (cheap reads only; nothing is walked here)."""
     root = pathlib.Path(root)
-    rows = maintenance_jobs.jobs(root)
+    rows = maintenance_jobs.jobs(root, JOBS)
     facts = _store_facts(root)
     return [name for name, (is_due, _run) in JOBS.items() if is_due(root, rows.get(name) or {}, facts, False)]
 

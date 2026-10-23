@@ -531,6 +531,14 @@ def coverage(root: Any, stream: str, seq: Optional[int] = None) -> Dict[str, Any
             **({} if planned else {"unplanned": True})}
 
 
+def import_owed(root: Any) -> bool:
+    """Whether any planned segment still waits for the import (the maintenance dispatcher's look):
+    one indexed probe per stream, never a listing or a count over the ledger."""
+    with ds.transaction(root, write=False) as conn:
+        return any(conn.execute("SELECT 1 FROM import_ledger INDEXED BY ledger_state WHERE stream=? AND state='pending' "
+                                "LIMIT 1", (stream,)).fetchone() is not None for stream in ds.STREAMS)
+
+
 def import_status(root: Any) -> Dict[str, Any]:
     """Per stream: segments by state, rows imported, bytes still pending (the health document's job view)."""
     status: Dict[str, Any] = {}

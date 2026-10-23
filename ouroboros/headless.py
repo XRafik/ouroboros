@@ -216,7 +216,7 @@ def drive_candidates(base: pathlib.Path, parent: pathlib.Path, cutoff: float, st
     status and None as the instant (the strict reader decides later). A hint never authorizes
     removal: the prune re-reads the strict row before any settlement. ``record=False`` (the
     preview) classifies a legacy row in memory only; the prune fills the projection."""
-    names = sorted(entry.name for entry in base.iterdir() if entry.is_dir())
+    names = _drive_names(base)
     names = [name for name in names if name > after] + [name for name in names if name <= after]
     for task_id, fact in _drive_retention_rows(parent, names, stop, record=record):
         status, retention_at, inside = "", None, False
@@ -233,30 +233,51 @@ def drive_candidates(base: pathlib.Path, parent: pathlib.Path, cutoff: float, st
         yield task_id, status, retention_at, inside, fact if usable else {}
 
 
+def _drive_names(base: pathlib.Path) -> List[str]:
+    """The drive folders of a layout in name order, from one listing (the entry's type, never a stat per name)."""
+    with os.scandir(base) as entries:
+        return sorted(entry.name for entry in entries if entry.is_dir())
+
+
+def _earliest(known: Optional[float], instant: float) -> float:
+    return float(instant) if known is None else min(float(known), float(instant))
+
+
 def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, not_terminal: str,
                   retention_days: Optional[int], now: Optional[float], live: Any, guard: Any, stop: Any,
-                  budget: Optional[int], after: str, extra_checks: Any, rested: Optional[Dict] = None,
-                  only: Optional[Any] = None, progress: Any = None) -> Dict[str, Any]:
+                  budget: Optional[int], after: str, extra_checks: Any, rested: Any = None,
+                  only: Optional[Any] = None, progress: Any = None, rest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """The prune both layouts share: cheap per-name facts select possible work;
     fresh strict canonical status/date and existing checks still decide eligibility.
     Settlement through ``task_custody.settle_child_drive`` runs in name order after ``after`` (wrapping), at
-    most ``budget`` attempts per call; ``cursor`` is the last attempted drive, ``deferred`` the unreached rest;
-    ``rested`` the caller's durable verdicts (``task_custody.rested_verdict``), updated in place. ``only``
-    restricts the pass to those task ids (the free action's previewed folders; every other drive is untouched);
-    ``progress`` is called with the report after each settlement attempt."""
+    most ``budget`` attempts per call; ``cursor`` is the last attempted drive, ``deferred`` the unreached rest
+    (no verdict is read and no row decoded for it). ``rested`` is the caller's durable verdicts
+    (``task_custody.rested_verdict``), updated in place, or a callable that loads them: a pass that walks reads
+    them, one at rest never does. ``rest`` is the layout's durable rest, updated in place: the inputs
+    (``task_custody.layout_basis``) and the earliest retention instant of a drive it left young; while both
+    hold, the pass lists nothing (``rested`` in the report). A whole pass that attempted nothing records it;
+    any other pass clears it. ``only`` restricts the pass to those task ids (the free action's previewed folders;
+    every other drive is untouched, no rest is kept); ``progress`` is called with the report after each
+    settlement attempt."""
     from ouroboros.retention import age_cutoff
-    from ouroboros.task_custody import forget_departed, record_rest, rested_verdict, settle_child_drive
+    from ouroboros.task_custody import forget_departed, layout_basis, record_rest, rested_verdict, settle_child_drive
 
     days = _resolve_retention_days(retention_days)
     cutoff = age_cutoff(days, now)
     report: Dict[str, Any] = {"retention_days": days, "scanned": 0, "pruned": [], "skipped": [], "errors": [],
-                              "deferred": [], "cursor": after}
+                              "deferred": [], "cursor": after, "rested": False}
     if not base.is_dir():
         return report
     chosen = None if only is None else {str(task_id) for task_id in only}
-    forget_departed(rested, base.name, [entry.name for entry in base.iterdir() if entry.is_dir()])
-    attempts = 0
-    for task_id, status, _retention_at, inside_wait, fact in drive_candidates(base, parent, cutoff, stop, after=after):
+    basis = layout_basis(parent, base, days) if rest is not None and chosen is None else None
+    if basis is not None and rest.get("basis") == basis and not (
+            rest.get("youngest") is not None and float(rest["youngest"]) <= cutoff):
+        report["rested"] = True
+        return report  # nothing listed, decoded, copied or hashed: what the last whole pass saw still stands
+    rested = rested() if callable(rested) else rested
+    forget_departed(rested, base.name, _drive_names(base))
+    attempts, youngest = 0, None
+    for task_id, status, retention_at, inside_wait, fact in drive_candidates(base, parent, cutoff, stop, after=after):
         if chosen is not None and task_id not in chosen:
             continue
         task_dir = base / task_id
@@ -268,10 +289,11 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
                     report["skipped"].append({"task_id": task_id, "reason": not_terminal, "status": status})
                     continue
                 if inside_wait:
+                    youngest = _earliest(youngest, retention_at if retention_at is not None else task_dir.stat().st_mtime)
                     report["skipped"].append({"task_id": task_id, "reason": "younger_than_retention"})
                     continue
-            if stop is not None and stop():
-                report["deferred"].append(task_id)
+            if (stop is not None and stop()) or (budget is not None and attempts >= budget):
+                report["deferred"].append(task_id)  # unreached this pass: its turn comes after the cursor
                 continue
             if verdict := rested_verdict(rested, parent, task_id, task_dir, drive_of(task_dir)):
                 report["skipped"].append({"task_id": task_id, "reason": "custody_unchanged", "retained": verdict.get("reason")})
@@ -283,15 +305,14 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
             if status not in _FINAL_STATUSES:
                 report["skipped"].append({"task_id": task_id, "reason": not_terminal, "status": status})
                 continue
-            if not _prompt_settlement(result) and _timestamp_from_result(result, task_dir.stat().st_mtime) > cutoff:
+            instant = _timestamp_from_result(result, task_dir.stat().st_mtime)
+            if not _prompt_settlement(result) and instant > cutoff:
+                youngest = _earliest(youngest, instant)
                 report["skipped"].append({"task_id": task_id, "reason": "younger_than_retention"})
                 continue
             skip = extra_checks(task_dir, result)
             if skip is not None:
                 report["skipped"].append({"task_id": task_id, **skip})
-                continue
-            if (budget is not None and attempts >= budget) or (stop is not None and stop()):
-                report["deferred"].append(task_id)
                 continue
             attempts += 1
             report["cursor"] = task_id
@@ -303,6 +324,10 @@ def _prune_drives(base: pathlib.Path, parent: pathlib.Path, *, drive_of: Any, no
                 progress(report)
         except Exception as exc:
             report["errors"].append({"task_id": task_id, "error": f"{type(exc).__name__}: {exc}"})
+    if basis is not None:
+        rest.clear()
+        if not (attempts or report["deferred"] or report["errors"] or (stop is not None and stop())):
+            rest.update({"basis": basis, "youngest": youngest})  # a whole pass with nothing to do: its inputs stand
     return report
 
 
@@ -316,9 +341,10 @@ def prune_headless_task_drives(
     stop: Any = None,
     budget: Optional[int] = None,
     after: str = "",
-    rested: Optional[Dict[str, Any]] = None,
+    rested: Any = None,
     only: Optional[Any] = None,
     progress: Any = None,
+    rest: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Prune terminal child drives past retention (a cancelled subagent's at once). Removal is
     ``task_custody.settle_child_drive``'s decision alone: ``live`` is the supervisor's probe (without it nothing
@@ -340,7 +366,7 @@ def prune_headless_task_drives(
     return _prune_drives(parent / HEADLESS_TASKS_DIR, parent, drive_of=lambda task_dir: task_dir / "data",
                          not_terminal="parent_not_terminal", retention_days=retention_days, now=now, live=live,
                          guard=guard, stop=stop, budget=budget, after=after, extra_checks=checks, rested=rested,
-                         only=only, progress=progress)
+                         only=only, progress=progress, rest=rest)
 
 
 def prune_task_drives(
@@ -353,9 +379,10 @@ def prune_task_drives(
     stop: Any = None,
     budget: Optional[int] = None,
     after: str = "",
-    rested: Optional[Dict[str, Any]] = None,
+    rested: Any = None,
     only: Optional[Any] = None,
     progress: Any = None,
+    rest: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Prune direct-task scratch drives past retention (``settle_child_drive`` decides;
     same knobs as ``prune_headless_task_drives``)."""
@@ -363,7 +390,7 @@ def prune_task_drives(
     return _prune_drives(parent / TASK_DRIVES_DIR, parent, drive_of=lambda task_dir: task_dir,
                          not_terminal="task_not_terminal", retention_days=retention_days, now=now, live=live,
                          guard=guard, stop=stop, budget=budget, after=after, extra_checks=lambda *_a: None,
-                         rested=rested, only=only, progress=progress)
+                         rested=rested, only=only, progress=progress, rest=rest)
 
 
 def prune_task_trees(
