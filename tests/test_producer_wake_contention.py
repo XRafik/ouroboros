@@ -39,13 +39,54 @@ def test_plan_manifest_stays_durable_when_its_wake_cannot_be_written(tmp_path):
         elapsed = time.monotonic() - started
     assert ref and json.loads(Path(ref["manifest_ref"]["path"]).read_text(encoding="utf-8"))["producer_complete"]
     assert elapsed < 1, "the wake must not spend the producer's normal 10-second store budget"
-    assert maintenance.run_job(tmp_path, plan_collection_job.JOB) is None
-    # Existing explicit repair reselects pending seats even without a publication token.
-    maintenance_jobs.record(tmp_path, plan_collection_job.JOB, state="pending")
+    # The next ordinary dispatch check replays the missed wake without a task edit or repair.
+    assert plan_collection_job.JOB in maintenance.due(tmp_path)
     assert maintenance.run_job(tmp_path, plan_collection_job.JOB)["state"] == "done"
+    assert maintenance.run_job(tmp_path, plan_collection_job.JOB) is None
     assert coordinator._persist_producer_outcome(request, actor, "free", "plan_review", {"answer": "kept"})
     with store.open_store(tmp_path, write=False) as txn:
         assert txn.get_row(plan_collection_job.CHANGED, "task")["producer"][1] == "free_response"
+
+
+@pytest.mark.parametrize("arrival", ["before-transaction", "during-transaction"])
+def test_plan_wake_flush_preserves_a_racing_publication(tmp_path, monkeypatch, arrival):
+    from tests.test_child_duty_rest import measured_rest
+
+    write_task_result(tmp_path, "task", "completed", plan_record=_record([_participant("seat")]))
+    maintenance.run_job(tmp_path, plan_collection_job.JOB)
+    old, new = ["task", "old", "digest-old"], ["task", "new", "digest-new"]
+    with busy_store(tmp_path):
+        plan_collection_job.producer_published(tmp_path, old)
+    open_store, put_row, arrived = store.open_store, store.Txn.put_row, []
+
+    def publish():
+        if not arrived:
+            arrived.append(True)
+            plan_collection_job.producer_published(tmp_path, new)
+
+    @contextlib.contextmanager
+    def opening(root, **kwargs):
+        if kwargs.get("write") and arrival == "before-transaction":
+            publish()
+        with open_store(root, **kwargs) as txn:
+            yield txn
+
+    def writing(txn, set_name, key, facts):
+        result = put_row(txn, set_name, key, facts)
+        if set_name == plan_collection_job.CHANGED and arrival == "during-transaction":
+            publish()
+        return result
+
+    with monkeypatch.context() as race:
+        race.setattr(store, "open_store", opening)
+        race.setattr(store.Txn, "put_row", writing)
+        assert plan_collection_job.JOB in maintenance.due(tmp_path)
+    assert arrived == [True]
+    assert plan_collection_job.JOB in maintenance.due(tmp_path)
+    with open_store(tmp_path, write=False) as txn:
+        assert txn.get_row(plan_collection_job.CHANGED, "task") == {"producer": new}
+    assert maintenance.run_job(tmp_path, plan_collection_job.JOB)["state"] == "done"
+    measured_rest(tmp_path, plan_collection_job.JOB)
 
 
 def test_supervision_save_does_not_wait_for_the_retirement_store(tmp_path):
