@@ -2,6 +2,8 @@
 import os
 import time
 
+import pytest
+
 from ouroboros import maintenance, maintenance_jobs, maintenance_retirement, plan_record, store
 from ouroboros.task_results import write_task_result
 from tests._cost_meter import BOUNDARY, CostMeter, HISTORY
@@ -91,11 +93,39 @@ def test_a_racing_retirement_input_is_not_recorded_as_examined(tmp_path, monkeyp
     assert maintenance_retirement.due(tmp_path, row, {}, True)
 
 
-def test_metrics_child_discovers_a_death_after_append_and_rests_after_catchup(tmp_path):
+def test_metrics_child_discovers_a_death_after_append_and_rests_after_catchup(tmp_path, monkeypatch):
     from ouroboros import subagent_metrics
     from ouroboros.utils import append_jsonl
     from tests.test_subagent_metrics import event
-    append_jsonl(tmp_path / "logs/events.jsonl", event("saved-before-death", type=subagent_metrics.EVENT))
+    subagent_metrics.publish(tmp_path, event("already-folded"))
+    maintenance.run_job(tmp_path, "subagent_metrics")
+
+    class ProcessExit(BaseException):
+        pass
+
+    def append(path, row):
+        job = maintenance_jobs.job(tmp_path, "subagent_metrics")
+        assert subagent_metrics.identity_key(row) == job["publication_owed"]
+        return append_jsonl(path, row)
+
+    with monkeypatch.context() as crash:
+        crash.setattr(subagent_metrics, "append_jsonl", append)
+        crash.setattr(subagent_metrics, "_publish_suffix", lambda *a: (_ for _ in ()).throw(ProcessExit()))
+        with pytest.raises(ProcessExit):
+            subagent_metrics.publish(tmp_path, event("saved-before-death"))
     assert maintenance.run_job(tmp_path, "subagent_metrics")["state"] == "done"
-    assert subagent_metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 1
+    assert subagent_metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 2
+    assert maintenance_jobs.job(tmp_path, "subagent_metrics")["publication_owed"] is None
     measured_rest(tmp_path, "subagent_metrics")
+
+
+def test_completed_metrics_job_ignores_unrelated_events(tmp_path):
+    from ouroboros import subagent_metrics
+    from ouroboros.utils import append_jsonl
+    from tests.test_subagent_metrics import event
+
+    subagent_metrics.publish(tmp_path, event())
+    maintenance.run_job(tmp_path, "subagent_metrics")
+    for index in range(3):
+        append_jsonl(tmp_path / "logs/events.jsonl", {"type": "unrelated_event", "index": index})
+        measured_rest(tmp_path, "subagent_metrics")

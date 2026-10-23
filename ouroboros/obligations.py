@@ -233,7 +233,8 @@ class DutyRest:
     """
 
     def __init__(self, root: Any, duty: str, candidates: dict | None = None, *, name: str = "",
-                 inputs: dict | None = None, now: str | None = None, wake: Iterable[str] = ()) -> None:
+                 inputs: dict | None = None, now: str | None = None, wake: Iterable[str] = (),
+                 partial: bool = False) -> None:
         from ouroboros.utils import utc_now_iso
 
         self.root, self.duty, self.inputs = Path(root), _check_name(duty), dict(inputs or {})
@@ -249,8 +250,12 @@ class DutyRest:
                 self.signatures = {record["task_id"]: [record["write_seq"], record["updated_at"]] for record in
                                    txn.conn.execute("SELECT task_id, write_seq, updated_at FROM tasks WHERE task_id IN "
                                                     "(SELECT value FROM json_each(?))", (json.dumps(sorted(self.candidates)),))}
+                # A partial pass owns only its addressed members; other rests stay untouched.
+                where, params = ("id IN (SELECT value FROM json_each(?))",
+                                 (json.dumps([prefix + tid for tid in self.candidates]),)) if partial else (
+                                     "id>=? AND id<?", (prefix, self.duty + ";"))
                 self.marks = {record["id"][len(prefix):]: json.loads(record["facts"]) for record in txn.conn.execute(
-                    "SELECT id, facts FROM obligations WHERE set_name=? AND id>=? AND id<?", (REST_SET, prefix, self.duty + ";"))}
+                    "SELECT id, facts FROM obligations WHERE set_name=? AND " + where, (REST_SET, *params))}
                 self.readable = True
         except StoreError:
             if name:
@@ -289,7 +294,7 @@ class DutyRest:
         transaction; an outcome whose task was written after its selection is not recorded (that
         write already puts the member back). Nothing new: nothing is written. A rest is never
         authority, so a store that cannot take it leaves the members to the next pass.
-        ``confirm`` revalidates selected signatures and returns the resulting store revision
+        ``confirm`` revalidates selected signatures and returns the terminal-write marker
         for a process input latch; a racing write or unreadable store returns None."""
         import logging
 
@@ -300,7 +305,7 @@ class DutyRest:
             return
         try:
             with store.open_store(self.root, write=bool(outcomes or departed)) as txn:
-                changes, valid = txn.conn.total_changes, self.readable
+                valid = self.readable
                 for tid in confirm:
                     signature = txn.row(tid, "write_seq", "updated_at")
                     valid = valid and (list(signature) if signature is not None else None) == self.signatures.get(tid)
@@ -312,7 +317,6 @@ class DutyRest:
                         txn.put_row(REST_SET, f"{self.duty}:{tid}", facts)
                     else:
                         valid = False
-                # The shared store advances commit_seq once for a changed transaction.
-                return txn.revision() + int(txn.conn.total_changes != changes) if valid else None
+                return int(txn.meta(store.TERMINAL_WRITES) or 0) if valid else None
         except StoreError:
             logging.getLogger(__name__).debug("Duty %s rests not recorded this pass", self.duty, exc_info=True)

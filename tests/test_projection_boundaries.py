@@ -40,7 +40,7 @@ def test_first_publication_never_folds_a_cold_suffix(tmp_path, monkeypatch, stal
                     '{"type":"old_event"}\n' * 40, encoding="utf-8")
         else:
             with path.open("a", encoding="utf-8") as stream:
-                stream.write('{"type":"old_event"}\n' * (40 * scale))
+                stream.write('{"type":"old_event"}\n' * ((metrics.BATCH_BYTES // 20 + 1) * scale))
         calls = []
         original = swarm_rollup.fold_event_suffix
         with monkeypatch.context() as foreground:
@@ -72,6 +72,20 @@ def test_first_publication_never_folds_a_cold_suffix(tmp_path, monkeypatch, stal
             metrics.publish(root, event("warm-next"))
         assert metrics.read(root, "worker")["coverage"]["stream"] == "complete"
     assert counts == [0, 0]
+
+
+def test_warm_metrics_publish_folds_bounded_interleaved_events_without_a_child(tmp_path, monkeypatch):
+    from ouroboros.utils import append_jsonl
+
+    metrics.publish(tmp_path, event())
+    monkeypatch.setattr(maintenance.child, "request", lambda: pytest.fail("bounded warm publication woke the child"))
+    for index in range(3):
+        append_jsonl(tmp_path / "logs/events.jsonl", {"type": "ordinary_event", "index": index})
+        metrics.publish(tmp_path, event(str(index), purpose="execution", terminal=False))
+    rows = metrics.read(tmp_path, "worker")["rows"]
+    assert next(row for row in rows if row["purpose"] == "execution")["pending"] == 3
+    assert all(row["coverage"]["stream"] == "complete" for row in rows)
+    assert maintenance.run_job(tmp_path, "subagent_metrics") is None
 
 
 def test_fold_and_projection_never_hold_a_store_write_transaction(tmp_path, monkeypatch):
@@ -159,13 +173,17 @@ def test_child_batches_keep_cursor_and_projection_atomic_and_retry_a_repaired_to
     assert metrics.read(tmp_path, "worker")["rows"][0]["dispatched"] == 5
 
 
-def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch):
+@pytest.mark.parametrize("running", [False, True])
+def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch, running):
     counts = []
     for scale in (1, 30):
         root = env.root / f"root{scale:02}"
         current = SimpleNamespace(root=root, live=env.live)
         for index in range(10 * scale):
             attempt(current, f"missing{index:04}", cost=.04)
+        if running:
+            write_task_result(root, "running", "running")
+            attempt(current, "running")
         # Equal-width physical markers keep the cost comparison about row count.
         with usage_store.hold(root) as txn:
             txn.set_meta("publication_marker", [0, 100000])
@@ -174,8 +192,12 @@ def test_absent_usage_owners_rest_flat_and_new_facts_wake_them(env, monkeypatch)
         debt = dirty(current)
         with store.open_store(root, write=False) as txn:
             rests = txn.set_rows("duty_rest")
-        assert len(rests) == len(debt) and all(row["signature"] is None for row in rests.values())
+        assert len(rests) == 10 * scale and all(row["signature"] is None for row in rests.values())
         monkeypatch.setattr("ouroboros.utils.utc_now_iso", lambda: "2099-01-01T00:00:00+00:00")
+        with store.open_store(root, write=True) as txn:
+            txn.set_meta("unrelated_job", {"state": "done"})
+        if running:
+            write_task_result(root, "running", "running", result="live progress")
         store.close_connections()
         with CostMeter(root) as meter:
             token = BOUNDARY.set("rest")

@@ -98,10 +98,15 @@ def current_rows(root, rows):
     """Typed open facts only. Legacy gaps keep their identity until the child backfills them."""
     pending = []
     for facts in rows:
-        if "pending" in facts:
-            pending.extend(copy.deepcopy(facts["pending"]))
-        else:
-            pending.extend(pending_invocations(root, [facts["request"]], materialize=False))
+        projected = (copy.deepcopy(facts["pending"]) if "pending" in facts else
+                     pending_invocations(root, [facts["request"]], materialize=False))
+        source = facts["request"]
+        if source.get("request_ref") is not None and not (isinstance(source.get("request"), dict) and source["request"]):
+            for record in projected:
+                # Older projections cached a body without its ref. The source row
+                # keeps replay addressed even after that blob is lost or packed.
+                record.update(request=None, request_ref=copy.deepcopy(source["request_ref"]))
+        pending.extend(projected)
     return pending
 
 
@@ -125,7 +130,7 @@ def backfill(root, should_stop):
             return {"state": "pending", "items": done}
         if not key.startswith("invocation:") or "pending" in facts:
             continue
-        projected = pending_invocations(root, [facts["request"]])
+        projected = pending_invocations(root, [facts["request"]], materialize=False)
         with store.open_store(root, write=True) as txn:
             if txn.get_row("custody_open", key) == facts:
                 txn.put_row("custody_open", key, {**facts, "pending": projected})

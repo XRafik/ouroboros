@@ -1,4 +1,4 @@
-"""Pending-start inventories use typed open facts; only backfill/replay reads the source."""
+"""Pending-start inventories and backfills use typed open facts; only replay reads the body."""
 import pytest
 
 from ouroboros import delegate_custody as custody, delegate_pending, maintenance, store
@@ -16,7 +16,7 @@ def test_start_publication_keeps_request_facts_until_start_or_definite_refusal(t
         event = request(tmp_path, identity)
         assert custody.emit(tmp_path, custody.START_REQUESTED, event)
     monkeypatch.setattr(delegate_pending, "request_body", lambda *a: pytest.fail("inventory read history"))
-    assert {row["request"]["prompt"] for row in custody.pending_invocations(tmp_path)} == {"exact assignment"}
+    assert all(row["request"] is None and row["request_ref"] for row in custody.pending_invocations(tmp_path))
     assert custody.emit(tmp_path, custody.STARTED, {"invocation_id": "started", "run_id": "run", "task_id": "owner"})
     assert custody.emit(tmp_path, custody.START_FAILED, {"invocation_id": "refused", "definite": True})
     assert custody.emit(tmp_path, custody.START_FAILED, {"invocation_id": "uncertain", "definite": False})
@@ -29,31 +29,35 @@ def test_legacy_backfill_reads_only_open_requests_once_and_preserves_an_unreadab
     events.append({"type": custody.STARTED, "invocation_id": "closed", "run_id": "closed"})
     with store.open_store(tmp_path, write=True) as txn:
         current.write_fold(txn, current.fold(events), replace=True)
-    original, read = delegate_pending.request_body, []
-    def observe(root, row):
-        read.append(row["invocation_id"])
-        return original(root, row)
-    monkeypatch.setattr(delegate_pending, "request_body", observe)
+    original, read = delegate_pending.pending_invocations, []
+    def observe(root, rows=None, **kwargs):
+        if rows is not None:
+            read.extend(row["invocation_id"] for row in rows)
+        return original(root, rows, **kwargs)
+    monkeypatch.setattr(delegate_pending, "pending_invocations", observe)
+    resolve = delegate_pending.request_body
+    monkeypatch.setattr(delegate_pending, "request_body", lambda *a: pytest.fail("inventory/backfill read a blob"))
     assert {row["invocation_id"] for row in custody.pending_invocations(tmp_path)} == {"open", "unknown"}
-    assert read == []
+    read.clear()  # a legacy reader may project the same typed identity, without a body read
     assert maintenance.run_job(tmp_path, "pending_invocations")["items"] == 2
     assert sorted(read) == ["open", "unknown"]
     assert maintenance.run_job(tmp_path, "pending_invocations") is None
     rows = {row["invocation_id"]: row for row in custody.pending_invocations(tmp_path)}
-    assert rows["open"]["request"]["model"] == "original"
+    assert rows["open"]["request"] is None and resolve(tmp_path, rows["open"])["model"] == "original"
     assert rows["unknown"]["request"] is None and rows["unknown"]["request_ref"]
+    assert resolve(tmp_path, rows["unknown"]) is None
     assert sorted(read) == ["open", "unknown"]
 
 
 def test_backfill_cannot_resurrect_a_start_that_wins_during_source_read(tmp_path, monkeypatch):
     with store.open_store(tmp_path, write=True) as txn:
         txn.put_row("custody_open", "invocation:racing", {"request": request(tmp_path, "racing")})
-    original = delegate_pending.request_body
-    def racing(root, row):
-        body = original(root, row)
+    original = delegate_pending.pending_invocations
+    def racing(root, rows=None, **kwargs):
+        body = original(root, rows, **kwargs)
         custody.emit(root, custody.STARTED, {"invocation_id": "racing", "run_id": "run"})
         return body
-    monkeypatch.setattr(delegate_pending, "request_body", racing)
+    monkeypatch.setattr(delegate_pending, "pending_invocations", racing)
     maintenance.run_job(tmp_path, "pending_invocations")
     assert custody.pending_invocations(tmp_path) == []
 
@@ -61,14 +65,33 @@ def test_backfill_cannot_resurrect_a_start_that_wins_during_source_read(tmp_path
 def test_backfill_does_not_mark_a_racing_import_done(tmp_path, monkeypatch):
     with store.open_store(tmp_path, write=True) as txn:
         current.write_fold(txn, current.fold([request(tmp_path, "first")]), replace=True)
-    original, raced = delegate_pending.request_body, []
-    def arriving(root, row):
+    original, raced = delegate_pending.pending_invocations, []
+    def arriving(root, rows=None, **kwargs):
         if not raced:
             raced.append(True)
             with store.open_store(root, write=True) as txn:
                 current.write_fold(txn, current.fold([request(root, "arriving")]), replace=False)
-        return original(root, row)
-    monkeypatch.setattr(delegate_pending, "request_body", arriving)
+        return original(root, rows, **kwargs)
+    monkeypatch.setattr(delegate_pending, "pending_invocations", arriving)
     assert maintenance.run_job(tmp_path, "pending_invocations")["state"] == "pending"
     assert maintenance.run_job(tmp_path, "pending_invocations")["state"] == "done"
     assert {row["invocation_id"] for row in custody.pending_invocations(tmp_path)} == {"first", "arriving"}
+
+
+@pytest.mark.parametrize("inline", [None, {}])
+def test_an_old_cached_body_never_replaces_the_canonical_reference(tmp_path, monkeypatch, inline):
+    from pathlib import Path
+
+    source = {**request(tmp_path, "old-cache"), "request": inline}
+    cached = delegate_pending.pending_invocations(tmp_path, [source])
+    assert cached[0]["request"]["prompt"] == "exact assignment"
+    with store.open_store(tmp_path, write=True) as txn:
+        txn.put_row("custody_open", "invocation:old-cache", {"request": source, "pending": cached})
+    resolve = delegate_pending.request_body
+    monkeypatch.setattr(delegate_pending, "request_body", lambda *a: pytest.fail("inventory resolved history"))
+    [pending] = custody.pending_invocations(tmp_path)
+    assert pending["request"] is None and pending["request_ref"] == source["request_ref"]
+    assert resolve(tmp_path, pending)["prompt"] == "exact assignment"
+    Path(source["request_ref"]["path"]).unlink()
+    [pending] = custody.pending_invocations(tmp_path)
+    assert pending["request"] is None and resolve(tmp_path, pending) is None

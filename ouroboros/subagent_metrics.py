@@ -86,7 +86,7 @@ def fold(prior, event, previous=None):
 
 
 # Physical memory budget for one decoded suffix and its atomic projection. A single
-# larger event stays whole. The foreground never consumes a pre-existing backlog.
+# larger event stays whole. Only the child consumes an unbounded backlog.
 BATCH_BYTES = 256 * 1024
 JOB = "subagent_metrics"
 
@@ -164,6 +164,7 @@ def _commit_suffix(root, cursor, events, through, upper, source):
     missing = sorted(set(cursor.get("missing_producers") or ()) - observed)
     next_cursor = {"through": through, "source_root": str(pathlib.Path(root).resolve()),
         "missing_producers": missing, "source": source if through == upper else None,
+        "live": source[0][:2] if through == upper and source[0] else None,
         "coverage": {"state": "partial" if missing else "observed_window", "history_before_window": "unknown",
                      "missing_publications": len(missing), "stream": "complete" if through == upper else "incomplete"}}
     if next_cursor != cursor or updates:
@@ -179,7 +180,7 @@ def _commit_suffix(root, cursor, events, through, upper, source):
     return True
 
 
-def _publish_suffix(root, before):
+def _publish_suffix(root, before, publication=None):
     """A warm publisher reads only its bounded live suffix, with an inode/EOF proof.
 
     Missing/stale cursor, rotation, or a large suffix schedules the child before
@@ -188,13 +189,14 @@ def _publish_suffix(root, before):
     """
     with store.open_store(root, write=False) as txn:
         cursor = txn.meta(CURSOR) or {}
-    if cursor.get("source") != before and (cursor or any(before)):
+    old_live = cursor.get("live")
+    if old_live is None and (cursor or any(before)):
         _defer(root)
         return False
     current = _source_stamp(root)
-    old_live, live = before[0], current[0]
+    live = current[0]
     start = old_live[1] if old_live else 0
-    if (not live or current[1] != before[1] or (old_live and old_live[0] != live[0])
+    if (not live or (old_live and old_live[0] != live[0])
             or not 0 <= live[1] - start <= BATCH_BYTES):
         _defer(root)
         return False
@@ -218,6 +220,11 @@ def _publish_suffix(root, before):
     if not _commit_suffix(root, cursor, events, through, through, current):
         _defer(root)
         return False
+    from ouroboros import maintenance_jobs
+    with store.open_store(root, write=True) as txn:
+        job = txn.meta("job:" + JOB) or {}
+        if job.get("publication_owed") == publication and job.get("state") != "done":
+            maintenance_jobs.record_in(txn, JOB, state="done", source=current, publication_owed=None)
     return True
 
 
@@ -230,6 +237,8 @@ def catch_up(root, *, should_stop=None):
     try:
         stamp = _source_stamp(root)
         source = JsonlChainSnapshot(root / "logs/events.jsonl")
+        live = next((info for _path, info, is_live in source.entries if is_live), None)
+        stamp[0] = [live.st_ino, live.st_size, live.st_mtime_ns] if live else None
         while not (should_stop and should_stop()):
             with store.open_store(root, write=False) as txn:
                 cursor = txn.meta(CURSOR) or {}
@@ -265,9 +274,11 @@ def _source_stamp(root):
 
 
 def job_due(root, row, facts, child):
-    stamp = _source_stamp(root)
-    return row.get("state") in {"pending", "running"} or (
-        any(stamp) and row.get("source") != stamp)
+    if row.get("state") in {"pending", "running"}:
+        return True
+    if row.get("state") == "failed":
+        return row.get("source") != _source_stamp(root)  # changed failed source, including a repaired torn tail
+    return bool(row.get("publication_owed")) or not row and any(_source_stamp(root))
 
 
 def run_job(root, should_stop):
@@ -296,7 +307,8 @@ def run_job(root, should_stop):
             elif (cursor.get("coverage") or {}).get("stream") == "incomplete":
                 state = "failed"  # a torn line waits for its writer, never for a timer
             maintenance_jobs.record_in(txn, JOB, state=state, through=cursor.get("through"),
-                                       coverage=cursor.get("coverage"), source=source)
+                                       coverage=cursor.get("coverage"), source=source,
+                                       publication_owed=None if state == "done" else (request or {}).get("publication_owed"))
     return {"state": state, "items": 0}
 
 
@@ -306,6 +318,7 @@ def publish(root, event):
         return
     try:
         before = _source_stamp(root)
+        publication = None
         event = {**copy.deepcopy(event), "type": EVENT}
         with store.open_store(root, write=False) as txn:
             previous = txn.get_row(PRODUCERS, str(event["producer_id"])) or {}
@@ -314,6 +327,10 @@ def publish(root, event):
         if {key: value for key, value in event.items() if key != "ts"} != {
                 key: value for key, value in previous.items() if key != "ts"}:
             event["ts"] = event.get("ts") or previous.get("ts") or utc_now_iso()
+            from ouroboros import maintenance_jobs
+            publication = identity_key(event)
+            with store.open_store(root, write=True) as txn:
+                maintenance_jobs.record_in(txn, JOB, state="pending", publication_owed=publication)
             if not append_jsonl(pathlib.Path(root) / "logs/events.jsonl", event):
                 with store.open_store(root, write=True) as txn:
                     cursor = txn.meta(CURSOR) or {}
@@ -322,7 +339,7 @@ def publish(root, event):
                         "coverage": {**cursor.get("coverage", {}), "state": "partial", "missing_publications": len(missing)}})
                 raise OSError("measurement journal append failed")
         try:
-            _publish_suffix(root, before)
+            _publish_suffix(root, before, publication)
         except Exception:
             _defer(root)  # failed projection is unknown even when the old prefix was complete
             raise
@@ -359,7 +376,8 @@ def fact_line(task, *, drive_root):
         return ""
     facts = read(drive_root, row_id, row_identity=execution_identity(snapshot))
     if not facts["rows"]:
-        return ""
+        return ("Subagent measurements: " + json.dumps({"coverage": facts["coverage"]}, separators=(",", ":"))
+                if facts["coverage"].get("stream") in {"pending", "unavailable"} else "")
     return "Subagent measurements (observed window; earlier history unknown): " + json.dumps(
         [{key: row[key] for key in ("purpose", "dispatched", "terminal", "answer_received", "usable_verdict",
                                     "no_answer", "pending", "interrupted", "coverage")} for row in facts["rows"]],

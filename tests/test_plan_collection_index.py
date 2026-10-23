@@ -230,6 +230,7 @@ def test_real_late_collector_revisits_only_pending_plan_after_legacy_history(cou
     with monkeypatch.context() as patch:
         patch.setattr(store, "commit", committed)
         assert late_review_marks.replay_owed_late_reviews(root)["settled"] == 0
+        assert late_review_marks._collect_ended_plan_asks(root, None) == 0  # child-owned collection
     assert sum(changes > 0 for changes in commits) == 3, "legacy classification commits by bounded batch, not per row"
     assert _flags(root, "old-000") == (0, 0, 1)
     assert _flags(root, late.PLAN_TASK)[1] == 1, "a running author retains its pending seat"
@@ -248,14 +249,14 @@ def test_real_late_collector_revisits_only_pending_plan_after_legacy_history(cou
 
     with monkeypatch.context() as patch:
         patch.setattr(store.Txn, "body_text", body)
-        statements = captured_statements(patch, lambda: late_review_marks.replay_owed_late_reviews(root))
+        statements = captured_statements(patch, lambda: late_review_marks._collect_ended_plan_asks(root, None))
     assert reads and set(reads) == {late.PLAN_TASK}
     assert late._participant(council.h, "s1")["status"] == "answered"
     assert len(late._plan_marks(root)) == 1 and council.transport.calls.count("m/a") == 1
     selected = [(sql, params) for sql, params in statements if "SELECT task_id FROM tasks" in sql and "plan_collection_pending" in sql]
     assert selected and all(any("tasks_plan_collection" in step for step in _plan(root, sql, params)) for sql, params in selected)
     before = _flags(root, "old-000")
-    late_review_marks.replay_owed_late_reviews(root)
+    late_review_marks._collect_ended_plan_asks(root, None)
     assert len(late._plan_marks(root)) == 1 and _flags(root, "old-000") == before
 
 
@@ -283,17 +284,17 @@ def test_lazy_selection_failure_preserves_real_settlement_and_remaining_pending_
 
     with monkeypatch.context() as fault:
         fault.setattr(task_store, "plan_collection_candidates", interrupted)
-        report = late_review_marks.replay_owed_late_reviews(root)
-    assert report["settled"] == int(after_candidate)
+        settled = late_review_marks._collect_ended_plan_asks(root, None)
+    assert settled == int(after_candidate)
     assert "plan records are unreadable; their pending seats stay pending" in caplog.text
     assert late._participant(council.h, "s1")["status"] == ("answered" if after_candidate else "pending")
     assert all(late._participant(council.h, seat)["status"] == "pending" for seat in ("s2", "s3"))
     assert _flags(root, late.PLAN_TASK)[1] == 1
-    assert late_review_marks.replay_owed_late_reviews(root)["settled"] == int(not after_candidate)
+    assert late_review_marks._collect_ended_plan_asks(root, None) == int(not after_candidate)
     [mark] = late._plan_marks(root)
     assert mark["review"]["subject"]["seat_id"] == "s1"
     assert late._participant(council.h, "s1")["status"] == "answered"
-    assert late_review_marks.replay_owed_late_reviews(root)["settled"] == 0
+    assert late_review_marks._collect_ended_plan_asks(root, None) == 0
     assert late._plan_marks(root) == [mark] and council.transport.calls.count("m/a") == 1
 
 

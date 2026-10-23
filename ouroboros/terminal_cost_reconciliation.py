@@ -286,14 +286,14 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
                 yield leaf, reads.load(leaf)
 
     with store.open_store(root, write=False) as txn:
-        current_revision = txn.revision()
+        terminal_writes = int(txn.meta(store.TERMINAL_WRITES) or 0)
     with usage_store.read(root) as txn:
         money_marker = txn.marker()
         with _UNRESOLVED_LOCK:
             state = _subject_state(root, COST_PROJECTIONS)
-            resting = state.get("absence_inputs") == [current_revision, money_marker]
-        owners = [] if resting else txn.dirty_owners()
-    if resting:
+            resting = state.get("absence_inputs") == [terminal_writes, money_marker]
+        owners = state["present_owners"] if resting else txn.dirty_owners()
+    if resting and not owners:
         # Retry a failed diagnostic publication, not the proven-absent owners.
         if state["fault"] is not None or state["published"] is None:
             _publish_unresolved(root, {}, subject=COST_PROJECTIONS, keep=state["observed"])
@@ -305,12 +305,12 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
         except ValueError:
             pass  # System accounting scopes own no task result.
     # Successful absence keeps debt and rests on task arrival or a money write.
-    # The process's input latch skips the whole unchanged selection; restart or
-    # explicit repair re-observes it. Unanswered reads establish no absence.
+    # Terminal writes and money changes invalidate the selection. Other pending
+    # owners keep being examined without materializing the absent owners or rests.
     _ids, facts = _present_facts(root, ids.values())
     settled = set() if facts is None else {tid for tid, row in facts.items() if row["status"] in SETTLED_STATUSES}
     rest = DutyRest(root, "cost_projection", {ids[owner]: {"usage_revision": revision}
-                                              for owner, revision in owners if owner in ids})
+                                              for owner, revision in owners if owner in ids}, partial=resting)
     acknowledged, pending, failures, faults = [], set(), {}, {}
     for owner, revision in owners:
         task_id = ids.get(owner)
@@ -350,12 +350,18 @@ def _refresh_costs(root: pathlib.Path, reads) -> None:
     for owner, _revision in acknowledged:
         rest.candidates.pop(owner, None)
     absent = {tid for tid, reason in failures.items() if reason == "result_absent"}
-    unchanged_absence = bool(pending) and pending == absent and rest.readable and all(
+    unchanged_absence = bool(absent) and rest.readable and all(
         rest.signatures.get(tid) is None for tid in absent)
-    revision = rest.commit(confirm=absent if unchanged_absence else ())
+    confirmed = rest.commit(confirm=absent if unchanged_absence else ())
     with _UNRESOLVED_LOCK:
-        state["absence_inputs"] = [revision, money_marker] if unchanged_absence and revision is not None else None
-    _publish_unresolved(root, failures, subject=COST_PROJECTIONS, faults=faults, keep=pending)
+        if not resting:
+            state["absence_inputs"] = [confirmed, money_marker] if unchanged_absence and confirmed is not None else None
+            state["absent_owners"] = absent
+        state["present_owners"] = [(owner, rev) for owner, rev in owners if owner in pending and owner not in absent]
+        if resting and not failures and not acknowledged and state["fault"] is None and state["published"] is not None:
+            return
+        kept = pending | state.get("absent_owners", set()) if resting else pending
+    _publish_unresolved(root, failures, subject=COST_PROJECTIONS, faults=faults, keep=kept)
 
 
 def reconcile_abandoned_usage(drive_root: pathlib.Path) -> None:
