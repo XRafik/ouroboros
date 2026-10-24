@@ -66,7 +66,8 @@ async def api_place_rooms(request):
         rooms = await asyncio.to_thread(place_room_index, request_drive_root(request), place_id)
         return JSONResponse({'place_id': place_id, 'rooms': rooms}, headers={'Cache-Control': 'no-store'})
     except PlaceError as exc:
-        return JSONResponse({'ok': False, 'code': exc.code, 'error': str(exc)}, status_code=404)
+        return JSONResponse({'ok': False, 'code': exc.code, 'error': str(exc)},
+                            status_code=404 if exc.code == 'place_not_found' else 503)
     except (OSError, ValueError, StoreError) as exc:
         return JSONResponse({'ok': False, 'code': 'place_rooms_unavailable', 'error': str(exc)}, status_code=503)
 

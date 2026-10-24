@@ -54,3 +54,12 @@ def test_failed_store_read_remains_unavailable(owner_client, monkeypatch, focus)
     assert response.status_code == 503
     assert response.json()['code'] == 'place_rooms_unavailable'
     assert 'rooms' not in response.json()
+
+
+def test_corrupt_place_store_is_unavailable_not_absent(owner_client, focus):
+    root, place, *_ = focus
+    (root / 'state' / 'places.json').write_text('{broken', encoding='utf-8')
+    response = owner_client.get('/api/places/' + place.place_id + '/rooms')
+    assert response.status_code == 503
+    assert response.json()['code'] != 'place_not_found'
+    assert 'rooms' not in response.json()
