@@ -1,17 +1,17 @@
-"""Marks I tie to an action meet me in the result of the first such call in a task.
+"""Marks I tie to an action meet me with the result of the first such call in a task.
 
 A mark may carry an ``anchor`` its author chose: a tool name, optionally with text the
 call's arguments must contain, or a file or directory path a call names. The host
-compares literally and adds the mark's own words to that call's result once per
-task, as a host note behind the producer's payload (``tool_result._HOST_NOTE_SEPARATOR``,
-so text readers still recover the payload); it judges nothing, never refuses or delays
-the call, and a room mark meets only the work of the room the task is in now. Reading
-marks is best effort: an unreadable chronicle leaves the result as it was.
+compares literally and, when it shows the call's result to the mind, adds the mark's
+own words once per task as a trailing host note (``loop_tool_execution.process_tool_results``).
+Host readers of the result (status, receipts, acknowledgements) never see the note. It
+judges nothing and never refuses or delays the call; a room mark meets only the work of
+the room the task is in now. Reading marks is best effort: an unreadable chronicle
+shows no note.
 """
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 from typing import Any, Dict, Iterator, List
 
@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 
 _CACHE_ATTR = "_anchored_marks"
 _DELIVERED_ATTR = "_anchored_marks_delivered"
+_QUOTES = frozenset("\"'`")
 
 
 def anchor_problem(anchor: Any) -> str:
@@ -60,31 +61,45 @@ def _names_path(anchor_path: str, value: str) -> bool:
                            or "/" + path + "/" in text)
 
 
+def _path_like(value: str) -> bool:
+    """One line without quotes: a path or an argv element, not file text or code (spaces allowed)."""
+    return bool(value) and "\n" not in value and "\r" not in value and not _QUOTES.intersection(value)
+
+
 def matches(anchor: Dict[str, Any], tool: str, args: Any) -> bool:
-    """A path anchor meets an argument that is one path naming it (never a path inside file text or
-    a sentence); a tool anchor meets that tool, and its text an argument value or a command's words."""
+    """A path anchor meets an argument that is a path naming it; a tool anchor meets that tool,
+    and its text an argument value or a command's words."""
     if "path" in anchor:
-        return any(_names_path(str(anchor["path"]), value) for value in _strings(args) if value and not
-                   any(char.isspace() for char in value))
+        return any(_names_path(str(anchor["path"]), value) for value in _strings(args) if _path_like(value))
     if anchor.get("tool") != tool:
         return False
     text = anchor.get("text")
     return not text or str(text) in " ".join(_strings(args))
 
 
+def _room_key(ctx: Any, root: Any) -> int:
+    """The project room the task's lineage is bound to now (0 for none): cheap, cached per bindings."""
+    from ouroboros.project_dialogue import bound_room_chat
+    from ouroboros.projects_registry import RoomResolver
+
+    task_id = str(getattr(ctx, "task_id", "") or "")
+    meta = getattr(ctx, "task_metadata", {}) or {}
+    return bound_room_chat(RoomResolver(root), {"task_id": task_id, "parent_task_id": meta.get("parent_task_id"),
+                                                "root_task_id": meta.get("root_task_id")}) if task_id else 0
+
+
 def _anchored_marks(ctx: Any) -> List[Dict[str, Any]]:
     """This task's anchored marks (its room's and the global ones), read again only when the
-    task's project placement changes (a move to another project changes its room)."""
+    room its lineage is bound to changes (a move of the task or of an ancestor)."""
     from ouroboros.chronicle_store import ChronicleStore
     from ouroboros.dialogue_evidence import own_room_chat
-    from ouroboros.project_facts import placed_project_id
     from ouroboros.tool_access import canonical_data_root
 
-    placement = str(placed_project_id(ctx) or "")
-    cached = getattr(ctx, _CACHE_ATTR, None)
-    if cached is not None and cached[0] == placement:
-        return cached[1]
     root = canonical_data_root(ctx)
+    key = _room_key(ctx, root)
+    cached = getattr(ctx, _CACHE_ATTR, None)
+    if cached is not None and cached[0] == key:
+        return cached[1]
     store = ChronicleStore(root)
     receipt = store.activation()  # read only: marks exist only on an activated chronicle
     if not isinstance(receipt, dict) or receipt.get("kind") != "activation":
@@ -93,18 +108,18 @@ def _anchored_marks(ctx: Any) -> List[Dict[str, Any]]:
     rows = store.active_marks(None) if room is None else store.active_marks(str(room), include_global=True)
     marks = [mark for mark in rows if isinstance(mark.get("anchor"), dict) and not anchor_problem(mark["anchor"])
              and (room is not None or mark.get("scope") == "global")]
-    setattr(ctx, _CACHE_ATTR, (placement, marks))
+    setattr(ctx, _CACHE_ATTR, (key, marks))
     return marks
 
 
-def deliver_anchored_marks(ctx: Any, tool: str, args: Any, result: Any) -> Any:
-    """``result`` with the words of each anchored mark this call meets for the first time in the task."""
+def anchored_note(ctx: Any, tool: str, args: Any) -> str:
+    """The host note for the anchored marks this call meets for the first time in the task, or ``""``."""
     if ctx is None:
-        return result
+        return ""
     try:
         if tool == "memory_mark":
             setattr(ctx, _CACHE_ATTR, None)  # a new or released mark acts from the next call
-            return result
+            return ""
         delivered = getattr(ctx, _DELIVERED_ATTR, None)
         if delivered is None:
             delivered = set()
@@ -117,13 +132,7 @@ def deliver_anchored_marks(ctx: Any, tool: str, args: Any, result: Any) -> Any:
             delivered.add(mark_id)
             notes.append(f"⚠️ Mark I tied to {describe(mark['anchor'])} ({mark_id}): "
                          f"{str(mark.get('text') or '').strip()}")
-        if not notes:
-            return result
-        note = "\n".join(notes)
-        return dataclasses.replace(
-            result, text=f"{result.text}\n\n{note}",
-            producer_text=result.producer_text if result.producer_text is not None else result.text,
-            host_annotations=tuple(result.host_annotations) + (note,))
+        return "\n".join(notes)
     except Exception:
-        log.debug("anchored marks: delivery skipped for %s", tool, exc_info=True)
-        return result
+        log.debug("anchored marks: no note for %s", tool, exc_info=True)
+        return ""

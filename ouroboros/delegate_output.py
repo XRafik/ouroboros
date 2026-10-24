@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from ouroboros import delegate_custody as custody
 from ouroboros.delegate_custody import RunCustody as _RunCustody
 from ouroboros.tools.registry import ToolContext
-from ouroboros.tools.tool_result import _HOST_NOTE_SEPARATOR
 from ouroboros.utils import truncate_review_artifact
 
 log = logging.getLogger(__name__)
@@ -390,8 +389,7 @@ def _acknowledge_inline_terminal(ctx: ToolContext, projected: Dict[str, Any]) ->
     if projected.get("result_partial"):
         return
     try:
-        # A host note may trail the payload behind the one host-note boundary (``tool_result``).
-        payload = json.loads((projected.get("result") or "").partition(_HOST_NOTE_SEPARATOR)[0])
+        payload = json.loads(projected.get("result") or "")
         delivery = payload.get("output_delivery") or {}
         if payload.get("status") != "terminal" or not delivery.get("complete") or delivery.get("inline_is_preview"):
             return

@@ -1,7 +1,8 @@
-"""A mark tied to an action meets the mind in that action's result, once per task.
+"""A mark tied to an action meets the mind with that action's result, once per task.
 
 The anchor is the mind's own choice; the host compares it literally with the call
-and adds the mark's words as a host note. A call it does not name, a released mark,
+and adds the mark's words to what the mind sees, as a trailing host note. Host
+readers of the result never see it. A call it does not name, a released mark,
 another room's mark and a second call in the same task get nothing.
 """
 from __future__ import annotations
@@ -9,8 +10,10 @@ from __future__ import annotations
 import json
 import pathlib
 
+import pytest
+
 from ouroboros.chronicle_store import ChronicleStore
-from ouroboros.mark_anchors import anchor_problem, deliver_anchored_marks, matches
+from ouroboros.mark_anchors import anchor_problem, anchored_note, matches
 from ouroboros.memory_view import _marks_text
 from ouroboros.tools.chronicle import _chronicle_write, _memory_mark, _memory_read
 from ouroboros.tools.registry import ToolContext
@@ -26,10 +29,6 @@ def mark(ctx, text, anchor, **fields):
     return json.loads(_memory_mark(ctx, text=text, node_id=note["node_id"], anchor=anchor, **fields))
 
 
-def run(ctx, tool, args, text="output"):
-    return deliver_anchored_marks(ctx, tool, args, ToolResult(status="ok", code="OK", text=text))
-
-
 def test_anchors_match_tools_with_text_and_paths_literally():
     assert matches({"tool": "run_command"}, "run_command", {"cmd": ["ls"]})
     assert matches({"tool": "run_command", "text": "pytest"}, "run_command", {"cmd": ["python", "-m", "pytest", "-q"]})
@@ -40,13 +39,19 @@ def test_anchors_match_tools_with_text_and_paths_literally():
     assert matches({"path": "web/modules/"}, "write_file", {"path": "/repo/web/modules/settings.js"})
     assert not matches({"path": "web/modules/chat.js"}, "edit_text", {"path": "web/modules/chat.jsx"})
     assert not matches({"path": "web/modules"}, "edit_text", {"path": "web/modules_old/a.js"})
-    # A path inside file text or a sentence is not a call naming that path; a command's words match as typed.
+    # Paths with spaces are paths; file text and quoted code that mention a path are not calls naming it.
+    for anchor, path in (("docs/", "docs/Release Notes.md"), ("web/modules/", "/work/My Project/web/modules/chat.js"),
+                         ("src/config.py", r"C:\Users\John Smith\proj\src\config.py")):
+        assert matches({"path": anchor}, "read_file", {"path": path}), (anchor, path)
     assert not matches({"path": "docs/"}, "write_file", {"path": "notes/a.md", "content": "see docs/ARCHITECTURE.md\nmore"})
     assert not matches({"path": "web/modules"}, "edit_text",
                        {"path": "tests/test_foo.py", "old_str": 'import x from "/repo/web/modules/settings.js"'})
     assert matches({"path": "docs/"}, "run_command", {"cmd": ["wc", "-l", "docs/CHECKLISTS.md"]})
+    # A tool anchor's text is compared with the decoded argument values, never with key names.
     assert matches({"tool": "run_command", "text": "pytest -q"}, "run_command", {"cmd": ["python", "-m", "pytest", "-q"]})
-    assert matches({"tool": "run_command", "text": 'echo "hi"'}, "run_command", {"cmd": 'echo "hi"'})
+    for text in ('--name="demo"', r"C:\work\demo", "line one\nline two"):
+        assert matches({"tool": "run_command", "text": text}, "run_command", {"cmd": ["echo", text]})
+    assert not matches({"tool": "write_file", "text": "content"}, "write_file", {"path": "a", "content": "b"})
     assert anchor_problem({"tool": "run_command", "text": "pytest"}) == ""
     assert anchor_problem({"path": "a/b"}) == ""
     for bad in ({}, {"text": "x"}, {"tool": ""}, {"tool": "a", "path": "b"}, {"path": ""}, "run_command"):
@@ -55,18 +60,14 @@ def test_anchors_match_tools_with_text_and_paths_literally():
 
 def test_an_anchored_mark_meets_its_action_once_per_task(tmp_path):
     ctx = ctx_for(tmp_path)
-    made = mark(ctx, "A quiet pytest tail hides failures: read the exit code.", {"tool": "run_command", "text": "pytest"})
-    assert made["ok"], made
-    unrelated = run(ctx, "run_command", {"cmd": ["ls"]})
-    assert unrelated.text == "output" and unrelated.host_annotations == ()
-    first = run(ctx, "run_command", {"cmd": ["python", "-m", "pytest", "-q"]}, text="3 passed")
-    assert first.text.startswith("3 passed\n\n")
-    assert "A quiet pytest tail hides failures" in first.text and "run_command with 'pytest'" in first.text
-    assert first.producer_text == "3 passed" and len(first.host_annotations) == 1
-    again = run(ctx, "run_command", {"cmd": ["python", "-m", "pytest"]}, text="1 failed")
-    assert again.text == "1 failed"
+    assert mark(ctx, "A quiet pytest tail hides failures: read the exit code.", {"tool": "run_command", "text": "pytest"})["ok"]
+    assert anchored_note(ctx, "run_command", {"cmd": ["ls"]}) == ""
+    first = anchored_note(ctx, "run_command", {"cmd": ["python", "-m", "pytest", "-q"]})
+    assert first.startswith("⚠️ Mark I tied to run_command with 'pytest' (")
+    assert "A quiet pytest tail hides failures" in first
+    assert anchored_note(ctx, "run_command", {"cmd": ["python", "-m", "pytest"]}) == ""
     # A new task meets it again.
-    assert "A quiet pytest tail" in run(ctx_for(tmp_path, task_id="root0002"), "run_command", {"cmd": ["pytest"]}).text
+    assert "A quiet pytest tail" in anchored_note(ctx_for(tmp_path, task_id="root0002"), "run_command", {"cmd": ["pytest"]})
 
 
 def test_released_and_foreign_room_marks_stay_silent_and_a_new_mark_acts_next_call(tmp_path):
@@ -74,17 +75,40 @@ def test_released_and_foreign_room_marks_stay_silent_and_a_new_mark_acts_next_ca
     foreign = mark(ctx_for(tmp_path, task_id="other001", chat_id=2), "Only for room two.", {"path": "docs/"})
     glob = mark(ctx, "Global: docs are English.", {"path": "docs/"}, scope="global")
     assert foreign["ok"] and glob["ok"]
-    seen = run(ctx, "read_file", {"path": "docs/ARCHITECTURE.md"}).text
+    seen = anchored_note(ctx, "read_file", {"path": "docs/ARCHITECTURE.md"})
     assert "Global: docs are English." in seen and "Only for room two." not in seen
     released = json.loads(_memory_mark(ctx, release_id=glob["mark_id"], reason="no longer holds"))
     assert released["ok"], released
     later = ctx_for(tmp_path, task_id="root0003")
-    assert run(later, "read_file", {"path": "docs/ARCHITECTURE.md"}).text == "output"
+    assert anchored_note(later, "read_file", {"path": "docs/ARCHITECTURE.md"}) == ""
     # A mark written in this task acts from the next call.
-    run(later, "memory_mark", {"text": "x"})
+    anchored_note(later, "memory_mark", {"text": "x"})
     mark(later, "Read the whole file before editing it.", {"tool": "edit_text"})
-    run(later, "memory_mark", {"text": "x"})
-    assert "Read the whole file before editing it." in run(later, "edit_text", {"path": "a.py"}).text
+    anchored_note(later, "memory_mark", {"text": "x"})
+    assert "Read the whole file before editing it." in anchored_note(later, "edit_text", {"path": "a.py"})
+
+
+@pytest.mark.parametrize("moved", ["the task", "its parent"])
+def test_a_task_moved_to_another_project_meets_that_room_s_marks(tmp_path, moved):
+    """The cache follows the room the task's lineage is bound to: a move of the task or of
+    an ancestor changes whose room marks act (real registry, binding owner and resolver)."""
+    from ouroboros.dialogue_evidence import own_room_chat
+    from ouroboros.projects_registry import bind_task_to_project, create_project
+
+    project = create_project(tmp_path, "beta")
+    main, beta = ctx_for(tmp_path, task_id="parent-task"), ctx_for(tmp_path, task_id="beta-task", chat_id=project["chat_id"])
+    assert mark(main, "MAIN_ONLY_LESSON", {"tool": "edit_text"})["ok"]
+    assert mark(beta, "BETA_ONLY_LESSON", {"tool": "edit_text"})["ok"]
+    worker = ctx_for(tmp_path, task_id="child-task") if moved == "its parent" else ctx_for(tmp_path, task_id="mover-task")
+    if moved == "its parent":
+        worker.task_metadata = {"parent_task_id": main.task_id, "root_task_id": main.task_id}
+    assert own_room_chat(worker, tmp_path) == 1
+    assert anchored_note(worker, "read_file", {"path": "guide.md"}) == ""  # fills the cache while in Main
+    bound = main.task_id if moved == "its parent" else worker.task_id
+    bind_task_to_project(tmp_path, bound, "beta", origin={"absent": "post_hoc_unresolved"})
+    assert own_room_chat(worker, tmp_path) == project["chat_id"]
+    seen = anchored_note(worker, "edit_text", {"path": "guide.md"})
+    assert "BETA_ONLY_LESSON" in seen and "MAIN_ONLY_LESSON" not in seen, seen
 
 
 def test_a_malformed_anchor_is_refused_and_the_view_names_the_action(tmp_path):
@@ -107,62 +131,51 @@ def test_a_malformed_anchor_is_refused_and_the_view_names_the_action(tmp_path):
     assert "meets me at run_command with 'pytest'" in shown and shown.count("meets me at") == 1
 
 
-def test_the_loop_delivers_an_anchored_mark_through_the_real_tool_execution(tmp_path, monkeypatch):
-    """The seam the mind meets: ``_execute_single_tool`` composes the mark as a host note
-    over the producer's own text, once per task, and leaves a call it does not name alone."""
+def _probe_registry(tmp_path, monkeypatch, ctx):
     import ouroboros.safety as safety
-    from ouroboros.loop_tool_execution import _execute_single_tool
     from ouroboros.tools.registry import ToolEntry, ToolRegistry
 
     monkeypatch.setattr(safety, "check_safety", lambda *_args, **_kwargs: (True, ""))
-    ctx = ctx_for(tmp_path)
-    assert mark(ctx, "Probe output is partial: read the receipt.", {"tool": "fixture_probe"})["ok"]
     registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
     registry.set_context(ctx)
     for name in ("fixture_probe", "fixture_other"):
         registry.register(ToolEntry(name, {"name": name, "description": "fixture",
                                            "parameters": {"type": "object", "properties": {}, "required": []}},
                                     lambda _ctx, _name=name: f"{_name} output"))
-    logs = tmp_path / "logs"
-    logs.mkdir(exist_ok=True)
-
-    def call(name, call_id):
-        return _execute_single_tool(registry, {"id": call_id, "function": {"name": name, "arguments": "{}"}}, logs)
-
-    other = call("fixture_other", "c0")
-    assert other["result"] == "fixture_other output"
-    first = call("fixture_probe", "c1")
-    assert first["result"].startswith("fixture_probe output\n\n")
-    assert "Probe output is partial: read the receipt." in first["result"] and first["is_error"] is False
-    assert first["tool_result"].producer_text == "fixture_probe output"
-    assert call("fixture_probe", "c2")["result"] == "fixture_probe output"
+    (tmp_path / "logs").mkdir(exist_ok=True)
+    return registry
 
 
-def test_a_task_moved_to_another_project_meets_that_room_s_marks(tmp_path, monkeypatch):
-    """The cache follows the task's project placement: a move changes the room whose marks act."""
-    import ouroboros.dialogue_evidence as evidence
-    import ouroboros.project_facts as facts
+def test_the_mind_sees_the_mark_while_the_host_reads_the_plain_result(tmp_path, monkeypatch):
+    """Through the real seam: ``_execute_single_tool`` returns the producer's own text (status,
+    trace and receipts read it), and ``process_tool_results`` adds the note to the message the
+    mind receives, once per task, leaving a call it does not name alone."""
+    from ouroboros.loop_tool_execution import _execute_single_tool, process_tool_results
 
-    main, beta = ctx_for(tmp_path), ctx_for(tmp_path, task_id="beta0001", chat_id=7)
-    assert mark(main, "MAIN_ONLY_LESSON", {"tool": "edit_text"})["ok"]
-    assert mark(beta, "BETA_ONLY_LESSON", {"tool": "edit_text"})["ok"]
-    worker = ctx_for(tmp_path, task_id="mover001")
-    run(worker, "read_file", {"path": "a"})  # fills the cache while the task is in Main
-    monkeypatch.setattr(facts, "placed_project_id", lambda _ctx: "beta")
-    monkeypatch.setattr(evidence, "own_room_chat", lambda _ctx, _root: 7)
-    seen = run(worker, "edit_text", {"path": "a.py"}).text
-    assert "BETA_ONLY_LESSON" in seen and "MAIN_ONLY_LESSON" not in seen
+    ctx = ctx_for(tmp_path)
+    assert mark(ctx, "Probe output is partial: read the receipt.", {"tool": "fixture_probe"})["ok"]
+    registry = _probe_registry(tmp_path, monkeypatch, ctx)
+    rows = [_execute_single_tool(registry, {"id": f"c{i}", "function": {"name": name, "arguments": "{}"}},
+                                 tmp_path / "logs") for i, name in enumerate(("fixture_other", "fixture_probe", "fixture_probe"))]
+    assert [row["result"] for row in rows] == ["fixture_other output", "fixture_probe output", "fixture_probe output"]
+    messages, trace = [], {"tool_calls": [], "reasoning_notes": []}
+    process_tool_results(rows, messages, trace, lambda _text: None, registry)
+    shown = [row["content"] for row in messages if row.get("role") == "tool"]
+    assert shown[0] == "fixture_other output"
+    assert shown[1].startswith("fixture_probe output\n\n⚠️ Mark I tied to fixture_probe (")
+    assert "Probe output is partial: read the receipt." in shown[1]
+    assert shown[2] == "fixture_probe output"
+    assert trace["tool_calls"][1]["result"] == shown[1]  # review sees the view the mind saw
 
 
 def test_an_anchored_publication_keeps_its_receipt_and_its_pass(tmp_path, monkeypatch):
-    """A mark on submit_skill_to_hub trails the publication JSON behind the host-note boundary, so
-    the receipt the publication veto reads is still recovered and a real PR keeps its pass."""
+    """A mark on submit_skill_to_hub never reaches the publication text the host parses: the
+    receipt the publication veto reads is recorded and a real PR keeps its pass."""
     from types import SimpleNamespace
 
     from ouroboros import loop_tool_execution as execution
     from ouroboros.skill_publish_result import (
         SKILL_PUBLISH_TARGET_METADATA_KEY, apply_skill_publish_receipt_veto, serialize_skill_publish_result)
-    from ouroboros.tools.tool_result import _HOST_NOTE_SEPARATOR
 
     snapshot, ruleset, repo = "a" * 64, "b" * 64, "OuroborosHub/OuroborosHub"
     payload = serialize_skill_publish_result(
@@ -182,11 +195,11 @@ def test_an_anchored_publication_keeps_its_receipt_and_its_pass(tmp_path, monkey
     (tmp_path / "logs").mkdir(exist_ok=True)
     row = execution._execute_single_tool(registry, {"id": "c1", "function": {
         "name": "submit_skill_to_hub", "arguments": json.dumps({"skill": "demo"})}}, tmp_path / "logs", ctx.task_id)
-    assert "Check the license field before publishing." in row["result"]
-    assert row["result"].partition(_HOST_NOTE_SEPARATOR)[0] == payload
-    assert "skill_publish_receipt" in row["result_meta"]
+    assert row["result"] == payload and "skill_publish_receipt" in row["result_meta"]
     task = {"type": "skill_publish", "metadata": {SKILL_PUBLISH_TARGET_METADATA_KEY: {"skill": "demo", "repository": repo}}}
     outcome = {"outcome_axes": {"execution": {"status": "ok", "reason_code": "final_message"},
                                 "objective": {"status": "pass", "source": "result_review"}}}
     apply_skill_publish_receipt_veto(outcome, task, {"tool_calls": [{"tool": "submit_skill_to_hub", **row["result_meta"]}]})
     assert outcome["outcome_axes"]["objective"]["status"] == "pass"
+    # The mark itself is still shown to the mind with that call.
+    assert "Check the license field before publishing." in anchored_note(ctx, "submit_skill_to_hub", {"skill": "demo"})

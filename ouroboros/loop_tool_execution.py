@@ -703,13 +703,6 @@ def _execute_single_tool(
         for stale_key in PROCESS_FACT_KEYS:
             result_meta.pop(stale_key, None)
         result_meta.update(process_facts)
-    if host_refusal is None:
-        # A mark the mind tied to this action trails the result once per task, as a host note
-        # after the producer's payload: status and trace facts above were read from that payload.
-        from ouroboros.mark_anchors import deliver_anchored_marks
-
-        tool_result = deliver_anchored_marks(getattr(tools, "_ctx", None), fn_name, args, tool_result)
-        result = tool_result.text
 
     trace_ref = {}
     try:
@@ -1438,13 +1431,19 @@ def process_tool_results(
         typed = exec_result.get("tool_result")
         producer_ref = exec_result.get("producer_source_ref") or {}
         truncated_result = with_producer_source(exec_result, truncated_result)
+        # A mark the mind tied to this action trails what the mind sees, once per task; the host
+        # readers below (acknowledgements, receipts) keep reading the result without it.
+        from ouroboros.mark_anchors import anchored_note
+
+        note = anchored_note(ctx, fn_name, exec_result.get("tool_args") or {})
+        shown_result = f"{truncated_result}\n\n{note}" if note else truncated_result
 
         messages.append({
             "role": "tool",
             "tool_call_id": exec_result["tool_call_id"],
-            "content": truncated_result,
+            "content": shown_result,
             TOOL_RESULT_RECORD_KEY: make_tool_result_record(
-                exec_result, truncated_result, facts=typed_result_facts(exec_result),
+                exec_result, shown_result, facts=typed_result_facts(exec_result),
                 source_ref=result_source_ref),
         })
         published = (exec_result.get("result_meta") or {}).get("tool_result_meta") or {}
@@ -1488,7 +1487,7 @@ def process_tool_results(
             "tool_call_id": exec_result["tool_call_id"],
             "args": trace_args,
             # Review sees the same complete/bounded tool view that Main saw.
-            "result": truncated_result,
+            "result": shown_result,
             "is_error": is_error,
             "trace_ref": exec_result.get("trace_ref"), **({"round_id": exec_result["round_id"]} if exec_result.get("round_id") else {}),
             **({
