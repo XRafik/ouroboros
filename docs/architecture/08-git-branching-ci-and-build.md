@@ -2,7 +2,7 @@
 
 This chapter owns release topology: the branch and channel model behind the three official update feeds, the CI job graph with its trust boundaries, the keyless system-E2E suite, the build scripts, the dependency-lock authority and the release proof for seven required desktop assets and an optional verified Android pair. Every guarantee here is a rule about what a published artifact may claim, not a build convenience.
 
-`ouroboros` is the local working branch; the runtime setting independently selects one official feed: Stable is the newest plain release tag reachable from both `main` and `ouroboros-stable`, QA the `ouroboros-stable` tip, Development the `ouroboros` tip (`update_channels.py`). Promotion and rollback are owner-controlled exact-SHA movements; ordinary restart preserves the local tip, while explicit update owns fetch, target validation, rescue, apply and rollback. `managed` is the official read/update remote, `origin` optional personal persistence. Desktop and Colab reject a target without a regular non-empty `BIBLE.md`. External pull requests target `ouroboros`, allocate no release version and get the collision-free version when maintainers land them (CONTRIBUTING.md).
+`ouroboros` is the local branch, independent of the official feed (`update_channels.py`): Stable selects the newest plain release tag reachable from `main` and `ouroboros-stable`, QA the `ouroboros-stable` tip, Development the `ouroboros` tip. Promotion and Restore bind owner-chosen SHAs; Restore preserves rescue/keep refs and never pushes. Ordinary restart preserves the local tip; explicit update owns fetch, validation, rescue, apply and rollback. `managed` is the official update remote; `origin` is optional personal persistence. Desktop/Colab require a regular nonempty target `BIBLE.md`. External PRs target `ouroboros`; maintainers allocate collision-free versions on landing (CONTRIBUTING.md).
 
 Candidates use `candidate/<task>` and private pins (§6), published explicitly. Auto-push sends the branch and its operation-created annotated tag; selected adoption withholds both (DEVELOPMENT "The tiered commit and CI gates"). Adoption retains that creation fact; interrupted recording leaves the tag local. Neutral commits and legacy receipts backfill none. Tag failure is disclosed, not retried.
 
@@ -10,7 +10,7 @@ The local `ouroboros-stable` ref is also a recovery fallback maintained by expli
 
 ### CI topology
 
-`ci.yml` runs only on dispatch or `v*` tags; local tests and review stay strict. After merges to `ouroboros` the secret-free `post-merge.yml` runs the affected tests (coalesced, one retry) and `ruff --select F`, bisects a red to its merge and reports it to that PR and a `post-merge-red` issue, blocking nothing. UI/provider wrappers are manual; Claudexor and non-test publishing keep their triggers; Hub validation is separate.
+`ci.yml` runs on dispatch or `v*` tags. After merges to `ouroboros`, secret-free `post-merge.yml` runs affected tests (coalesced, one retry) and ruff F, attributes persistent reds to a PR and opens a `post-merge-red` issue. Its independent eight-minute cost-contract step selects the whole scale module at k=30; k=100 stays opt-in. Neither blocks merging. UI/provider wrappers are manual; other workflow triggers are unchanged.
 
 | Tier | Jobs | Trust boundary |
 |---|---|---|
