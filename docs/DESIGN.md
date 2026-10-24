@@ -1256,7 +1256,9 @@ reconciliation.
 ### Room work status
 
 Each room's bar has one status, right after its title: the short word in its
-status ink, then one mark, as on the sidebar's rows; no frame at rest, a neutral
+status ink (a turn still preparing adds the start step it stands at, `Preparing ·
+Building context`, and nothing reads `Thinking` before a model call is sent),
+then one mark, as on the sidebar's rows; no frame at rest, a neutral
 tint on hover and while open, a caret when it opens. A work is one request with
 its Continue episodes and whatever of them still lives (helpers, delegated
 runs still working, post-answer upkeep); the server gives each work and each room
@@ -2652,7 +2654,7 @@ crisp edges (owner 20.10), as a room's feed does (owner 21.10), while a plain pr
 layout the row is at most 56 px: ☰, the place's name, its status, then Panic and
 ⋯, with the page's tabs, or Files' location and its actions, under it
 (`bindPageHeader` moves those nodes); the name wins over the status word, which a short row
-drops whole, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
+drops whole after its start step, keeping its mark. Navigation sharing a toolbar also returns below the bar when the
 content column is too narrow, including while the sidebar is resized; the toolbar wraps in its
 own row. Files' location and actions return above the list, folder names fit and actions wrap. Whenever the bar itself is narrow, on a phone or in a narrow window,
 Restart and the budget move into ⋯ — the same controls, placed by the bar's

@@ -852,7 +852,7 @@ def scan_data_paths(root: pathlib.Path = REPO) -> frozenset[str]:
 # payload mutation locks ``state/delegate_payload_mutations/*.lock``; the retired global claim spelling is gone.
 # 417 -> 418: the desktop window's Interface size ``state/desktop_page_zoom.json`` (``launcher_page_zoom.py``,
 # its section-2 row).
-EXPECTED_SCAN_PATHS = 418
+EXPECTED_SCAN_PATHS = 421  # 418 + immutable delegated evidence generations and their unpublished staging
 
 # Scanned paths that must always be present — guards the scanner itself
 # against a silent regression that would shrink coverage while keeping counts
