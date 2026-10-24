@@ -135,8 +135,11 @@ def _origin_text(url: str) -> str:
 def _checkout_source(target: pathlib.Path, revision: str) -> None:
     """Materialize a disposable source cache without host-default newline conversion.
 
-    Removing tracked entries first also repairs stat-clean CRLF files at the same
-    commit: changing config plus a forced checkout alone can leave those untouched.
+    A pending retry restores the current HEAD's index before changing revisions so
+    checkout still removes tracked files absent from the target, including attributes.
+    Initial preparation then empties the index and checks out again to repair stat-clean
+    CRLF files: config plus a forced checkout alone can leave them untouched. Payload
+    files stay in place until checkout; a partially completed checkout is not rolled back.
     Repository-authored attributes still apply; release hashes remain authoritative.
     Callers hold the source lock (or own a fresh private probe directory).
     """
@@ -146,9 +149,17 @@ def _checkout_source(target: pathlib.Path, revision: str) -> None:
         _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "pending"], cwd=target)
         _git(["config", "--local", "core.autocrlf", "false"], cwd=target)
         _git(["config", "--local", "core.eol", "lf"], cwd=target)
-        _git(["rm", "-r", "--force", "--ignore-unmatch", "--", "."], cwd=target)
+    if policy == "pending":
+        try:
+            head = _git(["rev-parse", "--verify", "HEAD"], cwd=target).strip()
+        except SkillSourceFetchError:  # A fresh cache may have failed before its first checkout.
+            head = ""
+        if head:
+            _git(["read-tree", head], cwd=target)
     _git(["checkout", "--quiet", "--force", "--detach", revision], cwd=target)
     if policy != "1":
+        _git(["read-tree", "--empty"], cwd=target)
+        _git(["checkout", "--quiet", "--force", "--detach", revision], cwd=target)
         _git(["config", "--local", "ouroboros.sourceCheckoutPolicy", "1"], cwd=target)
 
 
@@ -182,8 +193,8 @@ def update_clone(drive_root: pathlib.Path, row: Dict[str, Any], *, wait_sec: flo
 
     ``after_fetch(clone_dir, commit)`` runs under the same lock, so a caller can derive a snapshot from
     exactly this commit before another refresh moves the files. A busy cache (another process is
-    fetching it) returns the current meta with ``busy: true``; a failed fetch keeps the previous clone
-    and records the error.
+    fetching it) returns the current meta with ``busy: true``; a failure retains the cache and records
+    the error, but a partially completed checkout is not rolled back.
     """
     from ouroboros.platform_layer import release_exclusive_file_lock
 
@@ -203,7 +214,7 @@ def update_clone(drive_root: pathlib.Path, row: Dict[str, Any], *, wait_sec: flo
             if after_fetch is not None:
                 after_fetch(cache / "repo", commit)
             meta.update({"commit": commit, "fetched_at": utc_now_iso(), "error": "", "error_at": ""})
-        except Exception as exc:  # the previous clone and snapshot stay readable
+        except Exception as exc:  # retain the cache; a failed checkout may have partially changed it
             meta.update({"error": str(exc)[:500] or type(exc).__name__, "error_at": utc_now_iso()})
             log.info("Skill source fetch failed for %s: %s", row.get("id"), meta["error"])
         atomic_write_json(cache / "meta.json", meta)
