@@ -1103,10 +1103,8 @@ def _copy_stable_memory(parent: pathlib.Path, child: pathlib.Path, *, project_id
     parent_memory = parent / "memory"
     child_memory = child / "memory"
     project = bool(str(project_id or "").strip())
-    # Projects inherit shared patterns, never the global knowledge topics/index.
+    # A project child inherits none of the global knowledge topics or index.
     paths = ["identity.md", "WORLD.md", "registry.md"]
-    if project:
-        paths.append("knowledge/patterns.md")
     for rel in paths:
         src = parent_memory / rel
         if src.is_file():

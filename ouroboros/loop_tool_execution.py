@@ -682,6 +682,12 @@ def _execute_single_tool(
             "ts": utc_now_iso(), "type": "tool_error", "task_id": task_id,
             "tool": fn_name, "args": args_for_log, "error": safe_error,
         }, correlation, tool_call_id=tool_call_id))
+    if host_refusal is None:
+        # A mark the mind tied to this action trails the result once per task (a host note).
+        from ouroboros.mark_anchors import deliver_anchored_marks
+
+        tool_result = deliver_anchored_marks(getattr(tools, "_ctx", None), fn_name, args, tool_result)
+        result = tool_result.text
 
     # `status`/`is_error` are READ from the published code, never re-derived from
     # the text; process exit, signal and artifact-registration facts come from
