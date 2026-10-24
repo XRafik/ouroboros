@@ -3,15 +3,15 @@
 A mark may carry an ``anchor`` its author chose: a tool name, optionally with text the
 call's arguments must contain, or a file or directory path a call names. The host
 compares literally and adds the mark's own words to that call's result once per
-task; it judges nothing, never refuses or delays the call, and a room mark meets
-only that room's work. Reading marks is best effort: an unreadable chronicle leaves
-the result as it was.
+task, as a host note behind the producer's payload (``tool_result._HOST_NOTE_SEPARATOR``,
+so text readers still recover the payload); it judges nothing, never refuses or delays
+the call, and a room mark meets only the work of the room the task is in now. Reading
+marks is best effort: an unreadable chronicle leaves the result as it was.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import json
 import logging
 from typing import Any, Dict, Iterator, List
 
@@ -61,33 +61,39 @@ def _names_path(anchor_path: str, value: str) -> bool:
 
 
 def matches(anchor: Dict[str, Any], tool: str, args: Any) -> bool:
+    """A path anchor meets an argument that is one path naming it (never a path inside file text or
+    a sentence); a tool anchor meets that tool, and its text an argument value or a command's words."""
     if "path" in anchor:
-        return any(_names_path(str(anchor["path"]), value) for value in _strings(args))
+        return any(_names_path(str(anchor["path"]), value) for value in _strings(args) if value and not
+                   any(char.isspace() for char in value))
     if anchor.get("tool") != tool:
         return False
     text = anchor.get("text")
-    return not text or str(text) in json.dumps(args, ensure_ascii=False)
+    return not text or str(text) in " ".join(_strings(args))
 
 
 def _anchored_marks(ctx: Any) -> List[Dict[str, Any]]:
-    """This task's anchored marks (its room's and the global ones), read once per task."""
-    cached = getattr(ctx, _CACHE_ATTR, None)
-    if cached is not None:
-        return cached
+    """This task's anchored marks (its room's and the global ones), read again only when the
+    task's project placement changes (a move to another project changes its room)."""
     from ouroboros.chronicle_store import ChronicleStore
     from ouroboros.dialogue_evidence import own_room_chat
+    from ouroboros.project_facts import placed_project_id
     from ouroboros.tool_access import canonical_data_root
 
+    placement = str(placed_project_id(ctx) or "")
+    cached = getattr(ctx, _CACHE_ATTR, None)
+    if cached is not None and cached[0] == placement:
+        return cached[1]
     root = canonical_data_root(ctx)
     store = ChronicleStore(root)
-    receipt = store.ensure_activated()
+    receipt = store.activation()  # read only: marks exist only on an activated chronicle
     if not isinstance(receipt, dict) or receipt.get("kind") != "activation":
         return []
     room = own_room_chat(ctx, root)
     rows = store.active_marks(None) if room is None else store.active_marks(str(room), include_global=True)
     marks = [mark for mark in rows if isinstance(mark.get("anchor"), dict) and not anchor_problem(mark["anchor"])
              and (room is not None or mark.get("scope") == "global")]
-    setattr(ctx, _CACHE_ATTR, marks)
+    setattr(ctx, _CACHE_ATTR, (placement, marks))
     return marks
 
 
@@ -109,7 +115,8 @@ def deliver_anchored_marks(ctx: Any, tool: str, args: Any, result: Any) -> Any:
             if mark_id in delivered or not matches(mark["anchor"], tool, args):
                 continue
             delivered.add(mark_id)
-            notes.append(f"Mark I tied to {describe(mark['anchor'])} ({mark_id}): {str(mark.get('text') or '').strip()}")
+            notes.append(f"⚠️ Mark I tied to {describe(mark['anchor'])} ({mark_id}): "
+                         f"{str(mark.get('text') or '').strip()}")
         if not notes:
             return result
         note = "\n".join(notes)

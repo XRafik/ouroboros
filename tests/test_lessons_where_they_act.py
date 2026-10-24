@@ -159,3 +159,22 @@ def test_the_prompt_and_the_constitution_name_learning_not_a_register():
     assert "Learning changes what happens next." in bible and "**Durable learning**" in bible
     for gone in ("Pattern Register", "two-strike", "patterns.md", "improvement-backlog.md", "If three behavioral rules"):
         assert gone not in bible, gone
+
+
+def test_the_residency_fact_fits_inside_the_receipt_bound(tmp_path):
+    """A rewrite that removes many headings still reports success: the residency fact is added
+    before the receipt's size bound, which then drops the heading list instead of failing."""
+    from ouroboros.tools.registry import ToolRegistry
+
+    body = "\n".join(f"## {'Ж' * 29} {i}\ntext {i}\n" for i in range(40))
+    ctx = _ctx(tmp_path)
+    registry = ToolRegistry(repo_dir=tmp_path, drive_root=tmp_path)
+    registry.set_context(ctx)
+    assert "✅" in registry.execute("knowledge_write", {"topic": "big", "content": body})
+    for title_len in range(1, 60):
+        topic = f"big{title_len}"
+        assert "✅" in registry.execute("knowledge_write", {
+            "topic": topic, "content": "\n".join(f"## {'Ж' * title_len} {i}\ntext\n" for i in range(40))})
+        rewritten = registry.execute("knowledge_write", {"topic": topic, "content": "short body\n",
+                                                         "expected_revision": _revision(ctx, topic)})
+        assert "✅" in rewritten and "knowledge_residency" in rewritten, (title_len, rewritten[:200])

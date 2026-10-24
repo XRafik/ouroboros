@@ -223,9 +223,9 @@ def _knowledge_write(
         meta["knowledge_source"] = result.current.source_ref()
         meta["knowledge_state"] = result.current.state
     if result.ok:
-        _bound_delta_meta(meta)
-        if result.current is not None:
+        if result.current is not None:  # before the bound, which then makes room for it
             meta["knowledge_residency"] = _residency(result.current)
+        _bound_delta_meta(meta)
         return _publish_tool_result(ctx, ToolResult(
             status="ok", code="OK",
             text=f"✅ Knowledge '{sanitized}' {result.reason} ({mode}).\n" + json.dumps(meta, ensure_ascii=False, sort_keys=True),

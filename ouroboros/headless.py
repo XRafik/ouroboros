@@ -126,7 +126,7 @@ def prepare_task_drive(parent_drive_root: pathlib.Path, task_id: str, memory_mod
     """Create a forked or empty execution drive; other modes keep the parent.
 
     Forks copy identity/world/registry and global knowledge except on Project
-    tasks, which copy only the shared patterns file. Memory initializes empties.
+    tasks, which copy no knowledge file. Memory initializes empties.
     """
 
     mode = str(memory_mode or "shared").strip().lower()

@@ -482,7 +482,7 @@ def get_tools():
         "Projections use sorted UTF-8 JSON; store documents and multi-ID bundles are flagged reconstructed. "
         "format=text saves one selected string exactly. Complete tool output is retained before any delivery cut. "
         "kind=knowledge_history lists global knowledge writes (when, topic, mode, writer, focus, task, summary, sizes, "
-        "change delta) without the note bodies; knowledge_read gives the current text. "
+        "change delta) without the note bodies, about 1 KB a row (raise max_bytes or lower tail); knowledge_read gives the current text. "
         "Results name their data plane; the owner's default queue files and blob fallback need the caller's existing read of each file."),
         "parameters": {"type": "object", "required": ["op"], "properties": {
             "op": {"enum": ["sql", "json", "jsonl", "blob"], "type": "string"},
@@ -499,7 +499,7 @@ def get_tools():
             "filter": {"type": "object", "required": ["field", "op", "value"], "additionalProperties": False,
                        "properties": {"field": {"type": "string"}, "op": {"type": "string", "enum": ["eq", "contains"]}, "value": {}}},
             "tail": {"type": "integer", "minimum": 0, "maximum": 10000, "default": 100,
-                     "description": "JSONL: last matching rows; 0 reads from start. An 8 MiB scan window reports scan_truncated."},
+                     "description": "JSONL: last matching rows; 0 reads from start. An 8 MiB scan window (256 MiB for knowledge_history) reports scan_truncated."},
             "max_rows": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 100},
             "max_bytes": {"type": "integer", "minimum": 256, "maximum": sql.MAX_BYTES, "default": 65536},
             "snapshot": {"type": "boolean", "description": "SQL snapshot; default true for money, false otherwise."},
