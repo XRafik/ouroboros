@@ -2,12 +2,13 @@
 
 A mark may carry an ``anchor`` its author chose: a tool name, optionally with text the
 call's arguments must contain, or a file or directory path a call names. The host
-compares literally and, when it shows the call's result to the mind, adds the mark's
-own words once per task as a trailing host note (``loop_tool_execution.process_tool_results``).
-Host readers of the result (status, receipts, acknowledgements) never see the note. It
-judges nothing and never refuses or delays the call; a room mark meets only the work of
-the room the task is in now. Reading marks is best effort: an unreadable chronicle
-shows no note.
+compares literally and adds the mark's own words, once per task, as a delivery note
+trailing the result the mind is shown (``loop_tool_execution.process_tool_results``): the
+batch is measured with it, the trace keeps the clean result beside it as the retained
+producer payload (the ``tool_result`` host-note contract), and the host readers that
+parse a result (acknowledgements, wake exposure, receipts) read it without the note. It
+judges nothing and never refuses the call; a room mark meets only the work of the room
+the task is in now. Reading marks is best effort: an unreadable chronicle shows no note.
 """
 
 from __future__ import annotations
@@ -19,7 +20,8 @@ log = logging.getLogger(__name__)
 
 _CACHE_ATTR = "_anchored_marks"
 _DELIVERED_ATTR = "_anchored_marks_delivered"
-_QUOTES = frozenset("\"'`")
+# Quoting characters of code and commands; an apostrophe is a letter of names (O'Brien).
+_QUOTES = frozenset("\"`")
 
 
 def anchor_problem(anchor: Any) -> str:
@@ -31,7 +33,12 @@ def anchor_problem(anchor: Any) -> str:
         ok = all(isinstance(anchor[key], str) and anchor[key].strip() for key in keys)
         return "" if ok else "anchor tool and text are non-empty strings"
     if keys == {"path"}:
-        return "" if isinstance(anchor["path"], str) and anchor["path"].strip() else "anchor path is a non-empty string"
+        path = anchor["path"]
+        if not isinstance(path, str) or not path.strip():
+            return "anchor path is a non-empty string"
+        if _QUOTES.intersection(path):
+            return "anchor path has no double quote or backtick (a value with one reads as quoted code)"
+        return ""
     return "anchor is {tool, text?} or {path}"
 
 
@@ -62,7 +69,8 @@ def _names_path(anchor_path: str, value: str) -> bool:
 
 
 def _path_like(value: str) -> bool:
-    """One line without quotes: a path or an argv element, not file text or code (spaces allowed)."""
+    """One line without a double quote or backtick: a path or an argv element, not file text or
+    quoted code (spaces and apostrophes allowed)."""
     return bool(value) and "\n" not in value and "\r" not in value and not _QUOTES.intersection(value)
 
 
@@ -103,6 +111,7 @@ def _anchored_marks(ctx: Any) -> List[Dict[str, Any]]:
     store = ChronicleStore(root)
     receipt = store.activation()  # read only: marks exist only on an activated chronicle
     if not isinstance(receipt, dict) or receipt.get("kind") != "activation":
+        setattr(ctx, _CACHE_ATTR, (key, []))  # memory_mark resets it, like a cached list
         return []
     room = own_room_chat(ctx, root)
     rows = store.active_marks(None) if room is None else store.active_marks(str(room), include_global=True)
