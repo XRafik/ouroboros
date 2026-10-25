@@ -511,8 +511,8 @@ GIGACHAT_DIRECT_DEFAULTS = {
 MINIMAX_DIRECT_DEFAULTS = {
     "main": "minimax::MiniMax-M3",
     "heavy": "minimax::MiniMax-M3",
-    "light": "minimax::MiniMax-M2.7",
-    "fallback": "minimax::MiniMax-M2.7",
+    "light": "minimax::MiniMax-M3.1-Flash",
+    "fallback": "minimax::MiniMax-M3.1-Flash",
     # NO deep_self_review default: MiniMax documents M3 as "up to 1M tokens" with a
     # GUARANTEED minimum of 512K (platform.minimax.io, 2026-08). Deep review sizes
     # against a firm 1M window, so the guaranteed floor decides — the slot follows
