@@ -66,8 +66,31 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     let strip = null;
     let targetTimer = 0;
     const bubbleActions = bindBubbleActions({ feed, registry: actions, onDomWrite });
-    // Notes between works: a relay row's bubble is dressed as a note card and grouped into decks (chat_relay_deck.js).
-    const decks = createRelayDecks({ feed, onDomWrite });
+    // How much of the feed's top the room's header covers: a placed row lands under it, not behind it.
+    const headerClearance = () => {
+        const header = feed.closest('.project-panel')?.querySelector('.project-panel-bar')
+            || feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
+        return Math.max(HEADER_CLEARANCE, (header?.getBoundingClientRect().bottom || 0) - feed.getBoundingClientRect().top + 12);
+    };
+    /** One explicit placement of a row under the header, as a quote's landing is: it claims the reading intent, so the
+     * reader's own later gesture supersedes it. `follow` instead returns a reader who was following the newest message
+     * to that message. */
+    function place(target, { follow = false } = {}) {
+        const position = reading();
+        if (position.claim) position.claim(); else position.cancel();
+        if (follow) {
+            position.stick = true;
+            position.followAfterLayout?.();
+            return;
+        }
+        position.stick = false;
+        revealTimelineNode(target, feed, headerClearance());
+        position.scroll();
+        position.remember(true);
+    }
+    // Notes between works: a relay row's bubble is dressed as a note card and grouped into stacks (chat_relay_deck.js);
+    // the room decides how the address reads (Main is chat 1) and lends a fanned column its reading owner and placement.
+    const decks = createRelayDecks({ feed, chatId, onDomWrite, reading, clearance: headerClearance, place });
     let destroyed = false;
     // `held`: the reader's own live-edge intent while a reveal is pending (a reveal sets stick false itself).
     let revealGeneration = 0, revealing = 0, held = null;
@@ -129,11 +152,7 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
         }
         if (!wanted()) return null;
         target = decks.surface(target) || target;  // a tucked note's deck opens, so the row it lands on shows
-        const header = feed.closest('.project-panel')?.querySelector('.project-panel-bar')
-            || feed.closest('.page, .chat-instance-panel')?.querySelector('.chat-page-header, .chat-panel-statusbar');
-        const clearance = Math.max(HEADER_CLEARANCE,
-            (header?.getBoundingClientRect().bottom || 0) - feed.getBoundingClientRect().top + 12);
-        revealTimelineNode(target, feed, clearance);
+        revealTimelineNode(target, feed, headerClearance());
         position.scroll();
         // This explicit placement measured the current column. An ordinary scroll
         // keeps the old-width anchor until reflow; a newly opened room must replace it.
