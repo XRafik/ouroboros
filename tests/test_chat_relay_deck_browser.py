@@ -228,6 +228,8 @@ def test_relay_notes_stack_fans_out_and_folds(direct_server_with_data, browser_e
             assert main_cards.nth(0).locator('.chat-relay-to').inner_text() == TARGET_A['title'], 'the display name the host stamped, not the task text'
             assert main_front.locator('.chat-relay-to').inner_text() == TARGET_B['title']
             assert main_cards.nth(0).locator('[data-intent="open-project"]').is_visible(), 'the Project capsule stands in the address'
+            assert all(to.evaluate('n => n.scrollWidth <= n.clientWidth + 1') for to in main_cards.locator('.chat-relay-to').all()), \
+                'each receiver shows its whole name, on its own line below a long capsule if need be'
             page.evaluate(_FRAMES)
             _snapshot(page, tmp_path, f'{prefix}-dark-main-open', MAIN, facts)
             main_cards.nth(0).locator('.chat-relay-act').click()
