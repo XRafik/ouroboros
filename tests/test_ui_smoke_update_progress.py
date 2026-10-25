@@ -209,7 +209,7 @@ def test_update_indicator_carries_the_outcome_until_dismissed_and_shows_the_next
             expect(page.locator("#updates-attempt-text")).to_have_text(
                 "Work was still finishing: Main conversation. This attempt stopped no running work. Try again when it finishes.")
             expect(page.locator("#btn-update-primary")).to_have_text("Update to 7.1.0")
-            page.locator("#updates-attempt-details summary").click()
+            page.locator("#updates-attempt-details > summary").click()
             expect(page.locator("#updates-attempt-facts")).to_contain_text("update_writer_fence_blocked")
             page.screenshot(path=str(evidence / f"update-panel-{engine}-{width}-attempt.png"), full_page=True)
             page.locator("#updates-attempt-dismiss").focus()
