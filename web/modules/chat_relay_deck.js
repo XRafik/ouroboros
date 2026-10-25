@@ -322,26 +322,28 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
         if (run.length < 2) return;
         const front = run[run.length - 1];
         const before = front.getBoundingClientRect();
+        const scrolled = feed.scrollTop || 0;
         const following = Boolean(reading?.()?.stick);
         onDomWrite(() => { paint(run, open); return true; });
         if (instant) return;
         // The reader is placed first, on the column's resting geometry: a card already on its way (its start transform
         // applied) would measure where it set out from, not where it lands.
         placeColumn(run, open, following);
-        if (open) emerge(run, before);
+        // Where the stack lay, in the feed as it now stands: placing the column scrolled the feed under it.
+        if (open) emerge(run, before.top - ((feed.scrollTop || 0) - scrolled));
         else settleLedges(front, timing().close);
     }
 
-    function emerge(run, before) {
+    function emerge(run, stackTop) {
         const { open, ease } = timing();
         const front = run[run.length - 1];
         const landing = front.getBoundingClientRect();
-        const glide = before.top - landing.top;
+        const glide = stackTop - landing.top;
         if (glide < 0) play(front, [{ transform: `translateY(${glide}px)` }, { transform: 'none' }], open, { easing: ease });
         run.slice(0, -1).forEach((card, i) => {
             const place = card.getBoundingClientRect();
-            // From the stack's place, a step lower per card, and never past the front card's end.
-            const from = Math.min(before.top - place.top + i * LEDGE_DROP, landing.bottom - place.bottom);
+            // From the stack's place, a step lower per card, and never past the front card's end nor below its own place.
+            const from = Math.min(stackTop - place.top + i * LEDGE_DROP, landing.bottom - place.bottom, 0);
             play(card, [{ transform: `translateY(${from}px) scale(0.96)`, opacity: 0 }, { transform: 'none', opacity: 1 }],
                 open, { delay: Math.min(i, 4) * 24, easing: ease });
         });
@@ -379,9 +381,12 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
             front.__relayPlaced = { following };
             return;
         }
-        const placed = front.__relayPlaced;
-        delete front.__relayPlaced;
+        // The placement rides the card that was in front when the column opened; a note that arrived meanwhile is the
+        // front now, and the reader it was following for comes back to it.
+        const holder = run.find((bubble) => bubble.__relayPlaced);
+        const placed = holder?.__relayPlaced;
         if (!placed) return;
+        delete holder.__relayPlaced;
         const card = front.getBoundingClientRect();
         if (placed.following) place(front, { follow: true });
         else if (card.top < top || card.bottom > box.bottom) place(front);

@@ -529,6 +529,27 @@ test('a fanned column at the bottom of a room asks the room to place its first c
     } finally { f.close(); }
 });
 
+test('a note arriving while the column is open becomes its front, and folding returns the follower to it', async () => {
+    const calls = [];
+    const position = { stick: true };
+    const f = fixture({ reading: () => position, clearance: () => 60, place: (node, opts = {}) => calls.push([node, Boolean(opts.follow)]) });
+    try {
+        f.feed.getBoundingClientRect = () => ({ top: 100, bottom: 700, height: 600 });
+        const rows = [f.note('a'), f.note('b'), f.note('c')];
+        await settle();
+        rows[0].rect = { top: -400, bottom: -100, height: 300 };
+        rows[1].rect = { top: -90, bottom: 210, height: 300 };
+        rows[2].rect = { top: 220, bottom: 680, height: 460 };
+        f.act(rows[2]).click();
+        const late = f.note('d');
+        await settle();
+        assert.equal(late.dataset.deck, 'open', 'the arrival joins the open column');
+        f.act(rows[0]).click();
+        const who = calls.map(([node, follow]) => [rows.indexOf(node) >= 0 ? `row ${rows.indexOf(node)}` : node === late ? 'late' : '?', follow]);
+        assert.deepEqual(who, [['row 0', false], ['late', true]], 'the follow intent outlives the arrival');
+    } finally { f.close(); }
+});
+
 test('disposing a room aborts a pending sender lookup and prevents a late DOM write', async () => {
     let resolve, signal;
     const f = fixture({ lookupProject: (_id, pending) => { signal = pending; return new Promise(done => { resolve = done; }); } });

@@ -293,6 +293,13 @@ def test_relay_notes_stack_fans_out_and_folds(direct_server_with_data, browser_e
             page.evaluate(_FRAMES)
             eight.locator('.chat-relay-act').focus()
             page.keyboard.press('Enter')
+            # The cards fan downward from where the stack lay, even though placing the column scrolled the feed: none
+            # sets out from below its own place.
+            starts = page.locator(feed).evaluate(r"""feed => [...feed.querySelectorAll('.chat-relay-note[data-deck="open"]')]
+                .flatMap(n => n.getAnimations().map(a => String((a.effect.getKeyframes()[0] || {}).transform || ''))
+                .map(t => { const m = /translateY\((-?[\d.]+)px\)/.exec(t); return m ? Number(m[1]) : null; })
+                .filter(v => v !== null))""")
+            assert starts and max(starts) <= 0.5, starts
             heights = page.locator(feed).evaluate("""feed => new Promise(done => { const hs = []; const t0 = performance.now();
                 (function tick() { hs.push(feed.scrollHeight); if (performance.now() - t0 < 500) requestAnimationFrame(tick); else done(hs); })(); })""")
             assert max(heights) <= heights[-1] + 1, heights
