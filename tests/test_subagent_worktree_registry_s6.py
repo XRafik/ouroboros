@@ -231,7 +231,7 @@ def test_c4_b_the_acting_worktree_branch_cleans_up_on_registry_failure(
     with pytest.raises(wt.SubagentWorktreeRegistryCorrupt):
         wt.provision_worktree(
             repo_dir=target, task_id="acting9", worktree_root=snaps, data_dir=data)
-    assert not (snaps / "acting9").exists(), "the refused attempt cleans up"
+    assert not copy_path(snaps, "acting9").exists(), "the refused attempt cleans up"
     assert _git(
         target, "rev-parse", "--verify", f"{wt._BRANCH_PREFIX}acting9", check=False,
     ).returncode != 0, "and takes the task branch with it"
@@ -247,7 +247,7 @@ def test_c4_b_the_acting_worktree_branch_cleans_up_on_registry_failure(
     with pytest.raises(OSError, match="registry disk full"):
         wt.provision_worktree(
             repo_dir=target, task_id="acting9", worktree_root=snaps, data_dir=data)
-    assert not (snaps / "acting9").exists()
+    assert not copy_path(snaps, "acting9").exists()
     assert _git(
         target, "rev-parse", "--verify", f"{wt._BRANCH_PREFIX}acting9", check=False,
     ).returncode != 0
