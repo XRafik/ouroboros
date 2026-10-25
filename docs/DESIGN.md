@@ -1753,7 +1753,7 @@ fades and lets nothing travel. The capsules are real buttons with the touch hit 
 face is not a second tab stop, focus follows the stack's one control only when it had it,
 the ledges are hidden from assistive technology, and a column fanned at the bottom of a
 room that does not fit scrolls its first card under the header, folding returning to the
-front card. The owner chose this drawing on 25 Oct 2026 («Стопка как принято») after
+front card (a reader who was following the newest message keeps following it). The owner chose this drawing on 25 Oct 2026 («Стопка как принято») after
 rejecting the edges drawn above the front card (24 Oct) that had replaced the 22 Oct
 deck. Telegram receives only a relay that passes his words, as plain text. Main keeps
 its one receipt line. The row menu (right-click, Shift+F10, ContextMenu on the focused
