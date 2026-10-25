@@ -189,7 +189,7 @@ Outside Cyber Pro, shell git reads anywhere but mutates only targets resolved ou
 
 P13 permits no round or character cap. Sends retain deadlines, tool timeouts, ledger admission and provider limits. Layout hints choose inline versus paged sources, never execution permission. `native_context` records serialized characters (images included), window evidence, previous usage/route/view and output allowance, never free tokens. Image receipts distinguish source path/hash, delivered pixel hash and unavailable input; attachment or captions do not attest inspection. `compact_context` preserves authored views and exact sources. `native_read_coverage` is diagnostic; receipts record `ctx.last_read_view` / `display_map` ranges, not full coverage (§6 The coupling question).
 
-Unavailable schemas produce `not_dispatched` at $0. Unsupported image routes or provider window refusals leave named gaps and originals; the episode continues with text. Text-only overflow still fails. Custody retains paid sends and historical failures. `triad_review.default_output_contract` supplies the default surface shape.
+Unavailable schemas produce `not_dispatched` at $0. Unsupported image routes or provider window refusals leave named gaps and originals; the episode continues with text. Text-only overflow still fails. Episodes leave custody and usage; a paid send is never relabelled unstarted; historical failures stay readable. `triad_review.default_output_contract` supplies the default surface shape.
 
 #### Late completion and typed refusals
 

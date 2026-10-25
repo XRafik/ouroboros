@@ -9821,7 +9821,9 @@ body.keyboard-open .project-panel {
     line-height: var(--line-meta);
 }
 .chat-relay-card-head > .chat-quiz-project .chat-live-project-name { font-weight: 600; }
-.chat-relay-dest { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 96px; min-width: 0; }
+/* The receiver is half of the address: it keeps room for a readable name and wraps to its own line before it shrinks
+   to a few letters beside a long Project capsule. */
+.chat-relay-dest { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 96px; min-width: min(100%, 9em); }
 .chat-relay-arrow { display: inline-flex; flex: none; color: var(--text-meta); }
 .chat-relay-arrow > svg { width: 14px; height: 14px; }
 .chat-relay-to { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
