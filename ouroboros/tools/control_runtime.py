@@ -555,6 +555,7 @@ def _update_identity(ctx: ToolContext, content: str, expected_revision: str | No
         )
     from ouroboros.memory import Memory
     from ouroboros.tool_access import canonical_data_root
+    from ouroboros.tool_access_reads import canonical_runtime_reader
 
     # One identity, every room (P1): who I am does not change with the room I
     # am speaking in, so a project room or an external conversation revises the
@@ -570,9 +571,10 @@ def _update_identity(ctx: ToolContext, content: str, expected_revision: str | No
         mem.identity_path(), expected_revision, lambda _old: content,
         journal=mem.identity_journal_path(), author=focus_signature(ctx),
         source_type=str((getattr(ctx, "task_metadata", {}) or {}).get("delegation_role") or "task"))
+    reader = "\nCanonical identity reader:\n" + canonical_runtime_reader(ctx, canonical_data_root(ctx), "memory/identity.md")
     if not publication.ok:
         return _publish_tool_result(ctx, ToolResult(status="blocked", code="RESOURCE_CONSTRAINT_BLOCKED",
-            text=publication_refusal(publication, "memory/identity.md")))
+            text=publication_refusal(publication, "canonical memory/identity.md") + reader))
     old_content = publication.old_content
     result = f"OK: identity updated ({len(content)} chars); revision={publication.revision}"
     old_len = len(old_content)
@@ -583,7 +585,7 @@ def _update_identity(ctx: ToolContext, content: str, expected_revision: str | No
             "but full rewrites should be rare and reflect genuine self-creation — not a trivial turn. "
             "Read before writing (P12) and prefer evolving over replacing wholesale."
         )
-    return result
+    return result + reader
 
 
 def _update_world(ctx: ToolContext, content: str, expected_revision: str | None = None) -> str:
