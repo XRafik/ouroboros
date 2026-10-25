@@ -507,6 +507,7 @@
  * @property {string=} task_id
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -532,6 +533,7 @@
  * @property {string=} task_id
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -555,6 +557,7 @@
  * @property {boolean=} project_thread
  * @property {Object=} transport
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -597,6 +600,7 @@
  * @property {boolean=} project_thread
  * @property {Object=} transport
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -653,6 +657,7 @@
  * @property {number=} size_bytes
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
