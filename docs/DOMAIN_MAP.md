@@ -12,7 +12,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D02 | LLM client, routing & providers | 43 | 0 |
 | D03 | Context assembly, fit & compaction | 25 | 0 |
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
-| D05 | Tool surfaces: files, code, shell, media, external | 44 | 0 |
+| D05 | Tool surfaces: files, code, shell, media, external | 45 | 0 |
 | D06 | Review stack | 95 | 0 |
 | D07 | Delegation, subagents & Claudexor | 91 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
@@ -381,6 +381,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/tools/browser.py`
 - `ouroboros/tools/cards.py`
 - `ouroboros/tools/control_relay.py`
+- `ouroboros/tools/control_ui_translation.py`
 - `ouroboros/tools/core.py`
 - `ouroboros/tools/core_artifacts.py`
 - `ouroboros/tools/core_file_tools.py`
