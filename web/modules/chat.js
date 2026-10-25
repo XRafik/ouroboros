@@ -336,6 +336,9 @@ export function createChatInstance({
     // back): a row of the page looks for its prior bubble only when one could be mounted, instead of scanning the feed
     // once per row (O(rows²) per page).
     let replayKeys = null;
+    // ...and the selection as the reader left it: every mounted row the page moves keeps it (one read for the page, not
+    // one per move: in Chromium a selection read lays the page out).
+    let replaySelection = null;
     function noteBubbleKeys(node) {
         if (!replayKeys || !node) return;
         const nodes = node.classList?.contains('chat-bubble') ? [node] : [];
@@ -739,7 +742,7 @@ export function createChatInstance({
             // the feed's last child (rows go before it): no walk of the feed per row.
             const last = messagesDiv.lastElementChild;
             const typing = last?.classList?.contains('typing-bubble') ? last : messagesDiv.querySelector('.typing-bubble');
-            insertTimelineNode(messagesDiv, node, typing);
+            insertTimelineNode(messagesDiv, node, typing, replaySelection);
             noteBubbleKeys(node);
             replies.syncDerivedQuotes(node);  // a landing row may repeat, or stop repeating, the quote below it
             return true;
@@ -2357,14 +2360,17 @@ export function createChatInstance({
     const pendingHistoryUpserts = new Map();
     const pendingLiveEvictions = new Set();
     function releaseLiveOverflow() {
-        for (const id of pendingLiveEvictions) {
+        // Every card is judged as the reader sees the page, before the first one leaves.
+        const due = [...pendingLiveEvictions].filter((id) => {
             const record = liveCardRecords.get(id);
-            if (!record) { pendingLiveEvictions.delete(id); continue; }
-            if (record.historyIds?.size || activeDirectActivities.has(id)
+            if (!record) { pendingLiveEvictions.delete(id); return false; }
+            return !(record.historyIds?.size || activeDirectActivities.has(id)
                     // A retained successor still owns this physical episode's content/controller.
                     || record.episodeDisclosure?.isConnected
                     || (!record.finished && !record.historicalUnavailable)
-                    || historyNodeIsProtected(record.root, messagesDiv)) continue;
+                    || historyNodeIsProtected(record.root, messagesDiv));
+        });
+        for (const id of due) {
             disposeLiveCard(id);
             subagentChildParents.delete(id); subagentTerminalChildren.delete(id);
             explicitCardExpansion.delete(id); reviewDisclosureByTask.delete(id);
@@ -2380,13 +2386,18 @@ export function createChatInstance({
             withStableViewport(() => {
                 replayKeys = { history: new Set(), client: new Set(), origin: new Set(), legacy: new Set() };
                 noteBubbleKeys(messagesDiv);
+                replaySelection = keepSelection(document);
                 // A formerly unbound final can gain its real child lineage on a
-                // deeper page. Keep a selected old bubble until it can move.
+                // deeper page. Keep a selected old bubble until it can move: every old bubble is judged before one leaves.
+                const olds = new Map(messages.filter(row => row.history_id && row.delegation_role === 'subagent' && !row.is_progress
+                    && replayKeys.history.has(row.history_id))
+                    .map(row => [row, historyNodes(row.history_id).find(node => node.classList.contains('chat-bubble'))])
+                    .filter(([, old]) => old));
+                const held = new Set([...olds].filter(([, old]) => historyNodeIsProtected(old, messagesDiv)).map(([row]) => row));
                 messages = messages.filter(row => {
-                    if (!row.history_id || row.delegation_role !== 'subagent' || row.is_progress) return true;
-                    const old = historyNodes(row.history_id).find(node => node.classList.contains('chat-bubble'));
-                    if (!old) return true;
-                    if (historyNodeIsProtected(old, messagesDiv)) {
+                    const old = olds.get(row);
+                    if (!old?.isConnected) return true;
+                    if (held.has(row)) {
                         pendingHistoryUpserts.set(row.history_id, row); return false;
                     }
                     pendingHistoryUpserts.delete(row.history_id);
@@ -2593,7 +2604,7 @@ export function createChatInstance({
             _historyRow = null;
             _historyReplayActive = false;
             _historyAppending = false;
-            replayKeys = null;
+            replayKeys = null; replaySelection = null;
         }
         syncChatStatus();
     }
@@ -3050,13 +3061,13 @@ export function createChatInstance({
             byId.get(key).push(node);
         }
         // The page as the reader sees it decides, before any row leaves: a row or card read, focused or selected stays,
-        // and a card keeps its timeline's scroll and selection. Read for all of them first, one layout for all.
+        // and a card keeps its timeline's selection. Read for all of them first, one layout for all.
         const due = new Set([...ids].filter(id => !retained.has(id)));
         const held = new Set([...due].filter(id => (byId.get(id) || []).some(node => historyNodeIsProtected(node, messagesDiv))));
         const kept = keepSelection(document);
-        const before = new Map([...liveCardRecords].filter(([, record]) => [...(record.historyIds || [])].some(key => due.has(key))
-            || record.items.some(item => due.has(item.historyId || item.sourceHistoryId))).map(([id, record]) => [id, {
-            held: historyNodeIsProtected(record.root, messagesDiv), at: { scroll: timelineScroll(record), kept } }]));
+        const heldCards = new Set([...liveCardRecords].filter(([, record]) => ([...(record.historyIds || [])].some(key => due.has(key))
+            || record.items.some(item => due.has(item.historyId || item.sourceHistoryId)))
+            && historyNodeIsProtected(record.root, messagesDiv)).map(([id]) => id));
         for (const id of ids) {
             if (retained.has(id)) { pendingHistoryEvictions.delete(id); continue; }
             const nodes = byId.get(id) || [];
@@ -3075,6 +3086,10 @@ export function createChatInstance({
             released.add(id);
         }
         if (!released.size) return;
+        // A timeline's scroll is read once its released lines have left (where the engine anchors scrolling, the line
+        // being read has stayed in place), for every card they left at once: one layout.
+        const at = new Map([...liveCardRecords].filter(([, record]) => record.items.some(item => released.has(item.historyId || item.sourceHistoryId)))
+            .map(([id, record]) => [id, { scroll: timelineScroll(record), kept }]));
         for (const [id, record] of [...liveCardRecords].reverse()) {
             let affected = false;
             for (const key of record.historyIds || []) {
@@ -3083,13 +3098,13 @@ export function createChatInstance({
             const items = record.items.filter(item => !released.has(item.historyId || item.sourceHistoryId));
             if (items.length !== record.items.length) {
                 record.items = items;
-                renderLiveCardTimeline(record, before.get(id)?.at);
+                renderLiveCardTimeline(record, at.get(id));
                 updateLiveCardCount(record);
             }
             if (!affected || record.historyIds?.size || activeDirectActivities.has(id)
                     || record.episodeDisclosure?.isConnected
                     || record.subagentsEl?.querySelector('.chat-live-card')
-                    || before.get(id)?.held) continue;
+                    || heldCards.has(id)) continue;
             if (!record.finished && !record.historicalUnavailable && !record.historicalUnconfirmed) continue;
             disposeLiveCard(id);
             subagentChildParents.delete(id); subagentTerminalChildren.delete(id);

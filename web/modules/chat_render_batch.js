@@ -276,7 +276,7 @@ export function keepSelection(doc) {
     return { active, caret, selection, ranges };
 }
 
-export function insertTimelineNode(messages, node, typing = null) {
+export function insertTimelineNode(messages, node, typing = null, kept = null) {
     const rawNodeTs = node?.dataset?.ts;
     const nodeTs = rawNodeTs == null || rawNodeTs === '' ? NaN : Number(rawNodeTs);
     let before = null;
@@ -297,8 +297,9 @@ export function insertTimelineNode(messages, node, typing = null) {
     const target = before || (typing?.parentNode === messages ? typing : null);
     if (node.parentNode === messages && node.nextElementSibling === target) return { before };
     const doc = messages.ownerDocument;
-    // Only a mounted row that moves can lose the focus, caret or selection in it; a new row is just inserted.
-    const { active, caret, selection, ranges } = node.isConnected ? keepSelection(doc) : { ranges: [] };
+    // Only a mounted row that moves can lose the focus, caret or selection in it; a new row is just inserted. A page
+    // that moves many rows passes the selection it read once (`kept`).
+    const { active, caret, selection, ranges } = node.isConnected ? kept || keepSelection(doc) : { ranges: [] };
     if (target) messages.insertBefore(node, target);
     else messages.appendChild(node);
     if (active && node.contains?.(active) && doc.activeElement !== active) active.focus({ preventScroll: true });

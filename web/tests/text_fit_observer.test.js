@@ -160,3 +160,25 @@ test('elements fitted together are fitted in lockstep: a batch costs a few layou
         restoreDom(env.prior);
     }
 });
+
+test('inside a batch a fitted element shows its whole text at once; only its cut waits for the batch\'s reads', async () => {
+    const env = installDom();
+    const prior = { style: globalThis.getComputedStyle };
+    globalThis.getComputedStyle = () => ({ lineHeight: '20px', fontSize: '14px', whiteSpace: 'normal' });
+    try {
+        const { fitText } = await import(`../modules/text_fit.js?whole=${Date.now()}`);
+        const { batch } = await import('../modules/layout_batch.js');
+        const page = countedPage();
+        const el = page.element(150);
+        const text = `${Array.from({ length: 45 }, (_, i) => `word${i}`).join(' ')}.`;
+        batch(() => {
+            fitText(el, text, 2);
+            assert.equal(el.textContent, text, 'a reader in the same write (a card\'s change projection) sees the new text');
+            assert.equal(page.state.layouts, 0, 'nothing is laid out before the write is done');
+        });
+        assert.ok(el.textContent.endsWith('…') && el.scrollHeight <= 41, el.textContent);
+    } finally {
+        globalThis.getComputedStyle = prior.style;
+        restoreDom(env.prior);
+    }
+});

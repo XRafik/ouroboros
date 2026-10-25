@@ -52,23 +52,22 @@ function fitsInline(el, nowrap) {
 const inside = (job) => job.el.scrollHeight <= job.limit && fitsInline(job.el, job.nowrap);
 
 // One element's fit, written as the reads it waits for: each `yield read` is measured with every other pending read
-// (layout_batch.js), then the fit resumes with its value — its width and line height, whether the whole text fits,
-// then a binary search on its words. An element with no layout shows its whole text. In a batch an element built
-// before it is mounted (a reply's quote) is fitted once the batch's writes have mounted it.
+// (layout_batch.js), then the fit resumes with its value — its width, line height and whether the whole text fits,
+// then a binary search on its words. The whole text is written at once, so whoever reads the element in the same write
+// sees it (a card's change projection, chat_render_batch.js); only a cut waits for its reads. An element with no layout
+// shows its whole text. In a batch an element built before it is mounted (a reply's quote) is fitted once the batch's
+// writes have mounted it.
 function* fitSteps(el, fit) {
+    if (el.textContent !== fit.text) el.textContent = fit.text;
     const box = yield () => {
         if (!el.isConnected || !el.clientWidth) return null;
         const style = getComputedStyle(el);
-        return { el, width: el.clientWidth, limit: fit.lines * lineHeight(style) + 1, nowrap: style.whiteSpace === 'nowrap' };
+        const job = { el, width: el.clientWidth, limit: fit.lines * lineHeight(style) + 1, nowrap: style.whiteSpace === 'nowrap' };
+        job.whole = inside(job);
+        return job;
     };
-    if (!box) {
-        if (el.textContent !== fit.text) el.textContent = fit.text;
-        fit.onFit?.(false);
-        return;
-    }
-    fit.width = box.width;
-    el.textContent = fit.text;
-    if (yield () => inside(box)) { fit.onFit?.(false); return; }
+    if (box) fit.width = box.width;
+    if (!box || box.whole) { fit.onFit?.(false); return; }
     // Cut on whitespace only: a word is never split, a line never ends half a word.
     const tokens = fit.text.split(/(\s+)/);
     let low = 0, high = tokens.length;
