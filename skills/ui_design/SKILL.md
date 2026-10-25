@@ -37,7 +37,7 @@ A surface looks designed when every choice on it is explained by what the viewer
 
 - Open the delivered thing as its viewer will: the entry file or page, alone, at their size, theme and engine. Look at the first screen at 1:1, then at 2× crops of what changed; never a stitched sheet or a scaled grid.
 - Then measure what eyes miss: overflow, clipped or covered text, bars over content, stuck controls, small targets, contrast (`references/browser.md`, `references/measure.js`). Measure after a paint; WebKit can report one width before the first paint and another after.
-- Before a person sees it, let an eye that did not draw it say what it sees: what the thing is, who speaks to whom, what a viewer would do next. A reviewer given the frames, a critic you brief or a cold reader all serve; show the scene before your intent (the comparison page's clean view hides your names, notes and recommendation). When its words differ from your viewer sentence, the design is unclear: fix it before geometry.
+- An eye that did not draw it often sees what yours no longer can: when you judge it worth it, ask one to say what it sees first (what the thing is, who speaks to whom, what a viewer would do next). A reviewer given the frames, a critic you brief or a cold reader all serve; show the scene before your intent (the comparison page's clean view hides your names, notes and recommendation). When its words differ from your viewer sentence, the design is unclear: fix it before geometry.
 - Findings are evidence, never a verdict. A green test, a saved screenshot or a check count is not a look. If you could not render or see the result, say so and give what you measured.
 
 ## 4. Putting a choice before a person
@@ -64,4 +64,4 @@ A delegated session may not see this skill: give it this file's absolute path an
 
 ## Done means
 
-A delivered page opens alone and fetches nothing; zero console errors; the awkward content fits; you looked at it at the viewer's size, in both themes when the product has two; an eye that did not make it described it the way your viewer sentence does; you can name what you saw and what you measured.
+A delivered page opens alone and fetches nothing; zero console errors; the awkward content fits; you looked at it at the viewer's size, in both themes when the product has two, and what you saw (and what any eye you asked saw) matches your viewer sentence; you can name what you saw and what you measured.

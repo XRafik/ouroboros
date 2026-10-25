@@ -344,7 +344,9 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
             const place = card.getBoundingClientRect();
             // From the stack's place, a step lower per card, and never past the front card's end nor below its own place.
             const from = Math.min(stackTop - place.top + i * LEDGE_DROP, landing.bottom - place.bottom, 0);
-            play(card, [{ transform: `translateY(${from}px) scale(0.96)`, opacity: 0 }, { transform: 'none', opacity: 1 }],
+            // Shrunk toward its top edge, so the scale never lowers a card that sets out at its own place.
+            play(card, [{ transform: `translateY(${from}px) scale(0.96)`, transformOrigin: '50% 0', opacity: 0 },
+                { transform: 'none', transformOrigin: '50% 0', opacity: 1 }],
                 open, { delay: Math.min(i, 4) * 24, easing: ease });
         });
     }
