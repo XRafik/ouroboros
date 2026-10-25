@@ -19,8 +19,9 @@ app releases: at startup an unmodified built-in whose bundled version changed is
 in place, keeping its enablement, its Telegram state and the owner's grants while the
 requested keys and permissions are unchanged; a copy with local changes is kept and the
 owner chooses on update. Nothing re-installs a built-in the owner removed.
-A built-in no longer bundled loses its launcher marker and keeps running as a skill that
-left its source. A built-in whose manifest ``os`` excludes this host is not offered or newly
+A built-in no longer bundled is uninstalled when its copy is unchanged (grants survive), after a
+clean re-seed of the same pass; an edited or unknown copy loses its launcher marker and keeps running
+as the owner's skill. A built-in whose manifest ``os`` excludes this host is not offered or newly
 installed; an installed copy is still re-seeded (discovery hides it, except a Unix
 computer-use copy kept on Windows for remote machines). ``state/native_seed.json`` records
 the committed bundled tree the last complete pass reconciled, so an unchanged tree costs a
@@ -296,22 +297,6 @@ def _warn_equal_version_drift(seed: pathlib.Path, target: pathlib.Path, version:
                        seed.name, version, seed_hash, target_hash)
 
 
-def _unmodified_release(drive_root: pathlib.Path, name: str, target: pathlib.Path) -> bool:
-    """Whether the installed copy still holds exactly the bytes of the release it was installed from.
-    Unknown original bytes, an edit mark or unreadable bytes never count as unmodified."""
-    from ouroboros.skill_install_record import read_install_record
-    from ouroboros.skill_loader import compute_content_hash
-
-    record = read_install_record(drive_root, name) or {}
-    digest = str(record["base_digest"] if "base_digest" in record else (record.get("release") or {}).get("digest") or "")
-    if record.get("modified") or not digest:
-        return False
-    try:
-        return compute_content_hash(target) == digest
-    except Exception:
-        return False
-
-
 def release_removed_builtins(drive_root: pathlib.Path, *, seed_dir: Optional[pathlib.Path] = None,
                              log_obj: Any = None, retire: bool = True) -> bool:
     """A built-in no longer bundled: a copy nobody changed is uninstalled (the bundle carries its
@@ -331,16 +316,20 @@ def release_removed_builtins(drive_root: pathlib.Path, *, seed_dir: Optional[pat
         if not entry.is_dir() or entry.name.startswith(".") or not marker.is_file() or (seed_root / entry.name).is_dir():
             continue
         try:
-            if _unmodified_release(pathlib.Path(drive_root), entry.name, entry):
+            if _changed_since_install(pathlib.Path(drive_root), entry.name, entry) is False:
                 if not retire:
                     complete = False
                     continue
-                uninstall_installed(pathlib.Path(drive_root), entry.name)
-                logger.info("Built-in skill %r is no longer bundled and was unchanged; uninstalled.", entry.name)
-                continue
+                try:
+                    uninstall_installed(pathlib.Path(drive_root), entry.name)
+                    logger.info("Built-in skill %r is no longer bundled and was unchanged; uninstalled.", entry.name)
+                    continue
+                except SkillInstallError:  # another folder uses the name: release this copy as the owner's
+                    logger.warning("Built-in skill %r could not be uninstalled; kept as the owner's copy.",
+                                   entry.name, exc_info=True)
             marker.unlink()
             logger.info("Built-in skill %r is no longer bundled; its installed copy is now user-managed.", entry.name)
-        except (OSError, SkillInstallError):
+        except OSError:
             complete = False
             logger.warning("Failed to release removed built-in %s", entry, exc_info=True)
     return complete

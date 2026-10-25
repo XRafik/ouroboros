@@ -307,6 +307,23 @@ def test_a_retired_built_in_nobody_changed_is_uninstalled_and_its_grants_survive
     assert grants.is_file(), "the owner's grants outlive the payload"
 
 
+def test_a_retired_built_in_whose_name_another_folder_uses_stays_as_the_owners_copy(env):
+    """The uninstall refuses a name two folders share; the copy stays, released, and the pass completes."""
+    from ouroboros.skill_builtin import release_removed_builtins
+
+    seed_dir, drive_root = env
+    seed = _write_skill(seed_dir, "weather")
+    assert _install("weather", seed_dir, drive_root)["ok"]
+    _write_skill(drive_root / "skills" / "external", "weather")
+    import shutil
+
+    shutil.rmtree(seed)
+    assert release_removed_builtins(drive_root, seed_dir=seed_dir) is True, "a refused uninstall does not loop every boot"
+    target = drive_root / "skills" / "native" / "weather"
+    assert target.is_dir() and not (target / ".seed-origin").exists()
+    assert (drive_root / "skills" / "external" / "weather" / "SKILL.md").is_file()
+
+
 def test_a_retired_built_in_someone_edited_keeps_running_as_the_owners_copy(env):
     from ouroboros.skill_builtin import release_removed_builtins
     from ouroboros.skill_install_record import read_install_record

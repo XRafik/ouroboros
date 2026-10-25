@@ -13,6 +13,7 @@ import { fullText } from './text_fit.js';
 import { bindBubbleActions } from './message_actions.js';
 import { revealTimelineNode } from './chat_render_batch.js';
 import { afterMotion } from './motion.js';
+import { readBand } from './project_read_state.js';
 
 export const REPLY_ICON = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"'
     + ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
@@ -54,7 +55,7 @@ function failureText({ state, task_id: taskId, error }) {
  * lets app switch to the host's destination only while this claim remains current. It returns a state or null
  * for cancellation. Neither the quote's stored chat label nor its task chooses the destination.
  */
-export function createChatReplies({ chatId, feed, input, key = '', reading, history = () => null,
+export function createChatReplies({ chatId, feed, input, composerArea = null, key = '', reading, history = () => null,
     navigate = null, present = () => true, onDomWrite = (write) => write(), actions = undefined }) {
     // The strip is the field's first line: inside the field, right before its text row (composer.js); a bare field (a
     // test fixture) takes it itself.
@@ -90,7 +91,9 @@ export function createChatReplies({ chatId, feed, input, key = '', reading, hist
     }
     // Notes between works: a relay row's bubble is dressed as a note card and grouped into stacks (chat_relay_deck.js);
     // the room decides how the address reads (Main is chat 1) and lends a fanned column its reading owner and placement.
-    const decks = createRelayDecks({ feed, chatId, onDomWrite, reading, clearance: headerClearance, place });
+    // What of the feed a reader sees below: the composer is drawn over the feed's foot.
+    const band = () => readBand(feed, null, composerArea);
+    const decks = createRelayDecks({ feed, chatId, onDomWrite, reading, clearance: headerClearance, band, place });
     let destroyed = false;
     // `held`: the reader's own live-edge intent while a reveal is pending (a reveal sets stick false itself).
     let revealGeneration = 0, revealing = 0, held = null;

@@ -525,6 +525,29 @@ def test_a_failed_phase_writes_no_receipt_and_the_next_boot_retries(seed_repo, m
     assert skill_builtin._version(drive / "skills" / "native" / "first") == "1.1.0"
 
 
+def test_a_dropped_built_in_waits_for_a_clean_re_seed_before_it_is_uninstalled(seed_repo, monkeypatch):
+    """The bundle merges `second` into `first`: while `first` fails to re-seed, `second` stays marked and running."""
+    import shutil
+
+    repo, drive = seed_repo
+    ensure(repo, drive)
+    shutil.rmtree(repo / "skills" / "second")
+    _write(repo / "skills", "first", "2.0.0")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "second merged into first")
+    real = skill_builtin.install_builtin_skill
+    monkeypatch.setattr(skill_builtin, "install_builtin_skill",
+                        lambda *args, **kwargs: {"ok": False, "error": "disk full"})
+    ensure(repo, drive)
+    second = drive / "skills" / "native" / "second"
+    assert (second / ".seed-origin").is_file(), "a failed successor keeps its retired partner for the next boot"
+    assert receipt(drive) is None
+    monkeypatch.setattr(skill_builtin, "install_builtin_skill", real)
+    ensure(repo, drive)
+    assert not second.exists() and receipt(drive) is not None
+    assert skill_builtin._version(drive / "skills" / "native" / "first") == "2.0.0"
+
+
 @pytest.mark.parametrize("pending", [["first"], None])
 def test_pending_packages_do_not_invalidate_the_bundle_receipt(seed_repo, monkeypatch, pending):
     """Inverted contract: package retries no longer require repeating bundle reconciliation."""

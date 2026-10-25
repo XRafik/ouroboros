@@ -53,12 +53,13 @@ const thisWork = () => tr('chat.relay.this_work', 'this work');
 /**
  * One instance per room feed (chat_reply.js creates it beside the replies). `chatId` is the room (Main is 1): it decides
  * how the address reads. `onDomWrite` is the room's stable-viewport seam: every change that moves heights runs inside
- * it. `reading()` is the room's reading-position owner, `clearance()` the height of what covers the feed's top, and
+ * it. `reading()` is the room's reading-position owner, `clearance()` the height of what covers the feed's top, `band()`
+ * the part of the feed a reader sees (its bottom is the composer's top where the composer is drawn over the feed), and
  * `place(row, { follow })` the room's one explicit placement of a row under its header (or its return to the newest
  * message): the deck decides when a fanned column asks for it, never how the feed scrolls.
  */
 export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => write(), formatTime = formatMsgTime,
-    reading = null, clearance = () => 72, place = null,
+    reading = null, clearance = () => 72, band = null, place = null,
     lookupProject = async (room, signal) => {
         const data = await fetchJson(`/api/projects?chat_id=${encodeURIComponent(room)}`, { signal });
         return data?.projects?.length === 1 ? data.projects[0] : null;
@@ -375,9 +376,10 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
         const first = run[0], front = run[run.length - 1];
         const box = feed.getBoundingClientRect();
         const top = box.top + clearance();
+        const bottom = band ? band().bottom : box.bottom;
         if (open) {
             const head = first.getBoundingClientRect().top;
-            const fits = front.getBoundingClientRect().bottom - head <= box.bottom - top;
+            const fits = front.getBoundingClientRect().bottom - head <= bottom - top;
             if (fits || head >= top) return;
             place(first);
             front.__relayPlaced = { following };
@@ -391,7 +393,7 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
         delete holder.__relayPlaced;
         const card = front.getBoundingClientRect();
         if (placed.following) place(front, { follow: true });
-        else if (card.top < top || card.bottom > box.bottom) place(front);
+        else if (card.top < top || card.bottom > bottom) place(front);
     }
 
     /* ---- the feed ------------------------------------------------------------------------------------------------ */

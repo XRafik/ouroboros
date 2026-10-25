@@ -13,8 +13,9 @@
      the smallest element that holds the change) and scrollers (selectors whose scroll is kept), questions [{text, context, number,
      options [{key, text, recommended}]}] (the page adds "none of these" itself), source (one line on how
      the frames were made), strings (the page's own words in the viewer's language).
-     Clean view (C, or #…&clean=1): variants become neutral numbers and every author's word (title, names, notes,
-     recommendation, questions) is hidden, so a critic says what it sees before it reads what you meant.
+     Clean view (C, or #…&clean=1): variants become neutral numbers (frame names and the link too) and every author's
+     word (title, names, notes, recommendation, questions) is hidden, so a critic says what it sees before it reads what
+     you meant.
      Inside the JSON block write every "</" as "<\/" (json.dumps(...).replace("</", "<\\/")): a frame that contains
      "</script>" would otherwise end this block early and the page would open blank. -->
 <style>
@@ -99,6 +100,7 @@ body.clean .num { display:inline; }
     keys: 'Keys: 1–9 or ←/→ switch variants, S shows them side by side, C hides every author\'s word',
     clean: 'Clean view', cleanTitle: 'Clean view: say what you see before reading what was meant' }, D.strings || {});
   const $ = (id) => document.getElementById(id), W = D.viewport.width, H = D.viewport.height;
+  const number = (id) => `${D.variants.findIndex((v) => v.id === id) + 1}`;
   const scenes = D.scenes && D.scenes.length ? D.scenes : [{ id: 'main', label: '' }];
   const state = { scene: scenes[0].id, variant: D.start || D.variants[0].id, side: false, clean: false };
   const frames = {}, scroll = {}, anchors = {};
@@ -228,9 +230,10 @@ body.clean .num { display:inline; }
     $('side').setAttribute('aria-pressed', String(state.side));
     $('clean').setAttribute('aria-pressed', String(state.clean));
     document.body.classList.toggle('clean', state.clean);
+    for (const g of Object.values(frames)) g.title = state.clean ? number(g.dataset.key.split('/')[0]) : g.dataset.key;
     document.title = $('title').textContent = state.clean ? T.cleanTitle : (D.title || '');
     $('scene-note').textContent = (scenes.find((s) => s.id === state.scene) || {}).note || '';
-    history.replaceState(null, '', `#scene=${encodeURIComponent(state.scene)}&v=${encodeURIComponent(state.variant)}${state.side ? '&side=1' : ''}${state.clean ? '&clean=1' : ''}`);
+    history.replaceState(null, '', `#scene=${encodeURIComponent(state.scene)}&v=${encodeURIComponent(state.clean ? number(state.variant) : state.variant)}${state.side ? '&side=1' : ''}${state.clean ? '&clean=1' : ''}`);
   }
   function onKey(e) {
     if (editable(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -267,11 +270,12 @@ body.clean .num { display:inline; }
   if ((D.questions || []).length) { const row = document.createElement('div'); row.className = 'answer'; answer.textContent = T.chat; row.append(copy, answer); $('more').append(row); }
   if (D.source) { const p = document.createElement('p'); p.className = 'source'; p.textContent = D.source; $('more').append(p); }
 
-  // Deep link (#scene=…&v=…&side=1) and a small API for scripted looks.
+  // Deep link (#scene=…&v=…&side=1; v is an id, or a number from the clean view) and a small API for scripted looks.
   const h = new URLSearchParams(location.hash.slice(1));
+  const pick = (v) => (D.variants.find((x) => x.id === v) || D.variants[Number(v) - 1] || {}).id;
   window.compare = { subject: D.subject || null, show: (s) => show({ scene: s.scene || state.scene, variant: s.variant || state.variant, side: !!s.side, clean: !!s.clean }),
     states: () => scenes.flatMap((s) => [...D.variants.map((v) => ({ scene: s.id, variant: v.id })), { scene: s.id, variant: D.variants[0].id, side: true }]) };
-  show({ scene: h.get('scene') || state.scene, variant: h.get('v') || state.variant, side: h.get('side') === '1', clean: h.get('clean') === '1' });
+  show({ scene: h.get('scene') || state.scene, variant: pick(h.get('v')) || state.variant, side: h.get('side') === '1', clean: h.get('clean') === '1' });
 })();
 </script>
 </body>

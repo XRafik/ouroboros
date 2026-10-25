@@ -271,9 +271,12 @@ def test_clean_view_hides_every_author_word_and_keeps_the_scene(engine, tmp_path
         assert not any(visible(selector) for selector in authored), "the clean view hides every author word"
         assert page.locator('[data-variant="a"] .num').inner_text() == "2"
         assert page.evaluate("document.getElementById('title').textContent") != title
-        assert page.evaluate("location.hash").endswith("&clean=1")
+        assert page.evaluate("location.hash") == "#scene=draft&v=1&clean=1", "the link names the variant by number"
+        names = page.evaluate("[...document.querySelectorAll('#stage iframe')].map(f => f.title)")
+        assert names and all(name.isdigit() for name in names), names
         page.keyboard.press("2")
         wait_shown(page, "a", "draft")
+        assert page.evaluate("location.hash") == "#scene=draft&v=2&clean=1"
         page.keyboard.press("s")
         wait_shown(page, "a", "draft", side=True)
         captions = page.locator("#stage .cap").all_inner_texts()
@@ -282,3 +285,6 @@ def test_clean_view_hides_every_author_word_and_keeps_the_scene(engine, tmp_path
         page.wait_for_timeout(150)
         assert visible("#more") and page.evaluate("location.hash").find("clean") < 0, "C brings the author's words back"
         assert_nothing_fetched(page)
+        shared = open_page(instance, path.as_uri() + "#scene=draft&v=2&clean=1")
+        wait_shown(shared, "a", "draft")
+        assert shared.evaluate("document.body.classList.contains('clean')"), "a clean link opens clean, on its variant"

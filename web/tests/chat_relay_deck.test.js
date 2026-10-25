@@ -529,6 +529,29 @@ test('a fanned column at the bottom of a room asks the room to place its first c
     } finally { f.close(); }
 });
 
+test('whether a fanned column fits is judged in the band a reader sees, not under the composer', async () => {
+    const calls = [];
+    let composerTop = 700;  // first no composer over the feed, then one over its last 100 px
+    const f = fixture({ reading: () => ({ stick: true }), clearance: () => 60, band: () => ({ top: 100, bottom: composerTop }),
+        place: (node, opts = {}) => calls.push([node, Boolean(opts.follow)]) });
+    try {
+        f.feed.getBoundingClientRect = () => ({ top: 100, bottom: 700, height: 600 });
+        const rows = [f.note('a'), f.note('b'), f.note('c')];
+        await settle();
+        // A reader at the newest end: the front card ends at the composer's top, the column's first card is under the header.
+        rows[0].rect = { top: 100, bottom: 250, height: 150 };
+        rows[1].rect = { top: 250, bottom: 400, height: 150 };
+        rows[2].rect = { top: 400, bottom: 600, height: 200 };
+        f.act(rows[2]).click();
+        assert.equal(calls.length, 0, 'a column that fits what the reader sees asks for nothing');
+        f.act(rows[0]).click();
+        composerTop = 600;
+        f.act(rows[2]).click();
+        assert.equal(calls.length, 1, 'with the composer over the feed the same column does not fit: its first card is placed');
+        assert.ok(calls[0][0] === rows[0] && calls[0][1] === false);
+    } finally { f.close(); }
+});
+
 test('a note arriving while the column is open becomes its front, and folding returns the follower to it', async () => {
     const calls = [];
     const position = { stick: true };
