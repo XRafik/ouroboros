@@ -24,7 +24,7 @@ import subprocess
 import pytest
 
 from ouroboros import subagent_worktrees as wt
-from ouroboros.unindexed import copy_path
+from ouroboros.unindexed import COPIES, copy_path
 
 
 MALFORMED = '"not a registry"'
@@ -206,7 +206,7 @@ def test_c4_a_git_branch_registry_write_failure_leaves_no_worktree_or_ref(
             target_root=target, task_id="t1", snapshot_id="snapFail",
             worktree_root=snaps, data_dir=data)
 
-    leftovers = sorted(p.name for p in snaps.glob("dlg_*")) if snaps.exists() else []
+    leftovers = sorted(p.name for p in [*snaps.glob("dlg_*"), *snaps.glob(f"{COPIES}/dlg_*")])
     assert leftovers == [], leftovers
     assert _git(
         target, "rev-parse", "refs/ouroboros/delegated/snapFail", check=False,
