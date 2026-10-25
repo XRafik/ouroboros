@@ -198,6 +198,7 @@ def test_round_sources_reference_one_retained_image_without_repeating_base64(tmp
         digest = hashlib.sha256(screenshot).hexdigest()
         assert refs and {ref["sha256"] for ref in refs} == {digest}
         assert {ref["source_path"] for ref in refs} == {_receipt(result)["source_path"]}
+        assert {ref["requested_path"] for ref in refs} == {str(path)}, "the record names what the reviewer opened"
         assert all(Path(ref["source_path"]).read_bytes() == screenshot for ref in refs)
         assert len(list((root / "uploads" / "views").iterdir())) == 1
         assert all(base64.b64decode(_parts(call)[0]["image_url"]["url"].split(",", 1)[1]) == screenshot
@@ -207,7 +208,8 @@ def test_round_sources_reference_one_retained_image_without_repeating_base64(tmp
         assert json.loads(sources[-1])["sent_view"] == executor._inspection_ctx._last_context_observation
 
 
-def test_converted_image_has_one_exact_source_beside_its_retained_original(tmp_path, screenshot, monkeypatch):
+def test_a_converted_image_is_named_by_the_pixels_sent_and_its_original_without_a_second_copy(
+        tmp_path, screenshot, monkeypatch):
     monkeypatch.setattr("ouroboros.vision_routing.supports_vision", lambda *a, **kw: True)
     bmp = io.BytesIO()
     Image.open(io.BytesIO(screenshot)).save(bmp, format="BMP")
@@ -225,9 +227,17 @@ def test_converted_image_has_one_exact_source_beside_its_retained_original(tmp_p
     refs = [ref for source in sources for ref in _references(json.loads(source))]
     pixels = base64.b64decode(_parts(llm.calls[1])[0]["image_url"]["url"].split(",", 1)[1])
     assert pixels != bmp.getvalue() and pixels.startswith(b"\x89PNG")
-    assert refs and len({ref["source_ref"]["path"] for ref in refs}) == 1
-    assert len(list(root.glob("task_results/artifacts/t-native/source_handles/context_checkpoints/*-image-*.bin"))) == 1
+    assert refs and not list(root.glob("task_results/artifacts/t-native/source_handles/context_checkpoints/*-image-*"))
     for ref in refs:
-        assert ref["sha256"] == hashlib.sha256(pixels).hexdigest()
-        assert read_actor_source_bytes(root, "t-native", ref["source_ref"]) == pixels
-        assert Path(ref["source_path"]).read_bytes() == bmp.getvalue()
+        assert ref["sha256"] == hashlib.sha256(pixels).hexdigest() and "source_ref" not in ref
+        assert ref["source_sha256"] == hashlib.sha256(bmp.getvalue()).hexdigest()
+        assert Path(ref["source_path"]).read_bytes() == bmp.getvalue() and ref["requested_path"] == str(path)
+
+
+@pytest.mark.parametrize("url", ["https://example.invalid/frame.png", "data:image/png;base64,not*base64"])
+def test_an_image_block_without_inline_pixels_is_kept_as_it_is(url):
+    from ouroboros.review_native_images import NativeReviewImages
+
+    block = {"type": "image_url", "image_url": {"url": url}}
+    assert NativeReviewImages().source_projection({"messages": [{"role": "user", "content": [block]}]}) == {
+        "messages": [{"role": "user", "content": [block]}]}

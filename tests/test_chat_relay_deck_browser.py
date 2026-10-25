@@ -149,6 +149,20 @@ _GEOMETRY = """n => {
 }"""
 
 
+# Every card's starting translation as the deck asks the engine for it, read whenever the test looks (a finished
+# animation drops out of getAnimations(), and a loaded machine can finish it before the read).
+_RECORD_STARTS = r"""(() => {
+    const animate = Element.prototype.animate;
+    window.__relayStarts = [];
+    Element.prototype.animate = function (frames, options) {
+        const first = Array.isArray(frames) ? frames[0] : null;
+        const m = this.classList?.contains('chat-relay-note') && first && /translateY\((-?[\d.]+)px\)/.exec(String(first.transform || ''));
+        if (m) window.__relayStarts.push(Number(m[1]));
+        return animate.call(this, frames, options);
+    };
+})()"""
+
+
 def _pixel(page, x, y):
     """The painted colour at a viewport point (device scale 2: the point's own pixel)."""
     from PIL import Image
@@ -187,6 +201,7 @@ def test_relay_notes_stack_fans_out_and_folds(direct_server_with_data, browser_e
         browser = getattr(pw, browser_engine).launch(headless=True)
         # The phone is a touch device: a coarse pointer, where the controls' hit areas reach the finger's minimum.
         page = browser.new_page(viewport={'width': viewport[0], 'height': viewport[1]}, device_scale_factor=2, has_touch=phone)
+        page.add_init_script(_RECORD_STARTS)
         page.on('pageerror', lambda error: errors.append(str(error)))
         page.on('console', lambda message: errors.append({'text': message.text, 'location': message.location}) if message.type == 'error' else None)
         page.on('response', lambda response: facts.setdefault('http_errors', []).append({'url': response.url, 'status': response.status}) if response.status >= 400 else None)
@@ -291,14 +306,12 @@ def test_relay_notes_stack_fans_out_and_folds(direct_server_with_data, browser_e
             # glide, and the first card of a column that does not fit lands under the header (owner question 6, A).
             page.locator(feed).evaluate('feed => { feed.scrollTop = feed.scrollHeight; }')
             page.evaluate(_FRAMES)
+            page.evaluate('window.__relayStarts.length = 0')
             eight.locator('.chat-relay-act').focus()
             page.keyboard.press('Enter')
             # The cards fan downward from where the stack lay, even though placing the column scrolled the feed: none
             # sets out from below its own place.
-            starts = page.locator(feed).evaluate(r"""feed => [...feed.querySelectorAll('.chat-relay-note[data-deck="open"]')]
-                .flatMap(n => n.getAnimations().map(a => String((a.effect.getKeyframes()[0] || {}).transform || ''))
-                .map(t => { const m = /translateY\((-?[\d.]+)px\)/.exec(t); return m ? Number(m[1]) : null; })
-                .filter(v => v !== null))""")
+            starts = page.evaluate('window.__relayStarts.slice()')
             assert starts and max(starts) <= 0.5, starts
             heights = page.locator(feed).evaluate("""feed => new Promise(done => { const hs = []; const t0 = performance.now();
                 (function tick() { hs.push(feed.scrollHeight); if (performance.now() - t0 < 500) requestAnimationFrame(tick); else done(hs); })(); })""")
@@ -402,4 +415,56 @@ def test_relay_notes_stack_fans_out_and_folds(direct_server_with_data, browser_e
             (dest / f'{prefix}-last.html').write_text(page.content())
             (dest / f'{prefix}-errors.json').write_text(json.dumps(errors))
             (dest / f'{prefix}-facts.json').write_text(json.dumps(facts, indent=2))
+            browser.close()
+
+
+_BAND = """feed => {
+    const panel = feed.closest('.project-panel');
+    const header = panel.querySelector('.project-panel-bar'), composer = panel.querySelector('.chat-input-area');
+    const cards = [...feed.querySelectorAll('.chat-relay-note')].map(n => n.getBoundingClientRect());
+    const act = feed.querySelector('.chat-relay-note[data-deck-first="1"] .chat-relay-act');
+    return { headerBottom: header.getBoundingClientRect().bottom, composerTop: composer.getBoundingClientRect().top,
+             feedTop: feed.getBoundingClientRect().top, feedBottom: feed.getBoundingClientRect().bottom,
+             column: cards[cards.length - 1].bottom - cards[0].top, showLessTop: act ? act.getBoundingClientRect().top : null };
+}"""
+
+
+@pytest.mark.parametrize('browser_engine', ['chromium', 'webkit'])
+@pytest.mark.parametrize('viewport', [(1100, 750), (390, 844)], ids=['desktop', 'phone'])
+def test_a_column_hidden_only_by_the_composer_comes_under_the_header(direct_server_with_data, browser_engine, viewport):
+    """Five ordinary notes fit the feed's box but not the band above the composer: the room lends the deck that band,
+    so the column's first card and its Show less come under the header (owner question 6, A)."""
+    from playwright.sync_api import sync_playwright
+
+    root = direct_server_with_data['data_dir']
+    room = create_project(root, 'relay-five', name='Five notes', origin='owner_ui')
+    start = datetime(2026, 10, 22, 11, tzinfo=timezone.utc)
+    ds.append(root, 'chat', {'chat_id': room['chat_id'], 'ts': start.isoformat(), 'direction': 'in',
+                             'text': 'What did the other works find?'}, feed=True)
+    for i, text in enumerate(UNNAMED[:5]):
+        ds.append(root, 'chat', {'chat_id': room['chat_id'], 'ts': (start + timedelta(minutes=i + 1)).isoformat(),
+                                 'direction': 'out', 'text': text, 'type': 'relay_entry', 'client_message_id': f'five-{i}',
+                                 'relay': {'relay_id': f'five-{i}', 'quotes': [], 'sender': {'task_id': f'old-{i}'}}},
+                  feed=True)
+    feed = f'#pchat-{room["id"]}-messages'
+    with sync_playwright() as pw:
+        browser = getattr(pw, browser_engine).launch(headless=True)
+        page = browser.new_page(viewport={'width': viewport[0], 'height': viewport[1]}, has_touch=viewport[0] < 600)
+        try:
+            assert page.request.post(direct_server_with_data['url'] + '/api/ui/preferences',
+                                     data={'project_panel_width': 580, 'sidebar_width': 306}).ok
+            _open(page, direct_server_with_data['url'])
+            _open_project(page, room)
+            cards = page.locator(f'{feed} .chat-relay-note')
+            assert cards.count() == 5
+            page.locator(feed).evaluate('feed => { feed.scrollTop = feed.scrollHeight; }')
+            page.evaluate(_FRAMES)
+            cards.nth(4).locator('.chat-relay-act').click()
+            page.wait_for_timeout(900)
+            page.evaluate(_FRAMES)
+            band = page.locator(feed).evaluate(_BAND)
+            seen, box = band['composerTop'] - band['headerBottom'], band['feedBottom'] - band['feedTop']
+            assert seen < band['column'] < box, band  # taller than what a reader sees, shorter than the feed itself
+            assert band['showLessTop'] is not None and band['showLessTop'] >= band['headerBottom'] - 0.5, band
+        finally:
             browser.close()

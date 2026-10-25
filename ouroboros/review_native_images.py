@@ -34,7 +34,6 @@ class NativeReviewImages:
         self.sent_messages = []
         self.candidates = {}
         self.refusals = {}
-        self._source_refs = {}
 
     def accept(self, call_id, path, result, private, *, round_idx):
         """Called only by the episode thread, after success OR abandonment."""
@@ -63,34 +62,31 @@ class NativeReviewImages:
         self.pending.clear()
         return messages[start:]
 
-    def source_projection(self, value, store_source):
-        """Round sources refer to retained pixels, never repeat inline base64.
+    def source_projection(self, value):
+        """Round sources name each image by the pixels sent and the files behind them, never repeat inline base64.
 
-        The in-memory canonical view and physical send stay intact. If the shared
-        loader converted the original, keep those exact bytes once in the existing
-        task source store. Unchanged pixels reuse the loader's retained original.
+        The in-memory canonical view and physical send stay intact. The record keeps the delivered pixels' hash, the
+        path the reviewer opened and the loader's retained copy, which ages out with agent media like any viewed image.
         """
         if isinstance(value, list):
-            return [self.source_projection(item, store_source) for item in value]
+            return [self.source_projection(item) for item in value]
         if not isinstance(value, dict):
             return value
         if not _is_image(value):
-            return {key: self.source_projection(item, store_source) for key, item in value.items()}
+            return {key: self.source_projection(item) for key, item in value.items()}
         url = _image_url_from_block(value)
-        raw = base64.b64decode(url.split(";base64,", 1)[1], validate=True)
-        digest = hashlib.sha256(raw).hexdigest()
-        ref = {"type": "image_reference", "sha256": digest, "size": len(raw), "mime": url[5:].split(";", 1)[0],
-               "source_path": value.get("_source_path"), "source_sha256": value.get("_source_sha256"),
-               "image_id": value.get("_review_image_id")}
-        if digest != ref["source_sha256"] or not ref["source_path"]:
-            if digest not in self._source_refs:
-                stored = store_source("image", raw)
-                if stored:
-                    self._source_refs[digest] = stored
-            ref["source_ref"] = self._source_refs.get(digest, {})
-            if not ref["source_ref"]:
-                ref["gap"] = "exact image representation could not be retained; original remains at source_path"
-        return ref
+        head, _, data = url.partition(";base64,")
+        try:
+            raw = base64.b64decode(data, validate=True) if data else None
+        except ValueError:
+            raw = None
+        if not raw:  # no inline pixels to shrink: the block stays as it is
+            return value
+        image_id = value.get("_review_image_id")
+        return {"type": "image_reference", "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw),
+                "mime": head[5:], "requested_path": self.facts.get(image_id, {}).get("requested_path"),
+                "source_path": value.get("_source_path"), "source_sha256": value.get("_source_sha256"),
+                "image_id": image_id}
 
     @staticmethod
     def _gap(fact, reason, *, status="unavailable"):

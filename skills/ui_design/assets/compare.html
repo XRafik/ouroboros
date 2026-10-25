@@ -270,12 +270,12 @@ body.clean .num { display:inline; }
   if ((D.questions || []).length) { const row = document.createElement('div'); row.className = 'answer'; answer.textContent = T.chat; row.append(copy, answer); $('more').append(row); }
   if (D.source) { const p = document.createElement('p'); p.className = 'source'; p.textContent = D.source; $('more').append(p); }
 
-  // Deep link (#scene=…&v=…&side=1; v is an id, or a number from the clean view) and a small API for scripted looks.
-  const h = new URLSearchParams(location.hash.slice(1));
-  const pick = (v) => (D.variants.find((x) => x.id === v) || D.variants[Number(v) - 1] || {}).id;
+  // Deep link (#scene=…&v=…&side=1; v is the variant's id, or its number in a clean link) and a small API for scripted looks.
+  const h = new URLSearchParams(location.hash.slice(1)), cleanLink = h.get('clean') === '1';
+  const pick = (v) => (cleanLink ? D.variants[Number(v) - 1] : D.variants.find((x) => x.id === v)) || {};
   window.compare = { subject: D.subject || null, show: (s) => show({ scene: s.scene || state.scene, variant: s.variant || state.variant, side: !!s.side, clean: !!s.clean }),
     states: () => scenes.flatMap((s) => [...D.variants.map((v) => ({ scene: s.id, variant: v.id })), { scene: s.id, variant: D.variants[0].id, side: true }]) };
-  show({ scene: h.get('scene') || state.scene, variant: pick(h.get('v')) || state.variant, side: h.get('side') === '1', clean: h.get('clean') === '1' });
+  show({ scene: h.get('scene') || state.scene, variant: pick(h.get('v')).id || state.variant, side: h.get('side') === '1', clean: cleanLink });
 })();
 </script>
 </body>

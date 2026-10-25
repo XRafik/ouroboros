@@ -400,12 +400,11 @@ class NativeToolRoundReviewExecutor(ReviewSlotExecutor):
             self._source_gap = "native_source_root_unavailable"
             return {}
         try:
-            data = (payload if isinstance(payload, bytes) else payload.encode("utf-8") if isinstance(payload, str)
-                    else json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+            data = payload.encode("utf-8") if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False).encode("utf-8")
             task_id = self.assignment.request.task_id or "review"
             ref = store_actor_source_bytes(root, task_id, category=category,
                 source_id=f"{self.assignment.call_id}-{source_id}", data=data,
-                extension="bin" if isinstance(payload, bytes) else "txt" if isinstance(payload, str) else "json")
+                extension="txt" if isinstance(payload, str) else "json")
             return ref
         except Exception as exc:
             self._source_gap = f"native_source_persistence_failed:{type(exc).__name__}"
@@ -418,7 +417,7 @@ class NativeToolRoundReviewExecutor(ReviewSlotExecutor):
             "round": self._rounds_used, "messages": self._round_messages,
             "read_receipts": self._tool_receipts, "view_receipt": self._view_receipt,
             "sent_view": getattr(self._inspection_ctx, "_last_context_observation", {}),
-        }, self._store_source))
+        }))
         if ref:
             self._round_source_refs.append(ref)
         self._last_persisted_round = self._rounds_used

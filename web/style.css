@@ -9811,7 +9811,7 @@ body.keyboard-open .project-panel {
 }
 .chat-relay-from { min-width: 0; overflow-wrap: anywhere; color: var(--text-primary); font-weight: 600; }
 .chat-relay-rooms[hidden] { display: none; }
-/* The sender's Project reference at the address line's size (the voice line's 28px, meta), ellipsizing first. */
+/* The sender's Project reference at the address line's size (the voice line's 28px, meta); a long name ellipsizes at its cap. */
 .chat-relay-card-head > .chat-quiz-project.chat-live-project-card-btn {
     min-height: 28px;
     max-width: min(60%, 360px);
@@ -9821,9 +9821,9 @@ body.keyboard-open .project-panel {
     line-height: var(--line-meta);
 }
 .chat-relay-card-head > .chat-quiz-project .chat-live-project-name { font-weight: 600; }
-/* The receiver is half of the address: it keeps room for a readable name and wraps to its own line before it shrinks
-   to a few letters beside a long Project capsule. */
-.chat-relay-dest { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 96px; min-width: min(100%, 9em); }
+/* The receiver is half of the address: it keeps its whole name, taking its own line below a long Project capsule
+   rather than shrinking; only a name longer than the line stops at its edge. */
+.chat-relay-dest { display: inline-flex; align-items: center; gap: var(--space-2); flex: 1 1 96px; min-width: auto; max-width: 100%; }
 .chat-relay-arrow { display: inline-flex; flex: none; color: var(--text-meta); }
 .chat-relay-arrow > svg { width: 14px; height: 14px; }
 .chat-relay-to { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
