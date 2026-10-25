@@ -12,7 +12,7 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D02 | LLM client, routing & providers | 43 | 0 |
 | D03 | Context assembly, fit & compaction | 25 | 0 |
 | D04 | Tool execution: registry, access & typed results | 23 | 0 |
-| D05 | Tool surfaces: files, code, shell, media, external | 43 | 0 |
+| D05 | Tool surfaces: files, code, shell, media, external | 44 | 0 |
 | D06 | Review stack | 94 | 0 |
 | D07 | Delegation, subagents & Claudexor | 91 | 0 |
 | D08 | Supervisor: queue, workers, events & runtime control | 73 | 0 |
@@ -24,11 +24,11 @@ The manifest is the SSOT of the module→domain assignment (1:1, complete over t
 | D14 | Skills & extensions | 69 | 0 |
 | D15 | Memory, knowledge, consciousness & self-evolution | 33 | 0 |
 | D16 | Observability, usage accounting & cost | 24 | 0 |
-| D17 | Projects, workspaces & task results | 49 | 0 |
+| D17 | Projects, workspaces & task results | 50 | 0 |
 | D18 | Launcher, packaging, platform & shared substrate | 34 | 0 |
 | D19 | Frozen contracts (ABI) | 12 | 0 |
 | D20 | Presence | 19 | 0 |
-| **total** | | **888** | **0** |
+| **total** | | **890** | **0** |
 
 ## Dependency direction matrix (strict, pinned)
 
@@ -52,7 +52,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 | **D14** | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D15** | ✓ | · | ✓ | ✓ | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | ✓ | ✓ | ✓ | · |
 | **D16** | · | ✓ | · | · | · | ✓ | · | · | · | · | · | ✓ | · | · | · | · | ✓ | ✓ | · | · |
-| **D17** | ✓ | · | · | ✓ | ✓ | ✓ | · | ✓ | · | · | ✓ | ✓ | · | · | ✓ | ✓ | · | ✓ | ✓ | · |
+| **D17** | ✓ | · | · | ✓ | ✓ | ✓ | ✓ | ✓ | · | · | ✓ | ✓ | · | · | ✓ | ✓ | · | ✓ | ✓ | · |
 | **D18** | · | · | · | · | · | · | · | · | ✓ | ✓ | · | ✓ | ✓ | · | · | · | · | · | · | · |
 | **D19** | · | · | · | · | · | · | · | · | · | · | · | · | · | ✓ | · | · | · | ✓ | · | · |
 | **D20** | · | · | · | ✓ | ✓ | · | · | · | · | · | · | · | · | · | ✓ | · | ✓ | ✓ | ✓ | · |
@@ -65,7 +65,7 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
 
 ## Hidden coupling (classified out of the strict graph)
 
-- lazy-only cross-domain pairs: **125**
+- lazy-only cross-domain pairs: **124**
   - D01->D10
   - D01->D11
   - D02->D05
@@ -167,7 +167,6 @@ Rows may import columns (`[graph].allowed`). `·` = forbidden direction.
   - D16->D11
   - D16->D15
   - D17->D02
-  - D17->D07
   - D17->D09
   - D17->D13
   - D17->D20
@@ -360,6 +359,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 
 ### D05 — Tool surfaces: files, code, shell, media, external
 
+- `ouroboros/artifact_directories.py`
 - `ouroboros/artifact_storage.py`
 - `ouroboros/artifacts.py`
 - `ouroboros/browser_policy.py`
@@ -1070,6 +1070,7 @@ No function body (≥ 10 normalized lines) is shared verbatim across domains. Ne
 - `ouroboros/tools/project_journal.py`
 - `ouroboros/workspace_admission.py`
 - `ouroboros/workspace_executor.py`
+- `ouroboros/workspace_executor_paths.py`
 - `ouroboros/workspace_file_outputs.py`
 - `ouroboros/workspace_patch_capture.py`
 - `ouroboros/workspace_patch_rules.py`
