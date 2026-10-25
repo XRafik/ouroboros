@@ -620,7 +620,7 @@ Birth identity is separate from PID presence. Linux mints boot-qualified ticks, 
 
 ### Data layout (`~/Ouroboros/`)
 
-Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSISTENCE.md` registers every durable entity's writer, format, schema, retention and reset.
+Default root (overrides: §7). This tree orients; `docs/PERSISTENCE.md` registers each durable entity's writer, format, schema, retention and reset.
 
 ```
 ~/Ouroboros/
@@ -716,7 +716,7 @@ Default root (overrides: §7). This tree is the orientation carrier; `docs/PERSI
 │   ├── archive/                   ← rotated logs, rescue snapshots, archived repos; never GC'd
 │   └── uploads/                   ← chat attachments
 ├── projects/                      ← genesis subagent projects (`OUROBOROS_SUBAGENT_PROJECTS_ROOT`), never GC-pruned
-├── subagent_worktrees/            ← self-worktree checkouts (`OUROBOROS_SUBAGENT_WORKTREE_ROOT`), GC-pruned
+├── subagent_worktrees/            ← self-worktree checkouts (`OUROBOROS_SUBAGENT_WORKTREE_ROOT`), GC-pruned; new in `copies.noindex/` (`unindexed.py`)
 ├── Deliverables/                  ← bare user_files filenames (`OUROBOROS_DELIVERABLES_ROOT`), never GC-pruned
 └── ouroboros.pid                  ← launcher PID lock; auto-released on crash
 ```

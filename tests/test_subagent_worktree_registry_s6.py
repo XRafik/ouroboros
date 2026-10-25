@@ -24,6 +24,7 @@ import subprocess
 import pytest
 
 from ouroboros import subagent_worktrees as wt
+from ouroboros.unindexed import copy_path
 
 
 MALFORMED = '"not a registry"'
@@ -162,7 +163,7 @@ def test_c3_a_new_snapshot_does_not_overwrite_a_malformed_registry(tmp_path):
 
     assert _registry(data).read_text(encoding="utf-8") == MALFORMED
     assert pathlib.Path(first.path).is_dir(), "the registered snapshot is untouched"
-    assert not (snaps / "dlg_t1_snapTwo").exists(), "the refused attempt cleans up"
+    assert not copy_path(snaps, "dlg_t1_snapTwo").exists(), "the refused attempt cleans up"
     assert _git(
         target, "rev-parse", "refs/ouroboros/delegated/snapTwo", check=False,
     ).returncode != 0, "and leaves no pinned ref"
