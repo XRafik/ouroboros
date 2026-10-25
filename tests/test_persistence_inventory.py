@@ -56,6 +56,8 @@ DATA_ROOT_MARKERS = (
 DATA_REL_CALL_NAMES = frozenset({"drive_path"})
 PATH_CTORS = frozenset({"Path", "PurePath", "PurePosixPath", "PureWindowsPath"})
 DIR_LISTING_CALLS = frozenset({"iterdir", "glob", "rglob"})
+# ``unindexed(parent, "leaf")`` (ouroboros/unindexed.py) names a NEW generated copy ``parent/leaf.noindex``.
+UNINDEXED_CALL, UNINDEXED_SUFFIX = "unindexed", ".noindex"
 TOP_LEVEL = frozenset({
     "state", "logs", "memory", "skills", "task_results", "observability",
     "locks", "archive", "settings.json", "uploads", "services", "artifacts",
@@ -393,6 +395,10 @@ class _PathResolver:
     def resolve(self, node: ast.expr, consts: dict[str, str],
                 local: dict[str, str]) -> tuple[str, bool]:
         """``(data-relative path, is-data-relative)`` for a path expression."""
+        if isinstance(node, ast.Call) and _call_name(node) == UNINDEXED_CALL and len(node.args) == 2:
+            inner, ok = self.resolve(node.args[0], consts, local)
+            leaf = _literal_segment(node.args[1])
+            return (f"{inner}/{leaf}{UNINDEXED_SUFFIX}", True) if ok and leaf and _is_named(inner) else ("", False)
         if isinstance(node, ast.Name):
             known = local.get(node.id)
             return (known, True) if known else ("", False)
@@ -586,6 +592,10 @@ class _PathResolver:
                             rel = _normalize([literal])
                             if rel:
                                 found.add(SUBROOT_ALIASES.get(rel, rel))
+                    elif isinstance(node, ast.Call) and _call_name(node) == UNINDEXED_CALL:
+                        rel, ok = self.resolve(node, consts, local)
+                        if ok and _is_named(rel):
+                            found.add(SUBROOT_ALIASES.get(rel, rel))
                     elif isinstance(node, ast.Call) and _call_name(node) == "store_actor_source_bytes":
                         rel = self._source_handle_path(node, scope)
                         if rel:
