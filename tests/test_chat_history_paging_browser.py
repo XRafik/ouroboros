@@ -772,7 +772,7 @@ def test_a_room_behind_other_rooms_archives_opens_at_its_newest_message_and_page
 # in the macOS app's WKWebView). CDP `LayoutCount` also sees layouts the engine forces natively (Chromium lays out on a
 # selection read), which a JS-side counter misses. The fixture is the real chat instance with only its transport
 # stubbed; `shared` reuses the same expanded cards on every page, so mounted cards move and their timelines replay.
-_FRAMES = "async n => { for (let i = 0; i < n; i++) await new Promise(requestAnimationFrame) }"
+_WAIT_FRAMES = "async n => { for (let i = 0; i < n; i++) await new Promise(requestAnimationFrame) }"
 _MARK_PASSAGE = """() => { const feed = document.querySelector('#chat-messages'), box = feed.getBoundingClientRect();
     const node = [...feed.children].find(n => n.dataset.historyId && n.getBoundingClientRect().bottom > box.top);
     window.__place = { node, top: node.getBoundingClientRect().top - box.top }; }"""
@@ -797,19 +797,19 @@ def _layouts_per_press(browser, url, size, kind):
         page.wait_for_function("window.__ready")
         if kind == "shared":
             page.locator("[data-live-disclosure]").evaluate_all("buttons => buttons.forEach(b => b.click())")
-        page.evaluate(_FRAMES, 36)
+        page.evaluate(_WAIT_FRAMES, 36)
         layouts, rows = [], []
         for _ in range(5):
             page.evaluate("""() => { const feed = document.querySelector('#chat-messages');
                 feed.dispatchEvent(new WheelEvent('wheel', { deltaY: -1 })); feed.scrollTop = 160; }""")
-            page.evaluate(_FRAMES, 36)
+            page.evaluate(_WAIT_FRAMES, 36)
             page.evaluate(_MARK_PASSAGE)
             reads = page.evaluate("window.__reads.length")
             before = _layout_count(cdp)
             page.locator(".chat-load-older button").evaluate("button => button.click()")  # no actionability scroll
             page.wait_for_function("""n => window.__reads.length > n
                 && !document.querySelector('.chat-load-older button').disabled""", arg=reads)
-            page.evaluate(_FRAMES, 36)  # Markdown, observers and the 30-frame changed-row sleep tail
+            page.evaluate(_WAIT_FRAMES, 36)  # Markdown, observers and the 30-frame changed-row sleep tail
             layouts.append(_layout_count(cdp) - before)
             rows.append(page.locator("#chat-messages > *").count())
             assert page.evaluate("window.__reads.length") == reads + 1, "one older page per press"
