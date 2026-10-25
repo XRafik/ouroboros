@@ -204,6 +204,13 @@
     --voice-owner: #103e7f;
     --voice-ouroboros: #76162b;
     --voice-ouroboros-card: #76162b;
+    /* A note between works (DESIGN "Replies"): the voice one quiet step back toward the room, its hover a step less;
+       the cards peeking below a stack's front card are that material flattened toward the room again, each level
+       more. Flat colours: the ledges carry the rest shadow, which an opacity would fade with them. */
+    --voice-ouroboros-note: color-mix(in srgb, var(--voice-ouroboros) 74%, var(--bg-primary));
+    --voice-ouroboros-note-hover: color-mix(in srgb, var(--voice-ouroboros) 84%, var(--bg-primary));
+    --relay-ledge-1: color-mix(in srgb, var(--voice-ouroboros-note) 84%, var(--bg-primary));
+    --relay-ledge-2: color-mix(in srgb, var(--voice-ouroboros-note) 66%, var(--bg-primary));
     --tone-crimson: #d32d43;
     --tone-crimson-hover: #c32a3f;
     /* The crimson tone's ink: white on the solid crimson. Its hover deepens rather than lightens, and so does its
@@ -249,6 +256,9 @@
     --motion-tone: background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, filter 0.12s ease;
     /* The one curve anything that moves rides: the iOS sheet curve (DESIGN §10 "Motion"; shell_motion.js reads it). */
     --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+    /* The one named exception: the light spring the older cards of a stack of notes emerge on when it fans out
+       (chat_relay_deck.js); the front card and everything else keep the sheet curve. */
+    --ease-spring: cubic-bezier(0.34, 1.26, 0.64, 1);
     /* How long it runs: a surface coming in, a surface going out, a fade (a finger's release sets its own speed). */
     --motion-open: 340ms;
     --motion-close: 280ms;
@@ -392,6 +402,13 @@
     --voice-owner: #e9eef9;
     --voice-ouroboros: #fdf2f4;
     --voice-ouroboros-card: #fff8f9;
+    /* The note between works: the work card's rose as a value under the note's own name (the card's token stays the
+       card's), hovering to the voice; on white a card behind lies in the front card's shadow, a deeper step of the
+       accent ladder, not a paler one. */
+    --voice-ouroboros-note: #fff8f9;
+    --voice-ouroboros-note-hover: var(--voice-ouroboros);
+    --relay-ledge-1: color-mix(in srgb, var(--accent) 10%, var(--bg-primary));
+    --relay-ledge-2: color-mix(in srgb, var(--accent) 14%, var(--bg-primary));
     /* The crimson tone is the accent ladder's; its hover stops at 14 % so the ink keeps 4.5:1 on it. */
     --tone-crimson: var(--accent-10);
     --tone-crimson-hover: var(--accent-14);
