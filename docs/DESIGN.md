@@ -665,11 +665,12 @@ a refused addressing act carries the host-composed `cause` sentence
 the System row and the picker toast), a landed act carries none, and an unknown
 reason stays raw. A provider failure quotes only the provider's own sentence (a
 long one, or one its producer already cut, shortened in words beside the Logs
-pointer); without one it names the host's classification of the failure (beside
-the provider's own error code and parameter when an engine relays them, as the
-provider's) and points at the Logs, which keep the host's record of it (a stream
-error's sentence only as a bounded excerpt, so no row promises more): neither an
-exception's text nor an engine's composed diagnostic reaches the owner's row.
+pointer); a fallback notice names the failure class first (owner decision 25.10).
+A terminal row without one names the host's classification (beside an
+engine-relayed error code and parameter, as the provider's) and points at the
+Logs, which keep the host's record (a stream error's sentence as an excerpt):
+neither an exception's text nor an engine's composed diagnostic reaches the
+owner's row.
 Host text speaks only for the host's own actions, counts and signed quotes; a
 source it could not read is unknown, never zero. A terminal whose preserved
 output was never reviewed shows that output labelled, not hidden: a short
