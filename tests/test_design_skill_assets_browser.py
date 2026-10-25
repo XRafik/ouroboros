@@ -253,3 +253,32 @@ def test_freeze_output_renders_alone_with_state_kept_and_scripts_gone(engine, tm
         frozen_box = page.locator("#made").bounding_box()
         assert abs(frozen_box["x"] - box["x"]) <= 1 and abs(frozen_box["y"] - box["y"]) <= 1
         assert_nothing_fetched(page)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+def test_clean_view_hides_every_author_word_and_keeps_the_scene(engine, tmp_path):
+    """C hides the title, names, notes, recommendation and questions; the frames, the switch and the scroll stay."""
+    path = sample_page(tmp_path)
+    with browser(engine) as instance:
+        page = open_page(instance, path.as_uri())
+        wait_shown(page, "now", "draft")
+        authored = ["#notes", "#scene-note", "#more", '[data-variant="a"] .lab', '[data-variant="a"] .rec']
+        visible = lambda selector: page.locator(selector).first.is_visible()
+        assert all(visible(selector) for selector in authored), "the normal view shows them"
+        title = page.evaluate("document.getElementById('title').textContent")
+        page.keyboard.press("c")
+        wait_shown(page, "now", "draft")
+        assert not any(visible(selector) for selector in authored), "the clean view hides every author word"
+        assert page.locator('[data-variant="a"] .num').inner_text() == "2"
+        assert page.evaluate("document.getElementById('title').textContent") != title
+        assert page.evaluate("location.hash").endswith("&clean=1")
+        page.keyboard.press("2")
+        wait_shown(page, "a", "draft")
+        page.keyboard.press("s")
+        wait_shown(page, "a", "draft", side=True)
+        captions = page.locator("#stage .cap").all_inner_texts()
+        assert captions == ["1", "2", "3"], "side by side names the variants by number only"
+        page.keyboard.press("c")
+        page.wait_for_timeout(150)
+        assert visible("#more") and page.evaluate("location.hash").find("clean") < 0, "C brings the author's words back"
+        assert_nothing_fetched(page)
