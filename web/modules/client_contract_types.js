@@ -313,6 +313,7 @@
  * @property {PresenceContact=} presence_contact
  * @property {string=} wait_ended_at
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // an outgoing row's own saved name, the same as its client_message_id
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
