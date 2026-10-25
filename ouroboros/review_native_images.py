@@ -34,6 +34,7 @@ class NativeReviewImages:
         self.sent_messages = []
         self.candidates = {}
         self.refusals = {}
+        self._source_refs = {}
 
     def accept(self, call_id, path, result, private, *, round_idx):
         """Called only by the episode thread, after success OR abandonment."""
@@ -62,6 +63,48 @@ class NativeReviewImages:
         self.pending.clear()
         return messages[start:]
 
+    def source_projection(self, value, store_source):
+        """Round sources refer to retained pixels, never repeat inline base64.
+
+        The in-memory canonical view and physical send stay intact. If the shared
+        loader converted the original, keep those exact bytes once in the existing
+        task source store. Unchanged pixels reuse the loader's retained original.
+        """
+        if isinstance(value, list):
+            return [self.source_projection(item, store_source) for item in value]
+        if not isinstance(value, dict):
+            return value
+        if not _is_image(value):
+            return {key: self.source_projection(item, store_source) for key, item in value.items()}
+        url = _image_url_from_block(value)
+        raw = base64.b64decode(url.split(";base64,", 1)[1], validate=True)
+        digest = hashlib.sha256(raw).hexdigest()
+        ref = {"type": "image_reference", "sha256": digest, "size": len(raw), "mime": url[5:].split(";", 1)[0],
+               "source_path": value.get("_source_path"), "source_sha256": value.get("_source_sha256"),
+               "image_id": value.get("_review_image_id")}
+        if digest != ref["source_sha256"] or not ref["source_path"]:
+            if digest not in self._source_refs:
+                stored = store_source("image", raw)
+                if stored:
+                    self._source_refs[digest] = stored
+            ref["source_ref"] = self._source_refs.get(digest, {})
+            if not ref["source_ref"]:
+                ref["gap"] = "exact image representation could not be retained; original remains at source_path"
+        return ref
+
+    @staticmethod
+    def _gap(fact, reason, *, status="unavailable"):
+        delivered = bool(fact.get("deliveries"))
+        fact.update(status="delivered" if delivered else status, delivered=delivered, reason=reason)
+
+    def _gap_text(self, image_id, reason):
+        fact = self.facts.get(image_id, {})
+        deliveries = fact.get("deliveries")
+        state = (f"Image withheld from later requests (delivered in round {deliveries[0]['round']})"
+                 if deliveries else "Image not delivered")
+        evidence = "Delivery alone does not attest visual inspection" if deliveries else "No visual inspection"
+        return f"{state}: {reason}. {evidence}. Original: {fact.get('source_path', '')}"
+
     def prepare(self, messages, slot):
         from ouroboros.vision_image_limits import prepare_route_images
         from ouroboros.vision_routing import _image_input_verdict, _metadata_says_no, own_lane_without_images
@@ -80,7 +123,7 @@ class NativeReviewImages:
             gap = reason or self.refusals.get((call_id, slot.model, slot.session_profile))
             if gap:
                 gaps[call_id] = gap
-                return f"[Image not delivered: {gap}. No visual inspection. Original: {block.get('_source_path', '')}]"
+                return f"[{self._gap_text(call_id, gap)}]"
             return None
 
         projected = prepare_route_images(_rewrite(messages, omit), slot.model)
@@ -104,14 +147,14 @@ class NativeReviewImages:
                          if isinstance(message.get("content"), list) for part in message["content"]
                          if part.get("type") == "text" and fact.get("source_path", "\0") in part.get("text", "")]
                 gaps[call_id] = " ".join(notes) or "image representation unavailable on the receiving route"
-            elif fact["status"] == "staged" and call_id not in present:
-                gaps[call_id] = "image left the working view before delivery (eviction or authored compaction)"
+            elif fact.get("source_path") and call_id not in present:
+                when = "" if fact.get("deliveries") else " before delivery"
+                gaps[call_id] = f"image left the working view{when} (eviction or authored compaction)"
             if call_id in gaps:
-                fact.update(status="unavailable", delivered=False, reason=gaps[call_id])
+                self._gap(fact, gaps[call_id])
         # The tool's text must name a route gap too; a local attachment is not delivery.
         if gaps:
-            projected = [{**message, "content": f"Image not delivered: {gaps[message['_review_image_id']]}. "
-                          f"No visual inspection. Original: {self.facts[message['_review_image_id']].get('source_path', '')}"}
+            projected = [{**message, "content": self._gap_text(message['_review_image_id'], gaps[message['_review_image_id']])}
                          if message.get("role") == "tool" and message.get("_review_image_id") in gaps else message
                          for message in projected]
         self.sent_messages = projected
@@ -125,8 +168,9 @@ class NativeReviewImages:
                 fact.pop("reason", None)
                 fact.setdefault("deliveries", []).append({"round": round_idx, **candidate})
             else:
-                fact.update(status="unconfirmed", delivered=False,
-                            reason="request dispatched without a successful response; visual inspection unconfirmed")
+                reason = "request dispatched without a successful response; inspection on that request unconfirmed"
+                self._gap(fact, reason, status="unconfirmed")
+                fact.setdefault("unconfirmed_requests", []).append({"round": round_idx, **candidate, "reason": reason})
 
     def refuse_send(self, error, slot, round_idx, serialized_chars):
         """Existing typed provider facts, never estimates or error-text matching."""
@@ -144,7 +188,7 @@ class NativeReviewImages:
         for image_id, candidate in self.candidates.items():
             self.refusals[(image_id, slot.model, slot.session_profile)] = reason
             fact = self.facts[image_id]
-            fact.update(status="unavailable", delivered=False, reason=reason)
+            self._gap(fact, reason)
             fact.setdefault("refused_requests", []).append({"round": round_idx, **candidate,
                                                             "serialized_chars": serialized_chars, "reason": reason})
         return True
