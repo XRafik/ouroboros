@@ -1,6 +1,7 @@
 // Chat timeline ordering, keyed item reconciliation and reading anchors.
 // These helpers own no history source, navigation or task authority.
 import { compareHistoryPosition } from './chat_history_replay.js';
+import { measure } from './layout_batch.js';
 import { appendDelegatedItem, reconcileDelegatedItems } from './delegated_activity.js';
 import { isStoreMigrating } from './api_client.js';
 import { showToast } from './toast.js';
@@ -262,6 +263,19 @@ function restoreTextControlCaret(active, caret) {
     }
 }
 
+/** The focus, caret and selection a move of mounted nodes would lose, kept to give back after it. Reading the
+ * selection lays the page out in Chromium: a write that moves nothing keeps nothing. */
+export function keepSelection(doc) {
+    const active = doc?.activeElement;
+    const caret = textControlCaret(active);
+    const selection = caret ? null : doc?.getSelection?.();
+    const ranges = Array.from({ length: selection?.rangeCount || 0 }, (_, index) => {
+        const range = selection.getRangeAt(index);
+        return [range.startContainer, range.startOffset, range.endContainer, range.endOffset];
+    });
+    return { active, caret, selection, ranges };
+}
+
 export function insertTimelineNode(messages, node, typing = null) {
     const rawNodeTs = node?.dataset?.ts;
     const nodeTs = rawNodeTs == null || rawNodeTs === '' ? NaN : Number(rawNodeTs);
@@ -281,13 +295,8 @@ export function insertTimelineNode(messages, node, typing = null) {
     const target = before || (typing?.parentNode === messages ? typing : null);
     if (node.parentNode === messages && node.nextElementSibling === target) return { before };
     const doc = messages.ownerDocument;
-    const active = doc?.activeElement;
-    const caret = textControlCaret(active);
-    const selection = caret ? null : doc?.getSelection?.();
-    const ranges = Array.from({ length: selection?.rangeCount || 0 }, (_, index) => {
-        const range = selection.getRangeAt(index);
-        return [range.startContainer, range.startOffset, range.endContainer, range.endOffset];
-    });
+    // Only a mounted row that moves can lose the focus, caret or selection in it; a new row is just inserted.
+    const { active, caret, selection, ranges } = node.isConnected ? keepSelection(doc) : { ranges: [] };
     if (target) messages.insertBefore(node, target);
     else messages.appendChild(node);
     if (active && node.contains?.(active) && doc.activeElement !== active) active.focus({ preventScroll: true });
@@ -354,6 +363,15 @@ function timelineItemForAnchor(record, anchor) {
     return record.items.find(item => item.lineKey === anchor.lineKey) || null;
 }
 
+/** A card timeline's scroll before a write: whether it rests at its end, where it is, its newest line. A timeline shows
+ * only while its card is expanded or its episode open (style.css `.chat-live-timeline`); hidden, it has no scroll, focus
+ * or selection to keep (null), and reading its box would lay out a row that sleeps (chat_row_sleep.js) on its own. */
+export function timelineScroll(record) {
+    const el = record.timelineEl;
+    if (record.root?.dataset?.expanded !== '1' && !el.parentElement?.open) return null;
+    return { pinned: el.scrollHeight - el.scrollTop - el.clientHeight <= 24, top: el.scrollTop, newest: el.lastElementChild };
+}
+
 export function createLiveCardTimelineRenderer({ withStableViewport, buildTimelineItemHtml, isReplayActive = () => false }) {
     // Remember generated markup, not the enhanced DOM: a timestamp update must
     // not undo markdown controls or replace a body the reader has selected.
@@ -406,22 +424,20 @@ export function createLiveCardTimelineRenderer({ withStableViewport, buildTimeli
         wrapper.innerHTML = buildTimelineItemHtml(item, record).trim();
         return wrapper.firstElementChild;
     };
-    const render = (record) => {
+    // Where a timeline is scrolled before a write changes it, and the selection it keeps. A caller that changes many
+    // cards measures theirs at once (`render(record, { scroll, kept })`: a page and its release); a timeline whose
+    // scroll an earlier write of this batch still owes keeps the state that write read.
+    const owed = new WeakMap();
+    const render = (record, before = null) => {
         if (defer(record)) return false;
         record._timelineDirty = false;
         reconcileDelegatedItems(record); // replay, page release and reorders re-project per seq
         return withStableViewport(() => {
             const el = record.timelineEl;
-            const pinned = el.scrollHeight - el.scrollTop - el.clientHeight <= 24;
-            const prevTop = el.scrollTop, newest = el.lastElementChild;
+            const at = owed.get(el) || before || { scroll: timelineScroll(record) };
+            const { scroll } = at;
             const byKey = new Map(Array.from(el.children).map((node) => [node.dataset.liveLineKey, node]));
-            const active = el.ownerDocument?.activeElement;
-            const caret = textControlCaret(active);
-            const selection = caret ? null : el.ownerDocument?.getSelection?.();
-            const ranges = Array.from({ length: selection?.rangeCount || 0 }, (_, index) => {
-                const range = selection.getRangeAt(index);
-                return [range.startContainer, range.startOffset, range.endContainer, range.endOffset];
-            });
+            const { active, caret, selection, ranges } = scroll ? at.kept || keepSelection(el.ownerDocument) : { ranges: [] };
             let changed = false;
             let moved = false;
             record.items.forEach((item, index) => {
@@ -458,8 +474,15 @@ export function createLiveCardTimelineRenderer({ withStableViewport, buildTimeli
                 }
             }
             // Only a new newest line keeps a pinned timeline at its end; a disclosure
-            // or late full output keeps the line being read where it is.
-            if (changed) el.scrollTop = pinned && el.lastElementChild !== newest ? el.scrollHeight : prevTop;
+            // or late full output keeps the line being read where it is. The scroll is
+            // written once the batch's writes are done, with every other card's (layout_batch.js).
+            if (changed && scroll) {
+                owed.set(el, at);
+                measure(() => {
+                    owed.delete(el);
+                    return scroll.pinned && el.lastElementChild !== scroll.newest ? el.scrollHeight : scroll.top;
+                }, (top) => { el.scrollTop = top; });
+            }
             return changed && Boolean(el.isConnected);
         });
     };

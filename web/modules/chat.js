@@ -100,10 +100,13 @@ import {
     createTimelineAnchors,
     insertTimelineNode,
     liveCardProjectionChanged,
+    keepSelection,
     syncLiveCardToggle,
+    timelineScroll,
     updateLiveTimelineItem,
     upsertToolFoldRow,
 } from './chat_render_batch.js';
+import { measure } from './layout_batch.js';
 import { placeCheckRow, placeReplayedEvidence } from './verification_presentation.js';
 import {
     COLLAPSED_ACTIVITY_MAX,
@@ -1087,7 +1090,7 @@ export function createChatInstance({
 
     // Refresh files/history; retain lifecycle.
     function noteTaskDetails(record, detail) {
-        const files = syncSettledItems(record, detail);
+        const files = syncSettledItems(record, detail, { write: withStableViewport });
         const history = syncHistoryRetentionItem(record, detail);
         const chain = episodes.note(record, detail);
         return Boolean((files || history) && (renderLiveCardMeta(record), updateLiveCardCount(record), renderLiveCardTimeline(record), true))
@@ -1824,7 +1827,7 @@ export function createChatInstance({
         msg = { quiet_effective: record.quietEffective ?? record.historicalTerminal?.quiet_effective, ...msg };
         const summary = taskTerminalSummary({ ...msg, task_id: taskId });
         changed = noteTaskDetails(record, msg) || changed;
-        syncSettledItems(record, msg);
+        syncSettledItems(record, msg, { write: withStableViewport });
         changed = Boolean(record.reviewController?.updateMany(reviewGroupsFromTaskDetail(msg, taskId))) || changed;
         if (finalizing && !record.finished) record.finalizingHold = true;
         changed = applyLiveCardState(
@@ -2552,9 +2555,10 @@ export function createChatInstance({
                     for (const id of historyRowIds(row)) record.historyIds.add(id);
                 }
                 _historyReplayActive = false;
-                for (const record of liveCardRecords.values()) {
-                    if (record._timelineDirty) renderLiveCardTimeline(record);
-                }
+                // The cards this page changed are drawn with the scroll and selection they had, read for all at once.
+                const dirty = [...liveCardRecords.values()].filter(record => record._timelineDirty);
+                measure(() => { const kept = keepSelection(document); return dirty.map(record => ({ scroll: timelineScroll(record), kept })); },
+                    (before) => dirty.forEach((record, index) => renderLiveCardTimeline(record, before[index])));
                 persistVisibleHistory();
                 return true;
             });
@@ -3017,10 +3021,18 @@ export function createChatInstance({
             if (!byId.has(key)) byId.set(key, []);
             byId.get(key).push(node);
         }
+        // The page as the reader sees it decides, before any row leaves: a row or card read, focused or selected stays,
+        // and a card keeps its timeline's scroll and selection. Read for all of them first, one layout for all.
+        const due = new Set([...ids].filter(id => !retained.has(id)));
+        const held = new Set([...due].filter(id => (byId.get(id) || []).some(node => historyNodeIsProtected(node, messagesDiv))));
+        const kept = keepSelection(document);
+        const before = new Map([...liveCardRecords].filter(([, record]) => [...(record.historyIds || [])].some(key => due.has(key))
+            || record.items.some(item => due.has(item.historyId || item.sourceHistoryId))).map(([id, record]) => [id, {
+            held: historyNodeIsProtected(record.root, messagesDiv), at: { scroll: timelineScroll(record), kept } }]));
         for (const id of ids) {
             if (retained.has(id)) { pendingHistoryEvictions.delete(id); continue; }
             const nodes = byId.get(id) || [];
-            if (nodes.some(node => historyNodeIsProtected(node, messagesDiv))) {
+            if (held.has(id)) {
                 pendingHistoryEvictions.add(id); continue;
             }
             pendingHistoryEvictions.delete(id);
@@ -3043,13 +3055,13 @@ export function createChatInstance({
             const items = record.items.filter(item => !released.has(item.historyId || item.sourceHistoryId));
             if (items.length !== record.items.length) {
                 record.items = items;
-                renderLiveCardTimeline(record);
+                renderLiveCardTimeline(record, before.get(id)?.at);
                 updateLiveCardCount(record);
             }
             if (!affected || record.historyIds?.size || activeDirectActivities.has(id)
                     || record.episodeDisclosure?.isConnected
                     || record.subagentsEl?.querySelector('.chat-live-card')
-                    || historyNodeIsProtected(record.root, messagesDiv)) continue;
+                    || before.get(id)?.held) continue;
             if (!record.finished && !record.historicalUnavailable && !record.historicalUnconfirmed) continue;
             disposeLiveCard(id);
             subagentChildParents.delete(id); subagentTerminalChildren.delete(id);

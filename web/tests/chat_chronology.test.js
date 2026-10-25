@@ -152,6 +152,7 @@ test('a timeline move keeps the caret of a focused text control instead of clear
     timeline.ownerDocument = { activeElement: input, getSelection: () => selection, createRange: () => ({ setStart() {}, setEnd() {} }) };
     const moving = makeNode('t1', 1);
     moving.contains = () => false;
+    moving.isConnected = true;  // mounted elsewhere in the feed: a move, not a new row
     insertTimelineNode(timeline, moving, typing);
     assert.deepEqual(ids(timeline), ['t1', 't3', 'typing']);
     assert.ok(!calls.some(([name]) => name === 'removeAllRanges'), calls);
