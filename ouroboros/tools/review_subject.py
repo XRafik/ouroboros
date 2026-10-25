@@ -898,7 +898,7 @@ def isolated_checkout(ctx: Any, spec: ReviewSubjectSpec, *,
                       retain: Optional[Callable[[], Mapping[str, Any]]] = None,
                       token: Optional[Callable[[FrozenSubject], str]] = None) -> Iterator[FrozenSubject]:
     """A detached worktree at the subject's parent with its patch applied to the
-    index, under the install's data root (``state/review_checkouts/<token>/repo``);
+    index, under the install's data root (``state/review_checkouts/<token>/repo.noindex``);
     the yielded subject reads there, so edits in the primary worktree during the
     run cannot change what the reviewers see. The checkout's ``write-tree`` must
     equal the frozen ``tree_sha`` or the subject is refused.

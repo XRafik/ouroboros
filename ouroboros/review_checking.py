@@ -830,9 +830,6 @@ def _retire_previous_turn(data_root: Any, task_id: str, previous: Mapping[str, A
 
 def _thread_locked(data_root: Any, task_id: str, seat: str, source: Mapping[str, Any], operation_id: str) -> str:
     home = seat_dir(data_root, task_id, f"thread:{seat}")
-    area = unindexed(home, "area")
-    if area.is_symlink():
-        raise CheckingAreaUnavailable("thread checking area was replaced by a symlink; copy retained")
     marker_path = home / "checking.json"
     try:
         previous = json.loads(marker_path.read_text(encoding="utf-8"))
@@ -840,6 +837,9 @@ def _thread_locked(data_root: Any, task_id: str, seat: str, source: Mapping[str,
         previous = {}  # a copy without a marker was never handed to a reviewer
     except (OSError, ValueError) as exc:
         raise CheckingAreaUnavailable(f"thread checking marker unreadable ({exc}); copy retained") from exc
+    area = unindexed(home, "area", previous.get("area"))  # its engine thread is bound to the recorded path
+    if area.is_symlink():
+        raise CheckingAreaUnavailable("thread checking area was replaced by a symlink; copy retained")
     previous_op = str(previous.get("operation_id") or "")
     if previous_op == operation_id and (previous or area.exists()):
         if previous.get("source") != dict(source):

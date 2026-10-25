@@ -2,11 +2,13 @@
 
 Spotlight skips a folder whose name ends in ``.noindex`` with everything under it, so a new
 review checkout, seat area or acting checkout gets such a name. A copy that already exists keeps
-its spelling: a rejoin reuses it, an engine thread stays bound to its path and the sweeps still
-retire it. Owner folders (genesis projects) are never named this way. Real Git, real copies.
+its spelling: a rejoin reuses it, an engine thread stays bound to its path (also when a refresh
+died after removing it) and the sweeps still retire it. Owner folders (genesis projects) are
+never named this way. Real Git, real copies.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 from types import SimpleNamespace
@@ -18,7 +20,7 @@ from ouroboros import subagent_worktrees as trees
 from ouroboros.startup_migrations import prepare_startup_state
 from ouroboros.tools.review_subject import ReviewSubjectSpec, checkout_token, isolated_checkout, round_checkout_repo
 from ouroboros.unindexed import COPIES, SUFFIX, copy_path, unindexed
-from tests.body_candidate_support import isolate, make_serving
+from tests.body_candidate_support import isolate, make_ctx, make_serving
 from tests.test_review_checking_prune import _custody
 from tests.test_review_checkout_lifecycle import EDIT, TASK, _frozen, _seat, _thread, _work
 from tests.test_review_checkout_retirement import RETRY_KEY, _git, _prune, _repo, _retain
@@ -32,6 +34,8 @@ def test_a_new_entry_is_born_unindexed_and_an_existing_one_keeps_its_name(tmp_pa
     assert unindexed(tmp_path, "area") == tmp_path / "area"
     (tmp_path / "repo").write_text("not a folder\n", encoding="utf-8")  # any entry holds the old name
     assert unindexed(tmp_path, "repo") == tmp_path / "repo"
+    assert unindexed(tmp_path, "seat", tmp_path / "seat") == tmp_path / "seat"  # a recorded old name, while absent
+    assert unindexed(tmp_path, "seat", tmp_path / "seat.noindex") == tmp_path / "seat.noindex"
     assert copy_path(tmp_path, "dlg_x") == tmp_path / COPIES / "dlg_x"
     (tmp_path / "dlg_x").mkdir()
     assert copy_path(tmp_path, "dlg_x") == tmp_path / "dlg_x"
@@ -101,6 +105,38 @@ def test_a_thread_copy_keeps_one_path_across_turns(tmp_path, older_body):
     assert first.is_dir() and not first.with_name("area.noindex" if older_body else "area").exists()
 
 
+class _Interrupted(BaseException):
+    """A process that dies between removing a thread's old copy and renaming the new one into place."""
+
+
+@pytest.mark.parametrize("older_body", [False, True])
+def test_an_interrupted_refresh_keeps_the_path_the_engine_thread_is_bound_to(tmp_path, monkeypatch, older_body):
+    """A refresh that dies after removing the old copy is rebuilt at the recorded path, under either name."""
+    root, source = _frozen(tmp_path)
+    bound = _thread(root, source, "turn-1")
+    marker = bound.parent / "checking.json"
+    if older_body:  # an older body made and recorded the copy under the old name
+        bound = bound.rename(bound.with_name("area"))
+        marker.write_text(json.dumps({**json.loads(marker.read_text(encoding="utf-8")), "area": str(bound)}),
+                          encoding="utf-8")
+    rc.bind_checking_thread(root, TASK, "plan_review:critic", "engine-thread")
+    remove = rc._remove_checking_area
+
+    def dies_after_removing(path):
+        remove(path)
+        if path == bound:
+            raise _Interrupted()
+
+    with monkeypatch.context() as patch:
+        patch.setattr(rc, "_remove_checking_area", dies_after_removing)
+        with pytest.raises(_Interrupted):
+            _thread(root, source, "turn-2")
+    assert not bound.exists()
+    assert _thread(root, source, "turn-2") == bound
+    assert json.loads(marker.read_text(encoding="utf-8"))["thread_id"] == "engine-thread"
+    assert not bound.with_name("area.noindex" if older_body else "area").exists()
+
+
 @pytest.mark.parametrize("older_body", [False, True])
 def test_the_sweep_releases_a_finished_seat_under_either_name(tmp_path, monkeypatch, older_body):
     root, source = _frozen(tmp_path)
@@ -145,10 +181,12 @@ def test_a_new_acting_checkout_lives_in_the_unindexed_folder_and_an_existing_pat
 def test_a_body_candidate_and_its_environment_share_the_unindexed_folder(tmp_path, monkeypatch):
     serving = make_serving(tmp_path)
     data = isolate(monkeypatch, tmp_path)
-    row = body_candidate._provision(serving, "root-copy", data)
-    candidate = pathlib.Path(row["path"])
+    monkeypatch.setenv("OUROBOROS_RUNTIME_MODE", "pro")
+    ctx = make_ctx(serving, data, "root-copy")
+    candidate = pathlib.Path(body_candidate.prepare(ctx)["path"])
     assert _same(candidate.parent, tmp_path / "worktrees" / COPIES) and candidate.name == "body_root-copy"
-    assert candidate.with_name(candidate.name + ".env").parent == candidate.parent
+    env_root = pathlib.Path(body_candidate.process_environment(ctx, ctx.repo_dir)["HOME"]).parent
+    assert env_root.is_dir() and env_root.name == "body_root-copy.env" and _same(env_root.parent, candidate.parent)
 
 
 def test_owner_projects_are_never_born_unindexed(tmp_path, monkeypatch):
