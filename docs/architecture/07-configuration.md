@@ -93,7 +93,7 @@ One row per key (`settings_defaults.py`). Env-only rows have no settings.json ca
 | OUROBOROS_PROJECT_NAMING_ASYNC_TIMEOUT_SEC | 8 | Inline naming bound when a card becomes a project (`gateway/projects.py`) |
 | OUROBOROS_UPDATE_LETTER_TIMEOUT_SEC | 120 | Update-letter calendar ceiling over slot wait and every send (`update_letter.py`) |
 | OUROBOROS_UI_TRANSLATION_TIMEOUT_SEC | 120 | One translation batch, slot wait and call together (`ui_translation.py`) |
-| OUROBOROS_UI_LANGUAGE | "" | Owner interface language (BCP-47 tag; `""` = not chosen); written only by `POST /api/ui/i18n/language` (`ENDPOINT_WRITTEN_SETTINGS`), read live (§3 Settings and onboarding) |
+| OUROBOROS_UI_LANGUAGE | "" | Owner interface language (BCP-47 tag; `""` = not chosen); written only by `POST /api/ui/i18n/language` (`ENDPOINT_WRITTEN_SETTINGS`), read live (§3 Settings) |
 | OUROBOROS_FALLBACK_COOLDOWN_ENABLED | true | 429-aware per-process model cooldown |
 | OUROBOROS_FALLBACK_COOLDOWN_SEC | 120 | Cooldown window |
 | OUROBOROS_FALLBACK_ATTEMPTS_PER_MODEL | 1 | Attempts per model in the fallback walk |

@@ -12,7 +12,7 @@ web/ — Web UI, a SPA of ES modules; chapter 3 owns the pages and the modules n
     speech_providers.js, voice_recorder.js, dictation.js — The page's speech hub and strict selection, bounded Opus/AAC/WAV recording, cancellable transcription and draft-insertion decisions
     voice_controls.js, dictation_chooser.js, read_aloud.js — The composer's dictation mic, "+" → Add dictation…, Read aloud on replies (DESIGN "Voice controls")
     ui_primitives.js — safe-field, escaping and tone/status helpers (§3 Navigation)
-    i18n.js, settings_language.js, ui_i18n_types.js — interface language: a DOM overlay over rendered chrome from the translation memory, translated at the producer; chat prose, logs, code and owner names are never walked (§3 Settings; §7 `OUROBOROS_UI_LANGUAGE`)
+    i18n.js, settings_language.js, ui_i18n_types.js — interface language: a DOM overlay over rendered chrome from the translation memory, translated at the producer; chat prose, logs, code and owner names are never walked (§3 Settings)
     page_header.js, ui_interactions.js, scroll_fade.js — header/tab strip and the segmented-choice generator; dialog, menu and popup binders; scroll-edge fade (§3 Navigation)
     chat_decision.js, question_presentation.js, main_waiting.js, chat_render_batch.js, task_phase_chip.js, task_activity_types.js — chat helpers: decision cards, the Project-question form and its Main mirror, keyed timeline patches, status/motion and census schema (§3 Chat and Projects)
     chat_history.js, chat_history_reveal.js, chat_history_replay.js, chat_reading_position.js, chat_row_sleep.js, chat_row_placement.js — bounded pages, landing, replay, reading intent, row sleep, child words vs notices (§3 Timeline ownership)
@@ -135,7 +135,7 @@ ouroboros/ — agent core and shared runtime (§6)
   model_concurrency.py — per-(model, use_local) semaphore (`OUROBOROS_MODEL_MAX_CONCURRENCY`), per-process only: one task's loop, children and pings cannot exhaust a model's rate limit
   project_naming.py — admission names, bounded Light naming with fallback, card conversion and lazy turn naming (§7)
   ui_translation.py — one translation worker, accounted Light batches and free-text language resolution (`language_needs_model`; §7)
-  ui_language.py, i18n_memory.py — the interface-language fact and the per-language translation memory `state/i18n/<tag>.json`, provenance owner > imported > generated (§7 `OUROBOROS_UI_LANGUAGE`)
+  ui_language.py, i18n_memory.py — the interface-language fact and one translation memory per language, `state/i18n/<tag>.json`: owner > imported > generated (§7)
   loop_tool_execution.py, tool_call_log.py — tool dispatch, results, per-invocation counting
   deadline_utils.py — deadline parsing and the transport-vs-logical wait seam
   observability.py, source_retention.py — private CAS: equal histories stored once, gzip-1, hardlinks (§10)
@@ -475,7 +475,7 @@ ouroboros/ — agent core and shared runtime (§6)
     compact_context.py — LLM-requested tool-history compaction trigger, applied on the next round
     control.py — control tools: restart, timeout settings, scheduling, review, chat history and model switching; the `schedule_subagent` contract and compact `wait_task` projections (§6 Delegated subagents)
     control_delegation.py — Delegation-budget affordances and `move_to_project` (§6 Project placement)
-    control_events.py, control_mind.py, control_relay.py, control_routing.py, control_runtime.py, control_scheduling.py, control_subagent_spec.py, control_task_results.py, task_result_views.py — the control tools' leaves: events and their durable outcomes, the mind's lifecycle controls, `tell_task` relays, routing, runtime self-control, scheduling, the `schedule_subagent` parameter surface, absorbing a child's result and retained redacted call sources
+    control_events.py, control_mind.py, control_relay.py, control_routing.py, control_runtime.py, control_scheduling.py, control_subagent_spec.py, control_task_results.py, control_ui_translation.py, task_result_views.py — the control tools' leaves: events and their durable outcomes, the mind's lifecycle controls, `tell_task` relays, routing, runtime self-control, scheduling, the `schedule_subagent` parameter surface, absorbing a child's result and retained redacted call sources, owner wording pins (§3)
     tool_discovery.py — List/enable owner: callable catalog by namespace in every mode; grants nothing
     tool_result.py, tool_catalog.py, tool_resolution.py — the typed internal tool result and its text adapter, intrinsic tool descriptors, argument normalization with physical target binding
     arg_feedback.py — What a tool says about an argument it did not obey: the one-line ignored disclosure and the typed refusal naming field, value and repair (DEVELOPMENT "LLM-first affordances")
