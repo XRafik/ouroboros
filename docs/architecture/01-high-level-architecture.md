@@ -257,7 +257,7 @@ ouroboros/ — agent core and shared runtime (§6)
   subagent_worktrees.py, worktree_removal.py — `state/subagent_worktrees.json` registry, `refs/ouroboros/delegated/` pins, custody GC, removal retries (§6 Delegated subagents)
   force_remove.py — shared permission-granting `force_rmtree`
   body_candidate.py, body_adoption.py, body_switch.py — Own-body worktree authoring and restart-bound adoption of an exact reviewed commit before body imports (§6 Own-body candidates; §2)
-  artifacts.py, artifact_storage.py — attachments (`artifact_store/attachments/`), records, block clones, patch compression, scratch hashes (`.scratch_manifest.json`), undeclared-output guard, tool-evidence slices
+  artifacts.py, artifact_storage.py, artifact_directories.py — artifact_store/attachments/, records/clones, patch compression, ZIPs, .scratch_manifest.json hashes, output audit, tool-evidence slices (§6)
   chat_uploads.py, confined_files.py — the owner-attachment store (`data/uploads`) with byte-proven media kind; held-directory walks and regular-file opens (POSIX dirfd, Windows NT handles) for attachments, task files and sources (DESIGN "Chat attachments")
   retention.py, workspace_preflight.py — GC clamp, cutoff and exact task-drive retention date; workspace facts and delegated scratch/cache preparation/retirement (§6)
   project_sources.py — folder attach validation (realpath, not the home root, no repo/data overlap); opt-in `init_git`; a server-side clone never prompts (typed `auth_required`); attaching is the trust grant (`trusted_at`)
@@ -363,7 +363,7 @@ ouroboros/ — agent core and shared runtime (§6)
   protected_artifacts.py — Execute-only black-box policy for protected artifacts
   shell_parse.py — Shared command/argv normalization and POSIX wrapper grammar; observed targets, not permission judgments (§6 Safety and runtime mode)
   argv_budget.py — Argv admission counts encoded bytes of argv plus environment (ARG_MAX charges both); asked by skill_exec before exec
-  workspace_executor.py, docker_process_observer.py — `local` and network-none `docker_exec`; Docker liveness needs `sh`, `cat`, readable `/proc` (§9)
+  workspace_executor.py, workspace_executor_paths.py, docker_process_observer.py — backends/output paths (§6); liveness needs `sh`, `cat`, `/proc` (§9)
   deliverables_paths.py — Lexical and case-folded deliverables path views
   tool_capabilities.py — SSOT for the core, parallel-safe, untruncated and stateful-browser tool sets and the cognitive-memory tool class every Presence ceiling carries
   tool_access.py — ToolProfile × ResourceRoot × Operation matrix, affordance map, closed-enum `required_capabilities` check
