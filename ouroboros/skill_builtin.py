@@ -296,24 +296,51 @@ def _warn_equal_version_drift(seed: pathlib.Path, target: pathlib.Path, version:
                        seed.name, version, seed_hash, target_hash)
 
 
+def _unmodified_release(drive_root: pathlib.Path, name: str, target: pathlib.Path) -> bool:
+    """Whether the installed copy still holds exactly the bytes of the release it was installed from.
+    Unknown original bytes, an edit mark or unreadable bytes never count as unmodified."""
+    from ouroboros.skill_install_record import read_install_record
+    from ouroboros.skill_loader import compute_content_hash
+
+    record = read_install_record(drive_root, name) or {}
+    digest = str(record["base_digest"] if "base_digest" in record else (record.get("release") or {}).get("digest") or "")
+    if record.get("modified") or not digest:
+        return False
+    try:
+        return compute_content_hash(target) == digest
+    except Exception:
+        return False
+
+
 def release_removed_builtins(drive_root: pathlib.Path, *, seed_dir: Optional[pathlib.Path] = None,
-                             log_obj: Any = None) -> bool:
-    """A built-in no longer bundled keeps its files and records; only the launcher
-    marker goes, so the copy is the owner's from now on. Returns whether every one went."""
+                             log_obj: Any = None, retire: bool = True) -> bool:
+    """A built-in no longer bundled: a copy nobody changed is uninstalled (the bundle carries its
+    successor; grants survive the uninstall), an edited or unknown copy keeps its files and records and
+    only the launcher marker goes, so it is the owner's from now on. ``retire=False`` (a re-seed of
+    this pass failed) leaves unchanged copies marked for the next boot. Returns whether every one went."""
+    from ouroboros.skill_source_install import SkillInstallError, uninstall_installed
+
     logger = log_obj or log
     seed_root = pathlib.Path(seed_dir or bundled_skills_dir())
     native_root = pathlib.Path(drive_root) / "skills" / "native"
     if not native_root.is_dir():
         return True
     complete = True
-    for entry in native_root.iterdir():
+    for entry in sorted(native_root.iterdir()):
         marker = entry / SEED_MARKER
         if not entry.is_dir() or entry.name.startswith(".") or not marker.is_file() or (seed_root / entry.name).is_dir():
             continue
         try:
+            if _unmodified_release(pathlib.Path(drive_root), entry.name, entry):
+                if not retire:
+                    complete = False
+                    continue
+                uninstall_installed(pathlib.Path(drive_root), entry.name)
+                logger.info("Built-in skill %r is no longer bundled and was unchanged; uninstalled.", entry.name)
+                continue
             marker.unlink()
             logger.info("Built-in skill %r is no longer bundled; its installed copy is now user-managed.", entry.name)
-        except OSError:
+        except (OSError, SkillInstallError):
             complete = False
             logger.warning("Failed to release removed built-in %s", entry, exc_info=True)
     return complete
@@ -586,8 +613,8 @@ def _reconcile_bundle(drive: pathlib.Path, seed_root: pathlib.Path, repo: pathli
     except Exception:
         failures.append("reseed")
         logger.warning("Built-in skill re-seed raised", exc_info=True)
-    try:
-        if not release_removed_builtins(drive, seed_dir=seed_root, log_obj=logger):
+    try:  # a successor that failed to re-seed keeps its retired partner until the next boot
+        if not release_removed_builtins(drive, seed_dir=seed_root, log_obj=logger, retire=not failures):
             failures.append("release")
     except Exception:
         failures.append("release")
