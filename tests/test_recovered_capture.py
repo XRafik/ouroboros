@@ -402,7 +402,7 @@ def test_stop_and_owner_restart_leave_capture_to_existing_owners(tmp_path, monke
         else:
             monkeypatch.setattr(server_restart, "DATA_DIR", root)
             monkeypatch.setattr(server_restart, "_OWNER_STOP_BEGAN", threading.Event())
-            monkeypatch.setattr(owned_shutdown, "begin_owned_stop", lambda root: None)
+            monkeypatch.setattr(owned_shutdown, "begin_owned_stop", lambda root, **_kw: None)
             monkeypatch.setattr(owned_shutdown, "stop_owned_work", lambda root: None)
             monkeypatch.setattr(claudexor_daemon, "ensure_owned_gateway",
                                 lambda **kw: pytest.fail("Restart must only attach"))
