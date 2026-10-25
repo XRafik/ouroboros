@@ -332,6 +332,21 @@ export function createChatInstance({
     let _historyReplayActive = false;
     let _historyRow = null;
     let _historyAppending = false;
+    // While a page is replayed, every identity key a mounted bubble carries (a superset: keys are added, never taken
+    // back): a row of the page looks for its prior bubble only when one could be mounted, instead of scanning the feed
+    // once per row (O(rows²) per page).
+    let replayKeys = null;
+    function noteBubbleKeys(node) {
+        if (!replayKeys || !node) return;
+        const nodes = node.classList?.contains('chat-bubble') ? [node] : [];
+        for (const bubble of [...nodes, ...(node.querySelectorAll?.('.chat-bubble') || [])]) {
+            const { historyId, clientMessageId, originId, messageKey } = bubble.dataset || {};
+            if (historyId) replayKeys.history.add(historyId);
+            if (clientMessageId) replayKeys.client.add(clientMessageId);
+            if (originId) replayKeys.origin.add(originId);
+            if (messageKey) replayKeys.legacy.add(messageKey);
+        }
+    }
 
     const persistedHistory = [];
     const seenMessageKeys = new Set();
@@ -720,9 +735,12 @@ export function createChatInstance({
         }
         return withStableViewport(() => {
             // Scope to THIS instance's column — a global id lookup would resolve to
-            // the first panel's typing node and misplace project-thread messages.
-            const typing = messagesDiv.querySelector('.typing-bubble');
+            // the first panel's typing node and misplace project-thread messages. It is
+            // the feed's last child (rows go before it): no walk of the feed per row.
+            const last = messagesDiv.lastElementChild;
+            const typing = last?.classList?.contains('typing-bubble') ? last : messagesDiv.querySelector('.typing-bubble');
             insertTimelineNode(messagesDiv, node, typing);
+            noteBubbleKeys(node);
             replies.syncDerivedQuotes(node);  // a landing row may repeat, or stop repeating, the quote below it
             return true;
         }, {
@@ -2158,26 +2176,33 @@ export function createChatInstance({
             && bubbles().find(node => node.dataset.deliveryId === opts.deliveryId);
         if (delivered) {
             stampHistoryNode(delivered, opts.historyId, opts.historyPosition);
+            noteBubbleKeys(delivered);
             rememberMessageKey(messageKey);
             return false;
         }
         const prior = opts.historyId
-            ? historyNodes(opts.historyId).find(node => node.classList.contains('chat-bubble'))
-            : Array.from(messagesDiv.querySelectorAll('.chat-bubble')).find(node => node.dataset.messageKey === legacyKey);
+            ? (replayKeys && !replayKeys.history.has(opts.historyId) ? null
+                : historyNodes(opts.historyId).find(node => node.classList.contains('chat-bubble')))
+            : (replayKeys && !replayKeys.legacy.has(legacyKey) ? null
+                : Array.from(messagesDiv.querySelectorAll('.chat-bubble')).find(node => node.dataset.messageKey === legacyKey));
         if (prior && (opts.historyId || _historyReplayActive)) {
             rememberMessageKey(messageKey);
             const originChanged = syncSavedProjectContext(prior, opts.originProjected, opts.originId);
+            noteBubbleKeys(prior);
             return chatDecision.renderRoutingDecision(prior, opts.chatAnnotation) || originChanged;
         }
         // History may land first; a live copy adds no new facts.
         if (prior || (messageKey && seenMessageKeys.has(messageKey))) return false;
         if (opts.historyId) {
-            const prior = bubbles().find(node =>
+            const mounted = !replayKeys || (clientMessageId && replayKeys.client.has(clientMessageId))
+                || (opts.originId && replayKeys.origin.has(opts.originId)) || replayKeys.legacy.has(legacyKey);
+            const prior = mounted && bubbles().find(node =>
                 (clientMessageId && node.dataset.clientMessageId === clientMessageId)
                 || (opts.originId && node.dataset.originId === opts.originId)
                 || (!node.dataset.historyId && node.dataset.messageKey === legacyKey));
             if (prior) {
                 stampHistoryNode(prior, opts.historyId, opts.historyPosition);
+                noteBubbleKeys(prior);
                 rememberMessageKey(messageKey);
                 chatDecision.renderRoutingDecision(prior, opts.chatAnnotation);
                 const changed = syncSavedProjectContext(prior, opts.originProjected);
@@ -2353,6 +2378,8 @@ export function createChatInstance({
         liveCardBound.beginReplay();
         try {
             withStableViewport(() => {
+                replayKeys = { history: new Set(), client: new Set(), origin: new Set(), legacy: new Set() };
+                noteBubbleKeys(messagesDiv);
                 // A formerly unbound final can gain its real child lineage on a
                 // deeper page. Keep a selected old bubble until it can move.
                 messages = messages.filter(row => {
@@ -2566,6 +2593,7 @@ export function createChatInstance({
             _historyRow = null;
             _historyReplayActive = false;
             _historyAppending = false;
+            replayKeys = null;
         }
         syncChatStatus();
     }

@@ -281,7 +281,9 @@ export function insertTimelineNode(messages, node, typing = null) {
     const nodeTs = rawNodeTs == null || rawNodeTs === '' ? NaN : Number(rawNodeTs);
     let before = null;
     if (Number.isFinite(nodeTs)) {
-        for (const child of Array.from(messages?.children || [])) {
+        const children = messages?.children || [];
+        for (let index = 0; index < children.length; index += 1) {
+            const child = children[index];
             if (child === node || child === typing) continue;
             const rawChildTs = child?.dataset?.ts;
             const childTs = rawChildTs == null || rawChildTs === '' ? NaN : Number(rawChildTs);
@@ -573,6 +575,7 @@ export function createTimelineAnchors({ messagesDiv, liveCardRecords }) {
             return rect.bottom > messagesRect.top && rect.top < messagesRect.bottom;
         }) || null;
         if (!topNode) return null;
+        const firstShown = nodes.indexOf(topNode);
 
         // A live-card can span several screens while the reader is inside a
         // child summary or timeline line. Preserve that visible boundary, not
@@ -657,7 +660,15 @@ export function createTimelineAnchors({ messagesDiv, liveCardRecords }) {
             }
             return top < bottom;
         };
-        const reading = Array.from(messagesDiv.querySelectorAll?.('.chat-live-line-body-full, [data-review-attempt-detail]') || [])
+        // Such a box sits in its row's flow, so only the rows reaching into the view can hold one: they are searched,
+        // not the whole feed on every capture.
+        const shownRows = [];
+        for (let index = firstShown; index < nodes.length; index += 1) {
+            const rect = nodes[index].getBoundingClientRect();
+            if (rect.top >= messagesRect.bottom) break;
+            if (rect.bottom > messagesRect.top) shownRows.push(nodes[index]);
+        }
+        const reading = shownRows.flatMap(row => Array.from(row.querySelectorAll?.('.chat-live-line-body-full, [data-review-attempt-detail]') || []))
             .map(box => ({ box, rect: box.getBoundingClientRect() }))
             .filter(({ box, rect }) => box.getClientRects().length && shown(box, rect)
                 && (box.scrollTop > 0 || rect.top < messagesRect.top))
