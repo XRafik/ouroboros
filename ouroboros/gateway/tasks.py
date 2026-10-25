@@ -107,9 +107,9 @@ _RESERVED_METADATA_KEYS = frozenset({
     "executor_ref",
     "workspace_executor",
     "project_id",
-    # Owner provenance belongs to the host, never to a caller.
+    # Owner provenance (and its recorded absence) belongs to the host, never to a caller.
     "origin_message_ref",
-    "origin_suppressed",
+    "origin_suppressed", "origin_message_absent",
 })
 
 

@@ -157,7 +157,7 @@ ouroboros/ — agent core and shared runtime (§6)
   external_runs.py — a task's delegated runs under one stop policy (§6 Owner Pause)
   working_checkpoint.py — one rolling working state per attempt, delayed content ACK, frozen recovery (§6 Saved working state)
   local_custody_repair.py — an addressed action retires a positively ended local owner's claim; passive reads write nothing (§6 Owner Continue)
-  owner_continue.py, schedule_continuation.py — Continue eligibility and owner/schedule sources (§6)
+  owner_continue.py, schedule_continuation.py — Continue eligibility and sources (§6)
   routing_wait.py — receipt waits and the one act projection that the picker, routing tools and observer share
   outcomes.py — typed task-outcome and objective authority with separate lifecycle, execution, objective, review, artifact and verification axes (§6 Task lifecycle; §10.1)
   outcome_receipt_store.py — verification-receipt append/read authority; a zero-run receipt writes `incomplete`/`unknown` only: a zero-run "complete" is unverifiable self-report
@@ -551,7 +551,7 @@ ouroboros/ — agent core and shared runtime (§6)
   obligations.py — Atomic current sets (incl. `owner_questions`); owning transitions publish before work and retire after discharge
   startup_migrations.py, startup_task_files.py — Explicit inherited-state import/repair and addressed file recovery
   delegate_custody_current.py — Custody on the store: run rows, pending invocations, outbox, importer's fold
-  owned_shutdown.py — the ownership set `state/owned_processes.json` (both custody funnels write it) and the one bounded exit stop; unconfirmed stops are retried at the next start (§9)
+  owned_shutdown.py — the ownership set `state/owned_processes.json`, the one bounded exit stop with its next-start retry and entry `state/shutdown_entry.json` (§9)
   platform_layer.py, platform_win32_abi.py — OS process/lock helpers, descendant seam, private Win32 ABI (Platform substrate below)
   verified_download.py — Shared exact-size/digest verification and atomic cached byte delivery
   node_runtime.py — Execution-probed Node runtime health (`node_runtime_health`; a missing binary is never cached), `select_skill_node_runtime`, `skill_node_emergency_path_dir`
