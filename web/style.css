@@ -9799,7 +9799,7 @@ body.keyboard-open .project-panel {
     .chat-relay-note[data-deck="closed"] { cursor: pointer; }
     .chat-relay-note[data-deck="closed"]:hover > .chat-relay-face { background: var(--voice-ouroboros-note-hover); }
 }
-.chat-relay-note[data-deck="closed"]:active:not(:has(button:active)) > .chat-relay-face { filter: var(--press); }
+.chat-relay-note[data-deck="closed"]:active > .chat-relay-face:not(:has(button:active)) { filter: var(--press); }
 /* The row's own states go to the face, since the row is transparent: a quote's jump rings the card (reduced motion
    keeps the ring), a long press sinks and lifts the row (its transform, below) while the face's shadow dims the feed. */
 @keyframes chat-relay-target {
