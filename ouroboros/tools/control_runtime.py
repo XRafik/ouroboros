@@ -105,7 +105,10 @@ def _request_restart(ctx: ToolContext, reason: str, adopt_commit: str = "") -> s
     if block_reason:
         return f"⚠️ RESTART_BLOCKED: in evolution mode, {block_reason}."
     is_evolution = str(ctx.current_task_type or "") == "evolution"
-    restart_reason = str(reason or "").strip() or "agent_requested_restart"
+    stated = str(reason or "").strip()
+    restart_reason = stated or "agent_requested_restart"
+    import json
+
     from ouroboros import body_adoption, body_candidate
 
     serving_dir = body_candidate.serving_repo_dir_for(ctx)
@@ -170,7 +173,11 @@ def _request_restart(ctx: ToolContext, reason: str, adopt_commit: str = "") -> s
     ctx.pending_restart_reason = restart_reason
     ctx.last_push_succeeded = False
     ctx.last_reviewed_commit_sha = ""
-    return f"Restart requested: {restart_reason}.{adoption_note}"
+    # The reason is the caller's own text, kept exact for the restart binding: quoted after the host's facts,
+    # never stated as one of them.
+    said = (f" Reason (the caller's own words): {json.dumps(stated, ensure_ascii=False)}." if stated
+            else " No reason was given; the host default agent_requested_restart is recorded.")
+    return f"Restart requested.{adoption_note}{said}"
 
 
 def self_change_tool_entries() -> list:
