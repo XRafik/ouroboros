@@ -1,0 +1,108 @@
+# Manual diagnostic driver on an isolated QA branch; never merge into product.
+# This file is not a release gate and has no push/pull_request/schedule trigger.
+name: Issue 1234 bounded Linux observation
+on:
+  workflow_dispatch:
+    inputs:
+      recipe_sha:
+        description: Exact commit containing this recipe (40 lowercase hex)
+        required: true
+        type: string
+      confirm:
+        description: Type RUN-SECRETLESS-DIAGNOSTICS to authorize download/containers/artifact retention
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  qualify:
+    if: inputs.confirm == 'RUN-SECRETLESS-DIAGNOSTICS'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1, from existing repository workflow
+        with:
+          ref: ${{ inputs.recipe_sha }}
+          persist-credentials: false
+      - name: Bind native x86_64 runner and exact recipe
+        env:
+          EXPECTED: ${{ inputs.recipe_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$EXPECTED"
+          test "$GITHUB_SHA" = "$EXPECTED"
+          test "$RUNNER_ARCH" = X64
+          test "$(uname -m)" = x86_64
+          mkdir -p "$RUNNER_TEMP/ob1234/input" "$RUNNER_TEMP/ob1234/evidence"
+          uname -a > "$RUNNER_TEMP/ob1234/evidence/runner.txt"
+          # Assumption: recipe is at repo root; adjust this line if integrated elsewhere.
+          cp qualify.py "$RUNNER_TEMP/ob1234/input/qualify.py"
+      - name: Acquire ONLY the known release, verify bytes before extraction
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ob1234/input"
+          curl --proto '=https' --tlsv1.2 --fail --location --max-time 300 \
+            --output release.tar.gz https://github.com/razzant/ouroboros/releases/download/v7.4.4/Ouroboros-7.4.4-linux-x86_64.tar.gz
+          test "$(stat -c %s release.tar.gz)" = 904504183
+          printf '%s  release.tar.gz\n' 6af83f159af01bcfc686d6a3668fe03779e0cf184271090e12be1fb66d0a7791 | sha256sum -c -
+          tar --no-same-owner -xzf release.tar.gz
+          test -x Ouroboros/_internal/python-standalone/bin/python3
+          git clone --no-checkout Ouroboros/_internal/repo.bundle source
+          git -C source checkout --detach 796f2e8708ee375216783a7fd80a3bf79f081079
+          git -C source rev-parse HEAD > ../evidence/runtime-source.txt
+          sha256sum release.tar.gz qualify.py > ../evidence/input-sha256.txt
+      - name: Ubuntu native userland observation (not Silverblue)
+        id: ubuntu
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ob1234/input"
+          # No package repair: missing runner dependencies are an incomplete observation.
+          timeout --signal=TERM --kill-after=5s 240s python3 qualify.py run \
+            --bundle "$PWD/Ouroboros/_internal" --source "$PWD/source" \
+            --expected-source-sha 796f2e8708ee375216783a7fd80a3bf79f081079 \
+            --out "$RUNNER_TEMP/ob1234/evidence/ubuntu" --cycles 3 --case-seconds 60
+      - name: Prepare Fedora 43 userland, recording mutable image/package inputs
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/ob1234"
+          docker pull fedora:43
+          docker image inspect fedora:43 > evidence/fedora-base-image.json
+          docker build --network default -t ob1234-fedora - <<'DOCKERFILE' 2>&1 | tee evidence/fedora-build.log
+          FROM fedora:43
+          RUN dnf -y install python3 git nss nspr atk at-spi2-atk cups-libs libdrm libX11 libXcomposite libXdamage libXext libXfixes libXrandr libxcb libxkbcommon mesa-libgbm alsa-lib pango cairo fontconfig freetype libxshmfence && dnf clean all
+          DOCKERFILE
+          docker image inspect ob1234-fedora > evidence/fedora-image.json
+          docker run --rm --network none ob1234-fedora rpm -qa > evidence/fedora-packages.txt
+      - name: Fedora 43 container on native x86_64 runner (NOT Silverblue host)
+        id: fedora
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          timeout --signal=TERM --kill-after=5s 240s docker run --name ob1234-fedora-run \
+            --user "$(id -u):$(id -g)" -e HOME=/tmp \
+            --network none --read-only --cpus 2 --memory 3g --pids-limit 256 --shm-size 256m \
+            --ulimit core=0 --tmpfs /tmp:rw,size=128m \
+            -v "$RUNNER_TEMP/ob1234/input:/input:ro" \
+            -v "$RUNNER_TEMP/ob1234/evidence:/evidence:rw" -w /input ob1234-fedora \
+            python3 /input/qualify.py run --bundle /input/Ouroboros/_internal --source /input/source \
+            --expected-source-sha 796f2e8708ee375216783a7fd80a3bf79f081079 \
+            --out /evidence/fedora43 --cycles 3 --case-seconds 60
+      - name: Cleanup only this diagnostic container, including timeout residue
+        if: always()
+        run: docker rm -f ob1234-fedora-run 2>/dev/null || true
+      - name: Retain failures as well as successes (repository artifact visibility applies)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4, from existing workflow
+        with:
+          name: issue1234-observations-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ob1234/evidence
+          if-no-files-found: error
+          retention-days: 7
+      - name: Missing/failed observation is NOT a green qualifier
+        if: always()
+        env:
+          UBUNTU: ${{ steps.ubuntu.outcome }}
+          FEDORA: ${{ steps.fedora.outcome }}
+        run: test "$UBUNTU" = success && test "$FEDORA" = success
