@@ -503,8 +503,9 @@ def test_a_dirty_tree_is_reconciled_without_a_receipt(seed_repo):
 def test_a_failed_phase_writes_no_receipt_and_the_next_boot_retries(seed_repo, monkeypatch, phase):
     repo, drive = seed_repo
     ensure(repo, drive)
+    shutil.rmtree(repo / "skills" / "second")  # merged into `first`: retired only by a pass where `first` arrived
     _write(repo / "skills", "first", "1.1.0")
-    _git(repo, "commit", "-qam", "first 1.1.0")
+    _git(repo, "commit", "-qam", "first 1.1.0 takes in second")
     if phase == "reseed":
         real = skill_builtin.install_builtin_skill
         monkeypatch.setattr(skill_builtin, "install_builtin_skill",
@@ -514,6 +515,7 @@ def test_a_failed_phase_writes_no_receipt_and_the_next_boot_retries(seed_repo, m
 
     ensure(repo, drive)
     assert receipt(drive) is None  # the stale receipt went before the pass; none replaced it
+    assert (drive / "skills" / "native" / "second" / ".seed-origin").is_file(), "the retired partner waits"
 
     monkeypatch.undo()
     monkeypatch.setattr("ouroboros.config.SETTINGS_PATH", drive / "settings.json")
@@ -521,31 +523,8 @@ def test_a_failed_phase_writes_no_receipt_and_the_next_boot_retries(seed_repo, m
     if phase == "reseed":
         assert skill_builtin.install_builtin_skill is real
     ensure(repo, drive)
-    assert receipt(drive) is not None
+    assert receipt(drive) is not None and not (drive / "skills" / "native" / "second").exists()
     assert skill_builtin._version(drive / "skills" / "native" / "first") == "1.1.0"
-
-
-def test_a_dropped_built_in_waits_for_a_clean_re_seed_before_it_is_uninstalled(seed_repo, monkeypatch):
-    """The bundle merges `second` into `first`: while `first` fails to re-seed, `second` stays marked and running."""
-    import shutil
-
-    repo, drive = seed_repo
-    ensure(repo, drive)
-    shutil.rmtree(repo / "skills" / "second")
-    _write(repo / "skills", "first", "2.0.0")
-    _git(repo, "add", "-A")
-    _git(repo, "commit", "-qm", "second merged into first")
-    real = skill_builtin.install_builtin_skill
-    monkeypatch.setattr(skill_builtin, "install_builtin_skill",
-                        lambda *args, **kwargs: {"ok": False, "error": "disk full"})
-    ensure(repo, drive)
-    second = drive / "skills" / "native" / "second"
-    assert (second / ".seed-origin").is_file(), "a failed successor keeps its retired partner for the next boot"
-    assert receipt(drive) is None
-    monkeypatch.setattr(skill_builtin, "install_builtin_skill", real)
-    ensure(repo, drive)
-    assert not second.exists() and receipt(drive) is not None
-    assert skill_builtin._version(drive / "skills" / "native" / "first") == "2.0.0"
 
 
 @pytest.mark.parametrize("pending", [["first"], None])
