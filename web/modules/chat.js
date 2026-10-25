@@ -100,6 +100,7 @@ import {
     createTimelineAnchors,
     insertTimelineNode,
     liveCardProjectionChanged,
+    replayedEvidenceTs,
     syncLiveCardToggle,
     updateLiveTimelineItem,
     upsertToolFoldRow,
@@ -808,7 +809,10 @@ export function createChatInstance({
             }
             updateLiveCardCount(record);
             renderLiveCardMeta(record);
-            reanchorTaskCard(record, rawTs, { suppressDomInsert });
+            // A timestamp-free current-work carrier intentionally belongs at the page end.
+            // Dated carriers may carry earlier evidence past an intervening owner message.
+            const anchor = Number.isFinite(Date.parse(rawTs)) ? replayedEvidenceTs(metrics.tool_evidence, rawTs) : rawTs;
+            reanchorTaskCard(record, anchor, { suppressDomInsert });
             ensureLiveCardVisible(record, { suppressDomInsert });
             return Boolean(changed || liveCardProjectionChanged(before, record));
         });
