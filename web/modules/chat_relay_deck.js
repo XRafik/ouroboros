@@ -18,9 +18,8 @@ const EDGES = 2;        // at most two ledges behind the front card
 const MAIN_CHAT = 1;
 const LEDGE_INSET = 12; // one stack level: 12px narrower per side, 8px lower (style.css draws it; the fold animates it)
 const LEDGE_DROP = 8;
-// The curve the older cards emerge on when a stack fans out: a light spring, the one named exception to the sheet
-// curve (owner question 5, A). Option B is the sheet curve itself: flip this token to '--ease-sheet'.
-const EMERGE_CURVE = '--ease-spring';
+// Everything that moves here rides the one sheet curve, the emerging cards of a fanned stack included (owner question
+// 5, B: no overshoot anywhere).
 const SHEET_CURVE = 'cubic-bezier(0.32, 0.72, 0, 1)';  // --ease-sheet's own value, should the stylesheet not answer
 const ARROW = '<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5"'
     + ' stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 8h11"></path>'
@@ -70,14 +69,11 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
     const inMain = Number(chatId) === MAIN_CHAT;
 
     const timing = () => {
-        let ease = '', spring = '';
+        let ease = '';
         try {
-            const style = globalThis.window.getComputedStyle(globalThis.window.document.documentElement);
-            ease = style.getPropertyValue('--ease-sheet').trim();
-            spring = style.getPropertyValue(EMERGE_CURVE).trim();
+            ease = globalThis.window.getComputedStyle(globalThis.window.document.documentElement).getPropertyValue('--ease-sheet').trim();
         } catch { ease = ''; }
-        ease ||= SHEET_CURVE;
-        return { open: motionMs('--motion-open'), close: motionMs('--motion-close'), ease, spring: spring || ease };
+        return { open: motionMs('--motion-open'), close: motionMs('--motion-close'), ease: ease || SHEET_CURVE };
     };
     // Position and opacity only. Reduced motion keeps a short fade of what fades and lets nothing travel; no engine
     // plays nothing.
@@ -337,7 +333,7 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
     }
 
     function emerge(run, before) {
-        const { open, ease, spring } = timing();
+        const { open, ease } = timing();
         const front = run[run.length - 1];
         const landing = front.getBoundingClientRect();
         const glide = before.top - landing.top;
@@ -347,7 +343,7 @@ export function createRelayDecks({ feed, chatId = 0, onDomWrite = (write) => wri
             // From the stack's place, a step lower per card, and never past the front card's end.
             const from = Math.min(before.top - place.top + i * LEDGE_DROP, landing.bottom - place.bottom);
             play(card, [{ transform: `translateY(${from}px) scale(0.96)`, opacity: 0 }, { transform: 'none', opacity: 1 }],
-                open, { delay: Math.min(i, 4) * 24, easing: spring });
+                open, { delay: Math.min(i, 4) * 24, easing: ease });
         });
     }
 

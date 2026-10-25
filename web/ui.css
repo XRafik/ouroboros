@@ -256,9 +256,6 @@
     --motion-tone: background 0.12s ease, box-shadow 0.12s ease, color 0.12s ease, filter 0.12s ease;
     /* The one curve anything that moves rides: the iOS sheet curve (DESIGN §10 "Motion"; shell_motion.js reads it). */
     --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
-    /* The one named exception: the light spring the older cards of a stack of notes emerge on when it fans out
-       (chat_relay_deck.js); the front card and everything else keep the sheet curve. */
-    --ease-spring: cubic-bezier(0.34, 1.26, 0.64, 1);
     /* How long it runs: a surface coming in, a surface going out, a fade (a finger's release sets its own speed). */
     --motion-open: 340ms;
     --motion-close: 280ms;

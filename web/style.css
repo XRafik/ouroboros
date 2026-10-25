@@ -9851,8 +9851,17 @@ body.keyboard-open .project-panel {
 }
 .chat-relay-words-inside::before { content: ''; flex: none; width: 3px; height: 12px; border-radius: 2px; background: currentColor; }
 .chat-relay-excerpt { display: flex; align-items: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
-/* The one control at the end of the teller's line; alone, when a note without that line is open, it keeps the right. */
+/* The one control at the end of the teller's line; alone, when a note without that line is open, it keeps the right.
+   A bare word is 16px tall: with a pointer it gains an invisible 24px hit area centred on it (the touch minimum comes
+   from .ui-hit-area under a coarse pointer), so the word itself moves nowhere. */
 .chat-relay-more { flex: none; margin-inline-start: auto; }
+@media (pointer: fine) {
+    .chat-relay-more::after {
+        content: "";
+        position: absolute;
+        inset: min(0px, calc((100% - 24px) / 2));
+    }
+}
 .chat-relay-gist {
     margin: 0;
     flex: 1 1 auto;

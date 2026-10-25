@@ -137,9 +137,8 @@ gradient behind content or on an object, and no glows, textures, outlines or neu
   (280 ms, going out) or `--motion-fade` (180 ms, a menu or the Shade; what leaves eases
   in); it moves by position, opacity and a small scale, never blur. Three folds change a
   height: the capsule row and the reply strip on that curve, and a stack of notes between works,
-  whose height lands at once inside the reading write while its cards glide by position and opacity; its
-  ledges are part of the card's own box, and the older cards emerging from a fanned stack ride the one
-  named exception, `--ease-spring`, a light spring that never drives the front card. The handover between places
+  whose height lands at once inside the reading write while its cards glide by position and opacity on
+  that same curve; its ledges are part of the card's own box. The handover between places
   keeps its own beat (`web/modules/shell_motion.js`); the expensive write of a change
   waits for its motion's end (`web/modules/motion.js`).
 - Where it lives: the values are `web/ui.css` tokens, dark in `:root` and light in
@@ -1745,9 +1744,9 @@ stack whose tucked cards carry them adds the blue mark `Your words in N earlier 
 under the excerpt (singular for one; N counts cards, not quotations), so the 16 Oct rule
 that his words stay prominent holds while their cards are tucked, and a jump to a tucked
 row opens its stack before landing on it. Motion: the stack's height lands at once inside
-the reading write; fanning out, the front card glides from where the stack lay on
-`--ease-sheet` (never from below its place) while the older cards emerge from the stack's
-place on `--ease-spring`, the one named exception; folding moves no card, only the
+the reading write; fanning out, the front card glides from where the stack lay (never
+from below its place) while the older cards emerge from the stack's place, all on
+`--ease-sheet` and nothing overshooting (owner, 25 Oct); folding moves no card, only the
 ledges settle under the front card; a new note slides 24 px in from the side its room
 lies on (Main from the left, a Project arriving in Main from the right); reduced motion
 fades and lets nothing travel. The capsules are real buttons with the touch hit area, the
