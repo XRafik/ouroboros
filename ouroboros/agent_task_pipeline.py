@@ -666,6 +666,7 @@ def _task_cost_fields(env: Any, task: Dict[str, Any]) -> Dict[str, Any]:
         task_cost_fields = reconstruct_task_cost(
             str(task.get("id") or ""), fields=True,
             drive_root=pathlib.Path(task.get("budget_drive_root") or env.drive_root),
+            custody_root=env.drive_root,
         )
         from ouroboros.cost_projection import with_task_cost_presentation
 
@@ -1305,8 +1306,6 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             # Compatibility mirror consumed by the gateway and task_done event.
             # ``outcome_axes.review`` remains the canonical structured axis.
             review_status=dict(outcome_axes.get("review") or {}),
-            accounted_upper_bound_usd_with_children=_cost_with_children,
-            cost_with_children_partial=_cost_partial,
             task_contract=task_contract,
             _is_direct_chat=bool(task.get("_is_direct_chat")),
             loop_outcome=loop_outcome,
@@ -1356,7 +1355,8 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             trace_summary=trace_summary,
             trace_refs=loop_outcome.get("trace_refs") or {},
             **({"model_execution": model_execution} if model_execution is not None else {}),
-            **cost_fields,
+            **{**cost_fields, "accounted_upper_bound_usd_with_children": _cost_with_children,
+               "cost_with_children_partial": _cost_partial},
             review_evidence=review_evidence or {},
             completion_observations=observations,
             **({"review_projection": review_projection} if review_projection.get("panels") else {}),

@@ -269,6 +269,7 @@ def _project_row(tid: str, row: dict, event: dict, ready: dict, *, delivery: dic
         "_result_text_present": (isinstance(row.get("result"), str) and bool(row["result"]))
         if "result" in row else row.get("_result_text_present") is True,
         "terminal_origin": str(row.get("terminal_origin") or ""),
+        **({"cancel_origin": dict(row["cancel_origin"])} if isinstance(row.get("cancel_origin"), dict) else {}),
         "result_ref": {"kind": "task_result", "task_id": tid, "reader": "get_task_result"}, "text": text,
         **({"reason_detail": verdict} if verdict else {}),
         "completion_notice": notice,

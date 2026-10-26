@@ -88,6 +88,20 @@ def root(tmp_path):
     return tmp_path
 
 
+@pytest.mark.parametrize("projected_partial", [False, True])
+def test_terminal_cost_carrier_is_merged_once_before_store(root, monkeypatch, projected_partial):
+    # The authoritative carrier may already include the root openness key.
+    # This initial own-cost mirror remains partial until the subtree refresh.
+    original = pipeline._task_cost_fields
+    def fields(env, task):
+        return {**original(env, task), "cost_with_children_partial": projected_partial}
+    monkeypatch.setattr(pipeline, "_task_cost_fields", fields)
+    _, stored, _, _ = _end_turn(root, monkeypatch, "cost-carrier", button="wrap_up")
+    assert stored["status"] == "completed" and stored["result"] == ANSWER
+    assert stored["cost_with_children_partial"] is True
+    assert stored["accounted_upper_bound_usd_with_children"] == stored["accounted_upper_bound_usd"]
+
+
 @pytest.mark.parametrize("answer, status", [(True, "completed"), (False, "failed")])
 def test_stop_now_reads_stopped_whatever_the_turn_kept(root, monkeypatch, answer, status):
     intent, stored, final, done = _end_turn(root, monkeypatch, f"stop-{answer}", button="stop_now", answer=answer)
@@ -250,6 +264,36 @@ def test_history_task_detail_and_terminal_row_say_the_same_word(root, monkeypatc
     replayed = next(message for message in payload["messages"] if message.get("task_id") == "consumers")
     assert replayed["outcome_phase"] == "cancelled"
     assert replayed["cancel_origin"]["stop_policy"] == "immediate"
+
+
+@pytest.mark.parametrize("answer", [False, True])
+def test_compact_terminal_keeps_stop_when_result_read_is_unavailable(root, monkeypatch, answer):
+    from pathlib import Path
+    import subprocess
+    from ouroboros import task_store
+    from ouroboros.gateway.history import make_chat_history_endpoint
+    from ouroboros.preflight_node import resolve_node
+    from ouroboros.terminal_projection import _project_row
+
+    _, stored, _, _ = _end_turn(root, monkeypatch, "unavailable-stop", button="stop_now", answer=answer)
+    row = _project_row("unavailable-stop", stored, {}, {"chat_id": 7})
+    from ouroboros import dialogue_store
+    dialogue_store.append(root, "chat", row)
+    def unavailable(*_a, **_kw):
+        raise OSError("test: result store temporarily unavailable")
+    monkeypatch.setattr(task_store, "display_documents", unavailable)
+    response = asyncio.run(make_chat_history_endpoint(root)(SimpleNamespace(query_params={"chat_id": "7"})))
+    replayed = next(r for r in json.loads(response.body)["messages"] if r.get("task_id") == "unavailable-stop")
+    assert replayed["cancel_origin"] == stored["cancel_origin"]
+    node = resolve_node()
+    assert node
+    script = """import {taskOutcomeSeverity} from './web/modules/log_events.js';
+let text=''; for await (const chunk of process.stdin) text += chunk;
+console.log(taskOutcomeSeverity(JSON.parse(text)));"""
+    checked = subprocess.run([node, "--input-type=module", "-e", script], input=json.dumps(replayed),
+        cwd=Path(__file__).resolve().parents[1], capture_output=True, text=True, check=True)
+    assert checked.stdout.strip() == "cancelled"
+    assert load_task_result(root, "unavailable-stop") == stored
 
 
 def test_the_census_and_the_work_row_read_the_same_stop(root, monkeypatch):
