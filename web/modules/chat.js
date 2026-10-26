@@ -77,8 +77,6 @@ import {
     syncParkedPhase,
 } from './task_phase_chip.js';
 import {
-    loadSkillReviewDetail,
-    nestedSkillReviewRef,
     renderSkillReviewDisclosure,
     wireSkillReviewDisclosure,
 } from './skill_review_card.js';
@@ -406,7 +404,6 @@ export function createChatInstance({
     const markReviewAnchor = (r, on = false) => setReviewAnchor(r, on, setLiveCardPhase);
     const explicitCardExpansion = new Map();
     const reviewDisclosureByTask = new Map();
-    const skillReviewDetailStore = new Map();
     const reviewHydrator = createReviewHydrator({
         fetchDetail: fetchTaskDetailStrict,
         onSettled: () => !destroyed && reading.position(),
@@ -1257,9 +1254,7 @@ export function createChatInstance({
             ? explicitCardExpansion.get(normalizedGroupId)
             : Boolean(options.isSubagent && nestedSubagentsExpanded);
         root.dataset.expanded = initialExpanded ? '1' : '0';
-        // The summary band is reading content (selectable, never a control); its one disclosure is the
-        // "Details" button, its notes count kept in the button's name (DESIGN §5 "A task card's summary
-        // outranks its details").
+        // Selectable summary; Reviews and Details have independent native controls.
         root.innerHTML = `
             <div class="chat-live-summary-button" data-live-summary-button>
                 <div class="chat-live-summary">
@@ -1283,16 +1278,16 @@ export function createChatInstance({
             <div class="chat-live-foot" data-live-foot>
                 <div class="chat-live-meta" data-live-meta></div>
                 <div class="chat-live-foot-end" data-live-foot-end>
-                    <div class="chat-live-review-summary" data-live-review-summary hidden></div>
+                    <button type="button" class="chat-live-review-summary ui-hit-area" data-live-review-summary aria-expanded="false" hidden></button>
                 </div>
             </div>
+            <div data-live-reviews-host></div>
             <div class="chat-live-details">
                 <div data-live-phase-detail hidden></div>
                 <dl class="chat-live-facts" data-live-facts hidden></dl>
                 <div data-live-cost-detail hidden></div>
             </div>
             <div class="chat-live-timeline" data-live-timeline id="${escapeHtmlAttr(timelineId)}"></div>
-            <div data-live-reviews-host></div>
             <div class="chat-live-episode-history" data-live-episode-history hidden></div>
         `;
         const record = {
@@ -1329,7 +1324,6 @@ export function createChatInstance({
         const reviewDisclosure = reviewDisclosureByTask.get(normalizedGroupId) || {
             sectionExpanded: false,
             expandedGroups: new Set(),
-            expandedAttempts: new Set(),
         };
         reviewDisclosureByTask.set(normalizedGroupId, reviewDisclosure);
         record.reviewController = createReviewPresentationController({
@@ -1337,15 +1331,7 @@ export function createChatInstance({
             summary: record.reviewSummaryEl,
             disclosure: reviewDisclosure,
             onHydrate: () => hydrateCardReviews(normalizedGroupId),
-            onLoadSkillDetail: (detail, detailOptions = {}) => loadSkillReviewDetail(
-                detail,
-                nestedSkillReviewRef(detail),
-                {
-                    store: skillReviewDetailStore,
-                    retry: detailOptions.retry === true,
-                    onDomWrite: withStableViewport,
-                },
-            ),
+            onRead: (file, trigger, event) => chatMedia.openReview(file, record.root, trigger, event),
             onDomWrite: withStableViewport,
         });
         // A native button: Enter and Space press it. A portal hides it (its room holds what it would open).
@@ -3714,7 +3700,6 @@ export function createChatInstance({
             for (const id of liveCardRecords.keys()) disposeLiveCard(id);
             explicitCardExpansion.clear();
             reviewDisclosureByTask.clear();
-            skillReviewDetailStore.clear();
             reviewHydrator.clear();
             pendingSuggestedNames.clear();
             subagentChildParents.clear();

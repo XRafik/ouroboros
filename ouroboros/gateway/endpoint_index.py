@@ -56,6 +56,9 @@ HTTP_ENDPOINTS: tuple[str, ...] = (
     "GET /api/tasks",
     "GET /api/tasks/{task_id}",
     "GET /api/tasks/{task_id}/artifacts/{name}",
+    "GET /api/tasks/{task_id}/reviews",
+    "GET /api/tasks/{task_id}/reviews/skill/{job_id}",
+    "GET /api/tasks/{task_id}/reviews/{record_id}/{seat_id}",
     "GET /api/tasks/{task_id}/events",
     "POST /api/tasks/{task_id}/events",
     "POST /api/tasks/{task_id}/cancel",
@@ -308,7 +311,17 @@ HTTP_SHAPES: dict[str, Shape] = {
     "GET /api/tasks/{task_id}/events": Shape(
         "200:sse/TaskEvent 400,404:sse", query="cursor wait",
         note="resume with ?cursor=<last event id>; a 400/404 stream carries one error event"),
-    "POST /api/tasks/{task_id}/events": Shape("200:sse/TaskEvent 400,404:ErrorResponse", "TaskEventsRequest",
+    "GET /api/tasks/{task_id}/reviews": Shape(
+        "200:TaskReviewHistoryResponse 400,503:ErrorResponse", query="offset limit",
+        note="passive paged ledger history for this exact task, with per-record gaps; no-store"),
+    "GET /api/tasks/{task_id}/reviews/skill/{job_id}": Shape(
+        "200:text 400,404,503:ErrorResponse", query="skill format",
+        note="task-bound saved skill detail export; complete safe normalized text, no-store; existing desktop bridge prefix"),
+    "GET /api/tasks/{task_id}/reviews/{record_id}/{seat_id}": Shape(
+        "200:text 400,404,409:ErrorResponse", query="role part sha256 domain",
+        note="exact task/record/seat source selected by SHA, not a path; redacted complete text, no-store; original and export SHA differ when redacted"),
+    "POST /api/tasks/{task_id}/events": Shape(
+        "200:sse/TaskEvent 400,404:ErrorResponse", "TaskEventsRequest",
                                              note="v2 cursor: send back the cursor of the last event processed"),
     "POST /api/tasks/{task_id}/cancel": Shape(
         f"200,202:TaskCancelResponse {_TASK_ERRORS}", "TaskCancelRequest",

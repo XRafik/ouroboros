@@ -152,6 +152,7 @@ def collect_routes(
     )
     from ouroboros.gateway.state import api_consciousness, api_contract, api_health, api_state
     from ouroboros.gateway.skill_publish import skill_publish_routes
+    from ouroboros.gateway.task_reviews import task_review_routes
     from ouroboros.gateway.tasks import (
         api_task_artifact,
         api_task_cancel,
@@ -271,6 +272,7 @@ def collect_routes(
         Route("/api/tasks/{task_id}/cancel", endpoint=api_task_cancel, methods=["POST"]),
         Route("/api/tasks/{task_id}/hurry", endpoint=api_task_hurry, methods=["POST"]),
         *owner_tree_control_routes(),
+        *task_review_routes(),
         Route("/api/tasks/{task_id}/resume", endpoint=api_task_resume, methods=["POST"]),
         *_owner_answer_routes(),
         Route("/api/schedules", endpoint=api_schedules_list, methods=["GET"]),

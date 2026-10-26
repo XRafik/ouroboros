@@ -1033,7 +1033,7 @@ def emit_task_results(
         "artifact_status": artifact_bundle.get("status") or stored_result.get("artifact_status") or "",
         "artifact_bundle": artifact_bundle,
         "review_status": stored_result.get("review_status") if isinstance(stored_result.get("review_status"), dict) else {},
-        **({"review_projection": review_projection} if review_projection.get("panels") else {}),
+        **({"review_projection": review_projection} if review_projection.get("panels") or review_projection.get("gaps") or review_projection.get("review_records_omitted") else {}),
         **task_cost_fields,
         # v6.57.0 (P6b): recursive cost incl. children (from the stored rollup) so the
         # parent card / Logs can show the true subtree cost, not just this task's own.
@@ -1363,7 +1363,7 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
                "cost_with_children_partial": _cost_partial},
             review_evidence=review_evidence or {},
             completion_observations=observations,
-            **({"review_projection": review_projection} if review_projection.get("panels") else {}),
+            **({"review_projection": review_projection} if review_projection.get("panels") or review_projection.get("gaps") or review_projection.get("review_records_omitted") else {}),
             verification_ledger=verification_refs.get("inline"),
             artifact_bundle=artifact_bundle,
             artifacts=artifacts,
