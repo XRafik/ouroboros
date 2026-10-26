@@ -66,7 +66,7 @@ function* fitSteps(el, fit) {
         job.whole = inside(job);
         return job;
     };
-    if (box) fit.width = box.width;
+    fit.width = box ? box.width : 0;  // an element with no layout forgets its width, so showing it again fits it again
     if (!box || box.whole) { fit.onFit?.(false); return; }
     // Cut on whitespace only: a word is never split, a line never ends half a word.
     const tokens = fit.text.split(/(\s+)/);
