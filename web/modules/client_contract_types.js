@@ -306,13 +306,31 @@
  */
 
 /**
+ * Retained attention only; no exact wake match is inferred.
+ * @typedef {Object} PlaceHistoryAttention
+ * @property {'heard'|'focus_started'} decision
+ * @property {string=} reason
+ */
+
+/**
+ * A retained room message, delivery receipt or Place notice. Absent facts stay unknown.
+ * @typedef {Object} PlaceHistoryFacts
+ * @property {'message'|'notice'|'delivery'} kind
+ * @property {('authored'|'accepted'|'delivered'|'failed'|'uncertain')=} delivery_state
+ * @property {PlaceHistoryAttention=} attention
+ * @property {boolean=} owner_confirmed  // current stored account confirmation
+ */
+
+/**
  * One `GET /api/chat/history` row (live frames call `text` `content`). A row may also carry the
  * task-progress and outcome fields of a live `chat` frame (`ChatOutbound`). Replay-evidence rows
  * (`quiz_answer`, `quiz_closed`, `task_evidence`, or `summary_kind` + `historical_terminal`) are never shown.
  * @typedef {Object} ChatHistoryMessage
+ * @property {PlaceHistoryFacts=} place_history
  * @property {PresenceContact=} presence_contact
  * @property {string=} wait_ended_at
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // an outgoing row's own saved name, the same as its client_message_id
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -519,6 +537,33 @@
  * @property {string} connector
  * @property {string=} account_id
  * @property {string=} conversation_id
+ */
+
+/**
+ * A captured local conversation, not a complete remote-provider history.
+ * @typedef {Object} PlaceRoomSummary
+ * @property {number} room_chat_id
+ * @property {number|null} unanswered_count
+ * @property {string} address
+ * @property {string|null} label
+ * @property {string} last_at  // latest captured arrival
+ * @property {string} conversation_id
+ * @property {string} thread_id
+ */
+
+/**
+ * Store-wide chat import/gaps, not provider completeness.
+ * @typedef {Object} PlaceRoomsCoverage
+ * @property {'arrivals'} discovery
+ * @property {boolean} importing
+ * @property {boolean} gaps
+ */
+
+/**
+ * @typedef {Object} PlaceRoomsResponse
+ * @property {string} place_id
+ * @property {Array<PlaceRoomSummary>} rooms
+ * @property {PlaceRoomsCoverage} coverage
  */
 
 /**
@@ -795,6 +840,7 @@
  * A living card in Ouroboros's message; its history row is `msg_type: "card"` with the same `card`.
  * @typedef {Object} CardOutbound
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay

@@ -2,7 +2,7 @@ import { escapeHtmlAttr as escapeHtml } from './utils.js';
 import { openConfirmDialog } from './confirm_dialog.js';
 import { showToast } from './toast.js';
 import { apiClient, apiFetch } from './api_client.js';
-import { UPDATE_STAGE_LABELS, afterUpdateRows, attemptTime, bindPreflightDescription, dismissUpdateAttempt, dismissedUpdateAttempt, preflightEvidenceText, updateAttemptView, verifiedUpdatePlan } from './update_status.js';
+import { UPDATE_STAGE_LABELS, afterUpdateRows, attemptTime, bindPreflightDescription, preflightEvidenceText, updateAttemptView, verifiedUpdatePlan } from './update_status.js';
 import { destroyChatMarkdown, enhanceChatMarkdown, mountChatMarkdown } from './chat_markdown.js';
 import { updateEffectsText } from './update_effects.js';
 
@@ -484,7 +484,6 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
                                 <pre class="updates-raw-text" id="updates-attempt-raw-text"></pre>
                             </details>
                         </details>
-                        <button type="button" class="btn btn-ghost btn-sm" id="updates-attempt-dismiss">Dismiss indicator result</button>
                         <button type="button" class="btn btn-default btn-sm" id="updates-attempt-restore" hidden>Restore previous version</button>
                     </div>
                 </section>
@@ -544,7 +543,6 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
     const attemptWhen = page.querySelector('#updates-attempt-time');
     const attemptText = page.querySelector('#updates-attempt-text');
     const attemptFacts = page.querySelector('#updates-attempt-facts');
-    const attemptDismiss = page.querySelector('#updates-attempt-dismiss');
     const attemptRestore = page.querySelector('#updates-attempt-restore');
     const attemptRaw = page.querySelector('#updates-attempt-raw');
     const attemptRawLabel = page.querySelector('#updates-attempt-raw-label');
@@ -727,8 +725,6 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
         // Rewritten only when the record changes, so a refresh keeps the owner's selection in it.
         const raw = observed ? JSON.stringify(observed, null, 2) : '';
         if (attemptRawText.textContent !== raw) attemptRawText.textContent = raw;
-        attemptDismiss.dataset.attempt = view.id;
-        attemptDismiss.hidden = !view.terminal || dismissedUpdateAttempt() === view.id;
         attemptRestore.hidden = !view.restoreTarget;
         attemptRestore.dataset.target = view.restoreTarget || '';
         attemptRestore.disabled = replaceInFlight || Boolean(latestStatus?.update_tx?.active)
@@ -1092,11 +1088,6 @@ export function initUpdates({ mount, state, ws, openSettingsTab }) {
     });
     replaceBtn.addEventListener('click', replaceWithOfficial);
     attemptRestore.addEventListener('click', () => rollback(attemptRestore.dataset.target));
-    attemptDismiss.addEventListener('click', () => {
-        // The indicator only: no request is sent, and this section keeps the attempt until the next one.
-        dismissUpdateAttempt(attemptDismiss.dataset.attempt);
-        render();
-    });
     meta.addEventListener('click', (event) => {
         if (event.target.closest?.('[data-open-settings-advanced]')) {
             openSettingsTab?.('advanced');

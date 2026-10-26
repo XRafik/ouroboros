@@ -4,9 +4,11 @@ The real SPA (index.html, app.js, dashboard.js, updates.js, update_status.js and
 WebKit against the ``subscription_ui`` static server. ``/api/update/status`` answers with representative records,
 so each state is exact: populated samples of the shown attempt, zero, missing and long values, a record of another
 operation, an attempt without samples and one still running. A frame whose data hides the rows is a negative
-control: it is kept as evidence and never counts as coverage of them.
+control: it is kept as evidence and never counts as coverage of them. The update notice beside the version is read
+with the panel: it closes with its own button and a confirmed success never wears it, so the panel keeps no Dismiss
+and Restore is the attempt's one button.
 
-Screenshots (1100x750 and 390x844, light and dark, closed and open) and the facts read in the page go to
+Screenshots (1100x750, 560x800 and 390x844, light and dark, closed and open) and the facts read in the page go to
 ``OUROBOROS_UI_EVIDENCE_DIR`` when it is set.
 """
 from __future__ import annotations
@@ -53,9 +55,9 @@ AFTER = sample("d54e68d9ea1c43f9a617c9b226f3ffde", TARGET, "2026-10-21T09:12:05.
                                               "seconds": 15.238337040995248})
 
 
-def record(operation=OPERATION, before=BEFORE, after=AFTER):
+def record(operation=OPERATION, before=BEFORE, after=AFTER, outcome="applied"):
     """``after_update`` exactly as the status endpoint projects it (``update_generation_facts.projection``)."""
-    return {"operation_id": operation, "outcome": "applied", "base_sha": BASE, "target_sha": TARGET,
+    return {"operation_id": operation, "outcome": outcome, "base_sha": BASE, "target_sha": TARGET,
             "before": copy.deepcopy(before), "after": copy.deepcopy(after)}
 
 
@@ -92,14 +94,18 @@ def updates_ui(request, monkeypatch):
     return {**request.getfixturevalue("subscription_ui"), "engine": request.param}
 
 
-# What the owner can see of the panel, read in one frame. ``pairs`` are the rows the samples add: everything in the
-# list from its first group heading on, counted only when actually painted (a closed disclosure paints nothing).
+# What the owner can see of the panel and of the update notice, read in one frame. ``pairs`` are the rows the
+# samples add: everything in the list from its first group heading on, counted only when actually painted (a closed
+# disclosure paints nothing). The notice is read from its own state, since a phone keeps it in the closed drawer.
 FACTS = """() => {
     const text = (el) => (el?.textContent || '').replace(/\\s+/g, ' ').trim();
     const shown = (el) => Boolean(el) && el.checkVisibility() && el.getBoundingClientRect().height > 0;
     const box = (el) => { const r = el.getBoundingClientRect(); return {x: r.x, y: r.y, right: r.right, bottom: r.bottom}; };
     const card = document.querySelector('#updates-status-card');
     const details = document.querySelector('#updates-attempt-details');
+    const foot = details.parentElement;
+    const notice = document.querySelector('.update-notice'), pill = document.getElementById('update-pill');
+    const close = document.querySelector('.update-notice-close');
     const list = details.querySelector('#updates-attempt-facts');
     const raw = details.querySelector('#updates-attempt-raw');
     const pre = raw.querySelector('pre');
@@ -115,14 +121,18 @@ FACTS = """() => {
     return {
         headline: text(document.querySelector('#updates-summary')), action: text(document.querySelector('#btn-update-primary')),
         cardText: card.innerText, attemptShown: shown(document.querySelector('#updates-attempt')),
+        attemptHeadline: text(document.querySelector('#updates-attempt-headline')),
+        footButtons: [...foot.querySelectorAll(':scope > button')].filter(shown).map(text),
+        notice: {shown: Boolean(notice) && !notice.hidden, text: pill && !pill.hidden ? text(pill) : '',
+                 close: Boolean(close) && !close.hidden, tone: pill?.dataset.tone || ''},
         open: details.open, rawOpen: raw.open, rawShown: shown(raw), rawLabel: text(raw.querySelector('summary')),
         rawText: shown(pre) ? pre.textContent : null, rawOverflow: pre.scrollWidth - pre.clientWidth,
         heads: heads.map(text), pairs,
         strayBlocks: document.querySelectorAll('#updates-generation-facts, #updates-status-card h4:not([class])').length,
         cardOverflow: card.scrollWidth - card.clientWidth,
         pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-        card: box(card), summary: box(details.querySelector('summary')), details: box(details),
-        dismiss: control('#updates-attempt-dismiss'), restore: control('#updates-attempt-restore'),
+        card: box(card), foot: box(foot), summary: box(details.querySelector('summary')), details: box(details),
+        restore: control('#updates-attempt-restore'),
         meta: box(document.querySelector('#updates-meta')), status: box(document.querySelector('#updates-summary')),
         contrast: {label: of(labels[0]), value: of(labels[0]?.nextElementSibling), head: of(heads[0]), raw: of(pre),
                    summary: of(details.querySelector('summary'))},
@@ -201,14 +211,19 @@ def toggle(page, selector, key):
     rw.settle_frames(page)
 
 
-def buttons_beside_closed_summary(current, width):
-    """Closed, the attempt's buttons keep their place: the summary's row on a wide card, stacked under it on a phone."""
-    summary = current["summary"]
-    shown = [box for box in (current["dismiss"], current["restore"]) if box]
-    if width >= 640:
-        return bool(shown) and all(abs(box["y"] - summary["y"]) < 12 for box in shown)
-    return (summary["bottom"] <= shown[0]["y"] and all(a["y"] < b["y"] for a, b in zip(shown, shown[1:]))
-            and shown[-1]["bottom"] <= current["meta"]["y"])
+def restore_keeps_its_side(current, width):
+    """Restore, the attempt's one button (the notice has its own close), sits where approved A placed it: at the end
+    of the row on a wide card, at the start under the summary in a narrow one. Closed, it shares the summary's row
+    on a wide card; open, it is on the row below the list. It stays inside the attempt, above the meta chips."""
+    restore, foot, summary = current["restore"], current["foot"], current["summary"]
+    if not restore:
+        return False
+    side = abs(restore["right"] - foot["right"]) < 1 if width >= 640 else abs(restore["x"] - foot["x"]) < 1
+    if current["open"]:
+        row = restore["y"] >= current["details"]["bottom"]
+    else:
+        row = abs(restore["y"] - summary["y"]) < 12 if width >= 640 else summary["bottom"] <= restore["y"]
+    return side and row and restore["bottom"] <= current["meta"]["y"]
 
 
 @pytest.mark.parametrize("theme", ["dark", "light"])
@@ -223,8 +238,10 @@ def test_samples_are_rows_of_their_last_attempt_and_survive_refreshes(updates_ui
     assert closed["attemptShown"] and not closed["open"] and closed["heads"] == [] and closed["strayBlocks"] == 0
     for word in ("RSS", "CPU", "Duty", "first model call", TARGET, "4e15961e", "Raw record"):
         assert word not in closed["cardText"], word
+    # A confirmed success wears no notice: its record and samples are the panel's alone, which has no Dismiss.
+    assert not closed["notice"]["shown"] and closed["footButtons"] == ["Restore previous version"], closed
     assert closed["status"]["y"] < closed["summary"]["y"] < closed["meta"]["y"], closed
-    assert buttons_beside_closed_summary(closed, width), closed
+    assert restore_keeps_its_side(closed, width), closed
     capture(page, prefix + "-closed")
 
     page.locator("#updates-attempt-details > summary").click()
@@ -245,8 +262,9 @@ def test_samples_are_rows_of_their_last_attempt_and_survive_refreshes(updates_ui
     assert opened["rawShown"] and opened["rawLabel"] == "Raw record" and opened["rawText"] is None
     capture(page, prefix + "-open", "#updates-attempt-details > summary")
     capture(page, prefix + "-open-after", "#updates-attempt-facts .updates-facts-head >> nth=1")
-    # Open, the list takes the whole row; the two buttons keep their arrangement below it, inside the card.
-    assert opened["restore"]["y"] >= opened["details"]["bottom"] and opened["restore"]["right"] <= opened["card"]["right"]
+    # Open, the list takes the whole row; Restore moves down to the row below it, never across, inside the card. Its
+    # side is read against the attempt, whose width a classic scrollbar (WebKit) narrows once the panel scrolls.
+    assert restore_keeps_its_side(opened, width) and opened["restore"]["right"] <= opened["card"]["right"], opened
     for pair in opened["pairs"]:
         assert pair["valueOverflow"] <= 1, pair
         assert (abs(pair["valueBox"]["x"] - pair["labelBox"]["x"]) < 1) == (width < 640), (width, pair)
@@ -278,7 +296,7 @@ def test_samples_are_rows_of_their_last_attempt_and_survive_refreshes(updates_ui
     toggle(page, "#updates-attempt-details > summary", "Enter")
     again = facts(page)
     assert not again["open"] and not again["rawOpen"] and again["heads"] == []
-    assert buttons_beside_closed_summary(again, width), again
+    assert restore_keeps_its_side(again, width), again
     evidence(prefix, {"closed": closed, "open": shown, "refreshed": kept, "changed": moved, "closedAgain": again,
                       "statusReads": len(reads), "console": transport.console})
 
@@ -321,6 +339,8 @@ def test_samples_wait_for_their_attempt_and_never_join_another(updates_ui):
     during = facts(page)
     assert during["headline"] == "Checking the update and dependencies…" and not during["attemptShown"]
     assert "RSS" not in during["cardText"] and during["strayBlocks"] == 0
+    # The notice names the stage and offers no close: the attempt itself ends it.
+    assert during["notice"] == {"shown": True, "text": "Checking update…", "close": False, "tone": "neutral"}, during
     capture(page, "running")
 
     current["status"] = status(record())
@@ -329,6 +349,7 @@ def test_samples_wait_for_their_attempt_and_never_join_another(updates_ui):
     rw.settle_frames(page)
     done = facts(page)
     assert done["attemptShown"] and len(done["heads"]) == 2 and done["rawLabel"] == "Raw record"
+    assert not done["notice"]["shown"], done["notice"]  # a confirmed success wears no notice
 
     # This server's next attempt could not be saved: the retained record still names the earlier operation.
     unsaved = {**applied("e0d1c2b3a4f5061728394a5b6c7d8e9f"), "current_generation": True, "outcome": "not_applied",
@@ -339,6 +360,9 @@ def test_samples_wait_for_their_attempt_and_never_join_another(updates_ui):
     other = facts(page)
     assert "could not be saved" in other["cardText"] and other["heads"] == []
     assert other["rawLabel"] == "Raw record (not matched to this attempt)"
+    # Its failure keeps a closable notice; the panel offers no button of its own for it.
+    assert other["notice"] == {"shown": True, "text": "Update not applied", "close": True, "tone": "error"}, other
+    assert other["footButtons"] == [], other["footButtons"]
     assert json.loads(other["rawText"]) == current["status"]["after_update"]
     capture(page, "another-operation", "#updates-attempt")
 
@@ -349,6 +373,84 @@ def test_samples_wait_for_their_attempt_and_never_join_another(updates_ui):
     assert legacy["open"] and legacy["heads"] == [] and not legacy["rawShown"]
     evidence("lifecycle", {"running": during, "concluded": done, "anotherOperation": other, "withoutSamples": legacy,
                            "console": transport.console})
+
+
+def drawer(page, width, opened):
+    """A phone keeps the notice in the navigation drawer: open it to reach the notice, close it to read the panel."""
+    if width >= 980:
+        return
+    if opened:
+        page.locator("[data-mobile-nav-toggle]:visible").first.click()
+        page.wait_for_function("document.getElementById('content').inert === true")
+    else:
+        page.keyboard.press("Escape")
+        wait_drawer_closed(page)
+    page.evaluate("() => Promise.all(document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Infinity)"
+                  ".map(a => a.finished.catch(() => {})))")
+    rw.settle_frames(page)
+
+
+@pytest.mark.parametrize("theme,width,height", [("dark", 1100, 750), ("light", 390, 844)])
+def test_the_notice_closes_itself_and_leaves_the_last_attempt_whole(updates_ui, theme, width, height):
+    """An unconfirmed outcome keeps its notice until the notice's own close. Closing it by keyboard hides that notice
+    and nothing else: the Last attempt keeps its rows, its one recorded sample and its exact record, and no request
+    is sent. The next attempt, a confirmed success, wears no notice; its samples show in the panel alone."""
+    unconfirmed = {**applied(), "outcome": "unknown", "reason": "startup_unconfirmed"}
+    current = {"status": status(record(after=None, outcome="unknown"), progress=unconfirmed)}
+    page, transport, reads = open_updates(updates_ui, current, theme=theme, width=width, height=height)
+    page.locator("#updates-attempt-details > summary").click()
+    toggle(page, "#updates-attempt-raw > summary", "Enter")
+    shown = facts(page)
+    assert shown["notice"] == {"shown": True, "text": "Update outcome unconfirmed", "close": True, "tone": "neutral"}
+    assert shown["attemptHeadline"] == "The last update outcome is unconfirmed." and shown["footButtons"] == []
+    assert shown["heads"] == ["Before the update (recorded sample, server process)", "After the update"], shown["heads"]
+    assert [pair["label"] for pair in shown["pairs"]] == [*LABELS, "Sample"], shown["pairs"]
+    assert shown["pairs"][0]["value"] == BASE and shown["pairs"][-1]["value"] == "unobserved"
+    assert shown["rawLabel"] == "Raw record" and json.loads(shown["rawText"]) == current["status"]["after_update"]
+    capture(page, f"notice-{theme}-{width}-unconfirmed", "#updates-attempt-details > summary")
+
+    drawer(page, width, True)
+    capture(page, f"notice-{theme}-{width}-notice")
+    sent = len(transport.requests)
+    toggle(page, ".update-notice-close", "Enter")
+    drawer(page, width, False)
+    hidden = facts(page)
+    # Only the notice went, in this browser: the attempt, its rows and its exact record stay as they were.
+    assert not hidden["notice"]["shown"] and not hidden["notice"]["close"], hidden["notice"]
+    assert hidden["open"] and hidden["rawOpen"] and hidden["rawText"] == shown["rawText"]
+    assert [(p["label"], p["value"]) for p in hidden["pairs"]] == [(p["label"], p["value"]) for p in shown["pairs"]]
+    assert hidden["attemptHeadline"] == shown["attemptHeadline"]
+    assert [request for request in transport.requests[sent:] if request[0] != "GET"] == [], transport.requests[sent:]
+    refresh(page, transport, reads)
+    kept = facts(page)
+    assert not kept["notice"]["shown"] and kept["rawText"] == shown["rawText"] and len(kept["pairs"]) == 8, kept
+    capture(page, f"notice-{theme}-{width}-closed", "#updates-attempt-details > summary")
+
+    # The next attempt is a confirmed success: nothing to close, and its samples are the panel's.
+    following = "0f1e2d3c4b5a69788796a5b4c3d2e1f0"
+    current["status"] = status(record(operation=following), progress=applied(following))
+    refresh(page, transport, reads)
+    success = facts(page)
+    assert not success["notice"]["shown"] and success["attemptHeadline"] == "Update completed."
+    assert len(success["heads"]) == 2 and len(success["pairs"]) == 14 and success["rawLabel"] == "Raw record"
+    evidence(f"notice-{theme}-{width}", {"unconfirmed": shown, "noticeClosed": hidden, "refreshed": kept,
+                                         "nextSuccess": success, "console": transport.console})
+
+
+def test_restore_moves_only_down_when_the_list_opens_in_a_middle_width_window(updates_ui):
+    """Between a phone and a desk (a 560px window) the attempt is narrow, so Restore sits under the summary at its
+    start; opening the list moves it down to the row below and never across."""
+    page, _transport, _reads = open_updates(updates_ui, {"status": status(record())}, theme="light", width=560,
+                                            height=800)
+    closed = facts(page)
+    capture(page, "middle-light-560-closed")
+    page.locator("#updates-attempt-details > summary").click()
+    rw.settle_frames(page)
+    opened = facts(page)
+    capture(page, "middle-light-560-open", "#updates-attempt-raw", "center")
+    evidence("middle-light-560", {"closed": closed, "open": opened})
+    assert restore_keeps_its_side(closed, 560) and restore_keeps_its_side(opened, 560), (closed, opened)
+    assert all(pair["valueOverflow"] <= 1 for pair in opened["pairs"]) and opened["cardOverflow"] <= 1, opened
 
 
 def test_a_frame_without_the_record_is_kept_as_a_negative_control_not_coverage(updates_ui):

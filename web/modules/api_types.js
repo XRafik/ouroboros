@@ -9,6 +9,13 @@
  * @property {boolean} has_rows
  */
 /**
+ * @typedef {Object} CostCustody
+ * @property {'available'|'unavailable'} status
+ * @property {Array<string>} open_run_ids
+ * @property {Array<string>} unrecorded_run_ids
+ * @property {Array<string>} pending_invocation_ids
+ */
+/**
  * @typedef {Object} StateResponse
  * @property {number} uptime
  * @property {number} workers_alive
@@ -343,7 +350,7 @@
  *   The completion-seam EVIDENCE the route decision is reconciled against:
  *   {delegated_runs_started, delegated_runs_settled, delegated_runs_succeeded,
  *   delegated_runs_failed, delegated_run_failure_states, evidence_read_failed,
- *   subscription_cost_usd, subscription_cost_estimated, harness_models,
+ *   subscription_cost_usd, subscription_cost_estimated, subscription_cost_partial, harness_models,
  *   nanny_nudge_recorded, delegate_start_attempted,
  *   applied_access_profiles}.
  *   Terminal frames only; absent = "no evidence yet", never "ran natively".
@@ -395,6 +402,7 @@
  *   which can hold with every dollar bucket at zero (an estimated $0.00, or a dispatched
  *   row whose reservation is exactly zero).
  * @property {?CostPresentation=} cost_presentation
+ * @property {?CostCustody=} cost_custody
  *   #498: the facts that EXPLAIN the amount beside it, bound to the scope whose ledger
  *   rows produced them (`own` or `root_tree`). `tracked_amount` is null unless a priced
  *   or bounded row actually evidenced it, so an empty ledger and an all-unpriced one
@@ -470,6 +478,7 @@
  * @property {number=} chat_id
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name (a relay's); client_message_id here names the owner's submission
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -506,6 +515,7 @@
  * @property {string=} task_id
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -531,6 +541,7 @@
  * @property {string=} task_id
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -554,6 +565,7 @@
  * @property {boolean=} project_thread
  * @property {Object=} transport
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -596,6 +608,7 @@
  * @property {boolean=} project_thread
  * @property {Object=} transport
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -652,6 +665,7 @@
  * @property {number=} size_bytes
  * @property {boolean=} project_thread  // server-stamped: chat_id is a reserved Project thread; Main never adopts it even before projectChatIds learns the project
  * @property {string=} row_address
+ * @property {string=} row_client_message_id  // the saved row's own name, when it has one
  * @property {Object=} reply_to
  * @property {Object=} relay
  * @property {string=} reply_to_relay
@@ -1126,6 +1140,7 @@
  * @property {number} unknown_unmetered
  * @property {number} non_final_rows
  * @property {boolean} cost_final
+ * @property {?CostCustody} cost_custody
  * @property {"physical_attempt_ledger"} authority
  */
 /**
@@ -1544,7 +1559,7 @@ export const MAX_QUIZ_OPTIONS = 6;
 // Mirror task_decision._COMMENT_MAX: ingress refuses longer comments, never
 // truncates; cards must offer only comments the ingress can deliver verbatim.
 export const MAX_DECISION_COMMENT = 2000;
-export const GATEWAY_CONTRACT_VERSION = '7.8.0';
+export const GATEWAY_CONTRACT_VERSION = '7.8.1';
 /** @typedef {import('./client_contract_types.js').ChatHistoryPosition} ChatHistoryPosition */
 /** @typedef {import('./client_contract_types.js').ChatHistoryResponse} ChatHistoryResponse */
 
