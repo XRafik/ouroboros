@@ -151,6 +151,8 @@ import {
     applyHistoricalModelExecution,
     cardMetaKeys,
     renderCollapsedActivity,
+    syncCandidateRemainderItem,
+    candidateRemainderBody,
     renderLiveCardMeta as renderCardMeta,
     ensureLiveActionsEl,
     cardRowEvidenceRef,
@@ -1089,8 +1091,9 @@ export function createChatInstance({
     function noteTaskDetails(record, detail) {
         const files = syncSettledItems(record, detail);
         const history = syncHistoryRetentionItem(record, detail);
+        const candidate = syncCandidateRemainderItem(record, detail);
         const chain = episodes.note(record, detail);
-        return Boolean((files || history) && (renderLiveCardMeta(record), updateLiveCardCount(record), renderLiveCardTimeline(record), true))
+        return Boolean((files || history || candidate) && (renderLiveCardMeta(record), updateLiveCardCount(record), renderLiveCardTimeline(record), true))
             || chain;
     }
 
@@ -1564,6 +1567,7 @@ export function createChatInstance({
     // Beyond the 4000-char preview: fetch/cache on expansion, bounded scroll, render while expanded.
     async function fetchFullLineOutput(item, record) {
         item._fetchingFull = true;
+        item.fullReadError = '';
         let changed = false;
         try {
             const resp = await apiFetch(`/api/tasks/${encodeURIComponent(item.fullRef)}`, { cache: 'no-store' });
@@ -1576,12 +1580,24 @@ export function createChatInstance({
             let full = '';
             if (result && trace) full = `[RESULT]\n${result}\n\n[TRACE]\n${trace}`;
             else full = result || trace;
+            if (item.fullField === 'candidate_remainder') {
+                if (resp?.ok === false) throw new Error('candidate detail read failed');
+                full = candidateRemainderBody(data, item.remainderFact);
+                if (full === null) {
+                    item.fullReadError = 'The saved file list is unavailable for this observation. Close and reopen this detail to retry.';
+                    changed = true;
+                }
+            }
             if (full && item.fetchedFull !== full) {
                 item.fetchedFull = full;
                 changed = true;
             }
         } catch {
             // best-effort: leave the capped preview on failure
+            if (item.fullField === 'candidate_remainder') {
+                item.fullReadError = 'The saved file list could not be loaded. Close and reopen this detail to retry.';
+                changed = true;
+            }
         } finally {
             item._fetchingFull = false;
             if (changed && !destroyed && record.expandedLineKeys.has(item.lineKey)) {

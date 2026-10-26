@@ -534,16 +534,20 @@ def _attach_host_mutation_projection(
     )
     # Only the owning root task refreshes its terminal candidate snapshot at
     # outcome derivation; a subagent never rewrites the root's evidence.
+    snapshot_failed = False
     if task_id and task_id == root_task_id:
         try:
             if attribution_task_id(evidence_root, (task_id,)) == task_id:
                 record_terminal_mutation_candidates(evidence_root, task_id)
         except Exception:
+            snapshot_failed = True
             log.debug("terminal mutation snapshot failed for %s", task_id, exc_info=True)
     llm_trace.pop("mutation_attribution", None)
     for candidate in task_ids:
         projection = load_mutation_evidence_projection(evidence_root, candidate)
         if projection:
+            if snapshot_failed:
+                projection["uncommitted_remainder"] = {"state": "unknown", "count": None, "surfaces": []}
             llm_trace["mutation_attribution"] = projection
             return
 

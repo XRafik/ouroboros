@@ -79,6 +79,7 @@ def collect_routes(
         api_skill_toggle,
     )
     from ouroboros.gateway.widgets import api_widget_fault_post, api_widgets
+    from ouroboros.gateway.widget_assets import api_widget_asset_lease
     from ouroboros.gateway.contributions import api_extension_host_asset
     from ouroboros.gateway.files import (
         api_chat_upload,
@@ -162,7 +163,7 @@ def collect_routes(
         api_tasks_list,
     )
     from ouroboros.gateway import desktop_autostart as desktop_host
-    from ouroboros.gateway.onboarding_host import api_onboarding_bootstrap, onboarding_page
+    from ouroboros.gateway.onboarding_host import api_onboarding_attempt, api_onboarding_bootstrap, onboarding_page
     from ouroboros.gateway.owner_effort import api_owner_effort_range
     from ouroboros.gateway.safety_settings import api_owner_safety_rules, api_owner_safety_model, api_owner_safety_mode
     from ouroboros.gateway.settings import (
@@ -189,6 +190,8 @@ def collect_routes(
         Route("/api/consciousness", endpoint=api_consciousness, methods=["GET"]),
         Route("/api/widgets", endpoint=api_widgets, methods=["GET"]),
         Route("/api/widgets/fault", endpoint=api_widget_fault_post, methods=["POST"]),
+        Route("/api/widgets/asset-leases", endpoint=api_widget_asset_lease, methods=["POST"]),
+        Route("/api/widgets/asset-leases/{op}", endpoint=api_widget_asset_lease, methods=["POST"]),
         Route("/api/extensions", endpoint=api_extensions_index, methods=["GET"]),
         Route("/api/extensions/{skill}/manifest", endpoint=api_extension_manifest, methods=["GET"]),
         Route("/api/extensions/{skill}/module/{entry:path}", endpoint=api_extension_module, methods=["GET"]),
@@ -235,6 +238,8 @@ def collect_routes(
         # POST /api/settings + POST /api/owner/runtime-mode pair.
         Route("/api/onboarding/subagents/preview", endpoint=api_onboarding_subagents_preview, methods=["POST"]),
         Route("/api/onboarding/complete", endpoint=api_onboarding_complete, methods=["POST"]),
+        # Reads back one completion attempt by the id its client sent; writes nothing.
+        Route("/api/onboarding/complete", endpoint=api_onboarding_attempt, methods=["GET"]),
         Route("/api/settings", endpoint=settings_get, methods=["GET"]),
         Route("/api/settings", endpoint=settings_post, methods=["POST"]),
         Route("/api/settings/secret", endpoint=api_settings_secret, methods=["POST"]),

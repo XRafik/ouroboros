@@ -128,6 +128,8 @@ HTTP_ENDPOINTS: tuple[str, ...] = (
     "PATCH /api/claudexor/credential-profiles/{harness}/{profile_id}",
     "GET /api/widgets",
     "POST /api/widgets/fault",
+    "POST /api/widgets/asset-leases",
+    "POST /api/widgets/asset-leases/{op}",
     "GET /api/extensions",
     "GET /api/extensions/{skill}/manifest",
     "GET /api/extensions/{skill}/module/{entry:path}",
@@ -173,6 +175,7 @@ HTTP_ENDPOINTS: tuple[str, ...] = (
     "GET /api/onboarding/bootstrap",
     "POST /api/onboarding/subagents/preview",
     "POST /api/onboarding/complete",
+    "GET /api/onboarding/complete",
     "GET /api/files/list",
     "GET /api/files/read",
     "GET /api/files/content",
@@ -233,6 +236,9 @@ HTTP_SHAPES: dict[str, Shape] = {
     "POST /api/onboarding/complete": Shape(
         "200:OnboardingCompleteResponse 400,403,409,500,503:SettingsWriteRefusal|OnboardingPresetFailureResponse",
         "OnboardingCompleteRequest", note="the one atomic setup writer; a 503 with can_skip offers completion without agent presets"),
+    "GET /api/onboarding/complete": Shape(
+        "200:OnboardingAttemptResponse 400:ErrorResponse", query="attempt",
+        note="read-only; what became of the completion attempt whose attempt_id is given"),
     "GET /api/settings": Shape(
         "200:SettingsReadResponse", query="websearch_preview response_limit_preview model account local backend",
         note="masked secrets read back as placeholders; sending a placeholder keeps the stored value"),
@@ -349,6 +355,10 @@ HTTP_SHAPES: dict[str, Shape] = {
     "GET /api/logs/{name}": Shape("200:LogTailResponse 404:ErrorResponse", query="limit task_id"),
     "GET /api/extensions": Shape("200:ExtensionsIndexResponse 500:ErrorResponse"),
     "GET /api/widgets": Shape("200:WidgetsResponse"),
+    "POST /api/widgets/asset-leases": Shape("200:WidgetAssetLeaseResponse 400,403,409,413:ErrorResponse", "WidgetAssetLeaseRequest",
+                                          note="parent origin only; exact live publication; finite browser files"),
+    "POST /api/widgets/asset-leases/{op}": Shape("200:WidgetAssetLeaseResponse|WidgetAssetRevokeResponse 400,403,404,409,413:ErrorResponse", "WidgetAssetTokenRequest",
+                                               note="op=renew or revoke; parent session only; token confers no control authority"),
     "POST /api/widgets/fault": Shape("200:WidgetFaultResponse 400,413,503:ErrorResponse", "WidgetFaultRequest",
                                      note="one task-less widget_fault row in logs/events.jsonl, bounded per widget per minute"),
     "GET /api/extensions/{skill}/manifest": Shape("200:ExtensionManifestResponse 400,404:ErrorResponse"),
@@ -515,9 +525,11 @@ HTTP_SHAPES: dict[str, Shape] = {
         note="safe to repeat; every engine refusal answers 503"),
 }
 
-# Middleware-owned routes: ``server_auth.NetworkAuthGate`` answers them itself, and only while it
-# enforces a configured network password for a non-loopback peer (otherwise they are not mounted).
+# NetworkAuthGate owns these routes. Login/logout exist only for password-gated
+# non-loopback peers; scoped widget reads exist under every access mode.
 AUTH_ENDPOINTS: dict[str, Shape] = {
+    "GET /api/widget-assets/{token}/{path:path}": Shape("200:any 400,404,405:ErrorResponse",
+        note="GET/HEAD only; declared captured bytes; opaque-origin CORS; scoped bearer read, never API authentication"),
     "GET /auth/login": Shape("200:html", query="next builtin", note="selected login or builtin form; builtin=1 forces builtin; next is a same-origin path"),
     "POST /auth/login": Shape(
         "200:AuthLoginResponse 303:empty 401:ErrorResponse|html", "AuthLoginRequest|form",

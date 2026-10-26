@@ -918,6 +918,7 @@ def test_ui_smoke_phase3_declarative_widgets_and_settings(direct_server_with_dat
                 )
                 section.wait_for(state="visible", timeout=30_000)
                 settings_form = section.locator('[data-extension-settings-form]')
+                settings_form.locator('[data-extension-settings-edit-anyway]').click()  # POST-only: values unknown (#1552)
                 settings_form.locator('select[name="mode"]').select_option("fast")
                 settings_form.locator('input[name="token"]').fill("discard-me")
                 save = settings_form.locator('button[type="submit"]')

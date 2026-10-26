@@ -211,7 +211,7 @@
  * @property {string} method
  * @property {string} path
  * @property {string[]} path_params
- * @property {'gate'|'public'} auth
+ * @property {'gate'|'public'|'asset_lease'} auth
  * @property {boolean} typed  // false: published without shapes (an explicit gap)
  * @property {string[]=} query
  * @property {string[]=} headers  // request headers the handler reads; a trailing "!" marks a required one

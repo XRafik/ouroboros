@@ -834,8 +834,9 @@ def _emit_operation(
             # Both frames share the control FIFO: publish the seat before waking its reader.
             from ouroboros.model_sleep import announce_resumed
 
-            wait = getattr(getattr(entry, "operation", None), "wait", None)
-            if wait is not None:
+            operation = getattr(entry, "operation", None)
+            wait = getattr(operation, "wait", None)
+            if wait is not None and not operation.author_detached:
                 announce_resumed(SimpleNamespace(event_queue=wait.event_queue, task_id=task_id,
                                                   current_chat_id=wait.task.get("chat_id")))
     except Exception:

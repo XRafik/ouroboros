@@ -1114,11 +1114,13 @@ preference when it opens and on every reconnect; there is no file watcher.
 - **A narrow chat column gives every bubble its full width.** A column of
   620px or less — a phone or a narrow Project panel alike — drops the
   wide-screen gutters; the column, not the viewport, decides.
-- **A task card's summary outranks its details.** The latest-activity line is
-  `--type-body`; collapsed timeline rows are a dense log at `--type-meta` in
-  `--text-secondary`; an expanded row returns to `--type-body` in
-  `--text-primary`. Details never render larger than the summary above them;
-  an inline label inside a row is semibold at the row's own size.
+- **Task summaries outrank Details.** Activity: `--type-body`; collapsed rows:
+  `--type-meta`/`--text-secondary`; expanded: `--type-body`/`--text-primary`.
+  Details never exceed summary size; inline labels stay semibold at row size.
+  Task-attributed uncommitted work: one short fact; exact paths and HEAD in Details.
+  Failed scans say unknown; zero adds no line. Done stays Done; no adoption/publication claim.
+  Owner 2026-10-25 17:22:09, quiz `3766b0a01ce14dec9a17adee2488bdcf`:
+  “A — короткий факт сразу, файлы в Details”.
 - **A nested child card is subordinate to its root.** Its compact identity row
   shows status, role and `Details`; a short task id disambiguates siblings. Its
   compact line names the executor with only its own model evidence (observed;

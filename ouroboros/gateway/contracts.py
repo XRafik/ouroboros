@@ -25,7 +25,10 @@ from ouroboros.gateway.attachment_contracts import (  # noqa: F401 -- public re-
     AttachmentManifestEntry, ChatAttachmentInbound, ChatAttachmentView,
 )
 from ouroboros.gateway.contributions import UiContribution, UiContributionsResponse, UiPreferencesResponse
-from ouroboros.gateway.widgets import ExtensionLiveSnapshot, WidgetFaultRequest, WidgetFaultResponse, WidgetTab, WidgetsResponse
+from ouroboros.gateway.widgets import (
+    ExtensionLiveSnapshot, WidgetFaultRequest, WidgetFaultResponse, WidgetTab, WidgetsResponse,
+    WidgetAssetLeaseRequest, WidgetAssetTokenRequest, WidgetAssetLeaseResponse, WidgetAssetRevokeResponse,
+)
 from ouroboros.gateway.decision_contracts import DecisionRequest, DecisionResponse  # noqa: F401 -- public re-exports
 from ouroboros.gateway.card_contracts import CardOutbound, CardStateOutbound  # noqa: F401 -- public re-exports
 from ouroboros.gateway.update_contracts import (  # noqa: F401 -- public re-exports
@@ -1371,6 +1374,7 @@ class OnboardingCompleteRequest(TypedDict, total=False):
     allow_empty_review_pool: bool  # confirms saving agents that leave no review row
     starter_skills: List[str]  # catalog ids installed once after completion; absent: the default starter list
     skill_source_trust: Dict[str, str]  # {hub row id: trusted|review}; marks those rows confirmed
+    attempt_id: str  # client-made per save (16-128 of A-Z a-z 0-9 _ -); read back by GET with ?attempt=
 
 
 class OnboardingSubagentsPreviewResponse(TypedDict):
@@ -1406,6 +1410,20 @@ class OnboardingCompleteResponse(TypedDict):
     runtime_mode: str
     restart_required: bool
     preset: OnboardingPresetProjection
+
+
+class OnboardingAttemptResponse(TypedDict):
+    """GET /api/onboarding/complete?attempt=: one completion attempt read back, never a readiness probe.
+    ``saved``: true while the settings document holds this attempt's write, false when this server
+    refused it before writing, null when unconfirmed (still running, never arrived or replaced since).
+    ``receipt`` is the attempt's own success envelope once completion finished; the other fields repeat
+    its recorded failure. Only a receipt completes; anything else keeps the draft and never retries."""
+
+    saved: Optional[bool]
+    receipt: NotRequired[OnboardingCompleteResponse]
+    error: NotRequired[str]
+    code: NotRequired[str]
+    post_commit_failed: NotRequired[str]
 
 
 class SettingsPostCommitFailureResponse(TypedDict):
@@ -1493,7 +1511,7 @@ __all__ = [
     "SettingsSaveResponse",
     "OwnerRuntimeModeResponse", "OwnerAutoGrantResponse", "OwnerContextModeResponse", "OwnerSafetyModeResponse",
     "OwnerSkillPresenceRuntimeRequest", "OwnerSkillPresenceRuntimeResponse",
-    "OnboardingCompleteRequest", "OnboardingCompleteResponse",
+    "OnboardingCompleteRequest", "OnboardingCompleteResponse", "OnboardingAttemptResponse",
     "OnboardingSubagentsPreviewResponse",
     "OnboardingPresetFailureResponse",
     "OnboardingPresetProjection",
@@ -1507,6 +1525,7 @@ __all__ = [
     "UploadResponse",
     "ExtensionsIndexResponse", "ExtensionLiveSnapshot", "WidgetTab",
     "WidgetsResponse", "WidgetFaultRequest", "WidgetFaultResponse",
+    "WidgetAssetLeaseRequest", "WidgetAssetTokenRequest", "WidgetAssetLeaseResponse", "WidgetAssetRevokeResponse",
     "SkillPublishPreflightResponse",
     "SkillLifecycleQueueResponse",
     "MarketplaceSearchResponse",
