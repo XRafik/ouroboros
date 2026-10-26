@@ -235,7 +235,7 @@ export function createHistoryResyncScheduler({
 /**
  * Insert a top-level timeline node chronologically while keeping typing last.
  * Equal timestamps preserve arrival order; timestamp-free nodes append.
- * (Moved verbatim from chat.js — that module sits at its byte ceiling.)
+ * (Moved from chat.js — that module sits at its byte ceiling.)
  */
 // A focused text control keeps its own caret; Chromium mirrors it into the
 // document Selection, so clearing and rebuilding document ranges around a
@@ -367,8 +367,9 @@ function timelineItemForAnchor(record, anchor) {
 }
 
 /** A card timeline's scroll before a write: whether it rests at its end, where it is, its newest line. A timeline shows
- * only while its card is expanded or its episode open (style.css `.chat-live-timeline`); hidden, it has no scroll, focus
- * or selection to keep (null), and reading its box would lay out a row that sleeps (chat_row_sleep.js) on its own. */
+ * only while its card is expanded or its episode open (style.css `.chat-live-timeline`); hidden, it shows no scroll, focus
+ * or selection to keep (null: a selection left inside it is not restored), and reading its box would lay out a row
+ * that sleeps (chat_row_sleep.js) on its own. */
 export function timelineScroll(record) {
     const el = record.timelineEl;
     if (record.root?.dataset?.expanded !== '1' && !el.parentElement?.open) return null;

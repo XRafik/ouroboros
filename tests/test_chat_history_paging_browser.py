@@ -4,6 +4,8 @@ The history is the server's dialogue store: rows stored as the server stores the
 and the frozen JSONL archive of an older install imported as the upgrade imports it.
 Only the request transport can be held/failed; every successful page and cursor
 comes from the real history endpoint. The shared server uses its local mock LLM.
+The layout-count guard at the end is the exception: its pages come from
+web/tests/history_layout_fixture.html, the real chat instance over a stubbed transport.
 """
 from __future__ import annotations
 
