@@ -19,6 +19,7 @@ from ouroboros.model_sleep import in_slot_wait
 from ouroboros.outcomes import normalize_outcome_axes
 from ouroboros.runtime_limits import NESTED_SETTLEMENT_MARGIN_SEC
 from ouroboros.task_results import (
+    STATUS_CANCELLED,
     STATUS_COMPLETED,
     STATUS_REJECTED_DUPLICATE,
     validate_task_id,
@@ -519,7 +520,10 @@ def _get_task_result(
             f"{result or 'No details available.'}"
         )
     if isinstance(data.get("cancel_origin"), dict):
-        output += f"\n\n[CANCELLED_BY] {json.dumps(data['cancel_origin'], ensure_ascii=False)}"
+        origin = data["cancel_origin"]
+        command = {"immediate": "stop_now", "finalize_then_cancel": "wrap_up"}.get(origin.get("stop_policy"), "unknown")
+        marker = "[CANCELLED_BY]" if status == STATUS_CANCELLED else f"[OWNER_CONTROL] command={command}"
+        output += f"\n\n{marker} {json.dumps(origin, ensure_ascii=False)}"
     if data.get("retired_tool_invocations"):
         output += ("\n\n[INTERRUPTED_TOOL_CALLS] Local execution ended; external effects remain unknown.\n"
                    + json.dumps(data["retired_tool_invocations"], ensure_ascii=False))
