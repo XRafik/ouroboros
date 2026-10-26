@@ -128,9 +128,12 @@ Files routes: `gateway/files.py::file_browser_routes()` (envelopes/parity: §11)
 | POST | `/api/tasks` | |
 | GET | `/api/tasks` | |
 | GET | `/api/tasks/{task_id}` | |
+| GET | `/api/tasks/{task_id}/reviews` | paged; gaps |
+| GET | `/api/tasks/{task_id}/reviews/skill/{job_id}` | saved detail |
+| GET | `/api/tasks/{task_id}/reviews/{record_id}/{seat_id}` | saved source; no paths |
 | GET | `/api/tasks/{task_id}/events` | integer rank |
-| POST | `/api/tasks/{task_id}/events` | read-only v2 cursor (§3 History reads and the SSE v2 transport) |
-| GET | `/api/tasks/{task_id}/artifacts/{name}` | own stores: POSIX no-follow or Windows NT relative handles; admission facts precede child-store metadata reads; SVG: `sandbox` CSP, `nosniff` (`gateway/task_archive.py`) |
+| POST | `/api/tasks/{task_id}/events` | read-only v2 cursor (§3 history/SSE v2) |
+| GET | `/api/tasks/{task_id}/artifacts/{name}` | own stores: POSIX no-follow/Windows NT relative handles; admission before child-store metadata; SVG `sandbox` CSP + `nosniff` (`gateway/task_archive.py`) |
 | POST | `/api/tasks/{task_id}/cancel` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/hurry` | (§5 Stop policy and hurry) |
 | POST | `/api/tasks/{task_id}/pause` | (§6 Owner Pause of a whole tree) |

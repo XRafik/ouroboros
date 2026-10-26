@@ -506,6 +506,7 @@ def _frozen_actor(row: Dict[str, Any], slot: Any) -> Any:
         late_result_pending=pending,
         http_status=http_status,
         coverage=copy.deepcopy(row.get("coverage") or {}) if isinstance(row.get("coverage"), dict) else {},
+        failure_details=copy.deepcopy(row.get("failure_details") or {}) if isinstance(row.get("failure_details"), dict) else {},
         quorum_contribution=bool(row.get("quorum_contribution")),
         operation_state=operation_state,
         recovery_binding=dict(row.get("recovery_binding") or {}),

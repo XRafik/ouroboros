@@ -426,6 +426,13 @@
  * @property {Object=} cancel_origin The typed stop an owner-stopped turn's final carries (source, stop_policy).
  * @property {Object=} review_status
  * @property {Object=} review_projection
+ *   Ledger additions: gaps[] ({record_id, review_gap}) names unavailable records;
+ *   review_records_omitted is 0|"1+"|"unknown" (archive uncertainty alone proves no review).
+ *   panels[] retains subject, goal, revision, review_wave_id and record_state.
+ *   actors[] separates requested_model from observed_model (empty means unobserved),
+ *   keeps failure_details as an object, and names current sources[] by
+ *   {role, part, status, sha256, size, chars}. Pending/displaced sources remain
+ *   historical in the record; existing exact selections remain readable.
  *   v6.74.0 additive keys: panels[].dialogue ({status, votes} — the reviewer-authored
  *   dialogue-status reduction), panels[].single_reviewer_no_diversity (boolean label),
  *   and actors[].dialogue_status ("continue_actionable"|"unreachable_here"|"stable_disagreement"|"").
@@ -1595,3 +1602,17 @@ export const GATEWAY_CONTRACT_VERSION = '7.8.1';
 
 /** @typedef {import('./management_contract_types.js').UiContribution} UiContribution */
 /** @typedef {import('./management_contract_types.js').UiContributionsResponse} UiContributionsResponse */
+
+/**
+ * @typedef {Object} TaskReviewHistoryResponse
+ * @property {string} task_id
+ * @property {Object} review_projection Compact panels plus local gaps, never a complete-history claim.
+ * @property {number|null} next_offset Explicit next ledger-history page, null only at its end.
+ * Saved review source URLs bind task/record/seat/role/part/SHA. Their text/plain
+ * body is the complete safe export; X-Review-Source-SHA256 identifies the saved
+ * original and X-Review-Export-SHA256 the delivered redacted bytes. Read and
+ * Download use one URL. Saved skill detail uses
+ * /api/tasks/{physical_owner_task_id}/reviews/skill/{job_or_record_id}?skill={name}&format=text,
+ * checked against recorded task/origin/presentation ownership. It exports the same
+ * safe normalized text as skill history; the existing /api/skills JSON contract stays.
+ */

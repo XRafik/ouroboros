@@ -53,6 +53,14 @@ except ImportError:  # pragma: no cover - CI supports Python 3.10.
     from typing_extensions import Literal, NotRequired, Required, TypedDict  # type: ignore[assignment]
 
 
+class TaskReviewHistoryResponse(TypedDict):
+    """One exact task's paged ledger projection; local gaps do not hide healthy records."""
+
+    task_id: str
+    review_projection: Dict[str, Any]
+    next_offset: Optional[int]
+
+
 class ChatInbound(TypedDict):
     """Inbound WS chat message. ``type`` and ``content`` are required."""
 
@@ -262,6 +270,9 @@ class ChatOutbound(ChatReferenceFields):
     reason_code: NotRequired[str]
     cancel_origin: NotRequired[Dict[str, Any]]  # the typed stop an owner-stopped turn's final carries
     review_status: NotRequired[Dict[str, Any]]
+    # panels retain subject/goal/revision/wave; actors separate requested/observed models,
+    # dict failure_details and current source selectors. gaps name failed records;
+    # review_records_omitted is 0|"1+"|"unknown", never proof of a review by itself.
     review_projection: NotRequired[Dict[str, Any]]
     worker_saturation_warning: NotRequired[bool]
     source: NotRequired[str]
@@ -1555,7 +1566,7 @@ __all__ = [
     "ClaudexorVendorCredentialDisposition",
     "ClaudexorCredentialProfileDeleteResponse",
     "TaskEvent", "TaskEventCursor",
-    "TaskEventsRequest",
+    "TaskEventsRequest", "TaskReviewHistoryResponse",
     "TaskCancelResponse", "TaskCancelRequest",
     "TaskPauseRequest", "TaskPauseResponse",
     "TaskContinueRequest", "TaskContinueResponse", "ContinuationOffer",
