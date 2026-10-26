@@ -44,6 +44,7 @@ from ouroboros.outcomes import (
     EXECUTION_INFRA_FAILED,
     EXECUTION_OK,
     BEST_EFFORT_REASON_CODES,
+    REASON_OWNER_REQUESTED_FINALIZATION,
     apply_receipt_absent_flag,
     artifact_bundle_from_result,
     build_verification_ledger,
@@ -887,6 +888,13 @@ def emit_task_results(
     if ctx is not None and failed_or_forced:
         ctx._presence_completion_accepted = False
     reason_code = str(loop_outcome.get("reason_code") or "")
+    if reason_code == REASON_OWNER_REQUESTED_FINALIZATION:
+        # Which stop the owner pressed rides the terminal it ended: this frame, the stored result
+        # (terminal_result_fields) and their readers. The loop's one reason covers both buttons.
+        from supervisor.owner_stop import owner_stop_origin
+
+        if stop_origin := owner_stop_origin(custody_root, str(task.get("id") or "")):
+            usage["cancel_origin"] = stop_origin
     if is_presence_task(task):
         _stamp_presence_terminal_facts(task, usage, llm_trace, ctx, reason_code)
     # A Stop marker already on the task suppresses paid synthesis, not the durable outbox or free facts.
@@ -928,7 +936,9 @@ def emit_task_results(
     # task_results; reversing these writes could strand a terminal result with
     # no delivery. Registration and deduplication share ouroboros/task_finalization.py.
     if _root_outbox and not _presence and not quiet:
-        send_event.setdefault("progress_meta", {}).update(outcome_axes=outcome_axes, reason_code=reason_code)
+        send_event.setdefault("progress_meta", {}).update(
+            outcome_axes=outcome_axes, reason_code=reason_code,
+            **({"cancel_origin": usage["cancel_origin"]} if usage.get("cancel_origin") else {}))
         stamp_root_final_phase(  # shares the pre-store observation, not a later racing write
             send_event, task, terminal_status=terminal_status,
             post_task_open=not task.get("_skip_post_task_synthesis") and not _root_post_task_already_completed(env, task),
@@ -1296,8 +1306,6 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             # Compatibility mirror consumed by the gateway and task_done event.
             # ``outcome_axes.review`` remains the canonical structured axis.
             review_status=dict(outcome_axes.get("review") or {}),
-            accounted_upper_bound_usd_with_children=_cost_with_children,
-            cost_with_children_partial=_cost_partial,
             task_contract=task_contract,
             _is_direct_chat=bool(task.get("_is_direct_chat")),
             loop_outcome=loop_outcome,
@@ -1347,7 +1355,8 @@ def _store_task_result(env: Any, task: Dict[str, Any], text: str,
             trace_summary=trace_summary,
             trace_refs=loop_outcome.get("trace_refs") or {},
             **({"model_execution": model_execution} if model_execution is not None else {}),
-            **cost_fields,
+            **{**cost_fields, "accounted_upper_bound_usd_with_children": _cost_with_children,
+               "cost_with_children_partial": _cost_partial},
             review_evidence=review_evidence or {},
             completion_observations=observations,
             **({"review_projection": review_projection} if review_projection.get("panels") else {}),

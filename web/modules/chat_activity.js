@@ -815,6 +815,7 @@ export function mergeStickyCostMeta(previous, next) {
 export function clearStickyCardState(record) {
     if (!record) return record;
     record.collapsedActivity = '';
+    record.collapsedActivityLead = '';
     record.costMeta = null;
     // The executor chip is cycle state like the cost projection: a recycled
     // slot must not claim the previous cycle's delegated route as its own.
@@ -831,6 +832,7 @@ export function clearStickyCardState(record) {
     if (record.activityEl) {
         fitText(record.activityEl, '', 0);  // also drops a portal line's word-cut fit
         record.activityEl.removeAttribute('title');
+        if (record.activityEl.dataset) delete record.activityEl.dataset.lead;
     }
     record.modelExecution = null;
     record.effort = null;
@@ -1304,10 +1306,18 @@ export function refitCollapsedActivity(record) {
 export function renderCollapsedActivity(record, text) {
     if (!record?.activityEl) return false;
     const el = record.activityEl;
+    // A child's report names its reader before its words: the label is drawn by CSS from
+    // `data-lead`, so the fit below counts its room and a copy of the line keeps only the words.
+    const lead = text ? String(record.collapsedActivityLead || '') : '';
+    const leadChanged = (el.dataset?.lead || '') !== lead;
+    if (leadChanged && el.dataset) {
+        if (lead) el.dataset.lead = lead;
+        else delete el.dataset.lead;
+    }
     // A collapsed card's line is cut on a word with a clean ending (never `.…`; text_fit.js).
     const shown = fullText(el);
-    const changed = shown !== text || Boolean(el.hasAttribute?.('title'));
-    if (shown !== text) fitText(el, text, collapsedActivityLines(record));
+    const changed = shown !== text || leadChanged || Boolean(el.hasAttribute?.('title'));
+    if (shown !== text || leadChanged) fitText(el, text, collapsedActivityLines(record));
     if (el.hasAttribute?.('title')) el.removeAttribute('title');
     return Boolean(changed && el.isConnected);
 }
