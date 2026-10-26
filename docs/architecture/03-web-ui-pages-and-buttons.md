@@ -118,7 +118,7 @@ History (`gateway/history.py`) keeps lineage beyond recency while the child runs
 
 `log_events.js` shares Chat/Logs card reduction. Only authoritative task truth sets terminal status; nonterminal failures stay in details, unknown Chat names gain no keyword severity. `task_checkpoints.js` owns labels and `taskCheckpointIdentity`: crossings differ by bound/threshold, historical labels stay. Crossings persist in Events/Logs, not Chat replay. Checkpoints and `context_reclaim` appear in expanded cards, never titles, narration or toasts. Replayed tools keep typed `ok`/`level`; a start is no liveness proof. Keyword fallback is only for untyped Logs events and never expands them. `swarm_fanout` with `role="delegated_run"` names a run, not a child. Child failure stays local; cards navigate results; only `task_incident` raises urgent toasts.
 
-`taskReasonDetail` / `_completion_verdict` join causes once: execution, warnings/files, review, limitations. Approval hides no failure; bypasses name their rail once; soft Stop adds none. `cancelCauseClauses` / `cancel_cause_clauses` use origin/lineage: `request_origin.kind="agent_task"`, not `requested_by`, proves actor. Deferred children, open review and custody stay visible. `task_reason_words.js` owns words, not status. Main's compact System endings add `cause`/`undescribed`; canonical text stays full. `terminal_projection` derives `completion_notice` with transport facts and enriches replay from retained results.
+`taskReasonDetail` / `_completion_verdict` join causes once: execution, warnings/files, review, limitations, custody. Approval hides no failure; bypasses name their rail once; a Wrap up's answer adds none, a stop names its button (`owner_stop_origin`). `cancelCauseClauses` / `cancel_cause_clauses` use origin/lineage: `request_origin.kind="agent_task"`, not `requested_by`, proves actor. `task_reason_words.js` owns words, not status. Main's compact System endings add `cause`/`undescribed`; canonical text stays full. `terminal_projection` derives `completion_notice` with transport facts and enriches replay from retained results.
 
 #### Child cards and executor presentation
 
@@ -134,7 +134,7 @@ Card `Reviews` projects independent skill, plan, result and repository-review au
 
 #### Stop and cancel controls
 
-Cancel appears only on unfinished root cards (moved works' portals too) whose host attests `cancelable=true`; card shape grants no control, and native direct tasks follow §5 custody. The shared dropdown sends `cascade:true`; Wrap up, or a Stop now not yet confirmed, returns 202 pending. Completion wins and a missing live task reconciles from durable state. Reason lines: `log_events.taskReasonDetail` over `cancel_origin` (§3 Task cards, errors and reason lines).
+Cancel appears only on unfinished root cards (moved works' portals too) whose host attests `cancelable=true`; card shape grants no control, and native direct tasks follow §5 custody. The shared dropdown sends `cascade:true`; Wrap up, or a Stop now not yet confirmed, returns 202 pending. Completion wins and a missing live task reconciles from durable state. Reason lines: `taskReasonDetail` over `cancel_origin` (§3 Task cards, errors and reason lines).
 
 #### Turning a card into a Project
 
