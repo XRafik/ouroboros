@@ -156,6 +156,8 @@ import {
     applyHistoricalModelExecution,
     cardMetaKeys,
     renderCollapsedActivity,
+    syncCandidateRemainderItem,
+    readCandidateRemainder,
     renderLiveCardMeta as renderCardMeta,
     ensureLiveActionsEl,
     cardRowEvidenceRef,
@@ -1118,8 +1120,9 @@ export function createChatInstance({
     function noteTaskDetails(record, detail) {
         const files = syncSettledItems(record, detail, { write: withStableViewport });
         const history = syncHistoryRetentionItem(record, detail);
+        const candidate = syncCandidateRemainderItem(record, detail);
         const chain = episodes.note(record, detail);
-        return Boolean((files || history) && (renderLiveCardMeta(record), updateLiveCardCount(record), renderLiveCardTimeline(record), true))
+        return Boolean((files || history || candidate) && (renderLiveCardMeta(record), updateLiveCardCount(record), renderLiveCardTimeline(record), true))
             || chain;
     }
 
@@ -1593,13 +1596,12 @@ export function createChatInstance({
     // Beyond the 4000-char preview: fetch/cache on expansion, bounded scroll, render while expanded.
     async function fetchFullLineOutput(item, record) {
         item._fetchingFull = true;
+        item.fullReadError = '';
         let changed = false;
         try {
             const resp = await apiFetch(`/api/tasks/${encodeURIComponent(item.fullRef)}`, { cache: 'no-store' });
             const data = resp && typeof resp.json === 'function' ? await resp.json() : resp;
-            // Compose ALL available full fields — a subagent line can carry both a result AND a
-            // (separately truncated) trace_summary, so `result || trace_summary` would hide the
-            // full trace. Label each section when both are present.
+            // Keep result and trace: the preview can truncate either independently.
             const result = String((data && data.result) || '').trim();
             const trace = String((data && data.trace_summary) || '').trim();
             const report = result && ['done', 'warn'].includes(taskOutcomeSeverity(data))
@@ -1607,12 +1609,20 @@ export function createChatInstance({
             let full = '';
             if (result && trace) full = `${report ? `## ${report}` : '[RESULT]'}\n${result}\n\n[TRACE]\n${trace}`;
             else full = report ? `## ${report}\n${result}` : result || trace;
+            if (item.fullField === 'candidate_remainder') {
+                full = readCandidateRemainder(item, data, resp?.ok !== false);
+                changed = true;
+            }
             if (full && item.fetchedFull !== full) {
                 item.fetchedFull = full;
                 changed = true;
             }
         } catch {
             // best-effort: leave the capped preview on failure
+            if (item.fullField === 'candidate_remainder') {
+                readCandidateRemainder(item, null, false);
+                changed = true;
+            }
         } finally {
             item._fetchingFull = false;
             if (changed && !destroyed && record.expandedLineKeys.has(item.lineKey)) {

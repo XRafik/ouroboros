@@ -1313,8 +1313,13 @@ def _completion_verdict(result: Dict[str, Any], event: Dict[str, Any], *, includ
     if (objective.get("status") == "best_effort" and not clause and not objective.get("deferred_count")
             and raw_reason != REASON_OWNER_REQUESTED_FINALIZATION and review_cause in {"", "previous_revision_accepted"}):
         warning_clauses.append(TASK_CAUSE_PHRASES["partial_result"])
+    remainder = (execution.get("mutation_attribution") or {}).get("uncommitted_remainder") or {}
+    count = remainder.get("count")
+    remainder_clause = ("Uncommitted files in the saved candidate could not be checked" if remainder.get("state") == "unknown"
+                        else f"{count} uncommitted file{'s' if count != 1 else ''} remain{'s' if count == 1 else ''} in the saved candidate"
+                        if remainder.get("state") == "known" and type(count) is int and count > 0 else "")
     line = _join_cause_clauses([clause, *warning_clauses, _cause_phrase(review_cause, undescribed),
-                                _author_stop_rationale(decision, completion),
+                                _author_stop_rationale(decision, completion), remainder_clause,
                                 *_incident_cause_clauses(decision, reason),
                                 *_terminal_limitations(result, event, reason, held=held),
                                 TASK_CAUSE_PHRASES.get(custody, custody) if custody else ""])

@@ -3209,6 +3209,8 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     margin: 0;
 }
 
+.chat-live-line-body[data-body-format="text"] { white-space: pre-wrap; }
+
 .chat-live-line-title strong,
 .chat-live-line-body strong {
     font-weight: 600;

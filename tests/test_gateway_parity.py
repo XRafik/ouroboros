@@ -19,6 +19,7 @@ from ouroboros.gateway.contracts import (
     ClaudexorStatusReads,
     ClaudexorStatusResponse,
     ClaudexorVendorCredentialDisposition,
+    OnboardingAttemptResponse,
     OnboardingCompleteRequest,
     OnboardingCompleteResponse,
     OnboardingPresetFailureResponse,
@@ -230,7 +231,7 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
     for name in ("DecisionRequest", "DecisionResponse"):
         assert f"import('./decision_types.js').{name}" in text
     text += "\n" + (modules / "decision_types.js").read_text(encoding="utf-8")
-    for name in ("CommandInbound", "PanicAcceptedOutbound"):
+    for name in ("CommandInbound", "PanicAcceptedOutbound", "OnboardingAttemptResponse"):
         assert f"import('./client_contract_types.js').{name}" in text
     text += "\n" + (modules / "client_contract_types.js").read_text(encoding="utf-8")
     for name in ("EvolutionRefresh", "EvolutionDataResponse"):
@@ -295,6 +296,7 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
         "OnboardingSubagentsPreviewResponse",
         "OnboardingPresetProjection",
         "OnboardingCompleteResponse",
+        "OnboardingAttemptResponse",
         "OnboardingPresetFailureResponse",
         "SettingsPostCommitFailureResponse",
         "ClaudexorLoginJobResponse",
@@ -336,7 +338,7 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
                 TaskEvent, TaskEventCursor, TaskEventsRequest,
                 OwnerSkillPresenceRuntimeRequest, OwnerSkillPresenceRuntimeResponse,
                 OnboardingCompleteRequest, OnboardingPresetProjection,
-                OnboardingSubagentsPreviewResponse, OnboardingCompleteResponse,
+                OnboardingSubagentsPreviewResponse, OnboardingCompleteResponse, OnboardingAttemptResponse,
                 OnboardingPresetFailureResponse, AvailableSubagentsSettingsMeta,
                 SettingsPostCommitFailureResponse,
                 ProviderTestRequest, ProviderTestResponse,

@@ -2,6 +2,32 @@
   "purpose": "One status-word family across the browser and the host. Every case is a terminal-or-not task record read by log_events.js (taskDoneIsTerminal + taskTerminalPhase + taskPresentation) and by ouroboros.project_dialogue (outcome_phase + OUTCOME_PHASE_HEADLINE + _completion_verdict). Every typed cause with an owner sentence carries a case here, so the two TASK_CAUSE_PHRASES twins cannot drift apart unnoticed. A new axis, reason or acceptance status is added to both sides in the same commit, with a row here.",
   "cases": [
     {
+      "name": "saved candidate remainder keeps Done and a terminated cause",
+      "record": {"status": "completed", "reason_code": "final_message", "outcome_axes": {"execution": {"status": "ok", "mutation_attribution": {"uncommitted_remainder": {"state": "known", "count": 2, "paths_omitted": 2}}}}},
+      "phase": "done", "headline": "Done",
+      "acceptance_clause": "2 uncommitted files remain in the saved candidate.",
+      "exact_clause": true
+    },
+    {
+      "name": "single saved file follows author stop rationale",
+      "record": {"status": "completed", "reason_code": "final_message", "outcome_axes": {"execution": {"status": "ok", "task_completion": {"action": "stop", "rationale": "The requested change is saved."}, "mutation_attribution": {"uncommitted_remainder": {"state": "known", "count": 1, "paths_omitted": 1}}}}},
+      "phase": "done", "headline": "Done",
+      "acceptance_clause": "Ouroboros stopped with unfinished work; no review approval was granted · The requested change is saved · 1 uncommitted file remains in the saved candidate.",
+      "exact_clause": true
+    },
+    {
+      "name": "failed remainder scan stays unknown beside Done",
+      "record": {"status": "completed", "outcome_axes": {"execution": {"status": "ok", "mutation_attribution": {"uncommitted_remainder": {"state": "unknown", "count": null}}}}},
+      "phase": "done", "headline": "Done",
+      "acceptance_clause": "Uncommitted files in the saved candidate could not be checked.",
+      "exact_clause": true
+    },
+    {
+      "name": "zero remainder adds no cause",
+      "record": {"status": "completed", "outcome_axes": {"execution": {"status": "ok", "mutation_attribution": {"uncommitted_remainder": {"state": "known", "count": 0, "paths_omitted": 0}}}}},
+      "phase": "done", "headline": "Done", "acceptance_clause": "", "exact_clause": true
+    },
+    {
       "name": "empty length recovery ends incomplete with saved work",
       "record": {"status": "failed", "reason_code": "output_recovery_exhausted", "outcome_axes": {"execution": {"status": "infra_failed"}, "objective": {"status": "not_evaluated"}}},
       "phase": "error", "headline": "Failed",

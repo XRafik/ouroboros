@@ -552,11 +552,16 @@ export function taskReasonDetail(evt, codes = []) {
     if (objective?.status === 'best_effort' && !clause && !objective.deferred_count && !taskStoppedWithSummary(evt)
         && ['', 'previous_revision_accepted'].includes(reviewCause)) warningClauses.push(taskReasonPhrase('partial_result'));
     const rationale = completion?.action === 'stop' ? plainCauseText(completion.rationale, 0) : authorStopRationale(decision);
-    const line = joinCauseClauses([clause, ...warningClauses, phrase(reviewCause), rationale,
+    const remainder = record.outcome_axes?.execution?.mutation_attribution?.uncommitted_remainder;
+    const count = remainder?.count;
+    const remainderClause = remainder?.state === 'unknown' ? 'Uncommitted files in the saved candidate could not be checked'
+        : remainder?.state === 'known' && Number.isInteger(count) && count > 0
+            ? `${count} uncommitted file${count === 1 ? '' : 's'} remain${count === 1 ? 's' : ''} in the saved candidate` : '';
+    const line = joinCauseClauses([clause, ...warningClauses, phrase(reviewCause), rationale, remainderClause,
         ...acceptanceIncidentClauses(decision, reason, causePhraseLookup),
         ...terminalLimitations(record, reason, held), custody ? taskReasonPhrase(custody) : '',
         terminalDeliveryClause(record.terminal_delivery)]);  // the host twin appends the delivery clause last too
-    return severity === 'cancelled' && line && !/[.!?…)\u2026]$/.test(line) ? `${line}.` : line;
+    return (severity === 'cancelled' || remainderClause) && line && !/[.!?…)\u2026]$/.test(line) ? `${line}.` : line;
 }
 
 // S3 (HQ1): the ONE shared projection of a typed owner_hurry event for the

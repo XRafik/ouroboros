@@ -179,6 +179,7 @@
  * @property {boolean=} allow_empty_review_pool  // confirms saving agents that leave no review row
  * @property {string[]=} starter_skills  // catalog ids installed once after completion; absent: the default list
  * @property {Object<string, string>=} skill_source_trust  // {hub row id: trusted|review}; marks them confirmed
+ * @property {string=} attempt_id  // client-made per save; GET /api/onboarding/complete?attempt= reads it back
  */
 /**
  * POST /api/onboarding/subagents/preview accepts the same open provider/local draft and subscription
@@ -209,6 +210,7 @@
  * @property {boolean} restart_required
  * @property {OnboardingPresetProjection} preset
  */
+/** @typedef {import('./client_contract_types.js').OnboardingAttemptResponse} OnboardingAttemptResponse */
 /**
  * 500 AFTER settings landed: retry the named later step, never re-save (settings/onboarding writes).
  * @typedef {Object} SettingsPostCommitFailureResponse
@@ -934,12 +936,39 @@
  * @property {number} span
  * @property {number} grid_span
  * @property {string} revision
+ * @property {string=} generation  // live publication identity; changes on same-content reload too
  * @property {boolean=} pinned_card  // a kept living card (skill "_cards"); presses use the card: decision family
  */
 
 /**
  * @typedef {Object} WidgetsResponse
  * @property {WidgetTab[]} ui_tabs
+ */
+
+/**
+ * Parent-only controls for a finite widget file lease; the token is a read capability, not API auth.
+ * @typedef {Object} WidgetAssetLeaseRequest
+ * @property {string} skill
+ * @property {string} tab_id
+ * @property {string} generation
+ */
+
+/**
+ * @typedef {Object} WidgetAssetTokenRequest
+ * @property {string} token
+ */
+
+/**
+ * @typedef {Object} WidgetAssetLeaseResponse
+ * @property {string} token
+ * @property {string} base_url
+ * @property {number} expires_in
+ * @property {number} renew_after
+ */
+
+/**
+ * @typedef {Object} WidgetAssetRevokeResponse
+ * @property {boolean} ok
  */
 
 /**
