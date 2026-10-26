@@ -30,6 +30,7 @@ import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, his
 import { apiClient, apiFetch, fetchTaskDetail, fetchTaskDetailStrict, isStoreMigrating } from './api_client.js';
 import { syncHistoryRetentionItem } from './history_retention.js';
 import {
+    childReportLabel,
     getLogTaskGroupId,
     isGroupedTaskEvent,
     isTerminalTaskDetail,
@@ -156,7 +157,7 @@ import {
     cardMetaKeys,
     renderCollapsedActivity,
     syncCandidateRemainderItem,
-    candidateRemainderBody,
+    readCandidateRemainder,
     renderLiveCardMeta as renderCardMeta,
     ensureLiveActionsEl,
     cardRowEvidenceRef,
@@ -1600,21 +1601,17 @@ export function createChatInstance({
         try {
             const resp = await apiFetch(`/api/tasks/${encodeURIComponent(item.fullRef)}`, { cache: 'no-store' });
             const data = resp && typeof resp.json === 'function' ? await resp.json() : resp;
-            // Compose ALL available full fields — a subagent line can carry both a result AND a
-            // (separately truncated) trace_summary, so `result || trace_summary` would hide the
-            // full trace. Label each section when both are present.
+            // Keep result and trace: the preview can truncate either independently.
             const result = String((data && data.result) || '').trim();
             const trace = String((data && data.trace_summary) || '').trim();
+            const report = result && ['done', 'warn'].includes(taskOutcomeSeverity(data))
+                ? childReportLabel(data.status) : '';  // the label the capped body led with
             let full = '';
-            if (result && trace) full = `[RESULT]\n${result}\n\n[TRACE]\n${trace}`;
-            else full = result || trace;
+            if (result && trace) full = `${report ? `## ${report}` : '[RESULT]'}\n${result}\n\n[TRACE]\n${trace}`;
+            else full = report ? `## ${report}\n${result}` : result || trace;
             if (item.fullField === 'candidate_remainder') {
-                if (resp?.ok === false) throw new Error('candidate detail read failed');
-                full = candidateRemainderBody(data, item.remainderFact);
-                if (full === null) {
-                    item.fullReadError = 'The saved file list is unavailable for this observation. Close and reopen this detail to retry.';
-                    changed = true;
-                }
+                full = readCandidateRemainder(item, data, resp?.ok !== false);
+                changed = true;
             }
             if (full && item.fetchedFull !== full) {
                 item.fetchedFull = full;
@@ -1623,7 +1620,7 @@ export function createChatInstance({
         } catch {
             // best-effort: leave the capped preview on failure
             if (item.fullField === 'candidate_remainder') {
-                item.fullReadError = 'The saved file list could not be loaded. Close and reopen this detail to retry.';
+                readCandidateRemainder(item, null, false);
                 changed = true;
             }
         } finally {
@@ -1746,7 +1743,10 @@ export function createChatInstance({
             : (summary.human ? String(summary.activityPreview ?? activeHeadline ?? '')
                 : (summary.terminal && summary.activityPreview ? String(summary.activityPreview) : ''));
         const activityCandidate = previewSource.trim();
-        if (activityCandidate) record.collapsedActivity = boundActivityPreview(activityCandidate);
+        if (activityCandidate) {
+            record.collapsedActivity = boundActivityPreview(activityCandidate);
+            record.collapsedActivityLead = summary.activityLead || '';  // a child's "Report to parent"
+        }
         const activityText = projectCollapsedActivity({
             isSubagent: record.isSubagent,
             suggestedName: title,
