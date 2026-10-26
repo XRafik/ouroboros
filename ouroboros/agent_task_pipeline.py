@@ -669,6 +669,7 @@ def _task_cost_fields(env: Any, task: Dict[str, Any]) -> Dict[str, Any]:
         task_cost_fields = reconstruct_task_cost(
             str(task.get("id") or ""), fields=True,
             drive_root=pathlib.Path(task.get("budget_drive_root") or env.drive_root),
+            custody_root=env.drive_root,
         )
         from ouroboros.cost_projection import with_task_cost_presentation
 
@@ -1044,6 +1045,9 @@ def emit_task_results(
         if not evolution_restart:
             pending_events.append({
                 "type": "restart_request", "reason": restart_reason,
+                "phase": "ready", **{key: value for key, value in
+                    (getattr(ctx, "pending_restart_request", None) or {}).items()
+                    if key in {"request_id", "task_id", "task_attempt"}},
                 "evolution_restart": False, "ts": utc_now_iso(),
             })
         ctx.pending_restart_reason = None

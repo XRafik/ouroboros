@@ -231,7 +231,7 @@ def test_gateway_contract_endpoint_index_matches_router_and_types(tmp_path):
     for name in ("DecisionRequest", "DecisionResponse"):
         assert f"import('./decision_types.js').{name}" in text
     text += "\n" + (modules / "decision_types.js").read_text(encoding="utf-8")
-    for name in ("CommandInbound", "PanicAcceptedOutbound"):
+    for name in ("CommandInbound", "PanicAcceptedOutbound", "OnboardingAttemptResponse"):
         assert f"import('./client_contract_types.js').{name}" in text
     text += "\n" + (modules / "client_contract_types.js").read_text(encoding="utf-8")
     for name in ("EvolutionRefresh", "EvolutionDataResponse"):
