@@ -572,9 +572,12 @@ Status, owner action, and urgent notification are separate product concepts:
 
 - **Status** states a fact about the affected object, never implying that the
   owner can or must act. Task status uses one factual word family, `Working`,
-  `Done`, `Done with warnings`, `Failed`, `Stopped`, which is also the host's
-  durable label vocabulary for its own task rows in Main and the Project thread
-  (`OUTCOME_PHASE_HEADLINE`), not only the browser's.
+  `Done`, `Done with warnings`, `Failed`, `Stopped`, shared by host task rows in
+  Main and the Project thread (`OUTCOME_PHASE_HEADLINE`). `Done` says the turn ended, not that its goal was
+  met. Stop now reads `Stopped` whatever it kept (answer and files stay shown);
+  a Wrap up reads `Done` over its final answer and `Stopped` without one; failed
+  file preservation beside Wrap up reads `Failed`; the cause names the button.
+  A record naming no button keeps its recorded word (owner 25.10, A).
 - **Owner action** exists only when the responsible domain exposes a current
   concrete continuation, such as Resume, Retry, Connect, Repair, Grant access,
   or Restart: a real adjacent control, which severity alone never manufactures.
@@ -735,6 +738,10 @@ Independent execution, artifact, verification or publication failures still appl
 Blocking corrections saved without fresh approval and an explicit unfinished stop
 remain unaccepted; show the retained work and reason through the existing five-word
 status family and details, without inventing reviewer PASS or a new status badge.
+An older task-acceptance fail that was only an explicit Advisory host declining a
+second panel over an unchanged answer, its verdict short of FAIL, reads `Done with
+warnings` with that sentence; the stored fail stays beside it, a published Main row
+keeps its words, and any other case stays `Failed` (owner 25.10, A).
 
 ### The tone primitive
 
@@ -1149,7 +1156,9 @@ preference when it opens and on every reconnect; there is no file watcher.
   range. A frame without a level paints no chip; an older frame is never
   back-filled. A child keeps one useful activity line visible, a root up to
   three; empty activity reserves no band, and a duplicate title is not activity.
-  Full narration and Reviews expand independently. The root keeps primary title
+  Full narration and Reviews expand independently. A completed child's result is
+  its report: `Report to parent`, semibold at the row's size and ink, leads its
+  collapsed line and replaces `[RESULT]` over full text (owner 25.10, A). The root keeps primary title
   ink at weight 500, children secondary ink at 400. Nested frames preserve real
   ancestry; their opaque secondary surface avoids accumulating translucent white
   tints at greater depth.

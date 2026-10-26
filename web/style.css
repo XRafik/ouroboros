@@ -3068,6 +3068,14 @@ html[data-layout="docked"] .app-page-lead .files-crumb-sep { flex: none; font-si
     color: var(--text-secondary);
 }
 
+/* A child's report names its reader before its words: an inline label, semibold at the
+   row's own size and ink (DESIGN §5), like the timeline heading labels below.
+   Drawn from data-lead so the line's fit counts it. */
+.chat-live-activity[data-lead]:not(:empty)::before {
+    content: attr(data-lead) " · ";
+    font-weight: 600;
+}
+
 .chat-live-card.subagent:not([data-expanded="1"]) > .chat-live-summary-button .chat-live-title {
     display: block;
     min-height: 0;

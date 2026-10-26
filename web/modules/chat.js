@@ -30,6 +30,7 @@ import { mergeHistoricalTimelineItem, historyNodeIsProtected, historyRowIds, his
 import { apiClient, apiFetch, fetchTaskDetail, fetchTaskDetailStrict, isStoreMigrating } from './api_client.js';
 import { syncHistoryRetentionItem } from './history_retention.js';
 import {
+    childReportLabel,
     getLogTaskGroupId,
     isGroupedTaskEvent,
     isTerminalTaskDetail,
@@ -1577,9 +1578,11 @@ export function createChatInstance({
             // full trace. Label each section when both are present.
             const result = String((data && data.result) || '').trim();
             const trace = String((data && data.trace_summary) || '').trim();
+            const report = result && ['done', 'warn'].includes(taskOutcomeSeverity(data))
+                ? childReportLabel(data.status) : '';  // the label the capped body led with
             let full = '';
-            if (result && trace) full = `[RESULT]\n${result}\n\n[TRACE]\n${trace}`;
-            else full = result || trace;
+            if (result && trace) full = `${report ? `## ${report}` : '[RESULT]'}\n${result}\n\n[TRACE]\n${trace}`;
+            else full = report ? `## ${report}\n${result}` : result || trace;
             if (full && item.fetchedFull !== full) {
                 item.fetchedFull = full;
                 changed = true;
@@ -1706,7 +1709,10 @@ export function createChatInstance({
             : (summary.human ? String(summary.activityPreview ?? activeHeadline ?? '')
                 : (summary.terminal && summary.activityPreview ? String(summary.activityPreview) : ''));
         const activityCandidate = previewSource.trim();
-        if (activityCandidate) record.collapsedActivity = boundActivityPreview(activityCandidate);
+        if (activityCandidate) {
+            record.collapsedActivity = boundActivityPreview(activityCandidate);
+            record.collapsedActivityLead = summary.activityLead || '';  // a child's "Report to parent"
+        }
         const activityText = projectCollapsedActivity({
             isSubagent: record.isSubagent,
             suggestedName: title,

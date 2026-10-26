@@ -255,6 +255,7 @@ class ChatOutbound(ChatReferenceFields):
     outcome_axes: NotRequired[Dict[str, Any]]
     task_contract: NotRequired[Dict[str, Any]]
     reason_code: NotRequired[str]
+    cancel_origin: NotRequired[Dict[str, Any]]  # the typed stop an owner-stopped turn's final carries
     review_status: NotRequired[Dict[str, Any]]
     review_projection: NotRequired[Dict[str, Any]]
     worker_saturation_warning: NotRequired[bool]
@@ -697,6 +698,7 @@ class ActiveChatActivity(ActiveDirectTurn):  # global root census; phase and con
     status: NotRequired[str]
     outcome_axes: NotRequired[Dict[str, Any]]
     reason_code: NotRequired[str]
+    cancel_origin: NotRequired[Dict[str, Any]]  # the stored result's stop origin, read by the same status fold
     root_phase_checkpoint: NotRequired[Dict[str, Any]]
     timeout_retry_from: NotRequired[str]
     original_task_id: NotRequired[str]

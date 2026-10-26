@@ -413,6 +413,7 @@
  * @property {Object=} outcome_axes
  * @property {Object=} task_contract
  * @property {string=} reason_code
+ * @property {Object=} cancel_origin The typed stop an owner-stopped turn's final carries (source, stop_policy).
  * @property {Object=} review_status
  * @property {Object=} review_projection
  *   v6.74.0 additive keys: panels[].dialogue ({status, votes} — the reviewer-authored
